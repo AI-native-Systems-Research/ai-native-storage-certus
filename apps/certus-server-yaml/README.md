@@ -13,6 +13,8 @@ select different storage backends without changing Rust source code.
 | `full-session-lists` | `spdk` | Same as `full`, but uses the session-lineage eviction policy instead of LRU |
 | `full-optimized` | `spdk` | Same as `full`, but uses the optimized eviction policy (O(1) LRU + TinyLFU admission) instead of plain LRU |
 | `full-fs-block` | `filesys` | Filesystem-backed block devices with O_DIRECT on `/ssd/`, SPDK for DMA allocation |
+| `full-transfer` | `spdk,rdma` | `full` + the certus-to-certus transfer endpoint (shm-queue `FETCH`) |
+| `full-fs-transfer` | `filesys,rdma` | `full-fs-block` + the transfer endpoint: peers fetch from a file-backed disk tier too |
 | `minimal` | (none) | Logger only, no hardware dependencies |
 
 Profiles live in `profiles/*.yaml` and control which components are
@@ -30,6 +32,11 @@ cargo build -p certus-server-yaml --release
 # Filesystem-backed block devices (O_DIRECT, SPDK hugepages for DMA)
 CERTUS_PROFILE=full-fs-block cargo build -p certus-server-yaml \
     --no-default-features --features filesys --release
+
+# Certus-to-certus transfer (RDMA endpoint), on NVMe or on a file-backed drive
+CERTUS_PROFILE=full-transfer cargo build -p certus-server-yaml --features spdk,rdma --release
+CERTUS_PROFILE=full-fs-transfer cargo build -p certus-server-yaml \
+    --no-default-features --features filesys,rdma --release
 
 # Session-lineage eviction policy (drop-in for LRU); convenience wrapper:
 scripts/build-certus-session-lists.sh

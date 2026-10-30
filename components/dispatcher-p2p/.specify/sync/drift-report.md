@@ -1,11 +1,14 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-23T20:21:38Z
-spec_sync_git_commit: 33c49be4
-spec_sync_inputs_sha256: 2786ca7af02bf361c13681dbf90876c089718023e58fa6314f6d15e61f2605d4
+spec_sync_synced_at: 2026-10-29T23:34:02Z
+spec_sync_git_commit: 1de9052f9
+spec_sync_inputs_sha256: 9a0723c338cfe793513472f59693d1cb0ad2a35409e51648e06f5f9e8721aaca
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-29 (branch `fix/dispatcher-remove-ssd-extent`, merged with unstable `e35618b2`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (the `IDispatcher::check` doc gains an `# Errors` section, B-17 of the dispatcher sync). No analysis below changes.
+> **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** New since the last stamp: `clear_all`, mirroring the standard dispatcher's (FR-021a; `contracts/idispatcher.md` method list). Not tested in this crate, which has no data-drive harness; stated in FR-021a.
+
 > **Re-stamp 2026-10-23 (directory relocation, branch `chore/tidy-directory-layout`).** The Python benchmarks moved from `apps/python/` to `benchmarks/python/`. Doc-only path update in `specs/001-gpudirect-cold-path/quickstart.md` (4 command lines) and `tasks.md` (T031): `apps/python/certus-api-bench_v2.py` → `benchmarks/python/certus-api-bench_v2.py`. No FR/SC, acceptance scenario or `src/` change; no spec citation into `src/` moves. Status stays `clean`.
 
 > **Re-stamp 2026-10-23 (test-compile fixes, on top of `a70da5cc`).** Test-only fix: the test `MockDispatchMap` in `src/lib.rs` did not implement `IDispatchMap::set_checksum`/`get_checksum`, so the crate's tests did not compile whenever `interfaces/integrity-check` was enabled (for example in a `--all-features` workspace build). Added `#[cfg(feature = "integrity-check")]` no-op stubs, and an `integrity-check` feature in `Cargo.toml` that forwards `interfaces/integrity-check`, the same pattern as `components/remote-lookup`. The component itself does not compute or verify checksums, so no FR changes. Lib tests pass 77/77 with and without the feature. No spec citation into `src/lib.rs` is past the inserted lines. Status stays `clean`.

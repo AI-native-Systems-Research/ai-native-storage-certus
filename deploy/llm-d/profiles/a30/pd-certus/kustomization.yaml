@@ -1,0 +1,35 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Prefill/decode disaggregation with certus beside NIXL. Layered on ../pd, as
+# ../certus is on ../agg, so P/D can still be rolled out without certus.
+#
+# Each role runs MultiConnector[NixlConnector, Offloading(certus)], NIXL first:
+# the certus entrypoint lifts pd's --kv-transfer-config out of the args and
+# wraps it. MultiConnector loads from the first connector with a hit, and every
+# connector saves. So on decode NIXL pulls the prompt GPU->GPU as before and
+# certus only stores; on prefill NIXL claims nothing and certus serves what it
+# holds -- including blocks fetched from a peer when a request names one with
+# kv_transfer_params.certus_fetch_from.
+resources:
+  - ../pd
+  - rbac.yaml
+  - render.yaml
+
+configMapGenerator:
+  - name: certus-entrypoint
+    files:
+      # install.sh copies it in from ../certus when it materializes this
+      # overlay: kustomize will not load a file from outside the overlay.
+      - entrypoint-certus.sh
+
+patches:
+  - path: patch.yaml
+
+# The connector-bearing image, as in ../certus (same placeholder, rewritten by
+# install.sh from CERTUS_REGISTRY/CERTUS_REPO). Keep the tag in step with
+# ../certus/kustomization.yaml.
+images:
+  - name: docker.io/vllm/vllm-openai
+    newName: REGISTRY/REPO/llm-d-vllm-certus
+    newTag: vllm0.30.0-bd510b91

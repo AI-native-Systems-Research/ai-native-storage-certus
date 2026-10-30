@@ -142,5 +142,5 @@ fi
 
 echo
 echo "Point the overlay at this build:"
-echo "  (cd ${SCRIPT_DIR}/a30-certus && kustomize edit set image \\"
+echo "  (cd ${SCRIPT_DIR}/profiles/${PROFILE:-a30}/certus && kustomize edit set image \\"
 echo "     docker.io/vllm/vllm-openai=${FULL_IMAGE})"

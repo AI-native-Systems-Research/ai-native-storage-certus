@@ -123,7 +123,19 @@ All error cases are captured in the `MemoryTierError` enum:
 | `contains` | Presence check |
 | `clear_resets_all` | Full cache clear |
 | `touch_updates_eviction_order` | Touch promotes entry, eviction respects order |
-| `peek_does_not_update_eviction_order` | Peek does not promote |
+| `peek_does_not_update_eviction_order` | Peek returns the entry (order unchecked) |
+| `the_default_reserve_is_taken_quietly_and_capped` | 32 MiB default; capped at pool/8; pool_info covers the reserve |
+| `the_reserve_is_set_before_initialize_only` | Whole pages; error after init; zero = no reserve |
+| `the_cache_and_the_reserve_never_share_bytes` | Full cache cannot reach the reserve; allocating never evicts |
+| `the_reserve_starts_on_a_page_when_the_pool_does_not_end_on_one` | Reserve page-aligned and inside a pool that is not whole pages |
+| `leases_are_transient_until_freed_and_coalesce` | NoSpace when full; freed buffers coalesce |
+| `a_pool_that_is_not_dma_capable_never_fits` | NeverFits on an mmap pool |
+| `a_lease_larger_than_the_reserve_never_fits` | NeverFits for oversize/zero; NotInitialized before init |
+| `freeing_with_the_wrong_length_is_loud` | bounce_free panics on a length mismatch |
+| `freeing_a_buffer_twice_is_loud` | bounce_free panics on a buffer already freed |
+| `clear_empties_the_cache_and_leaves_the_reserve` | clear leaves bounce buffers alone |
+
+The regression test `insert_fails_cleanly_when_policy_refuses_to_track` is in `src/repair_test_insert_track_failure.rs`.
 
 ### Unit Tests (src/allocator.rs)
 

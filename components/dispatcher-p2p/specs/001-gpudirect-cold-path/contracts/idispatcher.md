@@ -4,7 +4,7 @@ The dispatcher-p2p component implements the `IDispatcher` interface defined in `
 
 ## Interface Methods
 
-All methods have identical signatures and semantics to the standard dispatcher. The P2P path only affects the internal implementation of cold lookups (when `IDispatchMap::lookup()` returns `BlockDevice`).
+All methods have identical signatures to the standard dispatcher, and identical semantics except the two listed under *Block-tier serving*. The P2P path only affects the internal implementation of cold lookups (when `IDispatchMap::lookup()` returns `BlockDevice`).
 
 ### Cold-Path Affected Methods
 
@@ -14,10 +14,17 @@ All methods have identical signatures and semantics to the standard dispatcher. 
 | `lookup_async(key, ipc_handle)` | Same as lookup but returns GpuStream for caller to sync. |
 | `batch_lookup(entries)` | Concurrent lookups; cold entries use P2P pipeline with thread partitioning. |
 
+### Block-tier serving (not implemented)
+
+| Method | P2P Behavior |
+|--------|-------------|
+| `read_to_bounce(key, offset, len)` | Always `BounceError::NeverFits`: this component does not read block-tier entries into the bounce reserve, so a peer is never served one through it. A transfer endpoint bound to it reports such an entry `Failed`, never retried. |
+| `release_bounce(buf)` | Unreachable: `read_to_bounce` never hands out a buffer. |
+
 ### Unchanged Methods
 
 All other IDispatcher methods behave identically to the standard dispatcher:
-`check`, `remove`, `populate`, `prepare_store`, `commit_store`, `cancel_store`, `touch`, `clear_memory_tier`, `flush_to_ssd`, `initialize`, `shutdown`.
+`check`, `remove`, `populate`, `prepare_store`, `commit_store`, `cancel_store`, `touch`, `clear_memory_tier`, `clear_all` (as the standard dispatcher's FR-063: both tiers listed, each entry removed through `remove`, a Removed event each, pinned entries reported), `flush_to_ssd`, `initialize`, `shutdown`.
 
 ## Initialization Contract
 

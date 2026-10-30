@@ -58,19 +58,17 @@ RUN dnf install -y cmake gcc gcc-c++ make pkg-config libtool autoconf automake \
         clang-devel libuuid-devel && dnf clean all
 RUN cd deps && bash build_zyre.sh
 
-# Build certus-server-yaml with the FULL-REMOTE profile.
+# Build certus-server-yaml with the FULL-TRANSFER profile: full plus the
+# certus-to-certus transfer endpoint behind shm-queue FETCH, over hardware RDMA.
+# The endpoint's `rdma` feature is turned on by certus-server-yaml's own `rdma`.
 #
-# The previous `cargo build --release -p certus-server-yaml` took the default
-# feature set, which is just ["spdk"]. That omits zyre and the RDMA
-# initiator/responder, so the resulting server still ACCEPTS --rl-group but has
-# no remote-lookup transport behind it -- instances silently never exchange
-# entries. The initiator/responder also need their OWN `rdma` features, or they
-# compile in stub mode rather than driving real hardware RDMA.
-#
-# Mirrors scripts/build-certus-full-remote-spdk.sh -- keep the two in step.
+# full-remote (remote-lookup over zyre) is still buildable by overriding both
+# args -- build-image-and-push.sh --profile full-remote does -- and its
+# initiator/responder need their OWN `rdma` features, or they compile in stub
+# mode. Mirrors scripts/build-certus-full-transfer.sh -- keep the two in step.
 # Exposed as build args so build-image-and-push.sh can override them.
-ARG CERTUS_PROFILE=full-remote
-ARG CERTUS_FEATURES="spdk,rdma,remote-lookup-rdma-initiator/rdma,remote-lookup-rdma-responder/rdma"
+ARG CERTUS_PROFILE=full-transfer
+ARG CERTUS_FEATURES="spdk,rdma"
 ENV PKG_CONFIG_PATH=/build/deps/zyre-build/lib/pkgconfig:/build/deps/zyre-build/lib64/pkgconfig
 ENV LD_LIBRARY_PATH=/build/deps/zyre-build/lib:/build/deps/zyre-build/lib64
 RUN CERTUS_PROFILE="${CERTUS_PROFILE}" cargo build --release \

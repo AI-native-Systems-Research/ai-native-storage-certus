@@ -262,6 +262,17 @@ pub enum ServedBy {
     /// of hits. The peer's own disk work is counted on the peer instead, by
     /// `IRemoteLookup::serve_stats`.
     Remote,
+    /// Fetched from a named peer ahead of this lookup, by an explicit transfer
+    /// (the shm-queue `FETCH` op over `ITransferEndpoint`), and served from the
+    /// local memory tier it landed in. Distinct from [`Remote`](Self::Remote):
+    /// remote lookup is the dispatcher forwarding a miss inside one lookup;
+    /// this is a fetch someone else requested earlier, by a different mechanism.
+    ///
+    /// A dispatcher never reports it — the block is a memory-tier entry by the
+    /// time it is looked up, so the dispatcher says `Dram`. The control plane
+    /// that ran the fetch re-attributes the block's **first** serve, after which
+    /// it is an ordinary local entry and its hits are honestly `Dram`.
+    Fetched,
     /// Not found in any tier, local or remote.
     Miss,
     /// Present, but at a different size than requested. Distinct from `Miss`: the key
@@ -275,12 +286,12 @@ pub enum ServedBy {
 }
 
 impl ServedBy {
-    /// True for the three values in which data reached the caller's destination.
+    /// True for the four values in which data reached the caller's destination.
     ///
     /// A hit is reported if and only if the lookup succeeded, so a consumer can
     /// compute a hit rate as `hits / total` without knowing the error taxonomy.
     pub fn is_hit(&self) -> bool {
-        matches!(self, Self::Dram | Self::Ssd | Self::Remote)
+        matches!(self, Self::Dram | Self::Ssd | Self::Remote | Self::Fetched)
     }
 }
 
@@ -309,6 +320,15 @@ pub struct LookupOutcome {
     pub served_by: ServedBy,
     /// The result the caller acts on. `is_ok()` if and only if `served_by.is_hit()`.
     pub result: Result<(), DispatcherError>,
+}
+
+/// What `IDispatcher::clear_all` did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ClearAll {
+    /// Entries removed, from either tier.
+    pub removed: u64,
+    /// Entries left in place because a pin outlasted the bounded wait.
+    pub still_pinned: u64,
 }
 
 /// A cumulative snapshot of the dispatcher's KV-cache tier-movement counters.
@@ -607,6 +627,12 @@ component_macros::define_interface! {
         /// Returns `true` if the key is present in the cache (any tier),
         /// `false` otherwise.
         ///
+        /// # Errors
+        ///
+        /// Returns [`DispatcherError::Timeout`] if a writer holds the entry past every retry of the
+        /// dispatch-map lookup (up to 6 waits of 2 s). The key's presence is then unknown, which is not
+        /// the same as absent. Returns [`DispatcherError::IoError`] for any other dispatch-map error.
+        ///
         /// # Examples
         ///
         /// ```no_run
@@ -833,6 +859,33 @@ component_macros::define_interface! {
         /// ```
         fn clear_memory_tier(&self) -> Result<usize, DispatcherError>;
 
+        /// Remove every entry from both tiers, freeing its memory-tier slot and
+        /// its SSD extent: the cache is empty afterwards, as after a restart with
+        /// `--format`, without one.
+        ///
+        /// Each removed entry is reported as an [`EvictionReason::Removed`]
+        /// event, so a client's view of the cache follows. An entry that is
+        /// pinned -- by a lookup, a client `pin`, or a reservation still being
+        /// written -- is retried for a bounded time and then left in place: it
+        /// is counted in [`ClearAll::still_pinned`], not treated as an error, so
+        /// a caller can tell "empty" from "nearly".
+        ///
+        /// # Errors
+        ///
+        /// Returns [`DispatcherError::NotInitialized`] before `initialize`.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # use interfaces::{IDispatcher, DispatcherError};
+        /// # fn example(dispatcher: &dyn IDispatcher) -> Result<(), DispatcherError> {
+        /// let c = dispatcher.clear_all()?;
+        /// println!("removed {}, {} still pinned", c.removed, c.still_pinned);
+        /// # Ok(())
+        /// # }
+        /// ```
+        fn clear_all(&self) -> Result<ClearAll, DispatcherError>;
+
         /// Flush all pending background write-through jobs to SSD and block until complete.
         ///
         /// Guarantees that every entry populated before this call has its data
@@ -893,6 +946,42 @@ component_macros::define_interface! {
         /// Monotonic since process start; take deltas across two calls to measure
         /// a window. Implementations that do no tiering return zeroed counters.
         fn tier_event_stats(&self) -> crate::TierEventStats;
+
+        /// Read the block-tier entry `key`, `len` bytes at extent `offset`, into
+        /// a fresh bounce buffer from the memory tier, for serving a peer.
+        ///
+        /// The caller MUST hold a pin on `key` — the `BlockDevice { offset }`
+        /// answer of its own `IDispatchMap::lookup` — for the whole call: the
+        /// pin, not this method, keeps the extent from being freed and reused.
+        /// This method neither takes nor releases one. It never promotes and
+        /// never touches the cache, so serving a peer cannot evict a cached
+        /// entry.
+        ///
+        /// Blocks until the read completes, however long the device takes.
+        /// There is deliberately no device timeout: a timed-out read is
+        /// forgotten while the drive may still write its buffer, so freeing
+        /// the buffer then would let a late read land in someone else's bytes.
+        /// A hung device surfaces as the peer's own reply deadline.
+        ///
+        /// Errors: `NoSpace` (the reserve is full now — retry later),
+        /// `NeverFits` (it never can be satisfied: larger than the reserve, no
+        /// data drives, or a drive block that does not divide the reserve's
+        /// 4 KiB pages), `Io` (the read failed; the buffer has been freed, or
+        /// leaked if the drive may still write it), `NotInitialized` (the
+        /// dispatcher or its memory tier is not ready).
+        ///
+        /// The read holds no dispatcher-wide lock while it waits on the
+        /// device, so a hung read does not hold up `shutdown`.
+        fn read_to_bounce(
+            &self,
+            key: CacheKey,
+            offset: u64,
+            len: u32,
+        ) -> Result<crate::BounceBuffer, crate::BounceError>;
+
+        /// Free a buffer from [`read_to_bounce`](Self::read_to_bounce), once
+        /// nothing can still read it (the write from it has completed).
+        fn release_bounce(&self, buf: crate::BounceBuffer);
     }
 }
 

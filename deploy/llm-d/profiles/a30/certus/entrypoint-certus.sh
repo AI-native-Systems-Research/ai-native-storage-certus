@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+# Derive this pod's certus mailbox from the NUMA domain of the GPU it was
+# assigned, then exec vLLM with the offloading connector wired up.
+#
+# Why derive it at runtime: the NVIDIA device plugin hands out GPUs opaquely, so
+# a single Deployment cannot statically say "the pod holding GPU0 uses the NUMA-0
+# mailbox". The plugin does expose only the assigned GPU to the container, so
+# nvidia-smi reports its real host PCI BDF (index is always 0 locally) and
+# /sys/bus/pci/devices/<bdf>/numa_node gives the domain -- for example
+# 0000:41:00.0 -> node 0 and 0000:a1:00.0 -> node 1.
+set -euo pipefail
+
+CERTUS_SHM_DIR="${CERTUS_SHM_DIR:-/certus-shm}"
+# Matches the mailboxes the certus DaemonSets publish:
+#   /dev/shm/certus-shmq-numa0   (NUMA 0)
+#   /dev/shm/certus-shmq-numa1   (NUMA 1)
+# set by CERTUS_SHM_PATH in deploy/k8s/certus-server-numa.yaml.tpl.
+#
+# Host-mode servers started by hand may publish under a different prefix
+# (`certus-stress-n`, for one), so override this when pointing at those rather
+# than at the DaemonSets -- the two naming
+# schemes are the one thing that has to agree across the client and server
+# deployments, and a mismatch fails fast below rather than silently.
+CERTUS_SHM_PREFIX="${CERTUS_SHM_PREFIX:-certus-shmq-numa}"
+CERTUS_SLAB_SIZE_BYTES="${CERTUS_SLAB_SIZE_BYTES:-131072}"
+# vLLM's offloading connector stores only prompt blocks by default
+# (offload_prompt_only). A decode pod generates the next turn's prefix, so under
+# P/D it should store generated blocks too, for the next turn's prefill to fetch
+# from its certus. Unset: vLLM's default.
+CERTUS_OFFLOAD_PROMPT_ONLY="${CERTUS_OFFLOAD_PROMPT_ONLY:-}"
+# KV events for llm-d's precise prefix producer (peer selection milestone 3):
+# a zmq endpoint to publish on, e.g. tcp://*:5556. Unset: no events. The topic
+# names this pod as the router routes to it, kv@<POD_IP>:<CERTUS_KV_EVENTS_PORT>
+# @<model>; the port is the one requests reach the pod on (8000: vLLM itself,
+# or decode's routing sidecar).
+CERTUS_KV_EVENTS="${CERTUS_KV_EVENTS:-}"
+CERTUS_KV_EVENTS_PORT="${CERTUS_KV_EVENTS_PORT:-8000}"
+
+log() { printf '[certus-entrypoint] %s\n' "$*" >&2; }
+
+bdf="$(nvidia-smi --query-gpu=pci.bus_id --format=csv,noheader 2>/dev/null | head -1 | tr -d '[:space:]')"
+if [ -z "$bdf" ]; then
+    log "FATAL: nvidia-smi reported no GPU; cannot determine the NUMA domain."
+    exit 1
+fi
+
+# nvidia-smi prints an 8-digit PCI domain (00000000:A1:00.0); sysfs uses 4
+# (0000:a1:00.0). Normalise via python3 rather than string-chopping, so a
+# non-zero or hex domain cannot silently produce a wrong path.
+numa="$(python3 - "$bdf" <<'PY'
+import pathlib, sys
+dom, bus, devfn = sys.argv[1].split(":")
+sysfs = f"{int(dom, 16):04x}:{bus.lower()}:{devfn.lower()}"
+print((pathlib.Path("/sys/bus/pci/devices") / sysfs / "numa_node").read_text().strip())
+PY
+)"
+
+if [ "$numa" = "-1" ]; then
+    # -1 means the kernel exposes no affinity for the device (BIOS/NUMA off).
+    numa="${CERTUS_NUMA_FALLBACK:-0}"
+    log "WARNING: no NUMA affinity reported for ${bdf}; falling back to node ${numa}."
+fi
+
+shm_path="${CERTUS_SHM_DIR}/${CERTUS_SHM_PREFIX}${numa}"
+if [ ! -e "$shm_path" ]; then
+    log "FATAL: mailbox ${shm_path} is not present."
+    log "  GPU ${bdf} is on NUMA node ${numa}."
+    log "  Expected certus-server for that domain to be running with"
+    log "  --shm-path /dev/shm/${CERTUS_SHM_PREFIX}${numa} on this host."
+    log "  Contents of ${CERTUS_SHM_DIR}:"
+    ls -la "$CERTUS_SHM_DIR" >&2 2>/dev/null || true
+    exit 1
+fi
+
+# Built with json.dumps so a path containing a shell metacharacter cannot break
+# the argument. kv_role/kv_connector mirror the proven bench driver
+# (run_multiturn_shmq_certus.py: KV_CONFIG).
+#
+# If the container's args already carry a --kv-transfer-config (the P/D overlay's
+# NixlConnector), it is not replaced: it is lifted out and becomes the FIRST
+# connector of a MultiConnector, certus the second. MultiConnector loads from the
+# first connector with a hit, so on decode NIXL's GPU->GPU pull wins and certus
+# only stores; on prefill NIXL claims nothing and certus serves what it holds.
+# Every connector saves. Two --kv-transfer-config flags would leave which one vLLM
+# keeps to its argument parser.
+existing_kv=""
+args=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --kv-transfer-config)
+            [ -z "$existing_kv" ] || { log "FATAL: two --kv-transfer-config in args"; exit 1; }
+            existing_kv="$2"; shift 2 ;;
+        --kv-transfer-config=*)
+            [ -z "$existing_kv" ] || { log "FATAL: two --kv-transfer-config in args"; exit 1; }
+            existing_kv="${1#*=}"; shift ;;
+        *) args+=("$1"); shift ;;
+    esac
+done
+set -- "${args[@]}"
+
+kv_cfg="$(python3 - "$shm_path" "$CERTUS_SLAB_SIZE_BYTES" "$existing_kv" "$CERTUS_OFFLOAD_PROMPT_ONLY" "$CERTUS_KV_EVENTS" <<'PY'
+import json, sys
+# Alone, certus is CertusConnector: OffloadingConnector asking vLLM for the
+# BLHNC layout, so a block is one contiguous piece across layers.
+certus = {
+    "kv_connector": "CertusConnector",
+    "kv_connector_module_path": "certus_shmq_connector.connector",
+    "kv_role": "kv_both",
+    "kv_connector_extra_config": {
+        "spec_name": "CertusShmqOffloadingSpec",
+        "spec_module_path": "certus_shmq_connector.spec",
+        "shm_path": sys.argv[1],
+        "slab_size_bytes": int(sys.argv[2]),
+    },
+}
+if sys.argv[4]:
+    flag = sys.argv[4].strip().lower()
+    if flag not in ("true", "false"):
+        sys.exit(f"CERTUS_OFFLOAD_PROMPT_ONLY={sys.argv[4]!r}: expected true or false")
+    certus["kv_connector_extra_config"]["offload_prompt_only"] = flag == "true"
+if sys.argv[5]:
+    # vLLM's events tracker then publishes certus's stores with their token ids,
+    # not as key-only placeholders the router cannot hash.
+    certus["kv_connector_extra_config"]["self_describing_kv_events"] = True
+cfg = certus
+if sys.argv[3]:
+    first = json.loads(sys.argv[3])
+    if first.get("kv_connector") == "MultiConnector":
+        sys.exit("args already name a MultiConnector; not nesting one in another")
+    # Beside NIXL, plain OffloadingConnector: vLLM uses one KV layout for the
+    # whole model, MultiConnector refuses connectors that ask for different
+    # ones, and NIXL asks for LBHNC -- CertusConnector's BLHNC would stop the
+    # engine at start ("KV cache layout mismatch").
+    certus = dict(certus, kv_connector="OffloadingConnector")
+    del certus["kv_connector_module_path"]
+    cfg = {
+        # The outer role is the first connector's: kv_producer on prefill and
+        # kv_consumer on decode is how llm-d's sidecar and NIXL tell them apart.
+        "kv_connector": "MultiConnector",
+        "kv_role": first.get("kv_role", "kv_both"),
+        "kv_connector_extra_config": {"connectors": [first, certus]},
+    }
+    # The scheduler reads the load-failure policy from the OUTER config only,
+    # so decode's "fail" (a broken NIXL pull errors rather than silently
+    # recomputing) has to be lifted or it falls back to the default.
+    if "kv_load_failure_policy" in first:
+        cfg["kv_load_failure_policy"] = first["kv_load_failure_policy"]
+print(json.dumps(cfg, separators=(",", ":")))
+PY
+)"
+if [ -n "$existing_kv" ]; then
+    log "wrapping the args' connector: MultiConnector[$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["kv_connector"])' "$existing_kv"), certus]"
+fi
+
+log "GPU ${bdf} -> NUMA ${numa} -> ${shm_path}"
+
+# Say which certus instance holds this pod's cache, for peer selection
+# (components/certus-transfer-endpoint/specs/001-rdma-cache-transfer/
+# peer-selection.md): another pod fetching from this one reads the annotation
+# certus.ai/transfer-endpoint to find it. The certus server publishes its name
+# beside the mailbox (<mailbox>.endpoint); this pod cannot work it out itself,
+# being outside the host network (the node's RoCE address is not visible here).
+#
+# Best effort and off the critical path: a server without a transfer endpoint
+# writes no file, and a pod without API access cannot annotate. Either way the
+# pod serves as before; only peers fetching from it lose the way to find its
+# certus, and say so in their logs.
+annotate_endpoint() {
+    local ep_file="${shm_path}.endpoint" tok=/var/run/secrets/kubernetes.io/serviceaccount
+    local i ep=""
+    for i in $(seq 1 30); do   # the server may still be starting
+        [ -s "$ep_file" ] && { ep="$(head -1 "$ep_file" | tr -d '[:space:]')"; break; }
+        sleep 1
+    done
+    if [ -z "$ep" ]; then
+        log "no ${ep_file}: this certus has no transfer endpoint; peers cannot fetch from it"
+        return 0
+    fi
+    if [ -z "${POD_NAME:-}" ] || [ -z "${POD_NAMESPACE:-}" ] || [ ! -r "$tok/token" ]; then
+        log "endpoint ${ep}, but no POD_NAME/POD_NAMESPACE or service-account token: not annotating"
+        return 0
+    fi
+    local body
+    body="$(python3 -c 'import json,sys;print(json.dumps({"metadata":{"annotations":{"certus.ai/transfer-endpoint":sys.argv[1]}}}))' "$ep")"
+    if curl -fsS --max-time 10 --cacert "$tok/ca.crt" \
+            -H "Authorization: Bearer $(cat "$tok/token")" \
+            -H "Content-Type: application/merge-patch+json" -X PATCH -d "$body" \
+            "https://kubernetes.default.svc/api/v1/namespaces/${POD_NAMESPACE}/pods/${POD_NAME}" \
+            >/dev/null; then
+        log "annotated certus.ai/transfer-endpoint=${ep}"
+    else
+        log "endpoint ${ep}: annotating the pod failed; peers cannot fetch from it"
+    fi
+}
+annotate_endpoint &
+
+# --no-async-scheduling: 0.22+ auto-enables async scheduling, which breaks the
+#   OffloadingConnector's per-request transfer serialization (a re-scheduled load
+#   races an in-flight store -> assert -> EngineDeadError).
+# --disable-hybrid-kv-cache-manager: required from 0.26; the connector assumes a
+#   single uniform KV-cache group.
+# Both mirror compat.py's needs_disable_* capability flags.
+events_args=()
+if [ -n "$CERTUS_KV_EVENTS" ]; then
+    [ -n "${POD_IP:-}" ] || { log "FATAL: CERTUS_KV_EVENTS set but POD_IP is not"; exit 1; }
+    model="${args[0]:-}"
+    events_cfg="$(python3 -c 'import json,sys;print(json.dumps({"enable_kv_cache_events":True,"publisher":"zmq","endpoint":sys.argv[1],"topic":f"kv@{sys.argv[2]}:{sys.argv[3]}@{sys.argv[4]}"},separators=(",",":")))' "$CERTUS_KV_EVENTS" "$POD_IP" "$CERTUS_KV_EVENTS_PORT" "$model")"
+    events_args=(--kv-events-config "$events_cfg")
+    log "KV events on ${CERTUS_KV_EVENTS}, topic kv@${POD_IP}:${CERTUS_KV_EVENTS_PORT}@${model}"
+fi
+
+exec vllm serve "$@" \
+    --no-async-scheduling \
+    --disable-hybrid-kv-cache-manager \
+    --kv-transfer-config "$kv_cfg" \
+    "${events_args[@]}"

@@ -1,0 +1,3 @@
+# A filled-in site file names real infrastructure; keep it out of git even if
+# someone copies it here instead of to ~/.config/certus/. See site.env.example.
+*.env
