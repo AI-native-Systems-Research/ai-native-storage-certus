@@ -250,6 +250,12 @@ class BenchResult:
     total_bytes: int
     wall_seconds: float
     phases: dict[str, PhaseTiming]
+    # (GB/s, seconds) including time excluded from wall_seconds, e.g. a store
+    # pass's disk write-through drain; None when nothing was excluded.
+    sustained: tuple[float, float] | None = None
+    # Work the backend skipped or did not do; the comparison report flags rows
+    # where these are nonzero: store_drops, load_misses, disk_read_bytes.
+    counts: dict = field(default_factory=dict)
 
     @property
     def throughput_gbs(self) -> float:
@@ -283,7 +289,9 @@ class BenchResult:
             "wall_seconds": f"{self.wall_seconds:.6f}",
             "throughput_gbs": f"{self.throughput_gbs:.4f}",
             "iops": f"{self.iops:.1f}",
+            "sustained_gbs": f"{self.sustained[0]:.4f}" if self.sustained else "",
         }
+        row.update({k: str(v) for k, v in self.counts.items()})
         for name, timing in self.phases.items():
             row[f"{name}_p50_us"] = f"{timing.p50_us:.1f}"
             row[f"{name}_p99_us"] = f"{timing.p99_us:.1f}"
@@ -930,6 +938,8 @@ def bench_store_lifecycle(
         wall_seconds=elapsed - excluded,
         phases=phases,
     )
+    result.sustained = (result.total_bytes / elapsed / 1e9, elapsed)
+    result.counts = {"store_drops": drops}
     result.print_report()
     if stack.has_secondary:
         print(f"  Sustained incl. fs write-through drain: "
@@ -988,6 +998,9 @@ def bench_load_lifecycle(
         wall_seconds=wall,
         phases=phases,
     )
+    result.counts = {"load_misses": misses}
+    if cold:
+        result.counts["disk_read_bytes"] = (stack.counters["promoted"] - promoted_before) * stack.chunk_bytes
     result.print_report()
     if misses or cold:
         print(f"  Load misses: {misses}  "
@@ -1085,6 +1098,8 @@ def bench_mixed_eviction(
         wall_seconds=wall,
         phases=phases,
     )
+    result.counts = {"store_drops": store_drops, "load_misses": load_misses,
+                     "disk_read_bytes": delta["promoted"] * stack.chunk_bytes}
     result.print_report()
     print(f"  CPU evictions (REMOVED): {delta['cpu_removed']}  "
           f"Store drops (tier full): {store_drops}  "
@@ -1200,6 +1215,8 @@ def bench_pipelined(
         wall_seconds=elapsed - excluded,
         phases=phases,
     )
+    if is_store:
+        result.sustained = (result.total_bytes / elapsed / 1e9, elapsed)
     result.print_report()
     if is_store and stack.has_secondary:
         print(f"  Sustained incl. fs write-through drain: "

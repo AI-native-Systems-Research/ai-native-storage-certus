@@ -323,6 +323,12 @@ class BenchResult:
     total_bytes: int
     wall_seconds: float
     phases: dict[str, PhaseTiming]
+    # (GB/s, seconds) including time excluded from wall_seconds, e.g. a store
+    # pass's SSD write-through drain; None when nothing was excluded.
+    sustained: tuple[float, float] | None = None
+    # Work the backend skipped or did not do; the comparison report flags rows
+    # where these are nonzero: store_drops, load_misses, disk_read_bytes.
+    counts: dict = field(default_factory=dict)
 
     @property
     def throughput_gbs(self) -> float:
@@ -356,7 +362,9 @@ class BenchResult:
             "wall_seconds": f"{self.wall_seconds:.6f}",
             "throughput_gbs": f"{self.throughput_gbs:.4f}",
             "iops": f"{self.iops:.1f}",
+            "sustained_gbs": f"{self.sustained[0]:.4f}" if self.sustained else "",
         }
+        row.update({k: str(v) for k, v in self.counts.items()})
         for name, timing in self.phases.items():
             row[f"{name}_p50_us"] = f"{timing.p50_us:.1f}"
             row[f"{name}_p99_us"] = f"{timing.p99_us:.1f}"
@@ -475,21 +483,30 @@ def bench_store_lifecycle(
     block_bytes: int,
     min_duration: float,
 ) -> BenchResult:
-    """Full store lifecycle: touch → prepare_store → submit_store → get_finished → complete_store."""
+    """Full store lifecycle: touch → prepare_store → submit_store → get_finished → complete_store.
+
+    Accounted the same way as the cputier and lmcache benches: after each pass
+    the background DRAM→SSD write-through is drained and the keys removed
+    (``reset``). The reset is excluded from wall time, so the headline is the
+    GPU→DRAM store path; the sustained figure including the SSD drain is
+    printed below it.
+    """
     phases = {
         "touch": PhaseTiming("touch"),
         "prepare_store": PhaseTiming("prepare_store"),
         "submit_store": PhaseTiming("submit_store"),
         "get_finished": PhaseTiming("get_finished"),
         "complete_store": PhaseTiming("complete_store"),
+        "reset": PhaseTiming("reset"),
     }
 
     total_blocks = 0
+    excluded = 0.0
     wall_start = time.perf_counter()
     iteration = 0
     job_id = 0
 
-    while (time.perf_counter() - wall_start) < min_duration or iteration < 2:
+    while (time.perf_counter() - wall_start - excluded) < min_duration or iteration < 2:
         for i in range(0, len(keys), batch_size):
             batch_keys = keys[i : i + batch_size]
 
@@ -535,19 +552,25 @@ def bench_store_lifecycle(
             total_blocks += len(stored_keys)
 
         iteration += 1
-        # After iteration 0, the keys exist in the server. Remove them so the
-        # next iteration's prepare_store actually reserves again.
-        if (time.perf_counter() - wall_start) < min_duration:
+        # Drain this pass's write-through, then remove the keys so the next
+        # pass's prepare_store reserves (and writes through) again.
+        t0 = time.perf_counter()
+        manager._ring.flush_to_ssd()
+        if (time.perf_counter() - wall_start - excluded) < min_duration:
             _remove_keys(manager._ring, keys, manager._world_size)
+        phases["reset"].record(time.perf_counter() - t0)
+        excluded += time.perf_counter() - t0
 
-    wall = time.perf_counter() - wall_start
-    return BenchResult(
+    elapsed = time.perf_counter() - wall_start
+    result = BenchResult(
         label="Store Lifecycle (touch → prepare_store → submit → finish → complete)",
         total_blocks=total_blocks,
         total_bytes=total_blocks * block_bytes,
-        wall_seconds=wall,
+        wall_seconds=elapsed - excluded,
         phases=phases,
     )
+    result.sustained = (result.total_bytes / elapsed / 1e9, elapsed)
+    return result
 
 
 # ── load lifecycle ──────────────────────────────────────────────────────────
@@ -578,18 +601,28 @@ def bench_load_lifecycle(
         "complete_load": PhaseTiming("complete_load"),
     }
 
+    if cold:
+        phases["demote"] = PhaseTiming("demote")
+
     total_blocks = 0
+    excluded = 0.0
     wall_start = time.perf_counter()
     iteration = 0
     job_id = 1000
+    io_before = manager._ring.get_io_stats() if cold else None
 
-    while (time.perf_counter() - wall_start) < min_duration or iteration < 2:
-        if cold and iteration > 0:
-            try:
-                manager._ring.flush_to_ssd()
-                manager._ring.clear_memory_tier()
-            except Exception:
-                pass
+    while (time.perf_counter() - wall_start - excluded) < min_duration or iteration < 2:
+        if cold:
+            # Every pass starts with an empty memory tier, so each block is read
+            # back from SSD. Drain the write-through first: an entry with no SSD
+            # copy is removed, not demoted, and the pass would then miss it. The
+            # empty-out is excluded from wall time, as in the cputier and lmcache
+            # benches (their ``demote`` phase).
+            t0 = time.perf_counter()
+            manager._ring.flush_to_ssd()
+            manager._ring.clear_memory_tier()
+            phases["demote"].record(time.perf_counter() - t0)
+            excluded += time.perf_counter() - t0
 
         for i in range(0, len(keys), batch_size):
             batch_keys = keys[i : i + batch_size]
@@ -649,8 +682,15 @@ def bench_load_lifecycle(
 
         iteration += 1
 
-    wall = time.perf_counter() - wall_start
-    return BenchResult(
+    wall = time.perf_counter() - wall_start - excluded
+    if cold:
+        io = manager._ring.get_io_stats()
+        reads = io["read_bytes"] - io_before["read_bytes"]
+        want = total_blocks * block_bytes
+        print(f"  Cold pass SSD reads: {reads / 1e6:.0f} MB for {want / 1e6:.0f} MB loaded"
+              + ("" if reads else "  (0: certus-server built without rw-telemetry, "
+                                  "or the loads were served from DRAM)"))
+    result = BenchResult(
         label=(
             f"{label_temp} Load Lifecycle "
             f"({'touch → lookup' if touch_first else 'lookup → touch'} "
@@ -661,6 +701,9 @@ def bench_load_lifecycle(
         wall_seconds=wall,
         phases=phases,
     )
+    if cold:
+        result.counts = {"disk_read_bytes": reads}
+    return result
 
 
 # ── shaped cold load (serving conditions) ──────────────────────────────────
@@ -1029,6 +1072,8 @@ def bench_mixed_eviction(
         wall_seconds=wall,
         phases=phases,
     )
+    result.counts = {"store_drops": store_drops, "load_misses": load_misses,
+                     "disk_read_bytes": io_after["read_bytes"]}
     result.print_report()
     print(f"  Eviction events (REMOVED): {total_evictions}  "
           f"Store drops (tier full): {store_drops}  "
@@ -1078,11 +1123,12 @@ def bench_pipelined(
         _populate_keys(manager, worker, keys, batch_size)
 
     total_blocks = 0
+    excluded = 0.0
     wall_start = time.perf_counter()
     iteration = 0
     job_id = 600_000
 
-    while (time.perf_counter() - wall_start) < min_duration or iteration < 2:
+    while (time.perf_counter() - wall_start - excluded) < min_duration or iteration < 2:
         batches = [keys[i : i + batch_size] for i in range(0, len(keys), batch_size)]
         in_flight: list[tuple[int, list]] = []  # (job_id, keys_for_complete)
 
@@ -1165,17 +1211,27 @@ def bench_pipelined(
             phases["pipeline_drain"].record(time.perf_counter() - t0)
 
         iteration += 1
-        if is_store and (time.perf_counter() - wall_start) < min_duration:
-            _remove_keys(manager._ring, keys, manager._world_size)
+        if is_store:
+            # As in bench_store_lifecycle: drain the pass's SSD write-through and
+            # remove the keys outside the timed window (the cputier and lmcache
+            # benches exclude their disk drain the same way).
+            t0 = time.perf_counter()
+            manager._ring.flush_to_ssd()
+            if (time.perf_counter() - wall_start - excluded) < min_duration:
+                _remove_keys(manager._ring, keys, manager._world_size)
+            excluded += time.perf_counter() - t0
 
-    wall = time.perf_counter() - wall_start
-    return BenchResult(
+    elapsed = time.perf_counter() - wall_start
+    result = BenchResult(
         label=f"Pipelined {label_dir} (depth={pipeline_depth})",
         total_blocks=total_blocks,
         total_bytes=total_blocks * block_bytes,
-        wall_seconds=wall,
+        wall_seconds=elapsed - excluded,
         phases=phases,
     )
+    if is_store:
+        result.sustained = (result.total_bytes / elapsed / 1e9, elapsed)
+    return result
 
 
 # ── mode: prefix-miss ────────────────────────────────────────────────────────
@@ -2588,6 +2644,8 @@ def main():
                 args.bs, acct_block_bytes, args.min_duration,
             )
             store_result.print_report()
+            gbs, secs = store_result.sustained
+            print(f"  Sustained incl. SSD write-through drain: {gbs:.2f} GB/s over {secs:.3f}s")
 
             _remove_keys(ring, keys, args.tp)
             _populate_keys(manager, worker, keys, args.bs)

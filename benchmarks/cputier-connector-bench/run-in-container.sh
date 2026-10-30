@@ -27,6 +27,9 @@
 #   CPU_BYTES      CPU tier size used to size the container's /dev/shm (pass
 #                  the same value to --cpu-bytes). Default 4G.
 #   SHM_SIZE       explicit /dev/shm size (default CPU_BYTES + 4G)
+#   CPUS           optional CPU list (e.g. 0-15,32-47) to pin the benchmark to,
+#                  applied with taskset inside the container: rootless podman has
+#                  no cpuset controller, and host CPU affinity is not inherited
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -67,6 +70,8 @@ DEVICES=()
 IFS=',' read -ra _gpus <<< "$GPU"
 for g in "${_gpus[@]}"; do DEVICES+=(--device "nvidia.com/gpu=${g}"); done
 
+ENTRY=(python3)
+[[ -n "${CPUS:-}" ]] && ENTRY=(taskset -c "$CPUS" python3)
 echo "[cputier-bench] ${IMAGE}  gpu=${GPU}  shm-size=${SHM_SIZE}  fs-tier=${FS_TIER_HOST} -> /fs-tier"
 
 # label=disable: the repo and fs-tier dirs are bind-mounted without relabeling
@@ -78,6 +83,7 @@ exec command podman run --rm --pull=never \
   -v "${REPO_ROOT}:/certus" \
   -v "${FS_TIER_HOST}:/fs-tier" \
   -w /certus \
-  --entrypoint python3 \
+  --entrypoint "${ENTRY[0]}" \
   "$IMAGE" \
+  "${ENTRY[@]:1}" \
   /certus/benchmarks/cputier-connector-bench/bench_cputier_lifecycle.py "${ARGS[@]}"

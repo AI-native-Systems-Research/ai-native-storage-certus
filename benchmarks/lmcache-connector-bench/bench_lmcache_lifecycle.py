@@ -126,6 +126,12 @@ class BenchResult:
     total_bytes: int
     wall_seconds: float
     phases: dict[str, PhaseTiming]
+    # (GB/s, seconds) including time excluded from wall_seconds, e.g. a store
+    # pass's disk write-through drain; None when nothing was excluded.
+    sustained: tuple[float, float] | None = None
+    # Work the backend skipped or did not do; the comparison report flags rows
+    # where these are nonzero: store_drops, load_misses, disk_read_bytes.
+    counts: dict = field(default_factory=dict)
 
     @property
     def throughput_gbs(self) -> float:
@@ -159,7 +165,9 @@ class BenchResult:
             "wall_seconds": f"{self.wall_seconds:.6f}",
             "throughput_gbs": f"{self.throughput_gbs:.4f}",
             "iops": f"{self.iops:.1f}",
+            "sustained_gbs": f"{self.sustained[0]:.4f}" if self.sustained else "",
         }
+        row.update({k: str(v) for k, v in self.counts.items()})
         for name, timing in self.phases.items():
             row[f"{name}_p50_us"] = f"{timing.p50_us:.1f}"
             row[f"{name}_p99_us"] = f"{timing.p99_us:.1f}"
@@ -500,6 +508,7 @@ def bench_store_lifecycle(stack, num_blocks, batch_size, min_duration) -> BenchR
         label="Store Lifecycle (touch → prepare_store → submit → finish → complete)",
         total_blocks=total, total_bytes=total * stack.chunk_bytes,
         wall_seconds=elapsed - excluded, phases=phases)
+    result.sustained = (result.total_bytes / elapsed / 1e9, elapsed)
     result.print_report()
     if has_l2:
         print(f"  Sustained incl. L2 write-through drain: "
@@ -541,6 +550,10 @@ def bench_load_lifecycle(stack, seqs, min_duration, *, cold: bool) -> BenchResul
         label=f"{temp} Load Lifecycle (lookup → touch → prepare → submit → finish → complete)",
         total_blocks=total, total_bytes=total * stack.chunk_bytes,
         wall_seconds=wall, phases=phases)
+    result.counts = {"load_misses": misses}
+    if cold:
+        result.counts["disk_read_bytes"] = (
+            int(d["lmcache_mp_l2_prefetch_load_completed_chunks_total"]) * stack.chunk_bytes)
     result.print_report()
     if misses or cold:
         print(f"  Load misses: {misses}  "
@@ -617,6 +630,9 @@ def bench_mixed_eviction(stack, batch_size, min_duration, *, working_set=512,
                f"(ws={working_set}, load_frac={load_fraction:.0%})"),
         total_blocks=total, total_bytes=total * stack.chunk_bytes,
         wall_seconds=wall, phases=phases)
+    result.counts = {"store_drops": store_drops, "load_misses": load_misses,
+                     "disk_read_bytes": int(d["lmcache_mp_l2_prefetch_load_completed_chunks_total"])
+                                        * stack.chunk_bytes}
     result.print_report()
     print(f"  L1 evictions: {int(d['lmcache_mp_l1_evicted_chunks_total'])}  "
           f"Store drops (L1 full): {store_drops}  Load misses: {load_misses}")
@@ -696,7 +712,12 @@ def bench_pipelined(stack, num_blocks, batch_size, min_duration, *,
         label=f"Pipelined {'Store' if is_store else 'Load'} (depth={pipeline_depth})",
         total_blocks=total, total_bytes=total * stack.chunk_bytes,
         wall_seconds=elapsed - excluded, phases=phases)
+    if is_store:
+        result.sustained = (result.total_bytes / elapsed / 1e9, elapsed)
     result.print_report()
+    if is_store and stack.has_l2():
+        print(f"  Sustained incl. L2 write-through drain: "
+              f"{result.total_bytes / elapsed / 1e9:.2f} GB/s over {elapsed:.3f}s")
     return result
 
 

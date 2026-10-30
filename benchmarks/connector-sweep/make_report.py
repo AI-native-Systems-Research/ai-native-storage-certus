@@ -20,6 +20,8 @@ from collections import Counter
 PARITY_COLUMNS = ["bs", "num_blocks", "block_bytes", "working_set", "tp", "lookup_order",
                   "pipeline_depth", "direction", "hit_ratio", "requests_per_step",
                   "num_sessions"]
+# Per-block KV tensors: certus records it as pieces_per_block, the others as layers.
+LAYERS_COLUMN = {"certus": "pieces_per_block", "cputier": "layers", "lmcache": "layers"}
 
 # (key, display name, legend description, CSS colour variable)
 ARMS = [
@@ -110,6 +112,12 @@ def main() -> None:
         same = all(len(v) == 1 and _num_eq(v[0], dram) for v in vals.values())
         parity.append(("DRAM tier bytes (certus --memory-tier-size / cputier cpu_bytes / lmcache L1)",
                        {k: " / ".join(v) or "—" for k, v in vals.items()}, same))
+        vals = {k: _distinct(r.get(LAYERS_COLUMN[k]) or ("1" if k == "certus" else "")
+                             for r in data[k]) for k, *_ in present}
+        flat = [v[0] for v in vals.values() if len(v) == 1]
+        same = len(flat) == len(vals) and all(_num_eq(x, flat[0]) for x in flat)
+        parity.append(("KV tensors per block (certus pieces_per_block / cputier, lmcache layers)",
+                       {k: " / ".join(v) or "—" for k, v in vals.items()}, same))
     mismatches = [p for p in parity if not p[2]]
 
     # ── join result rows across arms ──
@@ -133,6 +141,26 @@ def main() -> None:
         return (f'<div class="bar"><span class="fill" style="width:{w:.1f}%;background:var({var})"></span>'
                 f'<span class="val">{f(v)} GB/s</span></div>')
 
+    def work_flags(rows: dict) -> str:
+        """Why a row may not compare like for like: work an arm skipped."""
+        out = []
+        for k, r in rows.items():
+            if not r:
+                continue
+            bits = []
+            for col, what in (("store_drops", "dropped stores"), ("load_misses", "load misses")):
+                n = int(float(r.get(col) or 0))
+                if n:
+                    bits.append(f"{n:,} {what}")
+            if r["label"].startswith("Cold") and r.get("disk_read_bytes") not in (None, ""):
+                rd = float(r["disk_read_bytes"])
+                want = float(r["total_bytes"])
+                if rd < 0.5 * want:
+                    bits.append(f"read {rd / 1e9:.1f} of {want / 1e9:.1f} GB from disk")
+            if bits:
+                out.append(f"{names[k]}: " + ", ".join(bits))
+        return "; ".join(out)
+
     def fastest(rows: dict) -> str:
         got = {k: float(r["throughput_gbs"]) for k, r in rows.items() if r and float(r["throughput_gbs"]) > 0}
         if len(got) < 2:
@@ -147,7 +175,15 @@ def main() -> None:
         name = first["label"]
         bars = "".join(bar(rows[k]["throughput_gbs"] if rows[k] else None, var) for k, _, _, var in ARMS)
         iops = "".join(f"<td class='num'>{f(rows[k] and rows[k]['iops'], 0)}</td>" for k, *_ in ARMS)
-        rows_html.append(f"<tr><td class='lbl'>{esc(name)}</td><td class='bars'>{bars}</td>"
+        flags = work_flags(rows)
+        sust = " · ".join(f"{names[k]} {f(r.get('sustained_gbs'))}" for k, r in rows.items()
+                          if r and r.get("sustained_gbs"))
+        notes = ""
+        if sust:
+            notes += f"<div class='note'>incl. disk drain: {esc(sust)} GB/s</div>"
+        if flags:
+            notes += f"<div class='flag'>⚠ {esc(flags)}</div>"
+        rows_html.append(f"<tr><td class='lbl'>{esc(name)}{notes}</td><td class='bars'>{bars}</td>"
                          f"{iops}<td class='num'>{esc(fastest(rows))}</td></tr>")
 
         ph = {k: phases(r) if r else {} for k, r in rows.items()}
@@ -243,6 +279,7 @@ th {{ font-weight:600; color:var(--muted); font-size:12px; }}
   text-shadow:0 0 3px var(--card); }}
 .lbl {{ max-width:300px; }}
 tr.bad td {{ background:var(--badbg); color:var(--bad); }}
+.flag {{ color:var(--bad); font-size:12px; margin-top:2px; }}
 .warn {{ background:var(--warnbg); border:1px solid var(--line); border-radius:6px; padding:8px 12px; margin:8px 0; }}
 details {{ border:1px solid var(--line); border-radius:6px; margin:6px 0; background:var(--card); }}
 summary {{ cursor:pointer; padding:8px 12px; font-weight:500; }}
@@ -262,9 +299,11 @@ mode {esc(sh['mode'])} · lookup order {esc(sh['lookup_order'])}</div>
 <thead><tr><th>result</th><th>GB/s</th>{iops_head}<th class="num">fastest</th></tr></thead>
 <tbody>{''.join(rows_html)}</tbody></table></div>
 <p class="note">IOPS counts blocks (cputier: offload chunks; lmcache: LMCache chunks of {esc(lmc_chunk)} tokens, each
-<code>block_bytes</code>). cputier and lmcache store throughput exclude the per-pass write-through drain to their disk tier
-(see each log for the sustained figure); certus stores write through to SSD inside the server. lmcache's mixed-eviction row
-counts stores the server dropped into a full L1 (its eviction runs on a 1 s tick); see lmcache-bench.log.</p>
+<code>block_bytes</code>). Every arm is timed the same way: store rows exclude the per-pass drain of the disk write-through
+(certus DRAM→SSD, cputier CPU→fs, lmcache L1→L2) and give the sustained figure including it under the row label; cold rows
+empty the memory tier before every pass, outside the timed window, so each block is read back from disk. ⚠ marks a row
+where an arm skipped work — dropped stores, load misses, or a cold pass that read less than half its bytes from disk —
+so its throughput is not like for like.</p>
 
 <h2>Per-phase latency</h2>
 {''.join(details_html)}

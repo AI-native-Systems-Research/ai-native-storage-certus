@@ -19,13 +19,21 @@
 # lmcache.csv, certus-bench.log, cputier-bench.log, lmcache-bench.log, server.log.
 #
 # Options (defaults in brackets):
-#   --out PATH               HTML report path (required)
+#   --out PATH               HTML report path (required; relative to the current dir)
 #   --mode M                 default|pipelined|prefix-miss|contention|scheduler-step|all [all]
 #   --bs N [16]  --num-blocks N [128]  --block-bytes N [2097152]
 #   --min-duration S [5]  --warmup N [4]  --working-set N [512]
 #   --pipeline-depth N [4]  --direction D [both]  --hit-ratio F [0.75]
 #   --requests-per-step N [8]  --num-sessions N [32]  --lookup-order O [lookup-first]
 #   --gpu N [0]  --tp N [1]
+#   --layers N [32]          per-layer KV tensors each block is split into, on EVERY arm
+#                            (certus --pieces-per-block, cputier/lmcache --layers): vLLM's
+#                            default layer-outermost LBHNC layout. 1 = one contiguous
+#                            region per block, the BLHNC layout CertusConnector requests
+#   --io-threads N [16]      disk-tier I/O threads on the file-based arms (cputier fs
+#                            read AND write threads; lmcache fs_native workers)
+#   --numa N [GPU's node]    NUMA node every arm's CPUs and host memory are bound to;
+#                            -1 disables binding
 #   --dram SIZE [4G]         certus --memory-tier-size == cputier --cpu-bytes == lmcache L1
 #   --device-pci ADDR        certus NVMe device (repeatable) [the 4 vfio NVMe drives
 #                            0000:61:00.0..0000:64:00.0, same as benchmarks/vllm-serve], or
@@ -34,12 +42,19 @@
 #   --workers N              certus connector ThreadPoolExecutor workers [4]
 #   --channels N             certus-server mailbox channels [auto: max(16, tp*(1+2*workers))]
 #   --fs-tier DIR            cputier fs tier host dir [/raid0/cputier-bench-fs-tier]
-#   --server-bin PATH        [target/release/certus-server]
+#   --server-bin PATH        [target/release/certus-server, rebuilt (cargo, release) when
+#                            missing or older than the tree; an explicit PATH is used as-is]
 #   --image IMAGE            cputier vLLM image [docker.io/vllm/vllm-openai:v0.30.0]
 #   --l2-dir DIR             lmcache L2 (fs_native) host dir [/raid0/lmcache-bench-l2]
 #   --lmcache-image IMAGE    lmcache image [localhost/vllm-lmcache-bench:vllm0.30.0]
 #   --chunk-size N           lmcache server --chunk-size in tokens [256]
 #   --skip-certus | --skip-cputier | --skip-lmcache | --report-only
+#
+# Fairness: every arm gets the same workload flags, DRAM tier, KV layout (--layers),
+# NUMA node (CPU + memory bound to the GPU's node) and disk I/O parallelism; each
+# bench excludes its per-pass disk drain / tier reset from the timed window and
+# records it separately as sustained_gbs; and the report flags any row where an arm
+# dropped stores, missed loads, or (cold rows) read nothing back from disk.
 #
 # Disk tiers default to equal hardware: certus gets 4 SPDK NVMe drives, and the
 # file-based tiers (cputier fs, lmcache L2) share /raid0, a 4-drive XFS RAID0 on
@@ -48,13 +63,15 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+CALLER_DIR="$PWD"   # relative --out (and --server-bin) resolve against the caller's dir
 cd "$REPO_ROOT"
 
 OUT="" MODE=all BS=16 NUM_BLOCKS=128 BLOCK_BYTES=2097152 MIN_DURATION=5 WARMUP=4
 WORKING_SET=512 PIPELINE_DEPTH=4 DIRECTION=both HIT_RATIO=0.75 REQS_PER_STEP=8
 NUM_SESSIONS=32 LOOKUP_ORDER=lookup-first GPU=0 TP=1 DRAM=4G DEVICE_PCI=()
+LAYERS=32 IO_THREADS=16 NUMA=""
 DRIVE_COUNT="" EVICT_THRESHOLD=0.7 WORKERS=4 CHANNELS="" FS_TIER=/raid0/cputier-bench-fs-tier
-SERVER_BIN=target/release/certus-server IMAGE=docker.io/vllm/vllm-openai:v0.30.0
+SERVER_BIN="" IMAGE=docker.io/vllm/vllm-openai:v0.30.0
 L2_DIR=/raid0/lmcache-bench-l2 LMCACHE_IMAGE=localhost/vllm-lmcache-bench:vllm0.30.0 CHUNK_SIZE=256
 RUN_CERTUS=1 RUN_CPUTIER=1 RUN_LMCACHE=1
 SHM_PATH=/dev/shm/certus-shmq
@@ -78,6 +95,9 @@ while (($#)); do
     --lookup-order) LOOKUP_ORDER="$2"; shift ;;
     --gpu) GPU="$2"; shift ;;
     --tp) TP="$2"; shift ;;
+    --layers) LAYERS="$2"; shift ;;
+    --io-threads) IO_THREADS="$2"; shift ;;
+    --numa) NUMA="$2"; shift ;;
     --dram) DRAM="$2"; shift ;;
     --device-pci) DEVICE_PCI+=("$2"); shift ;;
     --drive-count) DRIVE_COUNT="$2"; shift ;;
@@ -94,7 +114,7 @@ while (($#)); do
     --skip-cputier) RUN_CPUTIER=0 ;;
     --skip-lmcache) RUN_LMCACHE=0 ;;
     --report-only) RUN_CERTUS=0; RUN_CPUTIER=0; RUN_LMCACHE=0 ;;
-    -h|--help) sed -n '2,46p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,/^set -uo pipefail/{/^#/p}' "$0"; exit 0 ;;
     *) echo "error: unknown option $1" >&2; exit 2 ;;
   esac
   shift
@@ -102,14 +122,41 @@ done
 
 [[ -n "$OUT" ]] || { echo "error: --out PATH is required" >&2; exit 2; }
 [[ "$OUT" == *.html ]] || OUT="$OUT.html"
+[[ "$OUT" == /* ]] || OUT="$CALLER_DIR/$OUT"
 mkdir -p "$(dirname "$OUT")"
 OUT="$(cd "$(dirname "$OUT")" && pwd -P)/$(basename "$OUT")"
 ART="${OUT%.html}.d"
 mkdir -p "$ART"
 
+# Default server: the tree's own release build, rebuilt below when stale. An
+# explicit --server-bin is taken as given (relative to the caller's dir).
+SERVER_AUTO=0
+if [[ -z "$SERVER_BIN" ]]; then
+  SERVER_BIN="$REPO_ROOT/target/release/certus-server"; SERVER_AUTO=1
+elif [[ "$SERVER_BIN" != /* ]]; then
+  SERVER_BIN="$CALLER_DIR/$SERVER_BIN"
+fi
+
 if ((${#DEVICE_PCI[@]} == 0)) && [[ -z "$DRIVE_COUNT" ]]; then DEVICE_PCI=("${DEFAULT_DEVICE_PCI[@]}"); fi
 if [[ -z "$CHANNELS" ]]; then
   CHANNELS=$(( TP * (1 + 2 * WORKERS) )); (( CHANNELS < 16 )) && CHANNELS=16
+fi
+
+# NUMA: bind every arm's CPUs and memory to the GPU's node (the certus drives,
+# 61-64, are on node 0 with GPU 0). certus-server and the certus bench run under
+# numactl. The podman arms inherit numactl's memory policy, but rootless podman has
+# no cpuset controller and does not carry CPU affinity into the container, so they
+# also get CPUS= and pin themselves with taskset inside the container.
+if [[ -z "$NUMA" ]]; then
+  gpu_bus=$(nvidia-smi -i "$GPU" --query-gpu=pci.bus_id --format=csv,noheader 2>/dev/null | head -1)
+  gpu_bus=${gpu_bus,,}; gpu_bus=${gpu_bus#0000}
+  NUMA=$(cat "/sys/bus/pci/devices/${gpu_bus}/numa_node" 2>/dev/null || echo -1)
+fi
+NUMA_CMD=() NUMA_CPUS=""
+if (( NUMA >= 0 )); then
+  NUMA_CPUS=$(cat "/sys/devices/system/node/node${NUMA}/cpulist")
+  NUMA_CMD=(numactl --cpunodebind="$NUMA" --membind="$NUMA")
+  command -v numactl >/dev/null || { echo "error: numactl not found (--numa -1 to skip binding)" >&2; exit 2; }
 fi
 
 # GPU list for the TP ranks: certus uses physical indices; the container
@@ -132,12 +179,14 @@ else
 fi
 
 CERTUS_CMD=(python3 benchmarks/certus-connector-bench/bench_connector_lifecycle.py "${SHARED[@]}"
+            --pieces-per-block "$LAYERS"
             --gpu "$GPU" --workers "$WORKERS" --shm-path "$SHM_PATH"
             --csv "$ART/certus.csv" --tag certus)
 # --csv is resolved inside the container, where the repo is /certus.
 REL_ART="${ART#"$REPO_ROOT"/}"
 if [[ "$REL_ART" == /* ]]; then CPUTIER_CSV_IN=/fs-tier/cputier.csv; else CPUTIER_CSV_IN="/certus/$REL_ART/cputier.csv"; fi
 CPUTIER_CMD=(benchmarks/cputier-connector-bench/run-in-container.sh "${SHARED[@]}"
+             --layers "$LAYERS" --fs-read-threads "$IO_THREADS" --fs-write-threads "$IO_THREADS"
              --gpu 0 --cpu-bytes "$DRAM" --csv "$CPUTIER_CSV_IN" --tag cputier)
 
 # lmcache: one rank, no contention mode; L1 is --dram in GiB.
@@ -153,6 +202,7 @@ import re,sys; m=re.fullmatch(r'(\d+(?:\.\d+)?)([KMGT]?)', '$DRAM'.strip().upper
 print(f'{float(m.group(1)) * (1 << {\"\":0,\"K\":10,\"M\":20,\"G\":30,\"T\":40}[m.group(2)]) / 2**30:g}')")
 if [[ "$REL_ART" == /* ]]; then LMCACHE_CSV_IN=/certus/.lmcache-compare-$$.csv; else LMCACHE_CSV_IN="/certus/$REL_ART/lmcache.csv"; fi
 LMCACHE_CMD=(benchmarks/lmcache-connector-bench/run-in-container.sh "${SHARED[@]}"
+             --layers "$LAYERS"
              --gpu 0 --csv "$LMCACHE_CSV_IN" --tag lmcache)
 
 python3 - "$ART/params.json" <<EOF
@@ -162,15 +212,16 @@ json.dump({
              "min_duration": $MIN_DURATION, "warmup": $WARMUP, "working_set": $WORKING_SET,
              "pipeline_depth": $PIPELINE_DEPTH, "direction": "$DIRECTION", "hit_ratio": $HIT_RATIO,
              "requests_per_step": $REQS_PER_STEP, "num_sessions": $NUM_SESSIONS,
-             "lookup_order": "$LOOKUP_ORDER", "tp": $TP, "gpus": "$GPU_LIST", "dram": "$DRAM"},
+             "lookup_order": "$LOOKUP_ORDER", "tp": $TP, "gpus": "$GPU_LIST", "dram": "$DRAM",
+             "layers": $LAYERS, "io_threads": $IO_THREADS, "numa_node": $NUMA, "numa_cpus": "$NUMA_CPUS"},
   "certus": {"channels": $CHANNELS, "eviction_threshold": $EVICT_THRESHOLD, "workers": $WORKERS,
              "devices": "${DEVICE_PCI[*]:-drive-count=$DRIVE_COUNT}", "server_bin": "$SERVER_BIN",
-             "server_args": """${SERVER_ARGS[*]}""", "bench_cmd": """${CERTUS_CMD[*]}"""},
+             "server_args": """${SERVER_ARGS[*]}""", "bench_cmd": """${NUMA_CMD[*]} ${CERTUS_CMD[*]}"""},
   "cputier": {"image": "$IMAGE", "fs_tier": "$FS_TIER", "spec": "tiering",
-              "bench_cmd": """GPU=$GPU_LIST CPU_BYTES=$DRAM FS_TIER_HOST=$FS_TIER IMAGE=$IMAGE ${CPUTIER_CMD[*]}"""},
+              "bench_cmd": """GPU=$GPU_LIST CPU_BYTES=$DRAM FS_TIER_HOST=$FS_TIER IMAGE=$IMAGE CPUS=$NUMA_CPUS ${NUMA_CMD[*]} ${CPUTIER_CMD[*]}"""},
   "lmcache": {"image": "$LMCACHE_IMAGE", "l2_dir": "$L2_DIR", "l1_gb": $L1_GB, "chunk_size": $CHUNK_SIZE,
               "note": "$LMCACHE_NOTE",
-              "bench_cmd": """GPU=$GPU L1_GB=$L1_GB L2_DIR=$L2_DIR CHUNK_SIZE=$CHUNK_SIZE IMAGE=$LMCACHE_IMAGE ${LMCACHE_CMD[*]}"""},
+              "bench_cmd": """GPU=$GPU L1_GB=$L1_GB L2_DIR=$L2_DIR CHUNK_SIZE=$CHUNK_SIZE IMAGE=$LMCACHE_IMAGE CPUS=$NUMA_CPUS L2_THREADS=$IO_THREADS ${NUMA_CMD[*]} ${LMCACHE_CMD[*]}"""},
   "git": {"branch": "$(git branch --show-current)", "commit": "$(git rev-parse --short HEAD)",
           "dirty": $( [[ -n "$(git status --porcelain --untracked-files=no)" ]] && echo True || echo False )},
   "host": "$(hostname)", "gpu_name": "$(nvidia-smi -i "$GPU" --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)",
@@ -193,14 +244,21 @@ trap stop_server EXIT INT TERM
 
 if ((RUN_CERTUS)); then
   STATUS_CERTUS=failed
-  if [[ ! -x "$SERVER_BIN" ]]; then
-    echo "[compare] building certus-server (release)"
-    cargo build -p certus-server --release || { echo "[compare] build failed" >&2; SERVER_BIN=""; }
+  # cargo rebuilds only what changed, so this is cheap when the binary is current.
+  # Without it a months-old binary from an earlier tree is used silently and can
+  # reject flags this script passes (e.g. --channels).
+  if ((SERVER_AUTO)) || [[ ! -x "$SERVER_BIN" ]]; then
+    echo "[compare] building certus-server (release; no-op when up to date)"
+    # rw-telemetry: per-drive SSD read/write counters, so the cold rows can show
+    # that certus really read from SSD (the other arms report it from their own
+    # counters).
+    cargo build -p certus-server --release --features rw-telemetry \
+      || { echo "[compare] build failed" >&2; SERVER_BIN=""; }
   fi
   if [[ -n "$SERVER_BIN" ]]; then
     rm -f "$ART/certus.csv"
-    echo "[compare] starting: $SERVER_BIN ${SERVER_ARGS[*]}"
-    "$SERVER_BIN" "${SERVER_ARGS[@]}" >"$ART/server.log" 2>&1 &
+    echo "[compare] starting: ${NUMA_CMD[*]} $SERVER_BIN ${SERVER_ARGS[*]}"
+    "${NUMA_CMD[@]}" "$SERVER_BIN" "${SERVER_ARGS[@]}" >"$ART/server.log" 2>&1 &
     SERVER_PID=$!
     ready=0
     for _ in $(seq 240); do
@@ -210,8 +268,8 @@ if ((RUN_CERTUS)); then
     done
     if ((ready)); then
       sleep 1
-      echo "[compare] certus arm: ${CERTUS_CMD[*]}"
-      "${CERTUS_CMD[@]}" 2>&1 | tee "$ART/certus-bench.log"
+      echo "[compare] certus arm: ${NUMA_CMD[*]} ${CERTUS_CMD[*]}"
+      "${NUMA_CMD[@]}" "${CERTUS_CMD[@]}" 2>&1 | tee "$ART/certus-bench.log"
       [[ ${PIPESTATUS[0]} -eq 0 && -s "$ART/certus.csv" ]] && STATUS_CERTUS=ok
     else
       echo "[compare] certus-server did not become ready; see $ART/server.log" >&2
@@ -224,8 +282,8 @@ if ((RUN_CPUTIER)); then
   STATUS_CPUTIER=failed
   rm -f "$ART/cputier.csv" "$FS_TIER/cputier.csv"
   echo "[compare] cputier arm: GPU=$GPU_LIST CPU_BYTES=$DRAM ${CPUTIER_CMD[*]}"
-  GPU="$GPU_LIST" CPU_BYTES="$DRAM" FS_TIER_HOST="$FS_TIER" IMAGE="$IMAGE" \
-    "${CPUTIER_CMD[@]}" 2>&1 | tee "$ART/cputier-bench.log"
+  GPU="$GPU_LIST" CPU_BYTES="$DRAM" FS_TIER_HOST="$FS_TIER" IMAGE="$IMAGE" CPUS="$NUMA_CPUS" \
+    "${NUMA_CMD[@]}" "${CPUTIER_CMD[@]}" 2>&1 | tee "$ART/cputier-bench.log"
   rc=${PIPESTATUS[0]}
   [[ "$CPUTIER_CSV_IN" == /fs-tier/* && -f "$FS_TIER/cputier.csv" ]] && mv "$FS_TIER/cputier.csv" "$ART/cputier.csv"
   [[ $rc -eq 0 && -s "$ART/cputier.csv" ]] && STATUS_CPUTIER=ok
@@ -237,7 +295,8 @@ if ((RUN_LMCACHE)); then
   mkdir -p "$L2_DIR"
   echo "[compare] lmcache arm: GPU=$GPU L1_GB=$L1_GB ${LMCACHE_CMD[*]}"
   GPU="$GPU" L1_GB="$L1_GB" L2_DIR="$L2_DIR" CHUNK_SIZE="$CHUNK_SIZE" IMAGE="$LMCACHE_IMAGE" \
-    "${LMCACHE_CMD[@]}" 2>&1 | grep --line-buffered -vE "LMCache (INFO|WARNING)|slapd|Discovered API|CudaIPCTypes" \
+    CPUS="$NUMA_CPUS" L2_THREADS="$IO_THREADS" \
+    "${NUMA_CMD[@]}" "${LMCACHE_CMD[@]}" 2>&1 | grep --line-buffered -vE "LMCache (INFO|WARNING)|slapd|Discovered API|CudaIPCTypes" \
     | tee "$ART/lmcache-bench.log"
   rc=${PIPESTATUS[0]}
   tmp_csv="$REPO_ROOT/${LMCACHE_CSV_IN#/certus/}"

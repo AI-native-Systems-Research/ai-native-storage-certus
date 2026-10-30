@@ -98,10 +98,10 @@ gives (see `run_compare.sh --help`): `--mode` (default `all`), `--bs`,
 
 4. **Preflight** and tell the user what will run, with the answers from step 3:
    - GPU free (no memory in use).
-   - certus arm: `target/release/certus-server` exists and is newer than the
-     last commit touching `apps/certus-server`, `components` or `lib` (otherwise
-     rebuild: `cargo build -p certus-server --release`); it runs as the current
-     user, no sudo. Make sure no other `certus-server` is running (it would own
+   - certus arm: `run_compare.sh` rebuilds `target/release/certus-server`
+     itself (`cargo build -p certus-server --release`, a no-op when current), so
+     no manual build is needed unless `--server-bin` points elsewhere; it runs as
+     the current user, no sudo. Make sure no other `certus-server` is running (it would own
      `/dev/shm/certus-shmq`).
    - cputier arm: `podman image exists docker.io/vllm/vllm-openai:v0.30.0`
      (or `--image`).
@@ -157,5 +157,9 @@ gives (see `run_compare.sh --help`): `--mode` (default `all`), `--bs`,
   `touch`, so `--lookup-order` changes nothing; and its L1 evicts on a 1 s
   background tick, so stores into a full L1 are dropped (counted in the
   mixed-eviction row).
-- Read cputier and lmcache store throughput with care: both exclude the
-  per-pass write-through drain to their disk tier (see each bench's README).
+- Every arm's store rows exclude the per-pass disk write-through drain and
+  report the sustained figure including it ("incl. disk drain" in the report);
+  quote both when a write-heavy workload matters.
+- Before naming a winner, check the ⚠ flags: a row where an arm dropped stores,
+  missed loads, or read under half of a cold pass's bytes from disk is not like
+  for like (see "What makes it a fair comparison" in the connector-sweep README).

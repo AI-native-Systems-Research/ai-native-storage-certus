@@ -30,6 +30,9 @@
 #   CHUNK_SIZE   server --chunk-size in tokens [256]
 #   LMC_WORKERS  server --max-workers [1]
 #   ZMQ_PORT / HTTP_PORT   server ports [5575 / 8095]
+#   CPUS         optional CPU list (e.g. 0-15,32-47) to pin the server and the
+#                bench to, applied with taskset inside each container: rootless
+#                podman has no cpuset controller, and host affinity is not inherited
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -91,7 +94,11 @@ cleanup() {
 trap cleanup EXIT
 
 echo "[lmcache-bench] ${IMAGE}  gpu=${GPU}  L1=${L1_GB}G  L2=$([[ "$L2" == 1 ]] && echo "${RUN_DIR} ${L2_GB}G" || echo none)  chunk=${CHUNK_SIZE}"
-podman run -d --name "$SRV" "${COMMON[@]}" "${SRV_MOUNT[@]}" "$IMAGE" "${SRV_ARGS[@]}" >/dev/null
+SRV_ENTRY=()
+[[ -n "${CPUS:-}" ]] && SRV_ENTRY=(--entrypoint taskset)
+SRV_CMD=("${SRV_ARGS[@]}")
+[[ -n "${CPUS:-}" ]] && SRV_CMD=(-c "$CPUS" /opt/lmcache/entrypoint.sh "${SRV_ARGS[@]}")
+podman run -d --name "$SRV" "${COMMON[@]}" "${SRV_MOUNT[@]}" "${SRV_ENTRY[@]}" "$IMAGE" "${SRV_CMD[@]}" >/dev/null
 for _ in $(seq 1 120); do
   curl -sf "http://127.0.0.1:${HTTP_PORT}/status" 2>/dev/null | grep -q '"is_healthy":true' && break
   if [[ "$(podman inspect -f '{{.State.Running}}' "$SRV" 2>/dev/null)" != "true" ]]; then
@@ -104,11 +111,14 @@ done
 curl -sf "http://127.0.0.1:${HTTP_PORT}/status" | grep -q '"is_healthy":true' \
   || { echo "[lmcache-bench] server not healthy; see podman logs $SRV" >&2; exit 1; }
 
+ENTRY=(python3)
+[[ -n "${CPUS:-}" ]] && ENTRY=(taskset -c "$CPUS" python3)
 set +e
 podman run --rm "${COMMON[@]}" \
   -v "${REPO_ROOT}:/certus" -w /certus \
-  --entrypoint python3 \
+  --entrypoint "${ENTRY[0]}" \
   "$IMAGE" \
+  "${ENTRY[@]:1}" \
   /certus/benchmarks/lmcache-connector-bench/bench_lmcache_lifecycle.py \
   --server-url "tcp://127.0.0.1:${ZMQ_PORT}" --http-url "http://127.0.0.1:${HTTP_PORT}" "$@"
 rc=$?
