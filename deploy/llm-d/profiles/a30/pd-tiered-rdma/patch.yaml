@@ -1,0 +1,161 @@
+# Both roles: pd-certus-rdma's RDMA wiring (the `roce` network, an RDMA device,
+# NIXL on GPU buffers over verbs) and the engine flags the certus entrypoint
+# adds, with vLLM's CPU + fs tiers where pd-certus-rdma has certus. There is no
+# entrypoint here, so the command builds the arg vector itself, and must be kept
+# in step with ../pd-certus-rdma/patch.yaml and ../certus/entrypoint-certus.sh.
+#
+# The fs tier is the array on the GPU's own NUMA node, as each certus instance
+# uses its NUMA-local drives: tiered-disks.sh mounts /mnt/kv-tier/numa<N> per
+# node, and the command picks the one for this pod's GPU. A pod clears its
+# node's old tier directories at start, as certus formats on start.
+#
+#   cpu_bytes_to_use  certus's --memory-tier-size (8 GiB) less its 32 MiB bounce
+#                     reserve: the cache each certus instance has.
+#   fs tier           vLLM's documented Multi-Tier Setup; 16 read / 16 write
+#                     threads, as llm-d's guide and the bench's Tiered-CPU-FS.
+#   eviction_policy   lru, as the bench's Tiered-CPU-FS variant.
+#   block size        vLLM's 16 tokens, as the certus arms run.
+#   offload_prompt_only
+#                     vLLM's default (prompt only) on prefill, false on decode:
+#                     what pd-certus-rdma does (CERTUS_OFFLOAD_PROMPT_ONLY=false
+#                     on decode only), so decode keeps the answers it generates.
+#   /dev/shm          the CPU tier is an mmap there; base's 20Gi holds it.
+#   KV events         none: llm-d's P/D router indexes prefixes from requests,
+#                     and nothing here consumes events (pd-certus publishes them
+#                     only for its fetch-source choice).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pd-disaggregation-nvidia-gpu-vllm-prefill
+spec:
+  template:
+    metadata:
+      annotations:
+        # A second interface, net1, on the RoCE port, as in ../pd-certus-rdma.
+        k8s.v1.cni.cncf.io/networks: roce
+    spec:
+      # The connector image lives in the site registry, as in ../pd-certus.
+      imagePullSecrets:
+        - name: artifactory-creds
+      containers:
+        - name: modelserver
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -eu
+              bdf="$(nvidia-smi --query-gpu=pci.bus_id --format=csv,noheader | head -1 | tr -d '[:space:]')"
+              numa="$(python3 -c 'import pathlib,sys;d,b,f=sys.argv[1].split(":");print(pathlib.Path(f"/sys/bus/pci/devices/{int(d,16):04x}:{b.lower()}:{f.lower()}/numa_node").read_text().strip())' "$bdf")"
+              root="/mnt/kv-tier/numa${numa}"
+              mountpoint -q "$root" || { echo "[tiered] FATAL: no disk tier mounted at $root (tiered-disks.sh fs)"; exit 1; }
+              rm -rf "${root}"/kv-* 2>/dev/null || true
+              dir="${root}/kv-${POD_NAME}"; mkdir -p "$dir"
+              echo "[tiered] GPU ${bdf} -> NUMA ${numa} -> fs tier ${dir} ($(df -h --output=source,size "$root" | tail -1))"
+              nixl='{"kv_connector":"NixlConnector","kv_role":"kv_producer","kv_buffer_device":"cuda","kv_connector_extra_config":{"backends":["UCX"]}}'
+              cfg="$(python3 -c 'import json,sys
+              tier={"kv_connector":"OffloadingConnector","kv_role":"kv_both","kv_connector_extra_config":{"spec_name":"TieringOffloadingSpec","cpu_bytes_to_use":8556380160,"eviction_policy":"lru","secondary_tiers":[{"type":"fs","root_dir":sys.argv[2],"n_read_threads":16,"n_write_threads":16}]}}
+              print(json.dumps({"kv_connector":"MultiConnector","kv_role":"kv_producer","kv_connector_extra_config":{"connectors":[json.loads(sys.argv[1]),tier]}},separators=(",",":")))' "$nixl" "$dir")"
+              exec vllm serve Qwen/Qwen3-8B \
+                --disable-access-log-for-endpoints=/health,/metrics,/v1/models \
+                --tensor-parallel-size=1 \
+                --gpu-memory-utilization=0.90 \
+                --kv-cache-memory-bytes=5483003904 \
+                --max-model-len=24576 \
+                --no-async-scheduling \
+                --disable-hybrid-kv-cache-manager \
+                --kv-transfer-config "$cfg"
+          env:
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            # pd pins UCX to TCP; let it choose RC verbs on the RDMA device,
+            # as in ../pd-certus-rdma.
+            - name: UCX_TLS
+              $patch: delete
+            - name: UCX_NET_DEVICES
+              value: mlx5_0:1
+          securityContext:
+            capabilities:
+              # Registering GPU and host memory with the NIC pins it.
+              add: [IPC_LOCK]
+          resources:
+            limits:
+              rdma/rdma_shared_device_a: 1
+            requests:
+              rdma/rdma_shared_device_a: 1
+          volumeMounts:
+            - name: kv-tier
+              mountPath: /mnt/kv-tier
+              mountPropagation: HostToContainer
+      volumes:
+        - name: kv-tier
+          hostPath:
+            path: /mnt/kv-tier
+            type: Directory
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pd-disaggregation-nvidia-gpu-vllm-decode
+spec:
+  template:
+    metadata:
+      annotations:
+        k8s.v1.cni.cncf.io/networks: roce
+    spec:
+      imagePullSecrets:
+        - name: artifactory-creds
+      containers:
+        - name: modelserver
+          imagePullPolicy: IfNotPresent
+          # As prefill, plus decode's NIXL role and fail policy (lifted to the
+          # outer config, as the certus entrypoint does: the scheduler reads only
+          # the outer one), offload_prompt_only false, and the sidecar's port.
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -eu
+              bdf="$(nvidia-smi --query-gpu=pci.bus_id --format=csv,noheader | head -1 | tr -d '[:space:]')"
+              numa="$(python3 -c 'import pathlib,sys;d,b,f=sys.argv[1].split(":");print(pathlib.Path(f"/sys/bus/pci/devices/{int(d,16):04x}:{b.lower()}:{f.lower()}/numa_node").read_text().strip())' "$bdf")"
+              root="/mnt/kv-tier/numa${numa}"
+              mountpoint -q "$root" || { echo "[tiered] FATAL: no disk tier mounted at $root (tiered-disks.sh fs)"; exit 1; }
+              rm -rf "${root}"/kv-* 2>/dev/null || true
+              dir="${root}/kv-${POD_NAME}"; mkdir -p "$dir"
+              echo "[tiered] GPU ${bdf} -> NUMA ${numa} -> fs tier ${dir} ($(df -h --output=source,size "$root" | tail -1))"
+              nixl='{"kv_connector":"NixlConnector","kv_role":"kv_consumer","kv_buffer_device":"cuda","kv_load_failure_policy":"fail","kv_connector_extra_config":{"backends":["UCX"]}}'
+              cfg="$(python3 -c 'import json,sys
+              tier={"kv_connector":"OffloadingConnector","kv_role":"kv_both","kv_connector_extra_config":{"spec_name":"TieringOffloadingSpec","cpu_bytes_to_use":8556380160,"eviction_policy":"lru","offload_prompt_only":False,"secondary_tiers":[{"type":"fs","root_dir":sys.argv[2],"n_read_threads":16,"n_write_threads":16}]}}
+              print(json.dumps({"kv_connector":"MultiConnector","kv_role":"kv_consumer","kv_load_failure_policy":"fail","kv_connector_extra_config":{"connectors":[json.loads(sys.argv[1]),tier]}},separators=(",",":")))' "$nixl" "$dir")"
+              exec vllm serve Qwen/Qwen3-8B \
+                --disable-access-log-for-endpoints=/health,/metrics,/v1/models \
+                --tensor-parallel-size=1 \
+                --gpu-memory-utilization=0.90 \
+                --kv-cache-memory-bytes=5483003904 \
+                --max-model-len=24576 \
+                --no-async-scheduling \
+                --disable-hybrid-kv-cache-manager \
+                --kv-transfer-config "$cfg" \
+                --port=8200
+          env:
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: UCX_TLS
+              $patch: delete
+            - name: UCX_NET_DEVICES
+              value: mlx5_0:1
+          securityContext:
+            capabilities:
+              add: [IPC_LOCK]
+          resources:
+            limits:
+              rdma/rdma_shared_device_a: 1
+            requests:
+              rdma/rdma_shared_device_a: 1
+          volumeMounts:
+            - name: kv-tier
+              mountPath: /mnt/kv-tier
+              mountPropagation: HostToContainer
+      volumes:
+        - name: kv-tier
+          hostPath:
+            path: /mnt/kv-tier
+            type: Directory
