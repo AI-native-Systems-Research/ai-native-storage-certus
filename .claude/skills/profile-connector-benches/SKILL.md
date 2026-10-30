@@ -15,7 +15,8 @@ them side by side:
 | cputier | `benchmarks/cputier-connector-bench/run-in-container.sh` (vLLM ≥ 0.30 image) | vLLM `TieringOffloadingSpec`: pinned CPU tier + `fs` disk tier |
 | lmcache | `benchmarks/lmcache-connector-bench/run-in-container.sh` (vLLM + LMCache image) | LMCache MP server: pinned-RAM L1 + `fs_native` L2 (the wrapper starts and stops the server) |
 
-All work is done by `run_compare.sh` in this skill's directory. It takes every
+All work is done by `benchmarks/connector-sweep/run_compare.sh` (it also runs
+standalone; see that directory's README). It takes every
 workload flag **once** and forwards the same list to every bench, so the arms
 cannot drift. The DRAM tier size `--dram` becomes certus-server's
 `--memory-tier-size`, cputier's `--cpu-bytes` (and the container's
@@ -118,7 +119,7 @@ gives (see `run_compare.sh --help`): `--mode` (default `all`), `--bs`,
 5. **Launch** in the background (a `--mode all` run is several minutes per arm;
    the arms run one after the other because they share the GPU):
    ```bash
-   .claude/skills/profile-connector-benches/run_compare.sh --out <output-html-path> \
+   benchmarks/connector-sweep/run_compare.sh --out <output-html-path> \
        --fs-tier <answer> --l2-dir <answer> --device-pci <addr> [--device-pci <addr> ...] \
        --dram <answer> [--working-set N] [flags]
    ```

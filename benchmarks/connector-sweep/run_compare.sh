@@ -41,8 +41,8 @@
 #   --skip-certus | --skip-cputier | --skip-lmcache | --report-only
 set -uo pipefail
 
-SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(git -C "$SKILL_DIR" rev-parse --show-toplevel)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
 OUT="" MODE=all BS=16 NUM_BLOCKS=128 BLOCK_BYTES=2097152 MIN_DURATION=5 WARMUP=4
@@ -242,6 +242,6 @@ elif [[ -n "$LMCACHE_NOTE" ]]; then
 fi
 
 echo "[compare] certus=$STATUS_CERTUS cputier=$STATUS_CPUTIER lmcache=$STATUS_LMCACHE"
-python3 "$SKILL_DIR/make_report.py" --artifacts "$ART" --out "$OUT"
+python3 "$SCRIPT_DIR/make_report.py" --artifacts "$ART" --out "$OUT"
 echo "[compare] report: $OUT"
 [[ "$STATUS_CERTUS" != failed && "$STATUS_CPUTIER" != failed && "$STATUS_LMCACHE" != failed ]]
