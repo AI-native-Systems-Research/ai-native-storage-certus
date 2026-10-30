@@ -7,7 +7,7 @@
 #![allow(dead_code)]
 
 use std::ffi::c_void;
-use std::os::raw::{c_char, c_int};
+use std::os::raw::{c_char, c_int, c_uint};
 
 /// CUDA error codes (subset).
 pub type cudaError_t = c_int;
@@ -84,6 +84,27 @@ pub const CUDA_HOST_REGISTER_PORTABLE: c_int = 1;
 /// Opaque CUDA stream handle.
 pub type CudaStream = *mut c_void;
 
+/// `cudaMemcpySrcAccessOrderStream`: the source is read in stream order.
+pub const CUDA_MEMCPY_SRC_ACCESS_ORDER_STREAM: c_int = 1;
+
+/// `struct cudaMemLocation` (`driver_types.h`, CUDA 13.x).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct cudaMemLocation {
+    pub r#type: c_int,
+    pub id: c_int,
+}
+
+/// `struct cudaMemcpyAttributes` (`driver_types.h`, CUDA 13.x).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct cudaMemcpyAttributes {
+    pub src_access_order: c_int,
+    pub src_loc_hint: cudaMemLocation,
+    pub dst_loc_hint: cudaMemLocation,
+    pub flags: c_uint,
+}
+
 extern "C" {
     pub fn cudaGetDeviceCount(count: *mut c_int) -> cudaError_t;
     pub fn cudaGetDeviceProperties(prop: *mut cudaDeviceProp, device: c_int) -> cudaError_t;
@@ -131,6 +152,17 @@ extern "C" {
         src: *const c_void,
         count: usize,
         kind: c_int,
+        stream: CudaStream,
+    ) -> cudaError_t;
+    /// CUDA 13.x signature (no `failIdx`); `stream` must not be the legacy NULL stream.
+    pub fn cudaMemcpyBatchAsync(
+        dsts: *const *mut c_void,
+        srcs: *const *const c_void,
+        sizes: *const usize,
+        count: usize,
+        attrs: *mut cudaMemcpyAttributes,
+        attrs_idxs: *mut usize,
+        num_attrs: usize,
         stream: CudaStream,
     ) -> cudaError_t;
 }

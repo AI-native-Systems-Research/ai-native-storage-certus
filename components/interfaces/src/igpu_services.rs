@@ -723,6 +723,31 @@ define_interface! {
             size: usize, stream: GpuStream
         ) -> Result<(), String>;
 
+        /// Asynchronously submit a batch of pointer-to-pointer copies in one call.
+        ///
+        /// Entry `i` copies `sizes[i]` bytes from `srcs[i]` to `dsts[i]`. The
+        /// direction (host-to-device, device-to-host) comes from the pointers.
+        /// The batch as a whole runs in stream order on `stream`, but there is
+        /// no order among its copies.
+        ///
+        /// # Safety (caller contract)
+        ///
+        /// * The entries must not overlap or depend on each other.
+        /// * Every pointer must be valid for its size and stay valid until the
+        ///   stream is synchronized; host pointers must be CUDA-pinned.
+        /// * `stream` must be a created stream, not the legacy NULL stream.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if GPU support is not compiled in, the component
+        /// is not initialized, the slices differ in length, or the CUDA batch
+        /// memcpy fails.
+        #[cfg(feature = "spdk")]
+        fn memcpy_batch_async(
+            &self, dsts: &[*mut std::ffi::c_void], srcs: &[*const std::ffi::c_void],
+            sizes: &[usize], stream: GpuStream
+        ) -> Result<(), String>;
+
         /// Allocate a CUDA-pinned host buffer registered with SPDK for DMA.
         ///
         /// The returned buffer is:

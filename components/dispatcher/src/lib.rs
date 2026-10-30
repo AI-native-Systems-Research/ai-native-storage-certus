@@ -455,6 +455,74 @@ const EVICT_SCAN_MAX: usize = 1024;
 /// The memory-tier component owns the memory; this wrapper must not free it.
 unsafe extern "C" fn noop_free(_ptr: *mut std::ffi::c_void) {}
 
+/// Most piece copies submitted in one `memcpy_batch_async` call. A block has at
+/// most a few dozen regions; a longer list is submitted in several batches on
+/// the same stream.
+const PIECE_BATCH_MAX: usize = 64;
+
+/// Stack-allocated list of one block's piece copies, submitted with one
+/// `memcpy_batch_async` instead of one async memcpy per piece. A list of one
+/// entry goes through `single` (the per-direction memcpy) unchanged.
+struct PieceBatch {
+    dsts: [*mut std::ffi::c_void; PIECE_BATCH_MAX],
+    srcs: [*const std::ffi::c_void; PIECE_BATCH_MAX],
+    sizes: [usize; PIECE_BATCH_MAX],
+    len: usize,
+}
+
+impl PieceBatch {
+    fn new() -> Self {
+        Self {
+            dsts: [std::ptr::null_mut(); PIECE_BATCH_MAX],
+            srcs: [std::ptr::null(); PIECE_BATCH_MAX],
+            sizes: [0; PIECE_BATCH_MAX],
+            len: 0,
+        }
+    }
+
+    /// Append one copy, first submitting the pending entries if the list is full.
+    fn push<F>(
+        &mut self,
+        gpu: &dyn IGpuServices,
+        stream: GpuStream,
+        single: &F,
+        dst: *mut std::ffi::c_void,
+        src: *const std::ffi::c_void,
+        size: usize,
+    ) -> Result<(), String>
+    where
+        F: Fn(*mut std::ffi::c_void, *const std::ffi::c_void, usize) -> Result<(), String>,
+    {
+        if self.len == PIECE_BATCH_MAX {
+            self.flush(gpu, stream, single)?;
+        }
+        self.dsts[self.len] = dst;
+        self.srcs[self.len] = src;
+        self.sizes[self.len] = size;
+        self.len += 1;
+        Ok(())
+    }
+
+    /// Submit the pending entries on `stream`: one batch call for two or more,
+    /// `single` for exactly one.
+    fn flush<F>(
+        &mut self,
+        gpu: &dyn IGpuServices,
+        stream: GpuStream,
+        single: &F,
+    ) -> Result<(), String>
+    where
+        F: Fn(*mut std::ffi::c_void, *const std::ffi::c_void, usize) -> Result<(), String>,
+    {
+        let n = std::mem::take(&mut self.len);
+        match n {
+            0 => Ok(()),
+            1 => single(self.dsts[0], self.srcs[0], self.sizes[0]),
+            _ => gpu.memcpy_batch_async(&self.dsts[..n], &self.srcs[..n], &self.sizes[..n], stream),
+        }
+    }
+}
+
 /// Per-GPU-device CUDA streams for the load/store DMA paths.
 ///
 /// A CUDA stream is bound to the device that was current when it was created,
@@ -1395,25 +1463,30 @@ impl DispatcherComponent {
         let raw = warm_raw;
         if raw != 0 {
             let s = GpuStream(raw as *mut std::ffi::c_void);
+            let map_err = |e: String| {
+                DispatcherError::IoError(format!("GPU DMA copy (memory-tier→device) failed: {e}"))
+            };
+            let single = |dst, src, len| gpu.memcpy_h2d_async(src, dst, len, s);
+            let mut batch = PieceBatch::new();
             let mut off: usize = 0;
             for region in regions {
                 let copy_size = (region.size as usize).min((size as usize).saturating_sub(off));
                 if copy_size == 0 {
                     break;
                 }
-                gpu.memcpy_h2d_async(
-                    (pointer as usize + off) as *const std::ffi::c_void,
-                    region.address as *mut std::ffi::c_void,
-                    copy_size,
-                    s,
-                )
-                .map_err(|e| {
-                    DispatcherError::IoError(format!(
-                        "GPU DMA copy (memory-tier→device) failed: {e}"
-                    ))
-                })?;
+                batch
+                    .push(
+                        &**gpu,
+                        s,
+                        &single,
+                        region.address as *mut std::ffi::c_void,
+                        (pointer as usize + off) as *const std::ffi::c_void,
+                        copy_size,
+                    )
+                    .map_err(map_err)?;
                 off += region.size as usize;
             }
+            batch.flush(&**gpu, s, &single).map_err(map_err)?;
             if synchronize {
                 gpu.stream_synchronize(s).map_err(|e| {
                     DispatcherError::IoError(format!("stream_synchronize failed: {e}"))
@@ -3747,19 +3820,43 @@ impl IDispatcher for DispatcherComponent {
             (stream, false)
         };
 
+        let map_err = |e: String| {
+            let _ = mt.remove(key);
+            DispatcherError::IoError(format!("GPU async DMA copy failed: {e}"))
+        };
         let mut off: usize = 0;
-        for region in regions {
-            gpu.memcpy_d2h_async(
-                region.address as *const std::ffi::c_void,
-                (mem_ptr as usize + off) as *mut std::ffi::c_void,
-                region.size as usize,
-                effective_stream,
-            )
-            .map_err(|e| {
-                let _ = mt.remove(key);
-                DispatcherError::IoError(format!("GPU async DMA copy failed: {e}"))
-            })?;
-            off += region.size as usize;
+        if effective_stream.0.is_null() {
+            // No created stream for this device: the batch API rejects the
+            // legacy NULL stream, so keep one async memcpy per region.
+            for region in regions {
+                gpu.memcpy_d2h_async(
+                    region.address as *const std::ffi::c_void,
+                    (mem_ptr as usize + off) as *mut std::ffi::c_void,
+                    region.size as usize,
+                    effective_stream,
+                )
+                .map_err(map_err)?;
+                off += region.size as usize;
+            }
+        } else {
+            let single = |dst, src, len| gpu.memcpy_d2h_async(src, dst, len, effective_stream);
+            let mut batch = PieceBatch::new();
+            for region in regions {
+                batch
+                    .push(
+                        &*gpu,
+                        effective_stream,
+                        &single,
+                        (mem_ptr as usize + off) as *mut std::ffi::c_void,
+                        region.address as *const std::ffi::c_void,
+                        region.size as usize,
+                    )
+                    .map_err(map_err)?;
+                off += region.size as usize;
+            }
+            batch
+                .flush(&*gpu, effective_stream, &single)
+                .map_err(map_err)?;
         }
         if needs_sync {
             gpu.stream_synchronize(effective_stream).map_err(|e| {
@@ -4909,6 +5006,8 @@ mod tests {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum GpuEvent {
         SubmitH2d,
+        /// One `memcpy_batch_async` call; its entries are also recorded as `SubmitH2d`.
+        SubmitBatch,
         Sync,
     }
 
@@ -5146,6 +5245,21 @@ mod tests {
         ) -> Result<(), String> {
             unsafe {
                 std::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, size);
+            }
+            Ok(())
+        }
+        fn memcpy_batch_async(
+            &self,
+            dsts: &[*mut std::ffi::c_void],
+            srcs: &[*const std::ffi::c_void],
+            sizes: &[usize],
+            stream: GpuStream,
+        ) -> Result<(), String> {
+            if let Some(ref p) = self.probe {
+                p.record(GpuEvent::SubmitBatch);
+            }
+            for ((&dst, &src), &size) in dsts.iter().zip(srcs).zip(sizes) {
+                self.memcpy_h2d_async(src, dst, size, stream)?;
             }
             Ok(())
         }
@@ -6498,6 +6612,58 @@ mod tests {
             "the cold key must already be promoted when the warm stream sync runs"
         );
         assert_eq!(fx.dm.total_read_refs(), 0);
+
+        d.shutdown().unwrap();
+    }
+
+    /// A multi-region block is submitted as one batch, and each piece still lands
+    /// at its own address: a warm serve scatters slot bytes `sum(sizes[0..L])..`
+    /// to region L, and a store gathers region L back to the same slot offset.
+    #[test]
+    fn multi_region_warm_serve_and_store_use_one_batch_per_block() {
+        let fx = setup_initialized_with_remote(&[], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        const PIECES: usize = 4;
+        const PIECE: usize = 1024;
+        let slot = fx.mt.insert(1, (PIECES * PIECE) as u32).unwrap();
+        // SAFETY: `insert` returned a slot of at least PIECES * PIECE bytes.
+        unsafe {
+            for i in 0..PIECES * PIECE {
+                *slot.add(i) = (i / PIECE) as u8 + 0x10;
+            }
+        }
+        fx.dm
+            .create_memory_tier_entry(1, slot, (PIECES * PIECE) as u32)
+            .unwrap();
+        fx.dm.release_write(1).unwrap();
+
+        let mut pieces: Vec<Vec<u8>> = (0..PIECES).map(|_| vec![0u8; PIECE]).collect();
+        let handles: Vec<IpcHandle> = pieces.iter_mut().map(|b| make_handle(b)).collect();
+        let results = d.batch_lookup(&[(1, handles)]);
+        assert!(results[0].result.is_ok(), "got: {results:?}");
+        for (l, piece) in pieces.iter().enumerate() {
+            assert!(piece.iter().all(|&b| b == l as u8 + 0x10), "warm piece {l}");
+        }
+        assert_eq!(fx.probe.count(GpuEvent::SubmitBatch), 1);
+        assert_eq!(fx.probe.count(GpuEvent::SubmitH2d), PIECES);
+
+        let mut src: Vec<Vec<u8>> = (0..PIECES).map(|l| vec![0xA0 + l as u8; PIECE]).collect();
+        let handles: Vec<IpcHandle> = src.iter_mut().map(|b| make_handle(b)).collect();
+        let dst = fx.mt.insert(2, (PIECES * PIECE) as u32).unwrap();
+        d.copy_gpu_to_memory_async(2, &handles, GpuStream(0x1 as *mut std::ffi::c_void))
+            .unwrap();
+        // SAFETY: `insert` returned a slot of at least PIECES * PIECE bytes.
+        let gathered = unsafe { std::slice::from_raw_parts(dst, PIECES * PIECE) };
+        for l in 0..PIECES {
+            assert!(
+                gathered[l * PIECE..(l + 1) * PIECE]
+                    .iter()
+                    .all(|&b| b == 0xA0 + l as u8),
+                "stored piece {l}"
+            );
+        }
+        assert_eq!(fx.probe.count(GpuEvent::SubmitBatch), 2);
 
         d.shutdown().unwrap();
     }

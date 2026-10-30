@@ -409,6 +409,18 @@ impl IGpuServices for HostGpu {
     ) -> Result<(), String> {
         host_copy(src as *const u8, dst as *mut u8, size)
     }
+    fn memcpy_batch_async(
+        &self,
+        dsts: &[*mut std::ffi::c_void],
+        srcs: &[*const std::ffi::c_void],
+        sizes: &[usize],
+        stream: GpuStream,
+    ) -> Result<(), String> {
+        for ((&dst, &src), &size) in dsts.iter().zip(srcs).zip(sizes) {
+            self.memcpy_h2d_async(src, dst, size, stream)?;
+        }
+        Ok(())
+    }
     fn allocate_pinned_dma_buffer(&self, size: usize) -> Result<DmaBuffer, String> {
         DmaBuffer::new(size, 4096, None).map_err(|e| e.to_string())
     }

@@ -929,6 +929,74 @@ impl IGpuServices for GpuServicesComponent {
     }
 
     #[cfg(feature = "spdk")]
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    fn memcpy_batch_async(
+        &self,
+        dsts: &[*mut std::ffi::c_void],
+        srcs: &[*const std::ffi::c_void],
+        sizes: &[usize],
+        stream: interfaces::GpuStream,
+    ) -> Result<(), String> {
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = (dsts, srcs, sizes, stream);
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            if !self.is_initialized() {
+                return Err("Not initialized: call initialize() first".to_string());
+            }
+            if dsts.len() != srcs.len() || dsts.len() != sizes.len() {
+                return Err(format!(
+                    "memcpy_batch_async: slice lengths differ (dsts {}, srcs {}, sizes {})",
+                    dsts.len(),
+                    srcs.len(),
+                    sizes.len()
+                ));
+            }
+            if dsts.is_empty() {
+                return Ok(());
+            }
+
+            let mut attrs = cuda_ffi::cudaMemcpyAttributes {
+                src_access_order: cuda_ffi::CUDA_MEMCPY_SRC_ACCESS_ORDER_STREAM,
+                ..Default::default()
+            };
+            let mut attrs_idxs: [usize; 1] = [0];
+
+            // SAFETY: the three slices have equal length `dsts.len()`, so the
+            // runtime reads `count` entries from each. `attrs`/`attrs_idxs` are
+            // one-element locals that outlive the call (the runtime copies them
+            // at submission). The caller guarantees every pointer is valid for
+            // its size until the stream syncs and that `stream.0` is a created
+            // stream, not the legacy NULL stream.
+            let err = unsafe {
+                cuda_ffi::cudaMemcpyBatchAsync(
+                    dsts.as_ptr(),
+                    srcs.as_ptr(),
+                    sizes.as_ptr(),
+                    dsts.len(),
+                    &mut attrs,
+                    attrs_idxs.as_mut_ptr(),
+                    1,
+                    stream.0,
+                )
+            };
+
+            if err != cuda_ffi::CUDA_SUCCESS {
+                return Err(format!(
+                    "cudaMemcpyBatchAsync failed: {}",
+                    cuda_ffi::cuda_error_string(err)
+                ));
+            }
+
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "spdk")]
     fn allocate_pinned_dma_buffer(&self, size: usize) -> Result<interfaces::DmaBuffer, String> {
         #[cfg(not(feature = "gpu"))]
         {
