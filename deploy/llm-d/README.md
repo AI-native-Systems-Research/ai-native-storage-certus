@@ -34,6 +34,9 @@ deploy/llm-d/
       pd-certus/              P/D with certus beside NIXL
         kustomization.yaml    overlay layered on ../pd
         patch.yaml            certus/'s wiring, on both roles
+      pd-certus-rdma/         pd-certus with NIXL GPU to GPU over RDMA
+      pd-offload-rdma/        pd-certus-rdma with vLLM's CPU tier + P2P pull
+                              in place of certus: the comparison arm
 ```
 
 ## Profiles and the private site file
@@ -282,6 +285,8 @@ deploy/llm-d/install.sh                 # aggregated serving
 WITH_CERTUS=1 deploy/llm-d/install.sh   # + certus KV-cache offload
 PD=1 deploy/llm-d/install.sh            # prefill/decode disaggregation
 PD=1 WITH_CERTUS=1 deploy/llm-d/install.sh   # P/D, certus beside NIXL
+PD=1 WITH_CERTUS=1 RDMA=1 deploy/llm-d/install.sh   # ... NIXL over RDMA
+PD=1 RDMA=1 OFFLOAD=1 deploy/llm-d/install.sh       # ... vLLM's CPU tier instead
 DRY_RUN=1 PD=1 deploy/llm-d/install.sh  # show the plan; change nothing
 UNINSTALL=1 deploy/llm-d/install.sh     # remove the instance; free its nodes
 ```
@@ -381,6 +386,24 @@ for P/D routing, not a tuned deployment.
   - Needs a connector image with the fetch path (`publish-image.sh`) and certus
     servers on the prefill and decode nodes; see
     [certus offload prerequisites](#certus-offload-prerequisites).
+- **Without certus, for comparison (`PD=1 RDMA=1 OFFLOAD=1`):
+  `profiles/a30/pd-offload-rdma`.** The `pd-certus-rdma` deployment with vLLM's
+  own tier in certus's place, following llm-d's `guides/p2p-kv-cache-sharing`
+  P/D variant: `MultiConnector[NixlConnector, OffloadingConnector(
+  TieringOffloadingSpec)]`, a CPU tier of 30 GiB per GPU (certus's memory tier
+  per GPU) with a P2P secondary tier, `offload_prompt_only: false` on decode,
+  and the routing sidecar's `--enable-p2p-pull`. Prefill pulls a turn's history
+  from the decode pod that generated it, as certus fetches it.
+  - Everything else is held equal to `pd-certus-rdma`: the same image (so the
+    same vLLM build), engine flags, model and window, NIXL GPU to GPU over RDMA,
+    KV events and router values (`install.sh` takes `pd-certus`'s
+    `router-values.yaml` and `render.yaml`). The engine args are written out in
+    full, not built by the certus entrypoint, so a change to one profile's
+    args, or to what the entrypoint adds, has to be made in the other too.
+  - The tier is an mmap of the pod's `/dev/shm`, raised to 36Gi.
+  - Stop certus on the nodes first, so its polling threads do not share the
+    CPUs: `deploy/k8s/certus-nodes.sh release true <node>...` (it waits for the
+    pods to exit), and `claim true <node>...` afterwards.
 - **Restarting the prefill pod: restart decode too.** NIXL's decode side caches
   the prefill agent. With the vLLM 0.30 image a restarted prefill can segfault
   decode, or leave it failing every handoff for up to an hour (llm-d's
