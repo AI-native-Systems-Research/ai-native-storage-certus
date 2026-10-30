@@ -65,8 +65,8 @@ gives (see `run_compare.sh --help`): `--mode` (default `all`), `--bs`,
    (skip any the invocation already answered via `--fs-tier`/`--l2-dir`,
    `--device-pci` / `--drive-count`, or `--dram`):
    - **Disk-tier filesystem** for cputier's fs tier and lmcache's L2 — options:
-     the default (`~/cputier-bench-fs-tier` and `~/lmcache-bench-l2`; state the
-     filesystem and backing device, e.g. "xfs on SAS SSD LVM"), plus up to two
+     the default (`/raid0/cputier-bench-fs-tier` and `/raid0/lmcache-bench-l2`;
+     state the filesystem and backing device, e.g. "xfs on a 4-NVMe md RAID0"), plus up to two
      other candidate mounts from step 2, preferring NVMe-backed ones. For a
      mount `<m>`, pass `--fs-tier <m>/cputier-bench-fs-tier --l2-dir
      <m>/lmcache-bench-l2`, so both disk tiers sit on the same device. Note that
@@ -74,8 +74,9 @@ gives (see `run_compare.sh --help`): `--mode` (default `all`), `--bs`,
      certus, and that it must not be overlay storage (no `O_DIRECT`). "Other"
      lets the user type a path.
    - **Number of certus SSDs** — options `1`, `2`, ... up to the number of
-     SPDK-bound NVMe devices found (max 4 options; recommend all devices on the
-     GPU's NUMA node, or 1 if none are). Then pick that many devices, GPU-NUMA
+     SPDK-bound NVMe devices found (max 4 options; recommend `4`, the script's
+     default of `0000:61:00.0`–`0000:64:00.0`, which matches the 4-drive `/raid0`
+     used by the file tiers). Then pick that many devices, GPU-NUMA
      node first, and pass each as `--device-pci`. Warn if any chosen SSD is on
      a different NUMA node from the GPU.
    - **Memory tier size** (applies to every arm: certus `--memory-tier-size`,

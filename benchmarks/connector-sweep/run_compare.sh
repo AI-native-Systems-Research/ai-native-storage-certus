@@ -27,18 +27,23 @@
 #   --requests-per-step N [8]  --num-sessions N [32]  --lookup-order O [lookup-first]
 #   --gpu N [0]  --tp N [1]
 #   --dram SIZE [4G]         certus --memory-tier-size == cputier --cpu-bytes == lmcache L1
-#   --device-pci ADDR        certus NVMe device (repeatable), or
-#   --drive-count N          first N discovered NVMe drives [1 if no --device-pci]
+#   --device-pci ADDR        certus NVMe device (repeatable) [the 4 vfio NVMe drives
+#                            0000:61:00.0..0000:64:00.0, same as benchmarks/vllm-serve], or
+#   --drive-count N          first N discovered NVMe drives (replaces the default list)
 #   --eviction-threshold F   certus-server --memory-tier-eviction-threshold [0.7]
 #   --workers N              certus connector ThreadPoolExecutor workers [4]
 #   --channels N             certus-server mailbox channels [auto: max(16, tp*(1+2*workers))]
-#   --fs-tier DIR            cputier fs tier host dir [$HOME/cputier-bench-fs-tier]
+#   --fs-tier DIR            cputier fs tier host dir [/raid0/cputier-bench-fs-tier]
 #   --server-bin PATH        [target/release/certus-server]
 #   --image IMAGE            cputier vLLM image [docker.io/vllm/vllm-openai:v0.30.0]
-#   --l2-dir DIR             lmcache L2 (fs_native) host dir [$HOME/lmcache-bench-l2]
+#   --l2-dir DIR             lmcache L2 (fs_native) host dir [/raid0/lmcache-bench-l2]
 #   --lmcache-image IMAGE    lmcache image [localhost/vllm-lmcache-bench:vllm0.30.0]
 #   --chunk-size N           lmcache server --chunk-size in tokens [256]
 #   --skip-certus | --skip-cputier | --skip-lmcache | --report-only
+#
+# Disk tiers default to equal hardware: certus gets 4 SPDK NVMe drives, and the
+# file-based tiers (cputier fs, lmcache L2) share /raid0, a 4-drive XFS RAID0 on
+# separate NVMe drives (so the two do not contend with certus for SSD bandwidth).
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,11 +53,12 @@ cd "$REPO_ROOT"
 OUT="" MODE=all BS=16 NUM_BLOCKS=128 BLOCK_BYTES=2097152 MIN_DURATION=5 WARMUP=4
 WORKING_SET=512 PIPELINE_DEPTH=4 DIRECTION=both HIT_RATIO=0.75 REQS_PER_STEP=8
 NUM_SESSIONS=32 LOOKUP_ORDER=lookup-first GPU=0 TP=1 DRAM=4G DEVICE_PCI=()
-DRIVE_COUNT="" EVICT_THRESHOLD=0.7 WORKERS=4 CHANNELS="" FS_TIER="$HOME/cputier-bench-fs-tier"
+DRIVE_COUNT="" EVICT_THRESHOLD=0.7 WORKERS=4 CHANNELS="" FS_TIER=/raid0/cputier-bench-fs-tier
 SERVER_BIN=target/release/certus-server IMAGE=docker.io/vllm/vllm-openai:v0.30.0
-L2_DIR="$HOME/lmcache-bench-l2" LMCACHE_IMAGE=localhost/vllm-lmcache-bench:vllm0.30.0 CHUNK_SIZE=256
+L2_DIR=/raid0/lmcache-bench-l2 LMCACHE_IMAGE=localhost/vllm-lmcache-bench:vllm0.30.0 CHUNK_SIZE=256
 RUN_CERTUS=1 RUN_CPUTIER=1 RUN_LMCACHE=1
 SHM_PATH=/dev/shm/certus-shmq
+DEFAULT_DEVICE_PCI=(0000:61:00.0 0000:62:00.0 0000:63:00.0 0000:64:00.0)
 
 while (($#)); do
   case "$1" in
@@ -88,7 +94,7 @@ while (($#)); do
     --skip-cputier) RUN_CPUTIER=0 ;;
     --skip-lmcache) RUN_LMCACHE=0 ;;
     --report-only) RUN_CERTUS=0; RUN_CPUTIER=0; RUN_LMCACHE=0 ;;
-    -h|--help) sed -n '2,42p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,46p' "$0"; exit 0 ;;
     *) echo "error: unknown option $1" >&2; exit 2 ;;
   esac
   shift
@@ -101,7 +107,7 @@ OUT="$(cd "$(dirname "$OUT")" && pwd -P)/$(basename "$OUT")"
 ART="${OUT%.html}.d"
 mkdir -p "$ART"
 
-if ((${#DEVICE_PCI[@]} == 0)) && [[ -z "$DRIVE_COUNT" ]]; then DRIVE_COUNT=1; fi
+if ((${#DEVICE_PCI[@]} == 0)) && [[ -z "$DRIVE_COUNT" ]]; then DEVICE_PCI=("${DEFAULT_DEVICE_PCI[@]}"); fi
 if [[ -z "$CHANNELS" ]]; then
   CHANNELS=$(( TP * (1 + 2 * WORKERS) )); (( CHANNELS < 16 )) && CHANNELS=16
 fi

@@ -34,6 +34,14 @@ benchmarks/connector-sweep/run_compare.sh \
 
 That is the run behind the 2026-10-30 comparison: one A30, 4 GiB memory tier on every arm, an 8 GiB mixed-eviction working set, and both file-based disk tiers on the `/cache` NVMe.
 
+Without disk-tier flags, the arms get matched hardware: certus uses the four SPDK drives `0000:61:00.0`–`0000:64:00.0` (the same set `benchmarks/vllm-serve` uses), and the cputier fs tier and the lmcache L2 both go under `/raid0`, a 4-drive XFS RAID0 on separate NVMe drives:
+
+```bash
+benchmarks/connector-sweep/run_compare.sh --out bench-results/connector-compare.html --dram 4G --working-set 4096
+```
+
+`--device-pci` (repeatable) or `--drive-count N` replaces the certus drive list; `--fs-tier` and `--l2-dir` move the file tiers.
+
 Artifacts go to `<out-without-.html>.d/`: `params.json` (records every arm's exact command line), `certus.csv`, `cputier.csv`, `lmcache.csv`, the three bench logs and `server.log`.
 
 ```bash
@@ -49,7 +57,7 @@ run_compare.sh --help                               # every option and its defau
 - **cputier:** `docker.io/vllm/vllm-openai:v0.30.0` must be in the default podman store.
 - **lmcache:** `localhost/vllm-lmcache-bench:vllm0.30.0` must exist (`deploy/lmcache/build.sh`), and ports 5575 and 8095 must be free. The arm is skipped automatically for `--mode contention` and for `--tp` above 1.
 - **Sizing:** `--working-set × --block-bytes` should exceed `--dram`, or the mixed-eviction phase never fills the tier. Keep `2 × working-set × block-bytes` within free GPU memory, because the certus bench allocates two buffers that size.
-- **Disk tiers:** put `--fs-tier` and `--l2-dir` on the same local NVMe filesystem (not overlay or tmpfs, which reject `O_DIRECT`) for a fair cold-path comparison.
+- **Disk tiers:** put `--fs-tier` and `--l2-dir` on the same local NVMe filesystem (not overlay or tmpfs, which reject `O_DIRECT`) for a fair cold-path comparison. The defaults do this: both live on `/raid0`, whose four drives are not the four certus drives, so no arm shares an SSD with another.
 
 ## Reading the results
 
