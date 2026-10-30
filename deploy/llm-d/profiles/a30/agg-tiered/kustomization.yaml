@@ -1,0 +1,34 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Aggregated serving with vLLM's native tiered prefix cache and no certus: a CPU
+# memory tier with a filesystem tier under it, as llm-d's
+# guides/tiered-prefix-cache ("vLLM native -- CPU RAM + Filesystem") and the
+# kv-offload-replay bench's Tiered-CPU-FS variant configure it. The comparison
+# arm for certus:
+#
+#   same          image (the connector image, so the same vLLM build), model,
+#                 window, GPU KV size, replicas, memory tier per GPU (the
+#                 certus-server --memory-tier-size, less its bounce reserve),
+#                 the NVMe drives under the disk tier
+#   different     OffloadingConnector(TieringOffloadingSpec, CPU + fs tiers)
+#                 in place of certus; the disk tier is XFS on a kernel-driver
+#                 RAID0 of the node's NUMA-local drives, where certus drives
+#                 them itself through SPDK
+#
+# The fs tier writes one file per block under /mnt/kv-tier, a hostPath on the
+# node's NUMA-local array (deploy/llm-d/tiered-disks.sh builds them). Run it with
+# certus stopped on the nodes: it owns those drives otherwise.
+resources:
+  - ../agg
+
+patches:
+  - path: patch.yaml
+
+# As in ../certus (same placeholder, rewritten by install.sh from
+# CERTUS_REGISTRY/CERTUS_REPO). Keep the tag in step with
+# ../certus/kustomization.yaml.
+images:
+  - name: docker.io/vllm/vllm-openai
+    newName: REGISTRY/REPO/llm-d-vllm-certus
+    newTag: vllm0.30.0-04548e47

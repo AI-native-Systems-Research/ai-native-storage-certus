@@ -24,6 +24,11 @@ turn's line is what the answering server reported; under P/D that is the decode
 pod, which reports 0 for KV it received from prefill, so it is no measure of
 cache reuse there. Read the pods' Prometheus counters for that.
 
+``--order interleaved`` sends turn k of every conversation before turn k+1 of
+any, so with many conversations a working set larger than a cache tier is
+evicted and read back between one conversation's turns; the default sends each
+conversation's turns back to back.
+
 Example (llm-d's router on any node's NodePort):
   LONGDOC_DOC_TOKENS=8000 LONGDOC_QUESTIONS=8 \\
       benchmarks/kv-offload-replay/longdoc_router.py --url http://node2:30080 \\
@@ -78,44 +83,97 @@ def stream(url: str, body: dict, timeout: float):
     return "".join(text), usage or {}, ttft, time.monotonic() - t0
 
 
-def run_conv(i, turns, a, out, lock, results):
-    context = ""
-    for k, human in enumerate(turns[: a.turns] if a.turns else turns):
-        prompt = human if k == 0 else context + "\n\n" + human
-        body = {"model": a.model, "prompt": prompt, "max_tokens": a.output_tokens,
-                "temperature": a.temperature, "top_p": a.top_p}
-        if a.ignore_eos:
-            body["ignore_eos"] = True
-        rec = {"conv": i, "turn": k, "sent": round(time.time(), 4)}
-        try:
-            answer, usage, ttft, total = stream(a.url.rstrip("/") + "/v1/completions",
-                                                body, a.timeout)
-        except urllib.error.HTTPError as e:
-            # 400 is the server refusing the prompt (too long for its window):
-            # the conversation is retired, the run goes on.
-            rec["error"] = f"HTTP {e.code}: {e.read().decode(errors='replace')[:300]}"
-            rec["retired"] = e.code == 400
-        except Exception as e:  # noqa: BLE001 - a failed turn ends its conversation, not the run
-            rec["error"] = str(e)
-        if "error" in rec:
-            with lock:
-                out.write(json.dumps(rec) + "\n")
-                out.flush()
-                results.append(rec)
-            return
-        details = usage.get("prompt_tokens_details") or {}
-        rec.update({
-            "prompt_tokens": usage.get("prompt_tokens"),
-            "cached_tokens": details.get("cached_tokens"),
-            "answer_tokens": usage.get("completion_tokens"),
-            "ttft_s": round(ttft if ttft is not None else total, 4),
-            "latency_s": round(total, 4),
-        })
+def run_turn(i, k, human, context, a, out, lock, results):
+    """Send turn ``k`` of conversation ``i`` and record it. Returns the context
+    the next turn builds on, or None when the conversation ends here."""
+    prompt = human if k == 0 else context + "\n\n" + human
+    body = {"model": a.model, "prompt": prompt, "max_tokens": a.output_tokens,
+            "temperature": a.temperature, "top_p": a.top_p}
+    if a.ignore_eos:
+        body["ignore_eos"] = True
+    rec = {"conv": i, "turn": k, "sent": round(time.time(), 4)}
+    try:
+        answer, usage, ttft, total = stream(a.url.rstrip("/") + "/v1/completions",
+                                            body, a.timeout)
+    except urllib.error.HTTPError as e:
+        # 400 is the server refusing the prompt (too long for its window):
+        # the conversation is retired, the run goes on.
+        rec["error"] = f"HTTP {e.code}: {e.read().decode(errors='replace')[:300]}"
+        rec["retired"] = e.code == 400
+    except Exception as e:  # noqa: BLE001 - a failed turn ends its conversation, not the run
+        rec["error"] = str(e)
+    if "error" in rec:
         with lock:
             out.write(json.dumps(rec) + "\n")
             out.flush()
             results.append(rec)
-        context = prompt + answer
+        return None
+    details = usage.get("prompt_tokens_details") or {}
+    rec.update({
+        "prompt_tokens": usage.get("prompt_tokens"),
+        "cached_tokens": details.get("cached_tokens"),
+        "answer_tokens": usage.get("completion_tokens"),
+        "ttft_s": round(ttft if ttft is not None else total, 4),
+        "latency_s": round(total, 4),
+    })
+    with lock:
+        out.write(json.dumps(rec) + "\n")
+        out.flush()
+        results.append(rec)
+    return prompt + answer
+
+
+def turns_of(conv, a):
+    return conv[: a.turns] if a.turns else conv
+
+
+def run_conv(i, conv, a, out, lock, results):
+    """Back-to-back order: one conversation's turns, each after the last."""
+    context = ""
+    for k, human in enumerate(turns_of(conv, a)):
+        context = run_turn(i, k, human, context, a, out, lock, results)
+        if context is None:
+            return
+
+
+def run_interleaved(convs, a, concurrency, out, lock, results):
+    """Round-robin order: turn k of every conversation before turn k+1 of any.
+
+    ``concurrency`` worker threads take the next ready turn from a queue in
+    conversation order; a conversation's next turn is queued only when its last
+    one has answered, and goes behind every turn already waiting. So between two
+    turns of one conversation, every other live conversation takes a turn, and
+    the KV they store passes through the tiers in between -- which is how a
+    working set larger than a tier gets its entries evicted and read back.
+    """
+    import collections
+
+    ready = collections.deque((i, 0, "") for i in range(len(convs)))
+    cv = threading.Condition()
+    live = [len(convs)]
+
+    def worker():
+        while True:
+            with cv:
+                while not ready and live[0] > 0:
+                    cv.wait()
+                if not ready:
+                    return
+                i, k, context = ready.popleft()
+            turns = turns_of(convs[i], a)
+            nxt = run_turn(i, k, turns[k], context, a, out, lock, results)
+            with cv:
+                if nxt is not None and k + 1 < len(turns):
+                    ready.append((i, k + 1, nxt))
+                else:
+                    live[0] -= 1
+                cv.notify_all()
+
+    ths = [threading.Thread(target=worker) for _ in range(concurrency)]
+    for t in ths:
+        t.start()
+    for t in ths:
+        t.join()
 
 
 def pct(xs, q):
@@ -136,6 +194,11 @@ def main():
                     help="conversations (documents) to run (default: LONGDOC_NUM_DOCS)")
     ap.add_argument("--concurrency", type=int, default=None,
                     help="conversations in flight at once (default: all of them)")
+    ap.add_argument("--order", choices=("conversation", "interleaved"), default="conversation",
+                    help="conversation: each conversation's turns back to back (a turn's "
+                         "prefix is minutes old at most); interleaved: turn k of every "
+                         "conversation before turn k+1 of any, so a large working set is "
+                         "evicted from a tier and read back between a conversation's turns")
     ap.add_argument("--turns", type=int, default=0,
                     help="turns per conversation, at most (0 = all LONGDOC_QUESTIONS)")
     ap.add_argument("--output-tokens", type=int, default=150,
@@ -162,7 +225,7 @@ def main():
     convs = common.load_convs(common._longdoc_generate(), n)
     concurrency = a.concurrency or len(convs)
     print(f"[longdoc] {len(convs)} conversations x {questions} turns, "
-          f"~{doc_tokens}-token documents, {concurrency} at a time, "
+          f"~{doc_tokens}-token documents, {concurrency} at a time, {a.order} order, "
           f"model {a.model} (window {window}), {a.output_tokens} output tokens",
           file=sys.stderr, flush=True)
     if window is not None and doc_tokens + a.output_tokens > window:
@@ -174,16 +237,19 @@ def main():
     results: list[dict] = []
     t0 = time.monotonic()
     with open(a.out, "w") as out:
-        pending = list(enumerate(convs))
-        threads: list[threading.Thread] = []
-        while pending or threads:
-            threads = [t for t in threads if t.is_alive()]
-            while pending and len(threads) < concurrency:
-                i, c = pending.pop(0)
-                t = threading.Thread(target=run_conv, args=(i, c, a, out, lock, results))
-                t.start()
-                threads.append(t)
-            time.sleep(0.05)
+        if a.order == "interleaved":
+            run_interleaved(convs, a, concurrency, out, lock, results)
+        else:
+            pending = list(enumerate(convs))
+            threads: list[threading.Thread] = []
+            while pending or threads:
+                threads = [t for t in threads if t.is_alive()]
+                while pending and len(threads) < concurrency:
+                    i, c = pending.pop(0)
+                    t = threading.Thread(target=run_conv, args=(i, c, a, out, lock, results))
+                    t.start()
+                    threads.append(t)
+                time.sleep(0.05)
     wall = time.monotonic() - t0
 
     ok = [r for r in results if "error" not in r]

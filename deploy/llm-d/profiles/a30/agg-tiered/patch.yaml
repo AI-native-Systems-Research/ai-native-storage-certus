@@ -1,0 +1,69 @@
+# The certus overlay's engine flags (../certus/entrypoint-certus.sh adds
+# --no-async-scheduling and --disable-hybrid-kv-cache-manager), with vLLM's
+# TieringOffloadingSpec where certus has CertusConnector. The disk tier is the
+# array on the GPU's own NUMA node, as each certus instance uses its NUMA-local
+# drives: both nodes' arrays are mounted and the command picks the local one.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: optimized-baseline-nvidia-gpu-vllm-decode
+spec:
+  template:
+    spec:
+      # The connector image lives in the site registry, as in ../certus.
+      imagePullSecrets:
+        - name: artifactory-creds
+      containers:
+        - name: modelserver
+          imagePullPolicy: IfNotPresent
+          # args (the model and ../agg's flags) pass through as "$@".
+          #   cpu_bytes_to_use  certus's memory tier per instance (8 GiB) less
+          #                     its 32 MiB bounce reserve: the cache certus has.
+          #   eviction_policy   lru, as the bench's Tiered-CPU-FS variant.
+          #   n_*_threads       llm-d's guide and the bench (16/16).
+          # The block size stays vLLM's 16 tokens, as the certus arms run.
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -eu
+              bdf="$(nvidia-smi --query-gpu=pci.bus_id --format=csv,noheader | head -1 | tr -d '[:space:]')"
+              numa="$(python3 -c 'import pathlib,sys;d,b,f=sys.argv[1].split(":");print(pathlib.Path(f"/sys/bus/pci/devices/{int(d,16):04x}:{b.lower()}:{f.lower()}/numa_node").read_text().strip())' "$bdf")"
+              root="/mnt/kv-tier/numa${numa}"
+              mountpoint -q "/mnt/kv-tier/numa${numa}" || { echo "[tiered] FATAL: no disk tier mounted for NUMA ${numa}"; exit 1; }
+              dir="${root}/kv-${POD_NAME}"
+              rm -rf "${root}"/kv-* 2>/dev/null || true
+              mkdir -p "$dir"
+              echo "[tiered] GPU ${bdf} -> NUMA ${numa} -> fs tier ${dir} ($(df -h --output=source,size "$root" | tail -1))"
+              cfg="$(python3 -c 'import json,sys;print(json.dumps({"kv_connector":"OffloadingConnector","kv_role":"kv_both","kv_connector_extra_config":{"spec_name":"TieringOffloadingSpec","cpu_bytes_to_use":8556380160,"eviction_policy":"lru","secondary_tiers":[{"type":"fs","root_dir":sys.argv[1],"n_read_threads":16,"n_write_threads":16}]}},separators=(",",":")))' "$dir")"
+              exec vllm serve \
+                Qwen/Qwen3-8B \
+                --disable-access-log-for-endpoints=/health,/metrics,/v1/models \
+                --tensor-parallel-size=1 \
+                --gpu-memory-utilization=0.90 \
+                --kv-cache-memory-bytes=5483003904 \
+                --max-model-len=24576 \
+                --no-async-scheduling \
+                --disable-hybrid-kv-cache-manager \
+                --kv-transfer-config "$cfg"
+          env:
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+          securityContext:
+            # O_DIRECT block files on the host array; the directory is root's.
+            runAsUser: 0
+          volumeMounts:
+            - name: kv-tier
+              mountPath: /mnt/kv-tier
+              mountPropagation: HostToContainer
+            # The CPU tier is an mmap of /dev/shm: 8 GiB plus vLLM's own use.
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: kv-tier
+          hostPath:
+            path: /mnt/kv-tier
+            type: Directory
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 28Gi
