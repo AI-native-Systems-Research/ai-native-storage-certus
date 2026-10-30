@@ -589,10 +589,12 @@ impl BackgroundEvictor {
                 let _ = dm.release_read(key);
                 None
             }
-            Ok(_) => {
-                let _ = dm.release_read(key);
-                None
-            }
+            // NotExist (and MismatchSize, which `lookup` never answers): the
+            // lookup took no read reference — it only pins an entry it finds —
+            // so none is released. Releasing here would drop a reference
+            // another caller holds, e.g. the write-through pin a concurrently
+            // registered entry carries.
+            Ok(_) => None,
             Err(_) => None,
         }
     }
@@ -935,3 +937,7 @@ mod tests {
 #[cfg(test)]
 #[path = "repair_test_ssd_evictor_release.rs"]
 mod repair_test_ssd_evictor_release;
+
+#[cfg(test)]
+#[path = "repair_test_evictor_no_foreign_pin_release.rs"]
+mod repair_test_evictor_no_foreign_pin_release;

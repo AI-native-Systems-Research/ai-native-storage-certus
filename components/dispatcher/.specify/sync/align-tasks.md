@@ -47,7 +47,9 @@ Source: `.specify/sync/proposals.json` / `proposals.md` (analysis run 2026-10-18
 an ALIGN task only: record in align-tasks.md, no code change in this PR"*. **No code was
 changed.** Line numbers refer to HEAD `4f8b5554b`.
 
-## Task: Align 002-served-by-tier-attribution/US1 AS3 + FR-009 (A-01, OPEN, major)
+## Task: Align 002-served-by-tier-attribution/US1 AS3 + FR-009 (A-01, CLOSED 2026-10-28, major)
+
+> Closed by commit `55d1d1bc9` (root cause #7, J28 repair, acceptance check PASS). Test: `src/repair_test_sync_failure_error.rs` asserts `ServedBy::Error`, `!is_ok()`, `lookup_hits_dram == 0` and `promotions_to_gpu == 0` after a failed warm stream sync.
 
 **Spec Requirement**: 002 US1 AS3 / FR-009. When the batched GPU sync fails, every key whose copy was in flight is attributed `ERROR`, and none is reported as a hit (002 spec.md:303-305, 430-434).
 **Current Code**: a failed warm `stream_synchronize` is only logged. The warm results stay `Ok` with tier `Dram`, so they are counted as hits and sent as wire byte 1 (`src/lib.rs:2750-2755`).
@@ -56,8 +58,8 @@ changed.** Line numbers refer to HEAD `4f8b5554b`.
 **Estimated Effort**: small
 
 ### Acceptance Criteria
-- [ ] A test using `PinProbe::failing_sync` on warm keys asserts `ServedBy::Error` and `!result.is_ok()`.
-- [ ] Warm keys whose sync failed are not counted in `promotions_to_gpu` / `lookup_hits_dram`.
+- [x] A test on warm keys with a failing sync asserts `ServedBy::Error` and `!result.is_ok()`.
+- [x] Warm keys whose sync failed are not counted in `promotions_to_gpu` / `lookup_hits_dram`.
 
 ## Task: Align 001-dispatcher-cache-interface/FR-051 + FR-036: `batch_lookup` cold pin (A-02, OPEN, major)
 
@@ -275,6 +277,82 @@ A-1, A-2, A-3 (decision recorded), A-4 (2026-10-14 apply); A-01, A-02, A-04, A-0
 - **Code**: in the scatter-gather setup, a channel checkout failure for drive *d* sets `results` only for the jobs of that drive and then `break`s. Since this branch the slots of all drives are released, but their results stay `None`. Neither the remote pass nor the recovery pass fills a `None`, and `r.unwrap()` then panics on the request thread. Needs at least 2 active drives and a `connect_client` failure.
 - **Required change**: in the `Err(e)` arm, set `results[...] = Some(Err(e.clone()))` for every job of every drive (the loop that already releases their slots); optionally replace `r.unwrap()` with a fallback.
 - **Test first**: two mock drives, the second drive's `connect_client` fails, one cold key per drive: both outcomes are `Err`, no panic, both slots released.
+
+---
+
+# Apply 2026-10-24 — branch `fix/dispatcher-remove-ssd-extent` (approved by Cornel, 2026-10-24)
+
+Source: `.specify/sync/proposals.json` / `proposals.md` (analysis run 2026-10-23, HEAD
+`765f75ba3`). **B-12** (approved 2026-10-23 on the earlier run), **B-14** and **B-15**
+were approved and applied to `specs/**` (see `apply-report.md`). A-11 and A-12 are
+**not approved as code changes**: they carry a TRACK note and are recorded below.
+**No code was changed.** Line numbers refer to HEAD `765f75ba3`, relative to
+`components/dispatcher/`.
+
+## Closed by this branch
+
+- **A-2** — ✅ RESOLVED in code by `a7444f4ab` (`remove` frees the SSD extent of a persisted
+  resident entry; the spec side is B-12). Its second acceptance criterion (a
+  `format_on_init=false` re-initialize does not resurrect the key) has no dedicated test.
+- **A-06** — ✅ RESOLVED in code by PR #568 (`src/lib.rs:2180`, `src/background.rs:532`).
+- **A-9** — ✅ IMPLEMENTED by `765f75ba3`, option (c) (the compensating
+  `promote_block_to_memory_tier`; the spec side is B-14). Option (a) is carried as A-12.
+
+## Open items from this run (tracked, not approved for code)
+
+### CLOSED 2026-10-28 A-11 — Align 001 FR-013 (+ FR-018, FR-009 as amended by B-12): the SSD evictor must not release a read reference it never took (moderate; MEDIUM confidence; pre-existing)
+
+> Approval note: *"TRACK (Cornel 2026-10-24): code change for a later repair with a test first; not in this PR."*
+
+> Closed by commit `f43f4833d` (J28c repair, acceptance check PASS: 122 tests x5, 112 proved, 0 lost). `get_evictable_offset` no longer releases in its catch-all arm. Test `src/repair_test_evictor_no_foreign_pin_release.rs` fails on the old code and passes on the fix.
+
+- **Spec**: 001 FR-013 (read/write locking for thread safety), FR-018 (a job reading the
+  DRAM slot finishes; `remove` must not free the slot itself), FR-009 as amended by B-12
+  (a lookup "MUST release only a read reference that lookup acquired").
+- **Code**: `BackgroundEvictor::get_evictable_offset` (`src/background.rs:581-601`) releases
+  a read reference on `LookupResult::NotExist` (`:595-598`), but `lookup` takes none there.
+  A candidate removed after the `oldest_keys` snapshot answers `NotExist`; if a store of the
+  key then registers the entry (write-through pin, `src/lib.rs:3784`, `:3843`, `:3852`)
+  before the evictor's `release_read`, the release drops that pin. A later `remove` then
+  succeeds and frees the slot while a job reads it. This is the defect class of root cause
+  #12 — the last such site in `src/` (`:3256-3261`, `:3792-3797`, `:3953-3965` are correct).
+- **Required change**: in `get_evictable_offset`, release only for a found entry
+  (`BlockDevice` → release + offset; `MemoryTier` → release + `None`; `NotExist` /
+  `MismatchSize` / `Err` → `None`, no release).
+- **Test first**: reuse the registration-race fixture of
+  `src/repair_test_remove_frees_ssd_extent.rs:991`. Assert `foreign_releases() == 0` and
+  that the write-through pin survives. Must fail on `765f75ba3`.
+- **Files**: `src/background.rs`, plus a test module. Effort: small.
+
+### OPEN A-12 — Align 001 SC-003 + FR-038: close the flip window of `remove` (A-9's option (a)) (minor; MEDIUM confidence; introduced by `a7444f4ab`)
+
+> Approval note: *"TRACK (Cornel 2026-10-24): code change for a later repair with a test first; not in this PR."*
+
+- **Spec**: SC-003 (removal frees all associated resources), FR-038 (`clear_memory_tier`
+  demotes an entry that has an SSD copy), FR-009 as amended by B-12.
+- **Code**: to learn a resident entry's offset, `remove` flips it to BlockDevice
+  (`src/lib.rs:3305`) and releases its references before `dm.remove` (`:3340`). In that
+  window a concurrent `clear_memory_tier` force-removes the entry (`:4132-4146`); `remove`
+  then returns `KeyNotFound` and never frees the extent — it leaks, and the key comes back
+  at the next `format_on_init=false` start.
+- **Required change**: one dispatch-map operation that, under one lock hold, removes the
+  entry only if it is unreferenced and returns its SSD offset (for example
+  `IDispatchMap::remove_returning_offset(key)`), used in place of the flip; the same result
+  in `WriteThroughPins::remove_entry` (`src/background.rs:354-375`), which also closes
+  A-4(a). B-14's "known gap" sentence is then removed.
+- **Test first**: `remove` and `clear_memory_tier` race, with a hook in the mock dispatch
+  map between the flip and `dm.remove`; exactly one of them reports the entry, and the
+  extent manager lists no extent for the key. Must fail on `765f75ba3`. Keep
+  `repair_test_remove_frees_ssd_extent.rs:941,991` and
+  `repair_test_remove_refused_leaves_entry_unchanged.rs:875` passing.
+- **Files**: `components/interfaces/src/idispatch_map.rs`,
+  `components/dispatch-map/src/lib.rs`, `src/lib.rs`, `src/background.rs`, the mocks.
+  Effort: medium.
+
+## Still open (carried over, re-verified at HEAD `765f75ba3` by the 2026-10-23 analysis)
+
+A-1, A-3 (decision), A-4, A-5, A-10, A-11, A-12; A-01, A-02, A-04, A-05, A-08 (tasks) and
+N-01 (decision) from earlier runs.
 
 ## Open items from branch `001-rdma-cache-transfer` (2026-10-22)
 

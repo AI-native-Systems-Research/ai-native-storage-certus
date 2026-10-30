@@ -627,6 +627,12 @@ component_macros::define_interface! {
         /// Returns `true` if the key is present in the cache (any tier),
         /// `false` otherwise.
         ///
+        /// # Errors
+        ///
+        /// Returns [`DispatcherError::Timeout`] if a writer holds the entry past every retry of the
+        /// dispatch-map lookup (up to 6 waits of 2 s). The key's presence is then unknown, which is not
+        /// the same as absent. Returns [`DispatcherError::IoError`] for any other dispatch-map error.
+        ///
         /// # Examples
         ///
         /// ```no_run

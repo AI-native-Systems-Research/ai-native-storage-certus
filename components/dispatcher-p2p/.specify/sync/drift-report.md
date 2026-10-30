@@ -1,11 +1,12 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-25T09:19:59Z
-spec_sync_git_commit: 4e17bedb
-spec_sync_inputs_sha256: 1614f3c28ddf72f28daca7c18a047c634d0b3cb76dafcac3db408415fb854c3c
+spec_sync_synced_at: 2026-10-29T23:34:02Z
+spec_sync_git_commit: 1de9052f9
+spec_sync_inputs_sha256: 9a0723c338cfe793513472f59693d1cb0ad2a35409e51648e06f5f9e8721aaca
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-29 (branch `fix/dispatcher-remove-ssd-extent`, merged with unstable `e35618b2`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (the `IDispatcher::check` doc gains an `# Errors` section, B-17 of the dispatcher sync). No analysis below changes.
 > **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** New since the last stamp: `clear_all`, mirroring the standard dispatcher's (FR-021a; `contracts/idispatcher.md` method list). Not tested in this crate, which has no data-drive harness; stated in FR-021a.
 
 > **Re-stamp 2026-10-23 (directory relocation, branch `chore/tidy-directory-layout`).** The Python benchmarks moved from `apps/python/` to `benchmarks/python/`. Doc-only path update in `specs/001-gpudirect-cold-path/quickstart.md` (4 command lines) and `tasks.md` (T031): `apps/python/certus-api-bench_v2.py` → `benchmarks/python/certus-api-bench_v2.py`. No FR/SC, acceptance scenario or `src/` change; no spec citation into `src/` moves. Status stays `clean`.

@@ -1303,6 +1303,22 @@ impl DispatcherComponent {
         size: u32,
         max_attempts: usize,
     ) -> Result<*mut u8, DispatcherError> {
+        // Duplicate check BEFORE any eviction: a key that already has a
+        // memory-tier slot is refused with AlreadyExists immediately. Checking
+        // only at `mt.insert` below is too late when the tier is full, because
+        // `evict_for_space` runs first and does not exclude the key being
+        // inserted: it can demote the very entry being duplicated to make room
+        // for its own replacement slot — destroying the existing entry — and
+        // when nothing is evictable the refusal instead surfaces as
+        // AllocationFailed after the caller's full backpressure budget, not
+        // the immediate AlreadyExists the contract promises.
+        if mt.contains(key) {
+            // Not a capacity refusal: someone else — a concurrent writer, or a
+            // remote fetch's `publish_success` — already put this key in the
+            // tier. Counted by the callers that are stores (`reserve_memory`);
+            // the load paths treat this as a hit.
+            return Err(DispatcherError::AlreadyExists(key));
+        }
         let mut attempts = 0usize;
         loop {
             self.evict_for_space(dm, mt, size, key, max_attempts.saturating_sub(attempts))?;
@@ -1327,11 +1343,15 @@ impl DispatcherComponent {
                     }
                 }
                 Err(interfaces::MemoryTierError::AlreadyExists(k)) => {
-                    // Not a capacity refusal: someone else — a concurrent writer, a
-                    // remote fetch's `publish_success`, or a concurrent promotion —
-                    // already put this key in the tier. Not counted here: this helper
-                    // is shared with the load paths, where a lost promotion race is a
-                    // hit. `reserve_memory` counts the store refusals.
+                    // Not a capacity refusal, and no longer the common path:
+                    // the pre-check above refuses an already-resident key
+                    // before any eviction. This arm is the race — between that
+                    // check and this insert a concurrent writer, or a remote
+                    // fetch's `publish_success`, put the same key in the tier.
+                    // Not counted here: this helper is shared with the load
+                    // paths, where a lost promotion race is a hit
+                    // (DIS-STORE-ALREADY-RESIDENT-COUNTS-STORES-ONLY);
+                    // `reserve_memory` counts the store refusals.
                     return Err(DispatcherError::AlreadyExists(k));
                 }
                 Err(e) => {
@@ -1390,6 +1410,10 @@ impl DispatcherComponent {
         // regions: region L reads from `slot + sum(sizes[0..L])`. A single-region
         // block (legacy / populate) is just the L==0 case. `size` is the slot's
         // byte length; we never read past it even if the regions sum larger.
+        // A zero-sized region receives zero bytes but does not end the
+        // scatter — the regions after it still get theirs. Only an exhausted
+        // slot (nothing left after the preceding regions' sizes) stops the
+        // loop, since no later region can have bytes left to copy.
         // Use the caller-resolved warm stream for the destination's device; the
         // stream must be on the same GPU as the region address or the async copy
         // fails with "invalid argument" under multi-GPU.
@@ -1398,21 +1422,24 @@ impl DispatcherComponent {
             let s = GpuStream(raw as *mut std::ffi::c_void);
             let mut off: usize = 0;
             for region in regions {
-                let copy_size = (region.size as usize).min((size as usize).saturating_sub(off));
-                if copy_size == 0 {
+                let rest = (size as usize).saturating_sub(off);
+                if rest == 0 {
                     break;
                 }
-                gpu.memcpy_h2d_async(
-                    (pointer as usize + off) as *const std::ffi::c_void,
-                    region.address as *mut std::ffi::c_void,
-                    copy_size,
-                    s,
-                )
-                .map_err(|e| {
-                    DispatcherError::IoError(format!(
-                        "GPU DMA copy (memory-tier→device) failed: {e}"
-                    ))
-                })?;
+                let copy_size = (region.size as usize).min(rest);
+                if copy_size > 0 {
+                    gpu.memcpy_h2d_async(
+                        (pointer as usize + off) as *const std::ffi::c_void,
+                        region.address as *mut std::ffi::c_void,
+                        copy_size,
+                        s,
+                    )
+                    .map_err(|e| {
+                        DispatcherError::IoError(format!(
+                            "GPU DMA copy (memory-tier→device) failed: {e}"
+                        ))
+                    })?;
+                }
                 off += region.size as usize;
             }
             if synchronize {
@@ -1424,29 +1451,34 @@ impl DispatcherComponent {
         } else {
             let mut off: usize = 0;
             for region in regions {
-                let copy_size = (region.size as usize).min((size as usize).saturating_sub(off));
-                if copy_size == 0 {
+                let rest = (size as usize).saturating_sub(off);
+                if rest == 0 {
                     break;
                 }
-                let aligned = copy_size.next_multiple_of(4096).max(4096);
-                let buf = unsafe {
-                    DmaBuffer::from_raw(
-                        (pointer as usize + off) as *mut std::ffi::c_void,
-                        aligned,
-                        noop_free,
-                        -1,
-                    )
-                }
-                .map_err(|e| DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}")))?;
-                let r = gpu
-                    .dma_copy_to_device(&buf, region.address as *mut std::ffi::c_void, copy_size)
+                let copy_size = (region.size as usize).min(rest);
+                if copy_size > 0 {
+                    let aligned = copy_size.next_multiple_of(4096).max(4096);
+                    let buf = unsafe {
+                        DmaBuffer::from_raw(
+                            (pointer as usize + off) as *mut std::ffi::c_void,
+                            aligned,
+                            noop_free,
+                            -1,
+                        )
+                    }
                     .map_err(|e| {
-                        DispatcherError::IoError(format!(
-                            "GPU DMA copy (memory-tier→device) failed: {e}"
-                        ))
-                    });
-                std::mem::forget(buf);
-                r?;
+                        DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}"))
+                    })?;
+                    let r = gpu
+                        .dma_copy_to_device(&buf, region.address as *mut std::ffi::c_void, copy_size)
+                        .map_err(|e| {
+                            DispatcherError::IoError(format!(
+                                "GPU DMA copy (memory-tier→device) failed: {e}"
+                            ))
+                        });
+                    std::mem::forget(buf);
+                    r?;
+                }
                 off += region.size as usize;
             }
             Ok(())
@@ -2523,6 +2555,11 @@ impl IDispatcher for DispatcherComponent {
 
         let mut cold_entries: Vec<ColdEntry> = Vec::new();
         let mut deferred_touch_keys: Vec<CacheKey> = Vec::new();
+        // Indices of the warm hits whose H2D copy is queued on the warm stream
+        // and only completed by the deferred sync below. If that sync fails,
+        // these are the entries whose destination buffers may not hold the
+        // data — each must be reported as an error, never as a hit.
+        let mut warm_inflight: Vec<usize> = Vec::new();
         // Read pins for the warm hits below. The H2D copies are submitted async and
         // synchronized once after the cold scatter-gather, so each pin must survive
         // until *after* that deferred sync: releasing at submission would let the
@@ -2602,6 +2639,12 @@ impl IDispatcher for DispatcherComponent {
                         warm_pins.adopt(key);
                         deferred_touch_keys.push(key);
                         tier[i] = Some(ServedBy::Dram);
+                        // The copy is queued, not complete: it is in flight
+                        // until the deferred sync (warm_raw == 0 means the
+                        // synchronous path ran — nothing is in flight).
+                        if warm_raw != 0 && res.is_ok() {
+                            warm_inflight.push(i);
+                        }
                         results[i] = Some(res);
                     }
                     LookupResult::BlockDevice { offset } => {
@@ -2960,7 +3003,16 @@ impl IDispatcher for DispatcherComponent {
         if !deferred_touch_keys.is_empty() && warm_raw != 0 {
             let s = GpuStream(warm_raw as *mut std::ffi::c_void);
             if let Err(e) = gpu.stream_synchronize(s) {
-                self.log_info(&format!("batch stream_synchronize failed: {e}"));
+                // The destination buffers may not hold the data, so none of
+                // the keys whose copies were in flight can be reported as a
+                // hit — their Ok is only the submission's, not the copy's.
+                // Mirrors the remote-delivery sync below (and spec 002: a
+                // result rewritten by the failed-batched-sync path is Error).
+                let msg = format!("batch stream_synchronize failed: {e}");
+                self.log_warn(&msg);
+                for &i in &warm_inflight {
+                    results[i] = Some(Err(DispatcherError::IoError(msg.clone())));
+                }
             }
         }
         // Every warm copy has completed (or nothing was submitted): only now is it
@@ -3325,7 +3377,26 @@ impl IDispatcher for DispatcherComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
 
-        match dm.lookup(key) {
+        // A `dm.lookup` that returns Err means *timeout* waiting for a
+        // transient write_ref (a concurrent store-commit / promote) to clear,
+        // NOT a missing key: the entry exists, in memory-tier or block-device
+        // state, while its writer holds it. Collapsing that Err into
+        // `Ok(false)` would answer "not cached" for a key that has a cache
+        // entry, sending the caller to re-populate a live key. Retry the
+        // lookup a few times so a writer holding write_ref past a single 2 s
+        // wait clears before we give up — the same condition `batch_lookup`
+        // retries (FR-039 step 1).
+        const LOOKUP_RETRIES: u32 = 5;
+        let lookup = {
+            let mut lk = dm.lookup(key);
+            let mut retries = 0u32;
+            while matches!(lk, Err(_)) && retries < LOOKUP_RETRIES {
+                retries += 1;
+                lk = dm.lookup(key);
+            }
+            lk
+        };
+        match lookup {
             Ok(result) => {
                 use interfaces::LookupResult;
                 let exists = !matches!(result, LookupResult::NotExist);
@@ -3334,7 +3405,13 @@ impl IDispatcher for DispatcherComponent {
                 }
                 Ok(exists)
             }
-            Err(_) => Ok(false),
+            // Every retry timed out behind a writer (or the read count
+            // overflowed): the key's presence could not be determined. That
+            // is a wait to report, never an absent key.
+            Err(interfaces::DispatchMapError::Timeout(k)) => Err(DispatcherError::Timeout(
+                format!("timeout waiting on key: {k}"),
+            )),
+            Err(other) => Err(DispatcherError::IoError(other.to_string())),
         }
     }
 
@@ -3347,15 +3424,64 @@ impl IDispatcher for DispatcherComponent {
             .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
 
         // Lookup the entry to determine its location (waits for any active writer).
+        // Only a found entry carries this lookup's read reference: `NotExist`
+        // (and `MismatchSize`, which the map never answers from `lookup`)
+        // acquires none, so none may be released either — a blind release
+        // there would decrement a reference held by another caller, e.g. the
+        // write-through pin a concurrent populate leaves on the entry it
+        // registers in the window between this lookup and the release.
+        // The memory-tier state this call's pre-pass flips away, to restore if
+        // the removal below is refused: a refused remove (`KeyNotFound`)
+        // frees nothing and changes nothing, so the entry must still be
+        // MemoryTier, with its memory-tier slot and its ssd_offset.
+        let mut flipped_memory_tier: Option<(*mut u8, u32)> = None;
         let block_offset = match dm.lookup(key) {
             Ok(LookupResult::BlockDevice { offset }) => {
                 let _ = dm.release_read(key);
                 Some(offset)
             }
-            Ok(_) => {
+            Ok(LookupResult::MemoryTier { pointer, size }) => {
+                // A resident entry may already carry its write-through SSD
+                // copy (`ssd_offset`), which this lookup result does not
+                // expose. Flip the entry to its block-device state — the
+                // transition that records that offset — and look it up once
+                // more to learn which extent to free. Hold this lookup's read
+                // reference across the flip: the memory-tier evictor's
+                // demotion (`try_evict_to_block`) refuses a pinned entry, so
+                // the state cannot change underneath us. `InvalidState` means
+                // no SSD copy exists yet (write-through not landed): nothing
+                // to free — a pending job's extent is freed by the takeover
+                // below or by the job itself.
+                let converted = dm.convert_memory_tier_to_block(key).is_ok();
                 let _ = dm.release_read(key);
-                None
+                if converted {
+                    match dm.lookup(key) {
+                        Ok(LookupResult::BlockDevice { offset }) => {
+                            let _ = dm.release_read(key);
+                            // This call flipped the entry away: remember how
+                            // to put it back if the removal is refused.
+                            flipped_memory_tier = Some((pointer, size));
+                            Some(offset)
+                        }
+                        // The entry vanished (a concurrent remove won the
+                        // race) or was re-promoted in place (its extent stays
+                        // the live entry's): the map removal below settles
+                        // the outcome either way.
+                        Ok(LookupResult::MemoryTier { .. }) => {
+                            let _ = dm.release_read(key);
+                            None
+                        }
+                        // NotExist takes no read reference: nothing to release.
+                        Ok(_) => None,
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                }
             }
+            // NotExist / MismatchSize: this lookup took no read reference, so
+            // there is none of this caller's to release.
+            Ok(_) => None,
             Err(_) => return Err(DispatcherError::KeyNotFound(key)),
         };
 
@@ -3365,10 +3491,25 @@ impl IDispatcher for DispatcherComponent {
             Ok(()) => false,
             // FR-018: the pin of a pending write-through does not hold remove up;
             // remove takes it over instead of waiting for the job.
-            Err(interfaces::DispatchMapError::ActiveReferences(_)) => self
-                .write_through_pins
-                .remove_entry(&*dm, key)
-                .ok_or(DispatcherError::KeyNotFound(key))?,
+            Err(interfaces::DispatchMapError::ActiveReferences(_)) => {
+                match self.write_through_pins.remove_entry(&*dm, key) {
+                    Some(job_frees_slot) => job_frees_slot,
+                    // A reader, a client pin or a concurrent lookup holds the
+                    // entry: the remove is refused. `KeyNotFound` promises that
+                    // nothing was freed and nothing changed, so put the entry back
+                    // the way this call found it — still MemoryTier, with its
+                    // memory-tier slot and its ssd_offset (the in-place promote
+                    // is the convert's inverse and keeps every reference) — and a
+                    // later lookup is served from DRAM again. Once the hold is
+                    // released, a later remove succeeds and frees both.
+                    None => {
+                        if let Some((pointer, size)) = flipped_memory_tier {
+                            let _ = dm.promote_block_to_memory_tier(key, pointer, size);
+                        }
+                        return Err(DispatcherError::KeyNotFound(key));
+                    }
+                }
+            }
             Err(_) => return Err(DispatcherError::KeyNotFound(key)),
         };
 
@@ -8376,3 +8517,27 @@ mod repair_test_store_already_resident;
 #[cfg(test)]
 #[path = "repair_test_eviction_window_tinylfu.rs"]
 mod repair_test_eviction_window_tinylfu;
+
+#[cfg(test)]
+#[path = "repair_test_remove_frees_ssd_extent.rs"]
+mod repair_test_remove_frees_ssd_extent;
+
+#[cfg(test)]
+#[path = "repair_test_remove_refused_leaves_entry_unchanged.rs"]
+mod repair_test_remove_refused_leaves_entry_unchanged;
+
+#[cfg(test)]
+#[path = "repair_test_warm_copy_stops_at_zero_region.rs"]
+mod repair_test_warm_copy_stops_at_zero_region;
+
+#[cfg(test)]
+#[path = "repair_test_sync_failure_error.rs"]
+mod repair_test_sync_failure_error;
+
+#[cfg(test)]
+#[path = "repair_test_duplicate_check_after_eviction.rs"]
+mod repair_test_duplicate_check_after_eviction;
+
+#[cfg(test)]
+#[path = "repair_test_check_present_map_timeout.rs"]
+mod repair_test_check_present_map_timeout;
