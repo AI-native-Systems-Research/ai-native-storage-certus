@@ -285,6 +285,61 @@ fn decode_handle_batch(r: &mut Reader<'_>) -> Result<HandleBatch, OpError> {
     Ok(HandleBatch { handles, entries })
 }
 
+/// Decode a `BlockBatch` (`LookupBlocks` / `CopyToStoreBlocks`) into the same
+/// `HandleBatch` that `decode_handle_batch` produces for the equivalent
+/// per-region request: region `L` of each entry is
+/// `(handle_idx, base_delta + block_id * stride, size)` of layer `L`, in layer
+/// order. See `wire.rs` for the layout.
+fn decode_block_batch(r: &mut Reader<'_>) -> Result<HandleBatch, OpError> {
+    let n_handles = r.u32()? as usize;
+    let mut handles = Vec::with_capacity(n_handles);
+    for _ in 0..n_handles {
+        let h = r.handle()?;
+        let dev = r.i32()?;
+        handles.push((h, dev));
+    }
+    let n_layers = r.u16()? as usize;
+    if n_layers == 0 {
+        return Err(OpError::Msg("block batch has no layers".into()));
+    }
+    let mut layers = Vec::with_capacity(n_layers);
+    for _ in 0..n_layers {
+        let idx = r.u32()?;
+        let base_delta = r.u64()?;
+        let stride = r.u64()?;
+        let size = r.u32()?;
+        if (idx as usize) >= n_handles {
+            return Err(OpError::Msg(format!(
+                "layer handle_idx {idx} out of range (n_handles={n_handles})"
+            )));
+        }
+        layers.push((idx, base_delta, stride, size));
+    }
+    let n_entries = r.u32()? as usize;
+    let mut keys = Vec::with_capacity(n_entries);
+    for _ in 0..n_entries {
+        keys.push(r.u64()?);
+    }
+    let mut entries = Vec::with_capacity(n_entries);
+    for key in keys {
+        let block_id = r.u64()?;
+        let mut regions = Vec::with_capacity(n_layers);
+        for &(idx, base_delta, stride, size) in &layers {
+            let offset = block_id
+                .checked_mul(stride)
+                .and_then(|o| o.checked_add(base_delta))
+                .ok_or_else(|| {
+                    OpError::Msg(format!(
+                        "block {block_id} offset overflows (base_delta={base_delta}, stride={stride})"
+                    ))
+                })?;
+            regions.push((idx, offset, size));
+        }
+        entries.push((key, regions));
+    }
+    Ok(HandleBatch { handles, entries })
+}
+
 /// Which FR-024 bucket one looked-up entry falls in. Exhaustive by construction, so a
 
 /// Shared, server-global translation state. Cloneable (all fields are `Arc`),
@@ -362,6 +417,8 @@ impl Translator {
             op::FLUSH_TO_SSD => self.op_flush_to_ssd(&mut r),
             op::GET_IO_STATS => self.op_get_io_stats(&mut r),
             op::TOUCH_CHECK => self.op_touch_check(&mut r),
+            op::LOOKUP_BLOCKS => self.op_lookup_blocks(&mut r),
+            op::COPY_TO_STORE_BLOCKS => self.op_copy_to_store_blocks(&mut r),
             other => Err(OpError::Msg(format!("unknown opcode {other}"))),
         }
     }
@@ -663,7 +720,14 @@ impl Translator {
     }
 
     fn op_copy_to_store(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
-        let batch = decode_handle_batch(r)?;
+        self.copy_to_store_batch(&decode_handle_batch(r)?)
+    }
+
+    fn op_copy_to_store_blocks(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
+        self.copy_to_store_batch(&decode_block_batch(r)?)
+    }
+
+    fn copy_to_store_batch(&self, batch: &HandleBatch) -> Result<Vec<u8>, OpError> {
         let keys: Vec<u64> = batch.entries.iter().map(|(k, _)| *k).collect();
         check_duplicate_keys(&keys)?;
 
@@ -740,7 +804,14 @@ impl Translator {
     }
 
     fn op_lookup(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
-        let batch = decode_handle_batch(r)?;
+        self.lookup_batch(&decode_handle_batch(r)?)
+    }
+
+    fn op_lookup_blocks(&self, r: &mut Reader<'_>) -> Result<Vec<u8>, OpError> {
+        self.lookup_batch(&decode_block_batch(r)?)
+    }
+
+    fn lookup_batch(&self, batch: &HandleBatch) -> Result<Vec<u8>, OpError> {
         let keys: Vec<u64> = batch.entries.iter().map(|(k, _)| *k).collect();
         check_duplicate_keys(&keys)?;
 
@@ -955,6 +1026,21 @@ mod tests {
         block_until_deadline: Mutex<bool>,
         touch_fail: Mutex<HashSet<u64>>,
         promoted: Mutex<Vec<u64>>,
+        /// `(key, [(address, size)])` of every entry that reached
+        /// `batch_lookup` / `copy_gpu_to_memory_async`, in call order.
+        regions_seen: Mutex<Vec<(u64, Vec<(usize, u32)>)>>,
+    }
+
+    impl MockDispatcher {
+        fn record(&self, key: CacheKey, regions: &[IpcHandle]) {
+            self.regions_seen.lock().unwrap().push((
+                key,
+                regions
+                    .iter()
+                    .map(|h| (h.address as usize, h.size))
+                    .collect(),
+            ));
+        }
     }
 
     impl IDispatcher for MockDispatcher {
@@ -980,13 +1066,16 @@ mod tests {
         ) -> Vec<interfaces::LookupOutcome> {
             entries
                 .iter()
-                .map(|_| interfaces::LookupOutcome {
-                    // This mock simulates a cache that always serves locally from DRAM,
-                    // so `Dram` is what it models rather than a convenient constant. A
-                    // mock reporting one tier regardless of what it simulates would make
-                    // every attribution assertion vacuous (FR-028).
-                    served_by: interfaces::ServedBy::Dram,
-                    result: Ok(()),
+                .map(|(key, regions)| {
+                    self.record(*key, regions);
+                    interfaces::LookupOutcome {
+                        // This mock simulates a cache that always serves locally from DRAM,
+                        // so `Dram` is what it models rather than a convenient constant. A
+                        // mock reporting one tier regardless of what it simulates would make
+                        // every attribution assertion vacuous (FR-028).
+                        served_by: interfaces::ServedBy::Dram,
+                        result: Ok(()),
+                    }
                 })
                 .collect()
         }
@@ -1034,10 +1123,11 @@ mod tests {
         }
         fn copy_gpu_to_memory_async(
             &self,
-            _key: CacheKey,
-            _regions: &[IpcHandle],
+            key: CacheKey,
+            regions: &[IpcHandle],
             _stream: GpuStream,
         ) -> Result<(), DispatcherError> {
+            self.record(key, regions);
             Ok(())
         }
         fn copy_gpu_to_memory_completed(
@@ -1443,5 +1533,211 @@ mod tests {
             elapsed < Duration::from_millis(500),
             "batch must be bounded by one budget, not per-key budgets (elapsed {elapsed:?})"
         );
+    }
+
+    // ---- BlockBatch (LookupBlocks / CopyToStoreBlocks) ----
+
+    /// One layer of a block table: `(handle_idx, base_delta, stride, size)`.
+    type Layer = (u32, u64, u64, u32);
+
+    fn handle_bytes(tag: u8) -> [u8; 64] {
+        [tag; 64]
+    }
+
+    fn put_handles(w: &mut Writer, handles: &[TableHandle]) {
+        w.u32(handles.len() as u32);
+        for (h, dev) in handles {
+            w.buf.extend_from_slice(h);
+            w.u32(*dev as u32);
+        }
+    }
+
+    fn enc_block_batch(
+        handles: &[TableHandle],
+        layers: &[Layer],
+        keys: &[u64],
+        block_ids: &[u64],
+    ) -> Vec<u8> {
+        let mut w = Writer::default();
+        put_handles(&mut w, handles);
+        w.buf
+            .extend_from_slice(&(layers.len() as u16).to_le_bytes());
+        for &(idx, base_delta, stride, size) in layers {
+            w.u32(idx);
+            w.u64(base_delta);
+            w.u64(stride);
+            w.u32(size);
+        }
+        w.u32(keys.len() as u32);
+        for &k in keys {
+            w.u64(k);
+        }
+        for &b in block_ids {
+            w.u64(b);
+        }
+        w.into_bytes()
+    }
+
+    /// The per-region `HandleBatch` a client would send for the same blocks,
+    /// regions built independently of `decode_block_batch`.
+    fn enc_equivalent_handle_batch(
+        handles: &[TableHandle],
+        layers: &[Layer],
+        keys: &[u64],
+        block_ids: &[u64],
+    ) -> Vec<u8> {
+        let mut w = Writer::default();
+        put_handles(&mut w, handles);
+        w.u32(keys.len() as u32);
+        for (&k, &b) in keys.iter().zip(block_ids) {
+            w.u64(k);
+            w.buf
+                .extend_from_slice(&(layers.len() as u16).to_le_bytes());
+            for &(idx, base_delta, stride, size) in layers {
+                w.u32(idx);
+                w.u64(base_delta + b * stride);
+                w.u32(size);
+            }
+        }
+        w.into_bytes()
+    }
+
+    fn block_cases() -> Vec<(Vec<TableHandle>, Vec<Layer>, Vec<u64>)> {
+        let h = |t| (handle_bytes(t), 0i32);
+        vec![
+            // Non-contiguous ids, one layer per handle.
+            (
+                vec![h(1), h(2), h(3)],
+                vec![
+                    (0, 512, 65536, 65536),
+                    (1, 0, 65536, 65536),
+                    (2, 128, 65536, 65536),
+                ],
+                vec![9, 3, 40, 41, 1000],
+            ),
+            // Descending ids, single region (p1).
+            (
+                vec![h(7)],
+                vec![(0, 0, 2 << 20, 2 << 20)],
+                vec![5, 4, 3, 2, 1, 0],
+            ),
+            // Large ids near u32::MAX.
+            (
+                vec![h(4), h(5)],
+                vec![(0, 64, 32768, 32768), (1, 0, 32768, 32768)],
+                vec![u32::MAX as u64, u32::MAX as u64 - 1, 1 << 31],
+            ),
+            // Several layers sharing one handle (one allocation for all layers).
+            (
+                vec![h(6)],
+                vec![
+                    (0, 0, 4096, 1024),
+                    (0, 1024, 4096, 1024),
+                    (0, 2048, 4096, 2048),
+                ],
+                vec![17, 2, 33],
+            ),
+        ]
+    }
+
+    #[test]
+    fn decode_block_batch_matches_equivalent_handle_batch() {
+        for (handles, layers, block_ids) in block_cases() {
+            let keys: Vec<u64> = (0..block_ids.len() as u64).map(|i| 100 + i).collect();
+            let blocks = enc_block_batch(&handles, &layers, &keys, &block_ids);
+            let regions = enc_equivalent_handle_batch(&handles, &layers, &keys, &block_ids);
+            let a = decode_block_batch(&mut Reader::new(&blocks)).unwrap();
+            let b = decode_handle_batch(&mut Reader::new(&regions)).unwrap();
+            assert_eq!(a.handles, b.handles);
+            assert_eq!(a.entries, b.entries, "layers {layers:?} ids {block_ids:?}");
+        }
+    }
+
+    #[test]
+    fn decode_block_batch_rejects_overflow_bad_index_and_no_layers() {
+        let handles = vec![(handle_bytes(1), 0i32)];
+        // block_id * stride overflows u64.
+        let blob = enc_block_batch(&handles, &[(0, 0, u64::MAX / 2, 4096)], &[1], &[3]);
+        assert!(decode_block_batch(&mut Reader::new(&blob)).is_err());
+        // + base_delta overflows u64.
+        let blob = enc_block_batch(&handles, &[(0, u64::MAX, 1, 4096)], &[1], &[1]);
+        assert!(decode_block_batch(&mut Reader::new(&blob)).is_err());
+        // handle_idx out of range.
+        let blob = enc_block_batch(&handles, &[(1, 0, 4096, 4096)], &[1], &[0]);
+        assert!(decode_block_batch(&mut Reader::new(&blob)).is_err());
+        // No layers.
+        let blob = enc_block_batch(&handles, &[], &[1], &[0]);
+        assert!(decode_block_batch(&mut Reader::new(&blob)).is_err());
+        // Truncated block-id array.
+        let mut blob = enc_block_batch(&handles, &[(0, 0, 4096, 4096)], &[1, 2], &[0, 1]);
+        blob.truncate(blob.len() - 4);
+        assert!(decode_block_batch(&mut Reader::new(&blob)).is_err());
+    }
+
+    /// Insert fake already-open mappings so `open_handle_table` resolves the
+    /// test handles without CUDA. Removed again by `unseed_ipc_cache` so the
+    /// translator's drop never closes them.
+    fn seed_ipc_cache(tr: &Translator, handles: &[TableHandle]) {
+        let mut map = tr.ipc_cache.lock().unwrap();
+        for (i, (h, dev)) in handles.iter().enumerate() {
+            map.insert(
+                *h,
+                IpcCacheEntry {
+                    dev_ptr: ((i + 1) << 40) as *mut std::ffi::c_void,
+                    gpu_device_id: *dev,
+                    refcount: 0,
+                    grace_until: None,
+                },
+            );
+        }
+    }
+
+    fn unseed_ipc_cache(tr: &Translator) {
+        tr.ipc_cache.lock().unwrap().clear();
+    }
+
+    #[test]
+    fn block_ops_reply_and_dispatch_like_region_ops() {
+        for (block_op, region_op) in [
+            (op::LOOKUP_BLOCKS, op::LOOKUP),
+            (op::COPY_TO_STORE_BLOCKS, op::COPY_TO_STORE),
+        ] {
+            for (handles, layers, block_ids) in block_cases() {
+                let keys: Vec<u64> = (0..block_ids.len() as u64).map(|i| 7 + i).collect();
+                let blocks = enc_block_batch(&handles, &layers, &keys, &block_ids);
+                let regions = enc_equivalent_handle_batch(&handles, &layers, &keys, &block_ids);
+
+                let disp_a = Arc::new(MockDispatcher::default());
+                let tr_a = translator(disp_a.clone());
+                seed_ipc_cache(&tr_a, &handles);
+                let reply_a = tr_a.dispatch(block_op, &blocks).unwrap();
+                unseed_ipc_cache(&tr_a);
+
+                let disp_b = Arc::new(MockDispatcher::default());
+                let tr_b = translator(disp_b.clone());
+                seed_ipc_cache(&tr_b, &handles);
+                let reply_b = tr_b.dispatch(region_op, &regions).unwrap();
+                unseed_ipc_cache(&tr_b);
+
+                assert_eq!(reply_a, reply_b);
+                assert_eq!(reply_a.len(), keys.len());
+                assert!(reply_a.iter().all(|&b| b != 0));
+                let seen_a = disp_a.regions_seen.lock().unwrap().clone();
+                let seen_b = disp_b.regions_seen.lock().unwrap().clone();
+                assert_eq!(seen_a.len(), keys.len());
+                assert_eq!(seen_a, seen_b);
+            }
+        }
+    }
+
+    #[test]
+    fn block_ops_reject_duplicate_keys() {
+        let handles = vec![(handle_bytes(1), 0i32)];
+        let blob = enc_block_batch(&handles, &[(0, 0, 4096, 4096)], &[5, 5], &[0, 1]);
+        let disp = Arc::new(MockDispatcher::default());
+        let tr = translator(disp.clone());
+        assert!(tr.dispatch(op::LOOKUP_BLOCKS, &blob).is_err());
+        assert!(tr.dispatch(op::COPY_TO_STORE_BLOCKS, &blob).is_err());
+        assert!(disp.regions_seen.lock().unwrap().is_empty());
     }
 }

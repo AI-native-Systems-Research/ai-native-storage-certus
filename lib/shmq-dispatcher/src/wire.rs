@@ -52,6 +52,10 @@
 //!                  resp { [state:u8]*n }   // same 0=miss/1=resident/2=pending as Check
 //!                  (Touch + Check fused in one server pass: each key is touched,
 //!                   then classified; a failed touch reads as miss.)
+//! LookupBlocks      (17): req  = BlockBatch (see below)
+//!                         resp { [tier:u8]*n }   // identical to Lookup
+//! CopyToStoreBlocks (18): req  = BlockBatch (see below)
+//!                         resp { [ok:u8]*n }     // identical to CopyToStore
 //! ```
 //!
 //! ## HandleBatch (CopyToStore / Lookup / Populate)
@@ -71,6 +75,28 @@
 //!                 nreg: u16,
 //!                 regions: [ handle_idx: u32, offset: u64, size: u32 ] * nreg
 //!               ] * n_entries,
+//! }
+//! ```
+//!
+//! ## `BlockBatch` (`LookupBlocks` / `CopyToStoreBlocks`)
+//!
+//! Every region offset of a block is `base_delta + block_id * stride` of its
+//! layer, so instead of one region list per entry the client sends a per-layer
+//! table once and one block id per key. The server expands it into exactly the
+//! `HandleBatch` entries the client would have sent: region `L` of entry `i` is
+//! `(layers[L].handle_idx, layers[L].base_delta + block_ids[i] * layers[L].stride,
+//! layers[L].size)`, in layer order, so the slot layout `sum(sizes[0..L])` is
+//! the same as for a `HandleBatch`.
+//!
+//! ```text
+//! BlockBatch {
+//!   n_handles:  u32,
+//!   handles:    [ cuda_ipc_handle: u8[64], gpu_device_id: i32 ]  * n_handles,
+//!   n_layers:   u16,
+//!   layers:     [ handle_idx: u32, base_delta: u64, stride: u64, size: u32 ] * n_layers,
+//!   n_entries:  u32,
+//!   keys:       [ key: u64 ]      * n_entries,
+//!   block_ids:  [ block_id: u64 ] * n_entries,
 //! }
 //! ```
 //!
@@ -98,6 +124,8 @@ pub mod op {
     pub const FLUSH_TO_SSD: u32 = 14;
     pub const GET_IO_STATS: u32 = 15;
     pub const TOUCH_CHECK: u32 = 16;
+    pub const LOOKUP_BLOCKS: u32 = 17;
+    pub const COPY_TO_STORE_BLOCKS: u32 = 18;
 }
 
 /// Per-key states returned by the Check response byte. Widened from a plain
@@ -319,6 +347,8 @@ mod tests {
         assert_eq!(op::FLUSH_TO_SSD, 14);
         assert_eq!(op::GET_IO_STATS, 15);
         assert_eq!(op::TOUCH_CHECK, 16);
+        assert_eq!(op::LOOKUP_BLOCKS, 17);
+        assert_eq!(op::COPY_TO_STORE_BLOCKS, 18);
     }
 
     /// The Check response byte is a tri-state wire contract shared with the

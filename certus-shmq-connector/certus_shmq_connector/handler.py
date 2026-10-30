@@ -3,12 +3,14 @@
 
 Byte-for-byte the same job/threadpool machinery as the gRPC connector's
 ``handler.py`` — only the transport calls change: the two RPC bodies issue
-``ring.copy_to_store(entries)`` / ``ring.lookup(entries)`` instead of
+``ring.copy_to_store_blocks`` / ``ring.lookup_blocks`` instead of
 ``stub.CopyToStore``/``stub.Lookup``, and rollback uses ``ring.abort_store``.
-Each ``entry`` is ``(key, regions)`` where ``regions`` is the per-layer list
-``[(handle_bytes, gpu_device_id, block_offset, stride_bytes)]`` — ``ring.py``
-dedups the distinct handles into a table and chunks oversize batches to fit
-``cap_req`` for us, so the worker just hands it the full per-block region list.
+Each call sends the worker's per-layer table (encoded once at init) plus one
+GPU block id per key; the server computes every region's offset. A server
+without those opcodes gets the legacy per-region form: ``(key, regions)``
+entries where ``regions`` is ``[(handle_bytes, gpu_device_id, block_offset,
+stride_bytes)]`` (``_regions_for_block``), sent with ``ring.copy_to_store`` /
+``ring.lookup``.
 
 One class, ``CertusShmqWorker``, serves every supported vLLM version (see the
 gRPC handler for the ≤0.24 vs 0.26 interface split — unchanged here).
@@ -16,6 +18,7 @@ gRPC handler for the ≤0.24 vs 0.26 interface split — unchanged here).
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import threading
@@ -33,6 +36,7 @@ from .compat import (
 
 from .gpu import KvCacheIpc
 from .mediums import CertusLoadStoreSpec, ns_key
+from .ring import encode_layer_table
 
 # Direction tags. Only used to populate the ≤0.24 ``TransferResult.transfer_type``
 # (dropped on 0.26); kept as the natural label for a job's direction either way.
@@ -112,6 +116,63 @@ def _log_copy_failure(failed_keys: list[int], batch_len: int) -> None:
         )
 
 
+class _HandleEncodeLog:
+    """Diagnostic log of each load/store body's request build and ring time, one
+    JSON line per call, in ``$OPTIMIZER_ARTIFACTS_DIR/handle_encode.<pid>.jsonl``.
+    Exists only when that variable is set. Lines are buffered and written every
+    64 lines and at interpreter exit; a write error disables the log, it never
+    raises."""
+
+    _FLUSH_LINES = 64
+
+    def __init__(self, directory: str):
+        self._path: str | None = os.path.join(
+            directory, f"handle_encode.{os.getpid()}.jsonl"
+        )
+        self._lines: list[str] = []
+        self._lock = threading.Lock()
+        self._t0_ns: int | None = None
+        atexit.register(self.flush)
+
+    def record(
+        self, op: str, blocks: int, regions: int, path: str, encode_ns: int, rpc_ns: int
+    ) -> None:
+        if self._path is None:
+            return
+        now_ns = time.monotonic_ns()
+        with self._lock:
+            if self._t0_ns is None:
+                self._t0_ns = now_ns
+            self._lines.append(
+                f'{{"op":"{op}","blocks":{blocks},"regions":{regions},'
+                f'"path":"{path}","encode_us":{encode_ns / 1000:.1f},'
+                f'"rpc_us":{rpc_ns / 1000:.1f},"t_us":{(now_ns - self._t0_ns) // 1000}}}\n'
+            )
+            full = len(self._lines) >= self._FLUSH_LINES
+        if full:
+            self.flush()
+
+    def flush(self) -> None:
+        with self._lock:
+            if self._path is None or not self._lines:
+                return
+            lines, self._lines = self._lines, []
+            try:
+                with open(self._path, "a") as f:
+                    f.write("".join(lines))
+            except OSError:
+                self._path = None
+
+
+_ARTIFACTS_DIR = os.environ.get("OPTIMIZER_ARTIFACTS_DIR")
+_ENCODE_LOG = _HandleEncodeLog(_ARTIFACTS_DIR) if _ARTIFACTS_DIR else None
+
+
+def _is_unknown_opcode(e: Exception) -> bool:
+    """True for a server's rejection of a *_BLOCKS opcode it does not know."""
+    return "unknown opcode" in str(e)
+
+
 @dataclass
 class _PendingJob:
     job_id: int
@@ -177,6 +238,62 @@ def _build_worker_class():
             # in the shared certus-server tier. Identity at world_size==1.
             self._rank = int(rank)
             self._world_size = int(world_size)
+            # Per-layer table for the *_BLOCKS ops, encoded once: the server
+            # computes each region as base_delta + block_id * stride (size =
+            # stride, layer order — exactly what _regions_for_block emits). None
+            # means this worker always uses the legacy per-region ops.
+            try:
+                self._layer_table = encode_layer_table(
+                    [
+                        (r.handle_bytes, r.gpu_device_id, int(r.base_delta),
+                         int(r.stride_bytes), int(r.stride_bytes))
+                        for r in kv_regions
+                    ]
+                )
+            except Exception:  # noqa: BLE001 - odd region objects use the legacy path
+                self._layer_table = None
+            self._encode_log = _ENCODE_LOG
+
+        # Cleared the first time a server rejects a *_BLOCKS opcode as unknown,
+        # so every later call (on any worker) goes straight to the legacy ops.
+        _blocks_supported = True
+
+        def _ring_blocks(self, op: str, gpu_block_ids, ns_keys):
+            """Send one load/store over the *_BLOCKS op, or the legacy per-region
+            op when the server or this worker's regions don't support it. Returns
+            the per-key results in key order."""
+            log = self._encode_log
+            if self._layer_table is not None and CertusShmqWorker._blocks_supported:
+                fn = self._ring.lookup_blocks if op == "load" else self._ring.copy_to_store_blocks
+                timings = [] if log is not None else None
+                t0 = time.perf_counter_ns() if log is not None else 0
+                try:
+                    results = fn(self._layer_table, ns_keys, gpu_block_ids, timings=timings)
+                except Exception as e:  # noqa: BLE001 - only unknown-opcode falls back
+                    if not _is_unknown_opcode(e):
+                        raise
+                    CertusShmqWorker._blocks_supported = False
+                else:
+                    if log is not None:
+                        total = time.perf_counter_ns() - t0
+                        enc = timings[0] if timings else 0
+                        log.record(op, len(ns_keys), len(ns_keys) * len(self._kv_regions),
+                                   "blocks", enc, total - enc)
+                    return results
+            t0 = time.perf_counter_ns() if log is not None else 0
+            entries = [
+                (ns_k, _regions_for_block(self._kv_regions, block_id))
+                for block_id, ns_k in zip(gpu_block_ids, ns_keys)
+            ]
+            t1 = time.perf_counter_ns() if log is not None else 0
+            if op == "load":
+                results = self._ring.lookup(entries)
+            else:
+                results = self._ring.copy_to_store(entries)
+            if log is not None:
+                log.record(op, len(ns_keys), len(ns_keys) * len(self._kv_regions),
+                           "legacy", t1 - t0, time.perf_counter_ns() - t1)
+            return results
 
         # ── shared async plumbing ──
 
@@ -296,12 +413,8 @@ def _build_worker_class():
             # matching per-rank namespaced keys (see manager.prepare_store), so the
             # store lands under the same key the pre-load Check/Pin will look up.
             ns_keys = [ns_key(k, self._rank, self._world_size) for k in keys]
-            entries = [
-                (ns_k, _regions_for_block(self._kv_regions, block_id))
-                for block_id, ns_k in zip(gpu_block_ids, ns_keys)
-            ]
             try:
-                results = self._ring.copy_to_store(entries)
+                results = self._ring_blocks("store", gpu_block_ids, ns_keys)
             except Exception as e:  # noqa: BLE001 - store failure must not crash vLLM
                 # A whole-batch transport failure: roll back all reservations and
                 # report success (see the invariant note below). Blocks stay
@@ -351,11 +464,7 @@ def _build_worker_class():
                 )
             # Same rank fold as the store path — load this worker's own shard.
             ns_keys = [ns_key(k, self._rank, self._world_size) for k in keys]
-            entries = [
-                (ns_k, _regions_for_block(self._kv_regions, block_id))
-                for block_id, ns_k in zip(gpu_block_ids, ns_keys)
-            ]
-            results = self._ring.lookup(entries)
+            results = self._ring_blocks("load", gpu_block_ids, ns_keys)
             # Diagnostic: a load must not fail (vLLM asserts), and it shouldn't be
             # able to — prepare_load pinned these keys. If the server reports any
             # per-key miss, dump exactly which key so we can see WHY a Lookup missed

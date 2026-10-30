@@ -109,6 +109,42 @@ class FakeRing:
         self.calls.append(("lookup", entries))
         return [True] * len(entries)
 
+    @staticmethod
+    def _expand_blocks(table, keys, block_ids):
+        """Expand a layer table + block ids into legacy ``(key, regions)``
+        entries, as the server's decode_block_batch does, so offset assertions
+        written against the per-region form still hold."""
+        import struct
+
+        off = 0
+        (n_handles,) = struct.unpack_from("<I", table, off)
+        off += 4
+        handles = []
+        for _ in range(n_handles):
+            hb = table[off:off + 64]
+            (dev,) = struct.unpack_from("<i", table, off + 64)
+            handles.append((hb, dev))
+            off += 68
+        (n_layers,) = struct.unpack_from("<H", table, off)
+        off += 2
+        layers = [struct.unpack_from("<IQQI", table, off + 24 * i) for i in range(n_layers)]
+        assert off + 24 * n_layers == len(table)
+        return [
+            (k, [(*handles[idx], base + int(b) * stride, size)
+                 for idx, base, stride, size in layers])
+            for k, b in zip(keys, block_ids)
+        ]
+
+    def copy_to_store_blocks(self, table, keys, block_ids, timings=None):
+        entries = self._expand_blocks(table, list(keys), list(block_ids))
+        self.calls.append(("copy_to_store_blocks", entries))
+        return [e[0] not in self.copy_fail for e in entries]
+
+    def lookup_blocks(self, table, keys, block_ids, timings=None):
+        entries = self._expand_blocks(table, list(keys), list(block_ids))
+        self.calls.append(("lookup_blocks", entries))
+        return [True] * len(entries)
+
     def take_events(self, max_events=0):
         self.calls.append(("take_events", max_events))
         # The real server drains its queue on each call; mirror that so a second
@@ -1391,7 +1427,8 @@ def test_store_handler_sends_offsets_per_block():
     results = h.get_finished()
     assert len(results) == 1 and results[0].success
 
-    (entries,) = _calls_of(ring, "copy_to_store")
+    assert _calls_of(ring, "copy_to_store") == []  # block-id op, not per-region
+    (entries,) = _calls_of(ring, "copy_to_store_blocks")
     assert [key for key, _ in entries] == [30, 70]
     # Single-region (N==1): each entry carries one region tuple
     # (handle_bytes, gpu_device_id, offset, size).
@@ -1424,3 +1461,54 @@ def test_store_handler_never_reports_failure_and_aborts_failed_keys():
     (abort,) = _calls_of(ring, "abort_store")
     assert abort == [70]  # only the failed key rolled back
     executor.shutdown()
+
+
+def test_handler_falls_back_to_region_ops_on_unknown_opcode():
+    """A server without the *_BLOCKS opcodes answers "unknown opcode"; the worker
+    then sends the same blocks over the legacy per-region ops, with the same
+    offsets, and stays on them."""
+    from certus_shmq_connector.handler import worker_class
+    from certus_shmq_connector.ring import RingError
+    from vllm.v1.kv_offload.mediums import GPULoadStoreSpec
+
+    class OldServerRing(FakeRing):
+        def copy_to_store_blocks(self, table, keys, block_ids, timings=None):
+            self.calls.append(("copy_to_store_blocks", None))
+            raise RingError("server error (op=18): unknown opcode 18")
+
+        def lookup_blocks(self, table, keys, block_ids, timings=None):
+            self.calls.append(("lookup_blocks", None))
+            raise RingError("server error (op=17): unknown opcode 17")
+
+    cls = worker_class()
+    ring = OldServerRing()
+    regions = [
+        KvCacheIpc(handle_bytes=b"a" * 64, gpu_device_id=0, stride_bytes=1024, base_delta=0),
+        KvCacheIpc(handle_bytes=b"b" * 64, gpu_device_id=0, stride_bytes=1024, base_delta=64),
+    ]
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        h = cls(ring, regions, block_size_bytes=2048, executor=executor)
+        src = GPULoadStoreSpec(block_ids=[3, 7], group_sizes=[2], block_indices=[0])
+        dst = CertusLoadStoreSpec([BlockLocation(key=30), BlockLocation(key=70)])
+        h.transfer_async(job_id=1, spec=(src, dst))
+        h.wait({1})
+        assert h.get_finished()[0].success
+
+        (entries,) = _calls_of(ring, "copy_to_store")
+        assert [[r[2] for r in regs] for _, regs in entries] == [
+            [3 * 1024, 64 + 3 * 1024], [7 * 1024, 64 + 7 * 1024],
+        ]
+        assert len(_calls_of(ring, "copy_to_store_blocks")) == 1
+
+        # The rejection is latched: a load goes straight to the legacy op.
+        load_src = CertusLoadStoreSpec([BlockLocation(key=30)])
+        load_dst = GPULoadStoreSpec(block_ids=[3], group_sizes=[1], block_indices=[0])
+        h.transfer_async(job_id=2, spec=(load_src, load_dst))
+        h.wait({2})
+        assert h.get_finished()[0].success
+        assert _calls_of(ring, "lookup_blocks") == []
+        assert len(_calls_of(ring, "lookup")) == 1
+    finally:
+        cls._blocks_supported = True
+        executor.shutdown()

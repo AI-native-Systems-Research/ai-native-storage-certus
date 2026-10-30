@@ -79,6 +79,8 @@ OP_CLEAR_MEMORY_TIER = 13
 OP_FLUSH_TO_SSD = 14
 OP_GET_IO_STATS = 15
 OP_TOUCH_CHECK = 16
+OP_LOOKUP_BLOCKS = 17
+OP_COPY_TO_STORE_BLOCKS = 18
 
 STATUS_OK = 0
 
@@ -98,6 +100,9 @@ HANDLE_ENTRY_SIZE = 64 + 4  # cuda_ipc_handle[64] + gpu_device_id:i32
 REGION_SIZE = 4 + 8 + 4  # handle_idx:u32 + offset:u64 + size:u32
 _HANDLE_BATCH_FIXED = 4 + 4  # n_handles:u32 + n_entries:u32
 _ENTRY_FIXED = 8 + 2  # key:u64 + nreg:u16
+# BlockBatch sizing (mirror wire.rs BlockBatch): per-layer row and per-key cost.
+_LAYER_ROW = struct.Struct("<IQQI")  # handle_idx:u32 + base_delta:u64 + stride:u64 + size:u32
+_BLOCK_ENTRY_SIZE = 8 + 8  # key:u64 + block_id:u64
 
 # ── futex (shared variant; SYS_futex is 202 on x86-64) ───────────────────────
 
@@ -214,6 +219,55 @@ def encode_handle_batch(entries) -> bytes:
         head += hb
         head += struct.pack("<i", dev)
     return bytes(head) + bytes(body)
+
+
+def encode_layer_table(layers) -> bytes:
+    """The fixed head of a BlockBatch (LookupBlocks / CopyToStoreBlocks request),
+    from ``n_handles`` through the layers array.
+
+    ``layers`` is ``[(handle_bytes[64], gpu_device_id, base_delta, stride, size)]``
+    in layer order. Distinct ``(handle_bytes, gpu_device_id)`` pairs are emitted
+    once, as in :func:`encode_handle_batch`; the server computes region ``L`` of
+    a block as ``base_delta + block_id * stride`` of layer ``L``. Built once per
+    worker and prepended to every :func:`encode_block_entries` body.
+    """
+    layers = list(layers)
+    if not layers or len(layers) > 0xFFFF:
+        raise RingError(f"layer table must have 1..65535 layers, got {len(layers)}")
+    table: dict[tuple[bytes, int], int] = {}
+    table_rows: list[tuple[bytes, int]] = []
+    rows = bytearray(struct.pack("<H", len(layers)))
+    for hb, dev, base_delta, stride, size in layers:
+        tkey = (hb, dev)
+        idx = table.get(tkey)
+        if idx is None:
+            idx = len(table_rows)
+            table[tkey] = idx
+            table_rows.append(tkey)
+        rows += _LAYER_ROW.pack(idx, base_delta, stride, size)
+
+    head = bytearray(struct.pack("<I", len(table_rows)))
+    for hb, dev in table_rows:
+        if len(hb) != 64:
+            raise RingError(f"CUDA IPC handle must be 64 bytes, got {len(hb)}")
+        head += hb
+        head += struct.pack("<i", dev)
+    return bytes(head) + bytes(rows)
+
+
+def encode_block_entries(keys: Sequence[int], block_ids: Sequence[int]) -> bytes:
+    """`{ n:u32, [key:u64]*n, [block_id:u64]*n }` — the per-call tail of a
+    BlockBatch. One bulk pack; keys are masked to u64 on overflow as in
+    :func:`encode_keys`. Block ids must be non-negative ints (struct raises
+    otherwise)."""
+    n = len(keys)
+    if len(block_ids) != n:
+        raise RingError(f"{n} keys != {len(block_ids)} block ids")
+    fmt = f"<I{n}Q{n}Q"
+    try:
+        return struct.pack(fmt, n, *keys, *block_ids)
+    except struct.error:
+        return struct.pack(fmt, n, *[k & _U64_MASK for k in keys], *block_ids)
 
 
 def chunk_handle_batches(entries, cap_req: int, log=None):
@@ -777,6 +831,50 @@ class Ring:
         for chunk in chunks:
             payload = self._dispatch(opcode, encode_handle_batch(chunk))
             results.extend(decode_ok_flags(payload, len(chunk)))
+        return results
+
+    def copy_to_store_blocks(
+        self, table: bytes, keys: Sequence[int], block_ids: Sequence[int], timings=None
+    ) -> list[bool]:
+        """CopyToStoreBlocks: ``table`` from :func:`encode_layer_table`, one block
+        id per key. Chunked by key count to fit cap_req; results in key order.
+        If ``timings`` is a list, the ns spent building request bytes is appended."""
+        return self._block_batch_op(OP_COPY_TO_STORE_BLOCKS, table, keys, block_ids, timings)
+
+    def lookup_blocks(
+        self, table: bytes, keys: Sequence[int], block_ids: Sequence[int], timings=None
+    ) -> list[bool]:
+        """LookupBlocks: ``table`` from :func:`encode_layer_table`, one block id
+        per key. Chunked by key count to fit cap_req; hit flags in key order.
+        If ``timings`` is a list, the ns spent building request bytes is appended."""
+        return self._block_batch_op(OP_LOOKUP_BLOCKS, table, keys, block_ids, timings)
+
+    def _block_batch_op(
+        self, opcode: int, table: bytes, keys, block_ids, timings=None
+    ) -> list[bool]:
+        keys = list(keys)
+        if not keys:
+            return []
+        block_ids = list(block_ids)
+        per_chunk = (self._cap_req - len(table) - 4) // _BLOCK_ENTRY_SIZE
+        if per_chunk < 1:
+            raise RingError(
+                f"layer table of {len(table)} B leaves no room for a block in "
+                f"cap_req {self._cap_req} B"
+            )
+        n = len(keys)
+        results: list[bool] = []
+        encode_ns = 0
+        for i in range(0, n, per_chunk):
+            ck = keys[i:i + per_chunk]
+            if timings is not None:
+                t0 = time.perf_counter_ns()
+            data = table + encode_block_entries(ck, block_ids[i:i + per_chunk])
+            if timings is not None:
+                encode_ns += time.perf_counter_ns() - t0
+            results.extend(decode_ok_flags(self._dispatch(opcode, data), len(ck)))
+        if timings is not None:
+            timings.append(encode_ns)
         return results
 
     def take_events(self, max_events: int = 0) -> tuple[list[tuple[int, int]], int]:
