@@ -413,7 +413,9 @@ LONGDOC_DOC_TOKENS=8000 LONGDOC_QUESTIONS=8 \
 
 `--concurrency` (default: every conversation at once), `--turns`, `--model`
 (default: the first served) and `--temperature` / `--top-p` (default 0.7 / 0.95,
-as the drivers) are the rest. Output is one JSON line per turn plus a summary
+as the drivers) are the rest. `--ignore-eos` makes every turn generate exactly
+`--output-tokens`; use it when comparing runs, or answers end at different
+lengths and the runs carry different KV. Output is one JSON line per turn plus a summary
 (TTFT for turn 0 and for later turns, per-turn prompt length).
 
 > **Note:** the container IPC mode is not a CLI flag — `profile_all.sh` launches

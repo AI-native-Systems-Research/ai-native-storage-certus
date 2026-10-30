@@ -84,6 +84,8 @@ def run_conv(i, turns, a, out, lock, results):
         prompt = human if k == 0 else context + "\n\n" + human
         body = {"model": a.model, "prompt": prompt, "max_tokens": a.output_tokens,
                 "temperature": a.temperature, "top_p": a.top_p}
+        if a.ignore_eos:
+            body["ignore_eos"] = True
         rec = {"conv": i, "turn": k, "sent": round(time.time(), 4)}
         try:
             answer, usage, ttft, total = stream(a.url.rstrip("/") + "/v1/completions",
@@ -140,6 +142,9 @@ def main():
                     help="max_tokens per turn (the drivers' OUTPUT_TOKENS default)")
     ap.add_argument("--temperature", type=float, default=0.7)
     ap.add_argument("--top-p", type=float, default=0.95)
+    ap.add_argument("--ignore-eos", action="store_true",
+                    help="generate exactly --output-tokens every turn (vLLM's ignore_eos), so "
+                         "runs compared against each other carry the same answer lengths")
     ap.add_argument("--timeout", type=float, default=1800,
                     help="per-request timeout, seconds")
     ap.add_argument("--out", required=True, help="JSON lines, one per turn")
