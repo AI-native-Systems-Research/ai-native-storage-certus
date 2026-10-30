@@ -67,6 +67,13 @@
 #                own CPU tier and P2P pull in place of certus -- the comparison
 #                arm. Same image and router values as pd-certus-rdma. Stop
 #                certus on the nodes first (default: 0)
+#   TIERED       1, with PD unset or 0 and WITH_CERTUS unset or 0:
+#                profiles/<PROFILE>/agg-tiered, aggregated serving with vLLM's
+#                native tiered prefix cache (CPU tier + filesystem tier) and
+#                llm-d's tiered-prefix-cache router -- the generic stack certus
+#                is compared against. The fs tier needs /mnt/kv-tier/numa<N>
+#                mounted on every node (deploy/llm-d/tiered-disks.sh), which
+#                means certus stopped there (default: 0)
 #   AGG_NODES    space-separated nodes for aggregated serving (default and
 #                WITH_CERTUS). Belongs in SITE_ENV. Optional if the nodes
 #                already carry this instance's label.
@@ -126,6 +133,7 @@ WITH_CERTUS="${WITH_CERTUS:-0}"
 PD="${PD:-0}"
 RDMA="${RDMA:-0}"
 OFFLOAD="${OFFLOAD:-0}"
+TIERED="${TIERED:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 KEEP_LLMD="${KEEP_LLMD:-0}"
 GUIDE_NAME="${GUIDE_NAME:-quickstart}"
@@ -188,6 +196,13 @@ if [ "${PD}" != "0" ]; then need_overlay pd; else need_overlay agg; fi
 if [ "${WITH_CERTUS}" != "0" ]; then
     need_overlay certus   # pd-certus takes its entrypoint from certus/
     [ "${PD}" = "0" ] || need_overlay pd-certus
+fi
+if [ "${TIERED}" != "0" ]; then
+    if [ "${PD}" != "0" ] || [ "${WITH_CERTUS}" != "0" ] || [ "${RDMA}" != "0" ] || [ "${OFFLOAD}" != "0" ]; then
+        echo "ERROR: TIERED=1 is aggregated serving without certus: no PD, WITH_CERTUS, RDMA or OFFLOAD." >&2
+        exit 1
+    fi
+    need_overlay agg-tiered
 fi
 if [ "${OFFLOAD}" != "0" ]; then
     if [ "${PD}" = "0" ] || [ "${RDMA}" = "0" ] || [ "${WITH_CERTUS}" != "0" ]; then
@@ -459,6 +474,22 @@ elif [ "${OFFLOAD}" != "0" ]; then
         echo "[install] image registry -> ${CERTUS_REGISTRY}/${CERTUS_REPO}"
     fi
     echo "[install] vLLM CPU tier + P2P pull ENABLED (no certus)"
+elif [ "${TIERED}" != "0" ]; then
+    # Consumes ../agg, so it sits beside it. The router values are llm-d's own
+    # for this guide, so the generic stack routes as it is meant to.
+    install_overlay "${VLLM_DIR}" agg-tiered
+    OVERLAY="${VLLM_DIR}/agg-tiered"
+    OVERLAY_SRC_DIR="${PROFILE_DIR}/agg-tiered"
+    if grep -q 'REGISTRY/REPO/' "${OVERLAY}/kustomization.yaml"; then
+        if [ -z "${CERTUS_REGISTRY:-}" ] || [ -z "${CERTUS_REPO:-}" ]; then
+            echo "ERROR: profiles/${PROFILE}/agg-tiered pins the REGISTRY/REPO placeholder;" >&2
+            echo "       set CERTUS_REGISTRY and CERTUS_REPO in ${SITE_ENV} or the environment." >&2
+            exit 1
+        fi
+        sed -i "s|REGISTRY/REPO/|${CERTUS_REGISTRY}/${CERTUS_REPO}/|" "${OVERLAY}/kustomization.yaml"
+        echo "[install] image registry -> ${CERTUS_REGISTRY}/${CERTUS_REPO}"
+    fi
+    echo "[install] vLLM tiered prefix cache (CPU + fs) ENABLED (no certus)"
 elif [ "${PD}" = "0" ]; then
     echo "[install] aggregated serving (WITH_CERTUS=1 for certus offload, PD=1 for P/D)"
 fi
