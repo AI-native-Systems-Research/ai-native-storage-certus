@@ -62,6 +62,11 @@
 #   RDMA         1, with PD=1 WITH_CERTUS=1: profiles/<PROFILE>/pd-certus-rdma,
 #                NIXL GPU to GPU over the `roce` secondary network
 #                (deploy/k8s/rdma-network/, which must be applied) (default: 0)
+#   OFFLOAD      1, with PD=1 RDMA=1 and WITH_CERTUS unset or 0:
+#                profiles/<PROFILE>/pd-offload-rdma, pd-certus-rdma with vLLM's
+#                own CPU tier and P2P pull in place of certus -- the comparison
+#                arm. Same image and router values as pd-certus-rdma. Stop
+#                certus on the nodes first (default: 0)
 #   AGG_NODES    space-separated nodes for aggregated serving (default and
 #                WITH_CERTUS). Belongs in SITE_ENV. Optional if the nodes
 #                already carry this instance's label.
@@ -120,6 +125,7 @@ RELEASE_NODES="${RELEASE_NODES:-0}"
 WITH_CERTUS="${WITH_CERTUS:-0}"
 PD="${PD:-0}"
 RDMA="${RDMA:-0}"
+OFFLOAD="${OFFLOAD:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 KEEP_LLMD="${KEEP_LLMD:-0}"
 GUIDE_NAME="${GUIDE_NAME:-quickstart}"
@@ -183,9 +189,18 @@ if [ "${WITH_CERTUS}" != "0" ]; then
     need_overlay certus   # pd-certus takes its entrypoint from certus/
     [ "${PD}" = "0" ] || need_overlay pd-certus
 fi
-if [ "${RDMA}" != "0" ]; then
+if [ "${OFFLOAD}" != "0" ]; then
+    if [ "${PD}" = "0" ] || [ "${RDMA}" = "0" ] || [ "${WITH_CERTUS}" != "0" ]; then
+        echo "ERROR: OFFLOAD=1 needs PD=1 RDMA=1 and no WITH_CERTUS (it replaces certus)." >&2
+        exit 1
+    fi
+    # Takes pd-certus's render service and router values, so both arms route alike.
+    need_overlay pd-offload-rdma
+    need_overlay pd-certus
+elif [ "${RDMA}" != "0" ]; then
     if [ "${PD}" = "0" ] || [ "${WITH_CERTUS}" = "0" ]; then
-        echo "ERROR: RDMA=1 needs PD=1 WITH_CERTUS=1 (it layers on pd-certus)." >&2
+        echo "ERROR: RDMA=1 needs PD=1 WITH_CERTUS=1 (it layers on pd-certus)," >&2
+        echo "       or OFFLOAD=1 for vLLM's CPU tier in place of certus." >&2
         exit 1
     fi
     need_overlay pd-certus-rdma
@@ -422,6 +437,28 @@ if [ "${WITH_CERTUS}" != "0" ]; then
         echo "[install] image registry -> ${CERTUS_REGISTRY}/${CERTUS_REPO}"
     fi
     echo "[install] certus KV-cache offload ENABLED"
+elif [ "${OFFLOAD}" != "0" ]; then
+    # Consumes ../pd, so it sits beside it. render.yaml and the router values
+    # are pd-certus's, so the two arms route identically.
+    install_overlay "${PD_VLLM_DIR}" pd-offload-rdma
+    OVERLAY="${PD_VLLM_DIR}/pd-offload-rdma"
+    OVERLAY_SRC_DIR="${PROFILE_DIR}/pd-certus"
+    cp "${PROFILE_DIR}/pd-certus/render.yaml" "${OVERLAY}/"
+    if ! kubectl get network-attachment-definitions -n "${NAMESPACE}" roce >/dev/null 2>&1 \
+            && [ "${DRY_RUN}" = "0" ]; then
+        echo "ERROR: no 'roce' network in ${NAMESPACE}; apply deploy/k8s/rdma-network/ first." >&2
+        exit 1
+    fi
+    if grep -q 'REGISTRY/REPO/' "${OVERLAY}/kustomization.yaml"; then
+        if [ -z "${CERTUS_REGISTRY:-}" ] || [ -z "${CERTUS_REPO:-}" ]; then
+            echo "ERROR: profiles/${PROFILE}/pd-offload-rdma pins the REGISTRY/REPO placeholder;" >&2
+            echo "       set CERTUS_REGISTRY and CERTUS_REPO in ${SITE_ENV} or the environment." >&2
+            exit 1
+        fi
+        sed -i "s|REGISTRY/REPO/|${CERTUS_REGISTRY}/${CERTUS_REPO}/|" "${OVERLAY}/kustomization.yaml"
+        echo "[install] image registry -> ${CERTUS_REGISTRY}/${CERTUS_REPO}"
+    fi
+    echo "[install] vLLM CPU tier + P2P pull ENABLED (no certus)"
 elif [ "${PD}" = "0" ]; then
     echo "[install] aggregated serving (WITH_CERTUS=1 for certus offload, PD=1 for P/D)"
 fi
