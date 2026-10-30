@@ -13,6 +13,17 @@ configMapGenerator:
 
 patches:
   - path: patch.yaml
+  # The GPU KV cache every certus and comparison arm gets: 37,184 tokens of
+  # Qwen3-8B, what P/D's engines get from --gpu-memory-utilization=0.90. Here
+  # the offloading connector's non-torch GPU memory would shrink it to 29,936
+  # at 0.90, a fifth less than the P/D arms; vLLM reports up to 5.86 GiB fits.
+  # Added after ../agg's args rather than in them, so plain aggregated serving
+  # keeps its own sizing.
+  - target: {kind: Deployment, name: optimized-baseline-nvidia-gpu-vllm-decode}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: "--kv-cache-memory-bytes=5483003904"
 
 # Swap the stock vLLM image for the connector-bearing build published by
 # ../../../publish-image.sh.
