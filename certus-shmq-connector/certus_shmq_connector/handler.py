@@ -205,7 +205,20 @@ def _regions_for_block(regions: list[KvCacheIpc], block_id: int):
     ]
 
 
-# Cache of the built worker class (base resolved once, lazily).
+def _scratch_offset(regions, block: int, layer: int) -> int:
+    """Byte offset of skipped block ``block``'s layer ``layer`` in the load scratch
+    buffer: the scratch holds up to ``blocks_per_chunk - 1`` whole GPU blocks, each
+    laid out as its layers side by side, so no two skipped pieces share bytes."""
+    per_block = sum(int(r.stride_bytes) for r in regions)
+    return block * per_block + sum(int(r.stride_bytes) for r in regions[:layer])
+
+
+def _scratch_bytes(regions, blocks_per_chunk: int) -> int:
+    """Size of the load scratch buffer: the most GPU blocks a load can skip (one
+    less than a key holds), each with every layer."""
+    return max(blocks_per_chunk - 1, 1) * sum(int(r.stride_bytes) for r in regions)
+
+
 def _chunk_entries(regions, gpu_block_ids, keys, blocks_per_chunk, skip, scratch):
     """``(key, regions)`` ring entries for keys of ``blocks_per_chunk`` GPU blocks.
 
@@ -235,15 +248,20 @@ def _chunk_entries(regions, gpu_block_ids, keys, blocks_per_chunk, skip, scratch
             pieces.extend(_regions_for_block(regions, gpu_block_ids[pos]))
             pos += 1
         if i == 0 and skip:
+            # Each skipped (block, layer) piece at its own place in the scratch buffer
+            # (_scratch_offset): one CUDA batch must not hold overlapping copies
+            # (IGpuServices::memcpy_batch_async).
             pieces = [
-                (scratch.handle_bytes, scratch.gpu_device_id, 0, r.stride_bytes)
-                for _ in range(skip)
-                for r in regions
+                (scratch.handle_bytes, scratch.gpu_device_id,
+                 _scratch_offset(regions, j, layer), r.stride_bytes)
+                for j in range(skip)
+                for layer, r in enumerate(regions)
             ] + pieces
         entries.append((key, pieces))
     return entries
 
 
+# Cache of the built worker class (base resolved once, lazily).
 _WORKER_CLASS = None
 
 
@@ -300,8 +318,8 @@ def _build_worker_class():
                 )
             except Exception:  # noqa: BLE001 - odd region objects use the legacy path
                 self._layer_table = None
-            # For keys of several GPU blocks: the same layers plus the scratch buffer as
-            # a last table row (scratch_idx), built once the scratch buffer exists.
+            # For a load that skips blocks of its first key: the same layers plus the
+            # scratch buffer as one more handle (scratch_idx), built on first such load.
             self._chunk_table: tuple[bytes, int] | None = None
             self._encode_log = _ENCODE_LOG
 
@@ -325,21 +343,30 @@ def _build_worker_class():
             ids += [CHUNK_ABSENT] * (n_keys * bpc - len(ids))
             return ids
 
-        def _chunk_table_for(self):
-            """The ChunkBlockBatch head for this worker and its scratch row's index:
-            the layer table, with the scratch buffer listed as one more handle (not as
-            a layer). Allocates the scratch buffer on first use; built once."""
+        def _scratch_buffer(self) -> KvCacheIpc:
+            """The load scratch buffer, allocated on the first load that skips blocks."""
+            with self._scratch_lock:
+                if self._scratch is None:
+                    self._scratch = scratch_ipc(
+                        _scratch_bytes(self._kv_regions, self._blocks_per_chunk),
+                        self._kv_regions[0].gpu_device_id,
+                    )
+                return self._scratch
+
+        def _chunk_table_for(self, skip: int):
+            """The ChunkBlockBatch head and its scratch handle's index. With nothing
+            skipped no id is CHUNK_SCRATCH, so the plain layer table serves and the
+            index is never read; otherwise the layer table with the scratch buffer
+            listed as one more handle (not as a layer), built once."""
+            if not skip:
+                return self._layer_table, 0
             if self._chunk_table is None:
+                scratch = self._scratch_buffer()
                 with self._scratch_lock:
-                    if self._scratch is None:
-                        self._scratch = scratch_ipc(
-                            max(r.stride_bytes for r in self._kv_regions),
-                            self._kv_regions[0].gpu_device_id,
-                        )
                     self._chunk_table = encode_layer_table(
                         [(r.handle_bytes, r.gpu_device_id, int(r.base_delta),
                           int(r.stride_bytes), int(r.stride_bytes)) for r in self._kv_regions],
-                        extra_handles=[(self._scratch.handle_bytes, self._scratch.gpu_device_id)],
+                        extra_handles=[(scratch.handle_bytes, scratch.gpu_device_id)],
                     )
             return self._chunk_table
 
@@ -355,7 +382,7 @@ def _build_worker_class():
                 timings = [] if log is not None else None
                 t0 = time.perf_counter_ns() if log is not None else 0
                 try:
-                    table, scratch_idx = self._chunk_table_for()
+                    table, scratch_idx = self._chunk_table_for(skip)
                     ids = self._chunk_ids(gpu_block_ids, len(ns_keys), skip)
                     results = fn(table, scratch_idx, self._blocks_per_chunk, ns_keys, ids,
                                  timings=timings)
@@ -530,15 +557,7 @@ def _build_worker_class():
                     (ns_k, _regions_for_block(self._kv_regions, block_id))
                     for block_id, ns_k in zip(gpu_block_ids, ns_keys)
                 ]
-            scratch = None
-            if skip:
-                with self._scratch_lock:
-                    if self._scratch is None:
-                        self._scratch = scratch_ipc(
-                            max(r.stride_bytes for r in self._kv_regions),
-                            self._kv_regions[0].gpu_device_id,
-                        )
-                    scratch = self._scratch
+            scratch = self._scratch_buffer() if skip else None
             return _chunk_entries(
                 self._kv_regions, gpu_block_ids, ns_keys, self._blocks_per_chunk,
                 skip, scratch,

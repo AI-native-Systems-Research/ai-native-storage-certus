@@ -236,10 +236,12 @@ def encode_reserve(entries: Sequence[tuple[int, int, int]]) -> bytes:
     """
     out = bytearray(struct.pack("<I", len(entries)))
     for key, size, session in entries:
+        if not 0 <= size <= 0xFFFFFFFF:
+            raise ValueError(f"Reserve size {size} does not fit the wire's u32")
         out += struct.pack(
             "<QIQ",
             key & 0xFFFFFFFFFFFFFFFF,
-            size & 0xFFFFFFFF,
+            size,
             session & 0xFFFFFFFFFFFFFFFF,
         )
     return bytes(out)

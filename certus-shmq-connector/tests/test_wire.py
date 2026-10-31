@@ -549,3 +549,19 @@ def test_block_batch_rejects_a_table_larger_than_cap_req():
     r = _BlockScriptedRing(len(table) + 4 + 15)
     with pytest.raises(RingError):
         r.lookup_blocks(table, [1], [0])
+
+
+def test_reserve_refuses_a_size_past_u32():
+    from certus_shmq_connector.ring import encode_reserve
+
+    encode_reserve([(1, 0xFFFFFFFF, 0)])
+    with pytest.raises(ValueError):
+        encode_reserve([(1, 1 << 32, 0)])
+
+
+def test_slot_size_past_u32_is_refused():
+    from certus_shmq_connector.spec import _check_slot_size
+
+    _check_slot_size(2 << 20, 2047)
+    with pytest.raises(ValueError):
+        _check_slot_size(2 << 20, 2048)

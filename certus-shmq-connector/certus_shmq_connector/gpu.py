@@ -138,9 +138,9 @@ def ipc_for_tensor(data_ptr: int, stride_bytes: int, gpu_device_id: int) -> KvCa
 
 def scratch_ipc(nbytes: int, gpu_device_id: int) -> KvCacheIpc:
     """A GPU buffer of ``nbytes`` for the pieces of a load that vLLM did not ask
-    for (a load that starts inside an offloaded block). Every block id maps to the
-    buffer's start (``stride_bytes == 0``). Allocated once per worker and kept for
-    the process's lifetime."""
+    for (a load that starts inside an offloaded block). Callers place each skipped
+    piece at its own offset (handler's ``_scratch_offset``), so ``stride_bytes`` is
+    0. Allocated once per worker and kept for the process's lifetime."""
     _load_cuda()
     ptr = ctypes.c_void_p()
     err = _libcudart.cudaMalloc(ctypes.byref(ptr), ctypes.c_size_t(nbytes))

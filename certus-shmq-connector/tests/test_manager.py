@@ -139,8 +139,8 @@ class FakeRing:
     def _expand_chunks(table, scratch_idx, blocks_per_key, keys, block_ids):
         """Expand a ChunkBlockBatch into ``(key, regions)`` entries, as the server's
         decode_chunk_block_batch does: each key's blocks in order, each block's
-        regions in layer order; CHUNK_SCRATCH maps every layer to the scratch handle
-        at offset 0 and CHUNK_ABSENT adds nothing."""
+        regions in layer order; the j-th CHUNK_SCRATCH maps layer L to the scratch
+        handle at j * sum(sizes) + sum(sizes[:L]) and CHUNK_ABSENT adds nothing."""
         import struct
         from certus_shmq_connector.ring import CHUNK_ABSENT, CHUNK_SCRATCH
 
@@ -156,14 +156,20 @@ class FakeRing:
         layers = [struct.unpack_from("<IQQI", table, off + 24 * i) for i in range(n_layers)]
         assert off + 24 * n_layers == len(table)
         entries = []
+        block_bytes = sum(layer[3] for layer in layers)
         for i, k in enumerate(keys):
             regions = []
+            skipped = 0
             for b in block_ids[i * blocks_per_key:(i + 1) * blocks_per_key]:
                 if b == CHUNK_ABSENT:
                     continue
+                scratch_off = skipped * block_bytes
+                if b == CHUNK_SCRATCH:
+                    skipped += 1
                 for idx, base, stride, size in layers:
                     if b == CHUNK_SCRATCH:
-                        regions.append((*handles[scratch_idx], 0, size))
+                        regions.append((*handles[scratch_idx], scratch_off, size))
+                        scratch_off += size
                     else:
                         regions.append((*handles[idx], base + int(b) * stride, size))
             entries.append((k, regions))
@@ -1668,7 +1674,25 @@ def test_chunk_load_from_inside_a_chunk_sends_skipped_blocks_to_scratch(monkeypa
     assert [h[:1] for h, *_ in k30] == [b"s"] * 4 + [b"a", b"b"] * 2
     assert [off for _, _, off, _ in k30[4:]] == [1100, 1107, 1200, 1207]
     assert [off for _, _, off, _ in k40] == [1300, 1307, 1400, 1407, 1500, 1507, 1600, 1607]
-    assert made == [100]     # one scratch buffer, the largest region's size
+    # Each skipped (block, layer) piece at its own scratch bytes: no two overlap.
+    assert [off for _, _, off, _ in k30[:4]] == [0, 100, 200, 300]
+    assert made == [600]     # room for the 3 blocks a 4-block key can skip
+    ex.shutdown()
+
+
+def test_chunk_load_skipping_nothing_allocates_no_scratch(monkeypatch):
+    import certus_shmq_connector.handler as handler
+
+    def no_scratch(n, dev):
+        raise AssertionError("scratch allocated for a load that skips nothing")
+
+    monkeypatch.setattr(handler, "scratch_ipc", no_scratch)
+    ring = FakeRing()
+    w, ex = _chunk_worker(ring, blocks_per_chunk=4)
+    src = CertusLoadStoreSpec([BlockLocation(key=30), BlockLocation(key=40)])
+    w.submit_load(4, src, _gpu_spec([1, 2, 3, 4, 5, 6], first_index=8))
+    w.wait({4})
+    assert all(r.success for r in w.get_finished())
     ex.shutdown()
 
 

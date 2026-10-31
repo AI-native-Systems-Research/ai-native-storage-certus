@@ -354,8 +354,11 @@ fn decode_block_batch(r: &mut Reader<'_>) -> Result<HandleBatch, OpError> {
 /// regions in layer order, so the slot layout is the same as the per-region
 /// request the connector sends for such keys (`handler.py` `_chunk_entries`). A
 /// block id of [`wire::CHUNK_SCRATCH`] maps each layer to the scratch row's
-/// handle at offset 0 (a load that starts inside its first key: those bytes are
-/// discarded); [`wire::CHUNK_ABSENT`] adds no regions (the short last key).
+/// handle (a load that starts inside its first key: those bytes are discarded),
+/// skipped block `j` (the `j`-th scratch marker of the entry) at offset
+/// `j * sum(sizes) + sum(sizes[0..L])` for layer `L`, so no two scratch pieces
+/// overlap in one copy batch; [`wire::CHUNK_ABSENT`] adds no regions (the short
+/// last key).
 fn decode_chunk_block_batch(r: &mut Reader<'_>) -> Result<HandleBatch, OpError> {
     let n_handles = r.u32()? as usize;
     let mut handles = Vec::with_capacity(n_handles);
@@ -384,16 +387,22 @@ fn decode_chunk_block_batch(r: &mut Reader<'_>) -> Result<HandleBatch, OpError> 
     let scratch_idx = r.u32()?;
     let blocks_per_key = r.u16()? as usize;
     if blocks_per_key == 0 {
-        return Err(OpError::Msg("chunk block batch has blocks_per_key 0".into()));
+        return Err(OpError::Msg(
+            "chunk block batch has blocks_per_key 0".into(),
+        ));
     }
     let n_entries = r.u32()? as usize;
     let mut keys = Vec::with_capacity(n_entries);
     for _ in 0..n_entries {
         keys.push(r.u64()?);
     }
+    // A skipped block occupies one whole block's worth of scratch, laid out as its
+    // layers side by side (the connector's `_scratch_offset`).
+    let block_bytes: u64 = layers.iter().map(|&(_, _, _, size)| u64::from(size)).sum();
     let mut entries = Vec::with_capacity(n_entries);
     for key in keys {
         let mut regions = Vec::with_capacity(n_layers * blocks_per_key);
+        let mut skipped: u64 = 0;
         for _ in 0..blocks_per_key {
             let block_id = r.u64()?;
             if block_id == wire::CHUNK_ABSENT {
@@ -405,9 +414,12 @@ fn decode_chunk_block_batch(r: &mut Reader<'_>) -> Result<HandleBatch, OpError> 
                         "scratch handle_idx {scratch_idx} out of range (n_handles={n_handles})"
                     )));
                 }
+                let mut off = skipped * block_bytes;
                 for &(_, _, _, size) in &layers {
-                    regions.push((scratch_idx, 0, size));
+                    regions.push((scratch_idx, off, size));
+                    off += u64::from(size);
                 }
+                skipped += 1;
                 continue;
             }
             for &(idx, base_delta, stride, size) in &layers {
@@ -632,7 +644,9 @@ impl Translator {
             op::LOOKUP_BLOCKS => self.op_lookup_blocks(&mut r),
             op::COPY_TO_STORE_BLOCKS => self.op_copy_to_store_blocks(&mut r),
             op::LOOKUP_CHUNKS => self.lookup_batch(&decode_chunk_block_batch(&mut r)?),
-            op::COPY_TO_STORE_CHUNKS => self.copy_to_store_batch(&decode_chunk_block_batch(&mut r)?),
+            op::COPY_TO_STORE_CHUNKS => {
+                self.copy_to_store_batch(&decode_chunk_block_batch(&mut r)?)
+            }
             other => Err(OpError::Msg(format!("unknown opcode {other}"))),
         }
     }
@@ -2559,7 +2573,6 @@ mod tests {
         assert_eq!(unpin_all_on(&tr, 0), 0);
     }
 
-
     // ---- BlockBatch (LookupBlocks / CopyToStoreBlocks) ----
 
     /// One layer of a block table: `(handle_idx, base_delta, stride, size)`.
@@ -2723,16 +2736,23 @@ mod tests {
             .enumerate()
             .map(|(i, &k)| {
                 let mut regions = Vec::new();
+                let block_bytes: u64 = layers.iter().map(|l| u64::from(l.3)).sum();
+                let mut skipped = 0u64;
                 for &b in &block_ids[i * blocks_per_key..(i + 1) * blocks_per_key] {
+                    let mut scratch_off = skipped * block_bytes;
                     for &(idx, base_delta, stride, size) in layers {
                         if b == wire::CHUNK_ABSENT {
                             continue;
                         }
                         if b == wire::CHUNK_SCRATCH {
-                            regions.push((scratch_idx, 0, size));
+                            regions.push((scratch_idx, scratch_off, size));
+                            scratch_off += u64::from(size);
                         } else {
                             regions.push((idx, base_delta + b * stride, size));
                         }
+                    }
+                    if b == wire::CHUNK_SCRATCH {
+                        skipped += 1;
                     }
                 }
                 (k, regions)
@@ -2742,7 +2762,11 @@ mod tests {
 
     #[test]
     fn decode_chunk_block_batch_matches_the_per_region_form() {
-        let handles = vec![(handle_bytes(1), 0i32), (handle_bytes(2), 0), (handle_bytes(9), 0)];
+        let handles = vec![
+            (handle_bytes(1), 0i32),
+            (handle_bytes(2), 0),
+            (handle_bytes(9), 0),
+        ];
         // Two layers in separate allocations, as vLLM's LBHNC tensors; handle 2 is
         // the connector's scratch buffer.
         let layers: Vec<Layer> = vec![(0, 64, 4096, 4096), (1, 0, 4096, 4096)];
@@ -2782,6 +2806,31 @@ mod tests {
             let b = decode_block_batch(&mut Reader::new(&block)).unwrap();
             assert_eq!(a.entries, b.entries, "layers {layers:?} ids {block_ids:?}");
         }
+    }
+
+    #[test]
+    fn chunk_scratch_pieces_do_not_overlap() {
+        // One copy batch must not hold overlapping destinations: every scratch piece
+        // of an entry gets its own byte range.
+        let handles = vec![(handle_bytes(1), 0i32), (handle_bytes(2), 0)];
+        let layers: Vec<Layer> = vec![(0, 0, 4096, 4096), (0, 64, 8192, 2048), (0, 7, 512, 512)];
+        let s = wire::CHUNK_SCRATCH;
+        let blob = enc_chunk_block_batch(&handles, &layers, 1, 4, &[9], &[s, s, s, 77]);
+        let got = decode_chunk_block_batch(&mut Reader::new(&blob)).unwrap();
+        let mut ranges: Vec<(u64, u64)> = got.entries[0]
+            .1
+            .iter()
+            .filter(|r| r.0 == 1)
+            .map(|&(_, off, size)| (off, off + u64::from(size)))
+            .collect();
+        assert_eq!(ranges.len(), 3 * layers.len());
+        ranges.sort();
+        for w in ranges.windows(2) {
+            assert!(w[0].1 <= w[1].0, "scratch pieces overlap: {:?}", w);
+        }
+        // and they fit in (blocks_per_key - 1) blocks of scratch
+        let block: u64 = layers.iter().map(|l| u64::from(l.3)).sum();
+        assert!(ranges.last().unwrap().1 <= 3 * block);
     }
 
     #[test]
@@ -2830,7 +2879,8 @@ mod tests {
             w.u32(entries.len() as u32);
             for (k, regions) in &entries {
                 w.u64(*k);
-                w.buf.extend_from_slice(&(regions.len() as u16).to_le_bytes());
+                w.buf
+                    .extend_from_slice(&(regions.len() as u16).to_le_bytes());
                 for &(idx, off, size) in regions {
                     w.u32(idx);
                     w.u64(off);
