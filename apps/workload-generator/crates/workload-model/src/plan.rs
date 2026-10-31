@@ -155,11 +155,13 @@ pub enum OpKind {
 
 impl OpKind {
     /// The wire `op_kind` byte.
+    #[must_use]
     pub fn as_u8(self) -> u8 {
         self as u8
     }
 
     /// Every kind, in wire order. Useful for exhaustiveness in tests and reports.
+    #[must_use]
     pub fn all() -> [OpKind; 8] {
         [
             OpKind::Check,
@@ -186,11 +188,13 @@ pub struct Operation {
 
 impl Operation {
     /// Virtual time the operation happens at.
+    #[must_use]
     pub fn at(&self) -> f64 {
         f64::from_bits(self.at_bits)
     }
 
     /// The session that issues it, which is also the ordering tie-break.
+    #[must_use]
     pub fn session(&self) -> u64 {
         self.session
     }
@@ -200,16 +204,19 @@ impl Operation {
     /// Always 0 for now: placement and migration are User Story 3. The field is
     /// present from the start because it is in the canonical serialisation, and
     /// adding it later would invalidate every recorded plan digest.
+    #[must_use]
     pub fn node(&self) -> u16 {
         self.node
     }
 
     /// What it asks for.
+    #[must_use]
     pub fn kind(&self) -> OpKind {
         self.kind
     }
 
     /// How many keys it carries.
+    #[must_use]
     pub fn key_count(&self) -> usize {
         self.keys.len()
     }
@@ -248,6 +255,7 @@ pub struct OperationPlan {
 
 impl OperationPlan {
     /// An empty plan with the given options.
+    #[must_use]
     pub fn with_options(options: PlanOptions) -> Self {
         Self {
             options,
@@ -256,21 +264,25 @@ impl OperationPlan {
     }
 
     /// The operations, in order.
+    #[must_use]
     pub fn operations(&self) -> &[Operation] {
         &self.ops
     }
 
     /// Operations in the plan.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.ops.len()
     }
 
     /// Whether nothing has been recorded.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.ops.is_empty()
     }
 
     /// Turns recorded.
+    #[must_use]
     pub fn turns(&self) -> u64 {
         self.turns
     }
@@ -287,17 +299,20 @@ impl OperationPlan {
     /// checks its whole prefix. Note it does *not* grow quadratically with a run's
     /// span: longer sessions mean proportionally fewer of them, so the total over a
     /// fixed span is linear in turn count.
+    #[must_use]
     pub fn key_references(&self) -> usize {
         self.ops.iter().map(|o| o.keys.len()).sum()
     }
 
     /// Keys stored in the arena, which is less than [`Self::key_references`]
     /// wherever operations share a range.
+    #[must_use]
     pub fn interned_keys(&self) -> usize {
         self.keys.len()
     }
 
     /// The keys one operation carries, in prefix order.
+    #[must_use]
     pub fn keys_of(&self, op: &Operation) -> &[CacheKey] {
         &self.keys[op.keys.clone()]
     }
@@ -393,7 +408,13 @@ impl OperationPlan {
                     a.at()
                 )));
             }
-            if b.at() == a.at() && b.session < a.session {
+            #[expect(
+                clippy::float_cmp,
+                reason = "ties are exact: two operations share an instant only when their \
+                          times are the same value"
+            )]
+            let tied = b.at() == a.at();
+            if tied && b.session < a.session {
                 return Err(Error::new(format!(
                     "operations {i} and {} share instant {} but their sessions are \
                      out of order: {} then {}",
@@ -440,7 +461,13 @@ impl OperationPlan {
             w.write_all(&op.session.to_le_bytes())?;
             w.write_all(&op.node.to_le_bytes())?;
             w.write_all(&[op.kind.as_u8(), 0u8])?;
-            w.write_all(&(op.keys.len() as u32).to_le_bytes())?;
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "the format's key_count is u32; one operation's key list (a single \
+                          turn's prefix or store run) is far below 2^32 keys"
+            )]
+            let key_count = op.keys.len() as u32;
+            w.write_all(&key_count.to_le_bytes())?;
             for k in &self.keys[op.keys.clone()] {
                 w.write_all(&k.to_le_bytes())?;
             }
@@ -449,6 +476,12 @@ impl OperationPlan {
     }
 
     /// The canonical serialisation as bytes.
+    #[must_use]
+    #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        reason = "writing to a Vec<u8> is infallible, so this cannot panic"
+    )]
     pub fn to_canonical_bytes(&self) -> Vec<u8> {
         let mut out = Vec::new();
         self.write_canonical(&mut out)
@@ -461,10 +494,11 @@ impl OperationPlan {
     /// A convenience for spotting that two runs differ, **not** a cryptographic
     /// digest and not a substitute for comparing bytes: SC-003 is asserted on the
     /// bytes themselves.
+    #[must_use]
     pub fn fingerprint(&self) -> u64 {
         let mut acc = 0xcbf2_9ce4_8422_2325u64;
         for b in self.to_canonical_bytes() {
-            acc = crate::keys::splitmix64(acc ^ b as u64);
+            acc = crate::keys::splitmix64(acc ^ u64::from(b));
         }
         acc
     }

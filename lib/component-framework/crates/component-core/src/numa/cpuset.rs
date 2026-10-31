@@ -29,10 +29,12 @@ pub struct CpuSet {
     inner: libc::cpu_set_t,
 }
 
-// libc::cpu_set_t is a plain data struct (array of u64) — safe to send/share.
-// SAFETY: cpu_set_t contains only integer data with no pointers or interior
-// mutability. It is safe to move between threads and share via immutable refs.
+// SAFETY: `libc::cpu_set_t` is a plain array of integer words: no pointers,
+// no thread-affine resources, so moving it to another thread is sound. (The
+// compiler would derive this already.)
 unsafe impl Send for CpuSet {}
+// SAFETY: as above, and it has no interior mutability: `&CpuSet` only reads
+// the words, and mutation needs `&mut CpuSet`.
 unsafe impl Sync for CpuSet {}
 
 impl Clone for CpuSet {
@@ -40,10 +42,13 @@ impl Clone for CpuSet {
         // SAFETY: cpu_set_t is plain data (array of u64), bit-for-bit copy is correct.
         let mut inner: libc::cpu_set_t = unsafe { std::mem::zeroed() };
         // Copy the bits array manually
+        // SAFETY: both pointers come from live `cpu_set_t` values (one borrowed,
+        // one a distinct local), so they are valid for `size_of::<cpu_set_t>()`
+        // bytes and do not overlap; any bit pattern is a valid `cpu_set_t`.
         unsafe {
             std::ptr::copy_nonoverlapping(
-                &self.inner as *const libc::cpu_set_t as *const u8,
-                &mut inner as *mut libc::cpu_set_t as *mut u8,
+                std::ptr::addr_of!(self.inner).cast::<u8>(),
+                std::ptr::addr_of_mut!(inner).cast::<u8>(),
                 std::mem::size_of::<libc::cpu_set_t>(),
             );
         }
@@ -72,9 +77,11 @@ impl CpuSet {
     /// assert!(cpus.is_empty());
     /// assert_eq!(cpus.count(), 0);
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         // SAFETY: zeroing a cpu_set_t produces a valid empty set.
         let mut inner: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+        // SAFETY: `inner` is a live, exclusively borrowed `cpu_set_t`.
         unsafe { libc::CPU_ZERO(&mut inner) };
         Self { inner }
     }
@@ -189,6 +196,7 @@ impl CpuSet {
     /// assert!(cpus.contains(7));
     /// assert!(!cpus.contains(8));
     /// ```
+    #[must_use]
     pub fn contains(&self, cpu_id: usize) -> bool {
         if cpu_id >= MAX_CPU {
             return false;
@@ -207,6 +215,11 @@ impl CpuSet {
     /// let cpus = CpuSet::from_cpus([0, 2, 4]).unwrap();
     /// assert_eq!(cpus.count(), 3);
     /// ```
+    #[must_use]
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "CPU_COUNT counts set bits, so it is in 0..=CPU_SETSIZE"
+    )]
     pub fn count(&self) -> usize {
         // SAFETY: the cpu_set_t is valid.
         unsafe { libc::CPU_COUNT(&self.inner) as usize }
@@ -222,6 +235,7 @@ impl CpuSet {
     /// assert!(CpuSet::new().is_empty());
     /// assert!(!CpuSet::from_cpu(0).unwrap().is_empty());
     /// ```
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.count() == 0
     }
@@ -237,11 +251,18 @@ impl CpuSet {
     /// let ids: Vec<usize> = cpus.iter().collect();
     /// assert_eq!(ids, vec![1, 3, 5]);
     /// ```
+    #[must_use]
+    #[expect(
+        clippy::iter_without_into_iter,
+        reason = "adding `impl IntoIterator for &CpuSet` would grow the public API; this \
+                  lint pass makes no API changes"
+    )]
     pub fn iter(&self) -> CpuSetIter<'_> {
         CpuSetIter { set: self, pos: 0 }
     }
 
     /// Access the underlying `libc::cpu_set_t` for direct syscall use.
+    #[must_use]
     pub fn as_raw(&self) -> &libc::cpu_set_t {
         &self.inner
     }
@@ -272,7 +293,7 @@ impl std::fmt::Debug for CpuSetIter<'_> {
     }
 }
 
-impl<'a> Iterator for CpuSetIter<'a> {
+impl Iterator for CpuSetIter<'_> {
     type Item = usize;
 
     fn next(&mut self) -> Option<usize> {
@@ -382,7 +403,7 @@ pub(crate) fn read_online_cpus() -> Result<CpuSet, io::Error> {
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
 }
 
-/// Parse a sysfs range list (e.g. "0-15,32-47") into a CpuSet.
+/// Parse a sysfs range list (e.g. "0-15,32-47") into a `CpuSet`.
 pub(crate) fn parse_range_list_to_cpuset(s: &str) -> Result<CpuSet, NumaError> {
     let ids = super::topology::parse_range_list(s)?;
     CpuSet::from_cpus(ids)
@@ -485,8 +506,8 @@ mod tests {
     fn debug_format() {
         let cpus = CpuSet::from_cpus([1, 3]).unwrap();
         let s = format!("{cpus:?}");
-        assert!(s.contains("1"));
-        assert!(s.contains("3"));
+        assert!(s.contains('1'));
+        assert!(s.contains('3'));
     }
 
     #[test]

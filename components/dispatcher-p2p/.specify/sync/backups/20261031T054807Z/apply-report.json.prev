@@ -1,0 +1,16 @@
+{
+ "applied": "2026-10-09T23:49:23Z",
+ "branch": "fix/dispatcher-p2p-clean-eviction",
+ "applied_ids": [
+  1,
+  2,
+  3,
+  7,
+  8
+ ],
+ "not_applied": [
+  4,
+  5,
+  6
+ ]
+}

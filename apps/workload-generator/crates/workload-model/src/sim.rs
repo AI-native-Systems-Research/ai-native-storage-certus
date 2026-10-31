@@ -234,13 +234,17 @@ impl Simulation {
                 let nominal = description
                     .shared_classes
                     .by_index(class_index)
-                    .map(|(_, c)| c.pool.size.nominal())
-                    .unwrap_or(0);
+                    .map_or(0, |(_, c)| c.pool.size.nominal());
+                #[expect(
+                    clippy::cast_precision_loss,
+                    reason = "a pool size; inexact only above 2^53 slots"
+                )]
+                let max = nominal as f64;
                 uses.push(Uses {
                     class_index,
                     // The pool size is the implied maximum on the count, exactly as
                     // load-time validation reports it (FR-004).
-                    count: u.count.resolve_integral(Some(nominal as f64))?,
+                    count: u.count.resolve_integral(Some(max))?,
                 });
             }
             let mut pool = SessionPool::new(
@@ -290,42 +294,50 @@ impl Simulation {
     }
 
     /// Virtual time reached so far.
+    #[must_use]
     pub fn now(&self) -> f64 {
         self.now
     }
 
     /// Turns taken since the run began.
+    #[must_use]
     pub fn turns_taken(&self) -> u64 {
         self.turns_taken
     }
 
     /// Block reads issued — the sum of every turn's prefix length, which grows
     /// quadratically in session length (FR-025).
+    #[must_use]
     pub fn blocks_read(&self) -> u64 {
         self.blocks_read
     }
 
     /// Blocks minted by turn growth, not counting shared instances.
+    #[must_use]
     pub fn blocks_minted(&self) -> u64 {
         self.blocks_minted
     }
 
     /// Live sessions across every class.
+    #[must_use]
     pub fn live_sessions(&self) -> usize {
         self.sessions.iter().map(|c| c.pool.live()).sum()
     }
 
     /// Selectable shared instances across every class.
+    #[must_use]
     pub fn live_instances(&self) -> usize {
-        self.shared_pools.iter().map(|p| p.live()).sum()
+        self.shared_pools.iter().map(SharedPool::live).sum()
     }
 
     /// One shared class's selection statistics, for the run report (FR-023).
+    #[must_use]
     pub fn selection_stats(&self, class_index: usize) -> Option<SelectionStats> {
-        self.selectors.get(class_index).map(|s| s.stats())
+        self.selectors.get(class_index).map(Selector::stats)
     }
 
     /// Sessions started and completed, per session class.
+    #[must_use]
     pub fn session_counts(&self, class_index: usize) -> Option<(u64, u64)> {
         self.sessions
             .get(class_index)
@@ -337,6 +349,7 @@ impl Simulation {
     /// What a run report wants. Kept as its own method because reporting class 0's
     /// numbers as the run's is a mistake that reads perfectly plausibly — a
     /// two-class description would simply under-report, with no sign that it had.
+    #[must_use]
     pub fn session_totals(&self) -> (u64, u64) {
         self.sessions.iter().fold((0, 0), |(s, c), class| {
             (s + class.pool.started(), c + class.pool.completed())
@@ -344,6 +357,7 @@ impl Simulation {
     }
 
     /// The next virtual time anything happens, if anything does.
+    #[must_use]
     pub fn next_event_at(&self) -> Option<f64> {
         let mut next = f64::INFINITY;
         for p in &self.shared_pools {
@@ -373,6 +387,12 @@ impl Simulation {
     /// alive, which is the only moment its keys can be read: a session that has
     /// just taken its last turn is finished in this same step and its chain goes
     /// with it.
+    #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        reason = "the pop follows a successful peek, and the second expect is inside a \
+                  debug assertion of the heap's own invariant"
+    )]
     pub fn step<F>(&mut self, on_turn: &mut F) -> Option<f64>
     where
         F: FnMut(&Session, &Turn),
@@ -440,6 +460,7 @@ impl Simulation {
     }
 
     /// Nodes sessions are placed across.
+    #[must_use]
     pub fn nodes(&self) -> usize {
         self.nodes
     }
@@ -453,6 +474,7 @@ impl Simulation {
     /// Measured as twice the spread's effective standard deviation — the ranks carrying most of
     /// the mass — rather than as a count of ranks ever drawn, which would depend on how long the
     /// run happened to be.
+    #[must_use]
     pub fn working_set(&self) -> Vec<(u64, u64, Option<f64>)> {
         self.shared_pools
             .iter()
@@ -462,9 +484,14 @@ impl Simulation {
                 (
                     index as u64,
                     pool.nominal(),
-                    selector
-                        .effective_ranks()
-                        .map(|r| r.min(pool.nominal() as f64)),
+                    selector.effective_ranks().map(|r| {
+                        #[expect(
+                            clippy::cast_precision_loss,
+                            reason = "a pool size; inexact only above 2^53 slots"
+                        )]
+                        let nominal = pool.nominal() as f64;
+                        r.min(nominal)
+                    }),
                 )
             })
             .collect()
@@ -475,6 +502,7 @@ impl Simulation {
     /// Reported because a run whose migration interval is long relative to session lifetime
     /// performs none, and a multi-node measurement that meant to exercise migration would
     /// otherwise look like one that did.
+    #[must_use]
     pub fn migrations(&self) -> u64 {
         self.migrations
     }
@@ -587,6 +615,10 @@ impl Simulation {
             .pool
             .finish(handle, &mut self.ids, &mut self.rng);
         for b in finished.take_chosen() {
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "class_id is a shared class's declaration index, made from a usize"
+            )]
             let owner = b.class_id() as usize;
             self.shared_pools[owner].release(b.into_held());
         }

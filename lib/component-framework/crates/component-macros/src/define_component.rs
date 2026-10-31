@@ -123,6 +123,10 @@ impl Parse for ComponentInput {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one quote! template per generated item; splitting it would scatter the component's generated code across helpers"
+)]
 pub(crate) fn expand(input: ComponentInput) -> TokenStream {
     let ComponentInput {
         vis,
@@ -283,7 +287,9 @@ pub(crate) fn expand(input: ComponentInput) -> TokenStream {
 
     // Generate new_default() when there are user fields.
     // Calls new() with Default::default() for each field.
-    let new_default_method = if !fields.is_empty() {
+    let new_default_method = if fields.is_empty() {
+        None
+    } else {
         let default_args: Vec<_> = fields
             .iter()
             .map(|(_, ftype)| {
@@ -298,8 +304,6 @@ pub(crate) fn expand(input: ComponentInput) -> TokenStream {
                 Self::new(#(#default_args),*)
             }
         })
-    } else {
-        None
     };
 
     // The init_interfaces method name (private, snake_case to avoid warning)

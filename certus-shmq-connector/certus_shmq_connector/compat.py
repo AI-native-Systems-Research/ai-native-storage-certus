@@ -193,7 +193,7 @@ FEATURES: dict[str, "callable"] = {
     # ``get_required_kvcache_layout()``, else the backends' default — and a
     # connector request no backend supports is dropped with a warning. Before
     # 0.29 that hook took legacy names ("HND"/"NHD") and block-outermost layouts
-    # did not exist, so CertusConnector requests BLHNC only here.
+    # did not exist, so CERTUS_KV_CACHE_LAYOUT=BLHNC needs 0.29 or later.
     "kvcache_layout_enum": lambda v: v >= (0, 29),  # verified @0.30 (vllm/v1/kv_cache_layout.py)
 }
 

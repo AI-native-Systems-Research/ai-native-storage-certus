@@ -1,0 +1,34 @@
+{
+  "applied_at": "2026-09-09",
+  "based_on": "proposals 2026-09-09",
+  "changes": [
+    {
+      "spec": "001-gpu-cuda-services",
+      "requirement": "FR-015",
+      "direction": "backfill",
+      "change_type": "modified_append",
+      "summary": "Documented CUDA_HOST_REGISTER_PORTABLE + idempotent ALREADY_REGISTERED/EBUSY handling + conditional cudaHostUnregister rollback."
+    },
+    {
+      "spec": "001-gpu-cuda-services",
+      "requirement": "FR-020",
+      "direction": "backfill",
+      "change_type": "modified_append",
+      "summary": "Documented CUDA_HOST_ALLOC_PORTABLE for the pinned DMA buffer."
+    },
+    {
+      "spec": "002-gpu-ssd-dma-prepare",
+      "requirement": "FR-019",
+      "direction": "backfill",
+      "change_type": "modified_append",
+      "summary": "Documented portable flag + idempotent registration, consistent with spec-001 FR-015."
+    }
+  ],
+  "new_specs": [],
+  "align_tasks": [],
+  "not_applied": [],
+  "result": {
+    "drift_status": "clean",
+    "actionable_drift_remaining": 0
+  }
+}

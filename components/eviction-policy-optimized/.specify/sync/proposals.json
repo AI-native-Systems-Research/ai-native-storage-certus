@@ -1,0 +1,28 @@
+{
+  "generated": "2026-10-31T04:54:40Z",
+  "based_on": "drift-report.json 2026-10-31T04:54:40Z",
+  "summary": {
+    "backfill": 1,
+    "align": 0,
+    "human_decision": 0,
+    "new_specs": 0
+  },
+  "proposals": [
+    {
+      "id": "B-1",
+      "spec": "specs/001-optimized-eviction-policy/spec.md",
+      "requirement": "all line citations",
+      "direction": "BACKFILL",
+      "kind": "citation",
+      "spec_says": "`src/lib.rs` citations past line 74 (US1 AS1-3, US3, US4, FR-001 to FR-011, FR-013, NFR-002, NFR-005, SC-002) and `src/lru_list.rs` citations in FR-009 and FR-012",
+      "code_does": "each mapped by the diff to its HEAD line (+37 before `create_pool`, +42 after it, +10 in `lru_list.rs`); citations at or before line 73 (`CMS_*`, `CountMinSketch`, `Pool`, `EvictionState`) did not move",
+      "rationale": "55a4ddd4 inserted lines above the cited code; the code is unchanged, so the code is authoritative.",
+      "confidence": "HIGH",
+      "approved": true
+    }
+  ],
+  "not_proposed": [
+    "Lock-poison panic not stated in the spec (pre-existing, unchanged); no proposal."
+  ],
+  "previous": null
+}

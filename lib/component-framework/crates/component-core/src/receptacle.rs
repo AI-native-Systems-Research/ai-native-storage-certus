@@ -61,6 +61,7 @@ impl<T: ?Sized + Send + Sync + 'static> Receptacle<T> {
     /// let r: Receptacle<dyn Send + Sync> = Receptacle::new();
     /// assert!(!r.is_connected());
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         Self {
             connection: RwLock::new(None),
@@ -69,9 +70,16 @@ impl<T: ?Sized + Send + Sync + 'static> Receptacle<T> {
 
     /// Connects a provider to this receptacle.
     ///
+    /// # Errors
+    ///
     /// Returns `Err(ReceptacleError::AlreadyConnected)` if the
     /// receptacle already has a connection. Call [`disconnect`](Self::disconnect)
     /// first.
+    ///
+    /// # Panics
+    ///
+    /// If the receptacle's lock is poisoned: an earlier
+    /// [`disconnect`](Self::disconnect) panicked while dropping the provider.
     ///
     /// # Examples
     ///
@@ -87,6 +95,11 @@ impl<T: ?Sized + Send + Sync + 'static> Receptacle<T> {
     /// // Second connect fails
     /// assert_eq!(r.connect(provider), Err(ReceptacleError::AlreadyConnected));
     /// ```
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the lock is poisoned only if a provider's Drop panicked inside disconnect; \
+                  propagating that panic is kept"
+    )]
     pub fn connect(&self, provider: Arc<T>) -> Result<(), ReceptacleError> {
         let mut guard = self.connection.write().unwrap();
         if guard.is_some() {
@@ -98,7 +111,15 @@ impl<T: ?Sized + Send + Sync + 'static> Receptacle<T> {
 
     /// Disconnects the current provider.
     ///
+    /// # Errors
+    ///
     /// Returns `Err(ReceptacleError::NotConnected)` if no provider is connected.
+    ///
+    /// # Panics
+    ///
+    /// If the receptacle's lock is poisoned (an earlier `disconnect`
+    /// panicked), or if dropping the provider's last `Arc` runs a `Drop` that
+    /// panics.
     ///
     /// # Examples
     ///
@@ -113,6 +134,11 @@ impl<T: ?Sized + Send + Sync + 'static> Receptacle<T> {
     /// r.connect(Arc::new(42u32) as Arc<dyn Send + Sync>).unwrap();
     /// assert!(r.disconnect().is_ok());
     /// ```
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the lock is poisoned only if a provider's Drop panicked inside disconnect; \
+                  propagating that panic is kept"
+    )]
     pub fn disconnect(&self) -> Result<(), ReceptacleError> {
         let mut guard = self.connection.write().unwrap();
         if guard.is_none() {
@@ -123,13 +149,30 @@ impl<T: ?Sized + Send + Sync + 'static> Receptacle<T> {
     }
 
     /// Returns `true` if a provider is currently connected.
+    ///
+    /// # Panics
+    ///
+    /// If the receptacle's lock is poisoned: an earlier
+    /// [`disconnect`](Self::disconnect) panicked while dropping the provider.
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the lock is poisoned only if a provider's Drop panicked inside disconnect; \
+                  propagating that panic is kept"
+    )]
     pub fn is_connected(&self) -> bool {
         self.connection.read().unwrap().is_some()
     }
 
     /// Returns a clone of the connected provider's `Arc`.
     ///
+    /// # Errors
+    ///
     /// Returns `Err(ReceptacleError::NotConnected)` if no provider is connected.
+    ///
+    /// # Panics
+    ///
+    /// If the receptacle's lock is poisoned: an earlier
+    /// [`disconnect`](Self::disconnect) panicked while dropping the provider.
     ///
     /// # Examples
     ///
@@ -144,6 +187,11 @@ impl<T: ?Sized + Send + Sync + 'static> Receptacle<T> {
     /// r.connect(Arc::new(42u32) as Arc<dyn Send + Sync>).unwrap();
     /// let provider = r.get().unwrap();
     /// ```
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the lock is poisoned only if a provider's Drop panicked inside disconnect; \
+                  propagating that panic is kept"
+    )]
     pub fn get(&self) -> Result<Arc<T>, ReceptacleError> {
         let guard = self.connection.read().unwrap();
         guard
@@ -159,9 +207,12 @@ impl<T: ?Sized + Send + Sync + 'static> Default for Receptacle<T> {
     }
 }
 
-// SAFETY: RwLock<Option<Arc<T>>> is Send + Sync when T: Send + Sync.
-// The bounds on T already enforce this.
+// SAFETY: the only field is a `RwLock<Option<Arc<T>>>`. With `T: Send + Sync`
+// (required by the impl bounds), `Arc<T>` is `Send + Sync`, and `RwLock<U>` is
+// `Send` for `U: Send`. (The compiler would derive this already.)
 unsafe impl<T: ?Sized + Send + Sync + 'static> Send for Receptacle<T> {}
+// SAFETY: `RwLock<U>` is `Sync` for `U: Send + Sync`, which
+// `Option<Arc<T>>` is under the same bounds.
 unsafe impl<T: ?Sized + Send + Sync + 'static> Sync for Receptacle<T> {}
 
 #[cfg(test)]
@@ -174,7 +225,7 @@ mod tests {
 
     struct TestImpl;
     impl ITestService for TestImpl {
-        fn call(&self) -> &str {
+        fn call(&self) -> &'static str {
             "test"
         }
     }

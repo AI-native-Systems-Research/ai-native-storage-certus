@@ -1,179 +1,83 @@
 {
-  "generated": "2026-10-21T00:00:00Z",
-  "project": "interfaces",
-  "branch": "fix/dispatcher-remove-clear-mt",
-  "head": "efd502331 + approved working-tree edits (specs/001-interfaces/spec.md:331, src/idispatcher.rs:832-837)",
-  "method": "Full analysis: every FR/NFR/SC located in src/** with file:line; every N-variant/N-field claim recounted; IDispatcher contracts touched by the branch checked against both implementors (dispatcher, dispatcher-p2p). cargo not permitted in this session, so SC-2/3/4/7 not re-executed.",
-  "summary": {
-    "specs_analyzed": 1,
-    "requirements_checked": 50,
-    "aligned": 38,
-    "drifted": 8,
-    "drift_items": 14,
-    "not_implemented": 0,
-    "not_reverified": 4,
-    "unspecced_features": 5
-  },
-  "branch_inputs_verified": [
+  "generated": "2026-10-31T05:08:52Z",
+  "branch": "specsync-a",
+  "base": "a0292be6 (origin/unstable)",
+  "head": "0a71990e",
+  "method": "delta: every hunk of git diff a0292be6 HEAD -- components/interfaces read; affected FR/NFR/SC re-checked with file:line; method counts recounted over every define_interface! block at base and HEAD",
+  "commits": [
+    "4941320a memcpy_batch_async",
+    "6a917346 merge (no own interfaces change)",
+    "55a4ddd4 clippy (docs, must_use, SAFETY, finish_non_exhaustive, # Errors/# Panics)"
+  ],
+  "checked": [
+    "FR-011",
+    "FR-021",
+    "FR-022",
+    "FR-029",
+    "FR-032",
+    "FR-018a (op_reserve wire)",
+    "NFR-003",
+    "NFR-004",
+    "NFR-005",
+    "NFR-006",
+    "SC-2",
+    "SC-3",
+    "SC-4",
+    "SC-7",
+    "Implementation Notes",
+    "plan.md interface counts"
+  ],
+  "aligned": [
+    "FR-021 WriteHandle publish/abort (src/iextent_manager.rs:137-168)",
+    "FR-022 GpuDmaBuffer (Debug output not quoted anywhere; src/igpu_services.rs:222)",
+    "FR-029 IZyreNode errors vs components/zyre/src/node.rs:78-83,144-269",
+    "FR-032 ZyreError 7 variants",
+    "NFR-003 Send+Sync set unchanged; SAFETY comments only",
+    "NFR-005",
+    "NFR-006",
+    "FR-018a op_reserve 0 on Err (lib/shmq-dispatcher/src/translate.rs:904)",
+    "SC-2/SC-7 cargo test -p interfaces: 35 unit + 54 doctests pass"
+  ],
+  "drifted": [
     {
-      "requirement": "FR-018a store_already_resident (approved spec edit)",
-      "spec_location": "components/interfaces/specs/001-interfaces/spec.md:331",
-      "code_location": "components/dispatcher/src/lib.rs:1214-1221 (not counted in evict_and_insert), :3507 and :3541 (counted in reserve_memory only)",
-      "status": "aligned"
+      "requirement": "FR-011",
+      "spec_text": "24 IGpuServices methods; no memcpy_batch_async",
+      "actual": "memcpy_batch_async added behind spdk (4941320a)",
+      "location": "components/interfaces/src/igpu_services.rs:745-768; components/gpu-services/src/lib.rs:973-1038",
+      "severity": "moderate",
+      "resolution": "BACKFILL P-1 applied"
     },
     {
-      "requirement": "IDispatcher::flush_to_ssd # Errors (approved doc edit)",
-      "spec_location": "components/interfaces/src/idispatcher.rs:832-837",
-      "code_location": "components/dispatcher/src/lib.rs:4026-4034; components/dispatcher/src/background.rs:362-380",
-      "status": "aligned for dispatcher; violated by dispatcher-p2p (see FR-008(c))"
-    }
-  ],
-  "specs": [
+      "requirement": "plan.md Interface Count",
+      "spec_text": "IGpuServices 24 (10 spdk), IDispatcher 24, total 178",
+      "actual": "IGpuServices 25 (11 spdk), IDispatcher 25 (clear_all, 266ed975), total 180",
+      "location": "components/interfaces/specs/001-interfaces/plan.md:8,25,28,52,55,65",
+      "severity": "minor",
+      "resolution": "BACKFILL P-2 applied"
+    },
     {
-      "id": "001-interfaces",
-      "title": "Shared Interface Trait Definitions",
-      "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
-        "FR-010", "FR-011", "FR-012", "FR-013", "FR-014", "FR-015", "FR-016",
-        "FR-018a", "FR-019", "FR-020", "FR-022", "FR-023a", "FR-024", "FR-025",
-        "FR-026", "FR-027", "FR-028", "FR-029", "FR-030", "FR-031", "FR-031a",
-        "FR-032", "FR-033", "FR-034",
-        "NFR-001", "NFR-003", "NFR-005", "NFR-006",
-        "SC-1", "SC-5", "SC-6"
-      ],
-      "drifted": [
-        {
-          "requirement": "FR-008(a) clear_memory_tier",
-          "spec_text": "spec.md:185 `clear_memory_tier(&self) -> Result<usize, DispatcherError>` - Evict all memory-tier entries. | src/idispatcher.rs:808-809 doc: 'Entries still being written are removed entirely.'",
-          "actual": "A pinned entry (incl. the write-through pin) keeps its slot and is retried; Timeout after 5 s with pinned entries left resident; Ok(n) counts only entries really cleared (commit cccfb328e, dispatcher FR-038).",
-          "location": "components/interfaces/src/idispatcher.rs:806-822; components/dispatcher/src/lib.rs:3940-4004",
-          "severity": "moderate",
-          "introduced_by_branch": true
-        },
-        {
-          "requirement": "FR-008(b) flush_to_ssd",
-          "spec_text": "spec.md:186 `flush_to_ssd(&self) -> Result<usize, DispatcherError>` - Flush pending writes to SSD.",
-          "actual": "Returns IoError if a failed write-through left an entry resident with no SSD copy; else the number of memory-tier entries that are is_evictable (commit 9bd231d85). Interface doc already updated (approved).",
-          "location": "components/dispatcher/src/lib.rs:4006-4035; components/interfaces/src/idispatcher.rs:824-838",
-          "severity": "minor",
-          "introduced_by_branch": true
-        },
-        {
-          "requirement": "FR-008(c) IDispatcher contract vs dispatcher-p2p",
-          "spec_text": "src/idispatcher.rs:627-628 remove 'Does NOT block waiting for background write-through ... Proceeds immediately'; :832-837 flush_to_ssd IoError on failed write-through; :806-810 clear_memory_tier.",
-          "actual": "dispatcher-p2p flush_to_ssd returns pre-flush in_flight() and never IoError; clear_memory_tier frees the slot of an ActiveReferences entry and counts it; remove maps the write-through pin's ActiveReferences to KeyNotFound. These are the three pre-repair bugs fixed in dispatcher by 9bd231d85 / cccfb328e / 0236a3c98.",
-          "location": "components/dispatcher-p2p/src/lib.rs:2889-2902, 2833-2864, 2380-2381 (pin installed at :2609)",
-          "severity": "major",
-          "introduced_by_branch": false
-        },
-        {
-          "requirement": "FR-008(d) IDispatcher method inventory / User Story 2",
-          "spec_text": "spec.md:171-189 lists 19 methods; spec.md:180 `copy_gpu_to_memory_async(&self, key: CacheKey, ipc_handle: IpcHandle, stream: GpuStream)`",
-          "actual": "22 methods; batch_populate (:688) and tier_event_stats (:883) unlisted; copy_gpu_to_memory_async takes `regions: &[IpcHandle]` (:732).",
-          "location": "components/interfaces/src/idispatcher.rs:679-688, 717-732, 877-883",
-          "severity": "moderate",
-          "introduced_by_branch": false
-        },
-        {
-          "requirement": "FR-008(e) batch_lookup doc comment",
-          "spec_text": "src/idispatcher.rs:591 'Returns one `Result` per input entry, in the same order.'",
-          "actual": "Returns Vec<LookupOutcome> (src/idispatcher.rs:599-602); spec.md:175 is already correct.",
-          "location": "components/interfaces/src/idispatcher.rs:591",
-          "severity": "minor",
-          "introduced_by_branch": false
-        },
-        {
-          "requirement": "FR-017 Command/Completion variant counts; ReadWriteStats",
-          "spec_text": "spec.md:312 'Command: 12-variant enum'; spec.md:313 'Completion: 11-variant enum'; spec.md:315 ReadWriteStats byte/op/latency-sum counters",
-          "actual": "Command 13 variants (+FlushSync, :408-414); Completion 12 (+FlushDone, :500-506); ReadWriteStats also has read/write_size_buckets with IO_SIZE_BUCKETS, size_bucket, bucket_lower_bound, merge_from.",
-          "location": "components/interfaces/src/iblock_device.rs:139-260, 322-414, 439-515",
-          "severity": "minor",
-          "introduced_by_branch": false
-        },
-        {
-          "requirement": "FR-018 DispatcherConfig field count; TierEventStats",
-          "spec_text": "spec.md:318 'DispatcherConfig: 18-field configuration' (list omits store_backpressure_ms)",
-          "actual": "19 fields incl. store_backpressure_ms (default 5000); TierEventStats (16 fields) not listed in FR-018.",
-          "location": "components/interfaces/src/idispatcher.rs:26-101, 116, 319-463",
-          "severity": "minor",
-          "introduced_by_branch": false
-        },
-        {
-          "requirement": "FR-021 FormatParams field count",
-          "spec_text": "spec.md:350 'FormatParams: 10-field format configuration with defaults.'",
-          "actual": "9 fields.",
-          "location": "components/interfaces/src/iextent_manager.rs:42-67",
-          "severity": "minor",
-          "introduced_by_branch": false
-        },
-        {
-          "requirement": "FR-023 LookupConfig field count",
-          "spec_text": "spec.md:382 'LookupConfig: 10-field configuration'",
-          "actual": "12 fields; adds caller_wait (default None) and connection_teardown_timeout (default 1000 ms).",
-          "location": "components/interfaces/src/iremote_lookup.rs:29-79, 82-97",
-          "severity": "minor",
-          "introduced_by_branch": false
-        },
-        {
-          "requirement": "Overview + FR-009 IMemoryTier spdk gating",
-          "spec_text": "spec.md:28-29 'The crate has two Cargo features' / spdk gates '... IMemoryTier ...'; spec.md:191 'IMemoryTier Interface (feature: spdk)'",
-          "actual": "IMemoryTier is ungated (define_interface! without cfg; unconditional pub use); three features declared.",
-          "location": "components/interfaces/src/imemory_tier.rs:53; components/interfaces/src/lib.rs:51; components/interfaces/Cargo.toml:13-19",
-          "severity": "minor",
-          "introduced_by_branch": false
-        },
-        {
-          "requirement": "NFR-002 gpu feature gating",
-          "spec_text": "spec.md:483 'GPU-specific code is gated behind --features gpu.'",
-          "actual": "No #[cfg(feature = \"gpu\")] anywhere in src/**; feature is declared but unused.",
-          "location": "components/interfaces/Cargo.toml:19",
-          "severity": "minor",
-          "introduced_by_branch": false
-        },
-        {
-          "requirement": "NFR-004 doc comments with runnable examples",
-          "spec_text": "spec.md:492 'All public types and methods have doc comments with runnable examples.'",
-          "actual": "No doc examples in idispatch_map, imemory_tier, ieviction_policy, iextent_manager, ipartition_table; undocumented public items (MemoryTierTelemetrySnapshot fields, ExtentManagerError variants, Extent fields, WriteHandle + methods, FormatParams::new).",
-          "location": "components/interfaces/src/imemory_tier.rs:13-15; components/interfaces/src/iextent_manager.rs:12-14, 20-24, 70, 95-146",
-          "severity": "moderate",
-          "introduced_by_branch": false
-        },
-        {
-          "requirement": "Implementation Notes: formally verified properties in comments",
-          "spec_text": "spec.md:545 'IDispatchMap: 10 props, IDispatcher: 10 props, IExtentManager: 10 props, IGpuServices: 10 props, IMemoryTier: 10 props'",
-          "actual": "Only igpu_services.rs keeps such a block; the others were stripped in a93b5620f (2026-08-20).",
-          "location": "components/interfaces/src/igpu_services.rs:231-246",
-          "severity": "minor",
-          "introduced_by_branch": false
-        },
-        {
-          "requirement": "Backfill banner: FR-014/FR-025 deferred orphaned module",
-          "spec_text": "spec.md:17-22 'IExtendedMetadataStore remains an orphaned module ... never declared/re-exported from lib.rs'",
-          "actual": "Declared and re-exported, ungated.",
-          "location": "components/interfaces/src/lib.rs:83, 105",
-          "severity": "minor",
-          "introduced_by_branch": false
-        }
-      ],
-      "not_implemented": [],
-      "not_reverified": [
-        {"requirement": "SC-2", "reason": "cargo build not permitted in this session"},
-        {"requirement": "SC-3", "reason": "cargo build --features spdk not permitted in this session"},
-        {"requirement": "SC-4", "reason": "cargo doc not permitted in this session; doc-content half contradicted by NFR-004"},
-        {"requirement": "SC-7", "reason": "cargo test not permitted; last evidence apply-report.md 2026-10-05 (78 passed)"}
-      ]
+      "requirement": "Implementation Notes citation",
+      "spec_text": "src/igpu_services.rs:231-246",
+      "actual": "src/igpu_services.rs:250-265",
+      "location": "components/interfaces/src/igpu_services.rs:250-265",
+      "severity": "cosmetic",
+      "resolution": "BACKFILL P-3 applied"
+    },
+    {
+      "requirement": "SC-4",
+      "spec_text": "cargo doc --no-deps is warning-free",
+      "actual": "3 unresolved-link warnings, all present at base a0292be6",
+      "location": "components/interfaces/src/idispatcher.rs:339; src/igpu_services.rs:587,607",
+      "severity": "minor",
+      "resolution": "P-4 not approved (ALIGN, src/ doc edit; pre-existing)"
     }
   ],
-  "unspecced": [
-    {"feature": "IDispatcher::batch_populate", "location": "components/interfaces/src/idispatcher.rs:679-688", "lines": 10, "suggested_spec": "001-interfaces FR-008"},
-    {"feature": "IDispatcher::tier_event_stats + TierEventStats", "location": "components/interfaces/src/idispatcher.rs:314-463, 877-883", "lines": 157, "suggested_spec": "001-interfaces FR-008/FR-018"},
-    {"feature": "Command::FlushSync / Completion::FlushDone", "location": "components/interfaces/src/iblock_device.rs:408-414, 500-506", "lines": 14, "suggested_spec": "001-interfaces FR-017"},
-    {"feature": "ReadWriteStats IO-size histograms and helpers", "location": "components/interfaces/src/iblock_device.rs:125-260", "lines": 135, "suggested_spec": "001-interfaces FR-017"},
-    {"feature": "LookupConfig caller_wait / connection_teardown_timeout", "location": "components/interfaces/src/iremote_lookup.rs:44-57", "lines": 14, "suggested_spec": "001-interfaces FR-023"}
+  "not_reverified": [
+    "SC-3 (no deps/spdk in this worktree)"
   ],
-  "conflicts": [
-    "interfaces IDispatcher contract (remove/clear_memory_tier/flush_to_ssd) vs dispatcher-p2p implementation (components/dispatcher-p2p/src/lib.rs:2357-2386, 2833-2864, 2889-2902)",
-    "interfaces clear_memory_tier doc (src/idispatcher.rs:808-809) vs dispatcher spec 001 FR-038 (approved 2026-10-20)",
-    "FR-018a 'store_already_resident MUST be counted' vs dispatcher-p2p leaving it at 0 by design (components/dispatcher-p2p/src/lib.rs:2932) - recorded, scope decision for dispatcher-p2p spec"
-  ]
+  "would_stamp": "clean",
+  "would_stamp_reason": "all drift introduced by this branch backfilled; P-4 (pre-existing rustdoc links) fixed in commit 26e7a9cc; interfaces-7/14 tracked since 2026-10-21",
+  "project": "interfaces",
+  "spec": "001-interfaces",
+  "previous": ".specify/sync/backups/20261031T050852Z/sync/drift-report.json (sync of 2026-10-21, branch fix/dispatcher-remove-clear-mt)"
 }

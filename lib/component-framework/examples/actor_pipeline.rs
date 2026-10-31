@@ -39,6 +39,10 @@ struct SquareProcessor {
 }
 
 impl ActorHandler<u64> for SquareProcessor {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the output channel's receiver is held by a pipe thread that outlives this sender, so send only fails if that thread panicked"
+    )]
     fn handle(&mut self, msg: u64) {
         let squared = msg * msg;
         println!("  Processor: {msg} -> {squared}");
@@ -53,11 +57,19 @@ struct Consumer {
 }
 
 impl ActorHandler<u64> for Consumer {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the shared mutex is only poisoned if another thread already panicked; re-panicking is the intended response"
+    )]
     fn handle(&mut self, msg: u64) {
         println!("  Consumer received: {msg}");
         self.results.lock().unwrap().push(msg);
     }
 
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the shared mutex is only poisoned if another thread already panicked; re-panicking is the intended response"
+    )]
     fn on_stop(&mut self) {
         let results = self.results.lock().unwrap();
         println!(
@@ -68,6 +80,10 @@ impl ActorHandler<u64> for Consumer {
     }
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "example program: a failed framework call is a bug in the example, and panicking with the error is how it reports it"
+)]
 fn main() {
     println!("=== Actor Pipeline Example ===");
     println!("  Producer -> Squarer -> Consumer\n");

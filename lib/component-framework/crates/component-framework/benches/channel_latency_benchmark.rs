@@ -18,6 +18,10 @@ use std::sync::Arc;
 const CAPACITY: usize = 1024;
 
 /// Measure single-message latency: send then recv on the same thread.
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+)]
 fn measure_latency(tx: &(dyn ISender<u64> + Send + Sync), rx: &(dyn IReceiver<u64> + Send + Sync)) {
     tx.send(42).unwrap();
     rx.recv().unwrap();
@@ -26,6 +30,10 @@ fn measure_latency(tx: &(dyn ISender<u64> + Send + Sync), rx: &(dyn IReceiver<u6
 // ---------------------------------------------------------------------------
 // SPSC latency
 // ---------------------------------------------------------------------------
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+)]
 fn spsc_latency(c: &mut Criterion) {
     let mut group = c.benchmark_group("spsc_latency");
 
@@ -80,6 +88,10 @@ fn spsc_latency(c: &mut Criterion) {
 // ---------------------------------------------------------------------------
 // MPSC latency (single-threaded send+recv, tests overhead of MPSC machinery)
 // ---------------------------------------------------------------------------
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+)]
 fn mpsc_latency(c: &mut Criterion) {
     let mut group = c.benchmark_group("mpsc_latency");
 

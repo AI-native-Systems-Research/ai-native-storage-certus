@@ -7,6 +7,12 @@ use component_framework::actor::Actor;
 use component_framework::iunknown::{query, IUnknown};
 use example_helloworld::{GreetRequest, GreeterHandler, HelloWorldComponent, IGreeter};
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "example binary: a missing interface or a failed actor start/send/stop ends the \
+              demo, so it aborts"
+)]
 fn main() {
     println!("=== Hello World Mainline Application ===\n");
 

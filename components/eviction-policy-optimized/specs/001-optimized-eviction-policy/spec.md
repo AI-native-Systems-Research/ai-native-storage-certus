@@ -48,14 +48,14 @@ estimated to be more valuable than the current victim.
    at the MRU end (empty pool), and each subsequent first-time key has frequency
    estimate equal to the current head's (both 1), so it is admitted at the LRU
    head (`push_front`) and the last tracked is evicted first
-   (`src/lib.rs:129-137`; test `track_and_evict_order`, `src/lib.rs:260-276`).
+   (`src/lib.rs:171-179`; test `track_and_evict_order`, `src/lib.rs:302-318`).
 2. **Given** a tracked entry is touched,
    **When** `identify_next_to_evict` is called,
    **Then** the touched entry moves to the MRU end and is NOT evicted first
-   (`src/lib.rs:142-156`; test `touch_moves_to_back`).
+   (`src/lib.rs:184-198`; test `touch_moves_to_back`).
 3. **Given** a tracked entry is removed,
    **When** `identify_next_to_evict` is called,
-   **Then** the removed entry is never returned (`src/lib.rs:186-200`; test
+   **Then** the removed entry is never returned (`src/lib.rs:228-242`; test
    `remove_invalidates_entry`).
 
 ### User Story 2 - Frequency-Based Admission (Priority: P1)
@@ -93,7 +93,7 @@ so that decisions in one domain do not affect another.
 
 1. **Given** two pools each with distinct entries, **When** an entry is popped
    from pool A, **Then** pool B's entries and sketch remain unchanged (test
-   `pools_are_independent`, `src/lib.rs:332-347`).
+   `pools_are_independent`, `src/lib.rs:374-389`).
 
 ### User Story 4 - Concurrent Access (Priority: P1)
 
@@ -105,7 +105,7 @@ so that the policy is safe under concurrent workloads.
 
 1. **Given** 4 threads each tracking 100 entries in the same pool, **When** all
    threads complete, **Then** the pool contains exactly 400 entries with no
-   corruption (test `concurrent_access`, `src/lib.rs:382-409`).
+   corruption (test `concurrent_access`, `src/lib.rs:424-451`).
 
 ## Requirements
 
@@ -114,13 +114,13 @@ so that the policy is safe under concurrent workloads.
 - **FR-001**: System MUST provide `create_pool()` returning a new, unique
   `PoolId`. Pool IDs are sequential starting from 0. Each pool owns its own LRU
   list AND its own Count-Min Sketch, `access_count`, and `max_len` counters
-  (`src/lib.rs:89-102`).
+  (`src/lib.rs:131-144`).
 - **FR-002**: System MUST provide `track(pool, key, semantics)` that (a)
   increments the pool's frequency sketch for `key`, (b) performs periodic aging
   (see FR-013), (c) applies the admission decision (FR-011) to choose the LRU
   insertion end, and (d) returns an opaque `EvictionHandle` for O(1) subsequent
   operations. The `semantics: BlockSemantics` argument is accepted for interface
-  conformance but ignored by this policy (`src/lib.rs:108`, `_semantics`).
+  conformance but ignored by this policy (`src/lib.rs:150`, `_semantics`).
   **Re-registration is NOT idempotent**: tracking a key already tracked in the
   same pool creates a *new* node and returns a *new* handle rather than
   refreshing an existing one (same deliberate divergence from the interface's
@@ -129,53 +129,53 @@ so that the policy is safe under concurrent workloads.
   upstream and MUST NOT `track` a key still tracked in the pool.
 - **FR-003**: System MUST provide `touch(handle)` that moves the referenced
   entry to the MRU end in O(1) time. `touch` does NOT update the frequency
-  sketch (only `track` does) (`src/lib.rs:142-156`).
+  sketch (only `track` does) (`src/lib.rs:184-198`).
 - **FR-004**: System MUST provide `batch_touch(handles)` that moves multiple
   entries to the MRU end, acquiring each pool's lock once across a run of
   handles for the same pool to amortize lock overhead. Empty input is a no-op
-  returning `Ok(())` (`src/lib.rs:158-184`).
+  returning `Ok(())` (`src/lib.rs:200-226`).
 - **FR-005**: System MUST provide `remove(handle)` that unlinks the referenced
-  entry from the ordering in O(1) time (`src/lib.rs:186-200`).
+  entry from the ordering in O(1) time (`src/lib.rs:228-242`).
 - **FR-006**: System MUST provide `identify_next_to_evict(pool)` that removes and
   returns the LRU-head key from the pool in O(1) time, or `None` if the pool is
-  empty (or the pool does not exist) (`src/lib.rs:202-207`).
+  empty (or the pool does not exist) (`src/lib.rs:244-249`).
 - **FR-007**: System MUST provide `get_eviction_candidates(pool, n)` that returns
   up to `n` LRU-head keys without removing them, in O(n) time. Returns an empty
-  vector for a non-existent pool (`src/lib.rs:209-218`).
+  vector for a non-existent pool (`src/lib.rs:251-260`).
 - **FR-008**: System MUST provide `len(pool)` returning the number of active
-  entries in the pool, or `0` for a non-existent pool (`src/lib.rs:220-229`).
+  entries in the pool, or `0` for a non-existent pool (`src/lib.rs:262-271`).
 - **FR-009**: System MUST provide `clear_pool(pool)` that removes all entries
   from the pool (no-op for a non-existent pool). Clearing resets the LRU list
   but does NOT reset the frequency sketch, `access_count`, or `max_len` — the
-  learned frequency history persists across a clear (`src/lib.rs:231-237`;
-  `clear` on the list only, `src/lru_list.rs:197-203`).
+  learned frequency history persists across a clear (`src/lib.rs:273-279`;
+  `clear` on the list only, `src/lru_list.rs:207-213`).
 - **FR-010**: Methods returning `Result` (`track`, `touch`, `batch_touch`,
   `remove`) MUST return `EvictionPolicyError::InvalidPool` for a non-existent
   pool. Methods returning `Option`/collection/scalar
   (`identify_next_to_evict`, `get_eviction_candidates`, `len`, `clear_pool`)
   MUST gracefully degrade (return `None`, empty, `0`, or no-op)
-  (`src/lib.rs:111-118,144-152,164-167,175-178,188-196,204,211,222,233`).
+  (`src/lib.rs:153-160,186-194,206-209,217-220,230-238,246,253,264,275`).
 - **FR-011**: On `track` into a **non-empty** pool the system MUST apply the
   TinyLFU admission gate: let `new_est` be the sketch estimate of the tracked
   key and `victim_est` the estimate of the current LRU-head key. The key is
   admitted at the LRU head (`push_front`, first to be evicted) when
   `new_est <= victim_est`; otherwise (`new_est > victim_est`) it is admitted at
-  the MRU end (`push_back`, protected) (`src/lib.rs:129-137`). On `track` into an
+  the MRU end (`push_back`, protected) (`src/lib.rs:171-179`). On `track` into an
   **empty** pool the key is admitted unconditionally at the back
-  (`src/lib.rs:136`). Note there is no absolute frequency threshold — the
+  (`src/lib.rs:178`). Note there is no absolute frequency threshold — the
   decision depends only on the comparison against the current victim.
 - **FR-012**: `touch` and `remove` on a stale handle (one whose entry was
   already removed, including by `clear_pool`, which discards the slots) MUST be
   idempotent (no panic, no effect), returning `Ok(())` silently. The guard is a
   range check on the slot index, then the node's `active` flag in the LRU list
-  (`src/lru_list.rs:113-118` `move_to_back`, `:168-173` `remove`). The
+  (`src/lru_list.rs:123-128` `move_to_back`, `:178-183` `remove`). The
   `InvalidHandle` error variant is defined in the interface but currently unused.
 - **FR-013**: The system MUST periodically age the frequency sketch to bound
   counter growth and let the policy adapt to shifting working sets: on each
   `track`, after updating `max_len` (the high-water mark of pool size) and
   incrementing `access_count`, if `max_len > 0` and
   `access_count % (max_len * 10) == 0` the sketch is halved (every counter
-  right-shifted by 1) (`src/lib.rs:121-127`, `CountMinSketch::halve`
+  right-shifted by 1) (`src/lib.rs:163-169`, `CountMinSketch::halve`
   `src/lib.rs:54-60`).
 
 ### Non-Functional Requirements
@@ -186,7 +186,7 @@ so that the policy is safe under concurrent workloads.
   `CMS_ROWS * CMS_COLS`), independent of pool size (`src/lib.rs:18-19,38-60`).
 - **NFR-002**: The component MUST be thread-safe — concurrent access MUST NOT
   cause data corruption (`RwLock<EvictionState>` + per-pool `Mutex`,
-  `src/lib.rs:71-73,83,90,110,119`).
+  `src/lib.rs:71-73,120,132,152,161`).
 - **NFR-003**: Per-pool locking granularity — operations on different pools MUST
   NOT contend (except during `create_pool`, which write-locks the state).
 - **NFR-004**: The Count-Min Sketch MUST use bounded memory that is independent
@@ -195,7 +195,7 @@ so that the policy is safe under concurrent workloads.
   dimensions).
 - **NFR-005**: The component MUST conform to the Certus component model
   (`define_component!`, provides `IEvictionPolicy`, single `logger` receptacle),
-  making it a drop-in replacement for `eviction-policy-lru` (`src/lib.rs:75-86`).
+  making it a drop-in replacement for `eviction-policy-lru` (`src/lib.rs:112-123`).
 
 ## Key Entities
 
@@ -237,7 +237,7 @@ so that the policy is safe under concurrent workloads.
 - **SC-001**: All tests in `lib.rs` and `lru_list.rs` pass
   (`cargo test -p eviction-policy-optimized`).
 - **SC-002**: The concurrent test (4 threads × 100 entries) completes with
-  exactly 400 entries and no panic or corruption (`src/lib.rs:382-409`).
+  exactly 400 entries and no panic or corruption (`src/lib.rs:424-451`).
 - **SC-003**: `cargo clippy -- -D warnings` and `cargo fmt --check` pass cleanly.
 - **SC-004**: The component builds and wires into the `full-optimized` profile
   (`CERTUS_PROFILE=full-optimized cargo build -p certus-server-yaml --release`)

@@ -339,6 +339,7 @@ impl Bench<'_> {
                 gpu_dst: self.buffers.gpu_at(i * stride),
                 start_lba: i as u64 * lbas_per_object,
                 total_bytes: object_size,
+                regions: &[],
             })
             .collect();
         let label = format!("batch_{}x{}KiB", BATCH_OBJECTS, object_size / 1024);

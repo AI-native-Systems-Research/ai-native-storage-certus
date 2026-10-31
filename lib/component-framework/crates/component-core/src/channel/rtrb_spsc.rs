@@ -10,7 +10,7 @@
 
 use std::any::{Any, TypeId};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use crate::error::RegistryError;
 use crate::interface::{InterfaceInfo, ReceptacleInfo};
@@ -44,6 +44,11 @@ pub struct RtrbSender<T> {
 }
 
 impl<T: Send + 'static> ISender<T> for RtrbSender<T> {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the lock is poisoned only if a rejected value's Drop panicked inside \
+                  try_send; propagating that panic is kept"
+    )]
     fn send(&self, value: T) -> Result<(), ChannelError> {
         let mut val = value;
         loop {
@@ -59,6 +64,11 @@ impl<T: Send + 'static> ISender<T> for RtrbSender<T> {
         }
     }
 
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the lock is poisoned only if a rejected value's Drop panicked inside \
+                  try_send; propagating that panic is kept"
+    )]
     fn try_send(&self, value: T) -> Result<(), ChannelError> {
         let mut guard = self.inner.lock().unwrap();
         guard.push(value).map_err(|_| ChannelError::Full)
@@ -93,19 +103,19 @@ pub struct RtrbReceiver<T> {
 impl<T: Send + 'static> IReceiver<T> for RtrbReceiver<T> {
     fn recv(&self) -> Result<T, ChannelError> {
         loop {
-            let mut guard = self.inner.lock().unwrap();
-            match guard.pop() {
-                Ok(val) => return Ok(val),
-                Err(_) => {
-                    drop(guard);
-                    std::thread::park_timeout(std::time::Duration::from_millis(1));
-                }
+            // Never poisoned: only `pop` runs under it, which drops no `T`.
+            let mut guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Ok(val) = guard.pop() {
+                return Ok(val);
             }
+            drop(guard);
+            std::thread::park_timeout(std::time::Duration::from_millis(1));
         }
     }
 
     fn try_recv(&self) -> Result<T, ChannelError> {
-        let mut guard = self.inner.lock().unwrap();
+        // Never poisoned: only `pop` runs under it, which drops no `T`.
+        let mut guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         guard.pop().map_err(|_| ChannelError::Empty)
     }
 }
@@ -168,6 +178,7 @@ impl<T: Send + 'static> RtrbChannel<T> {
     ///
     /// let ch = RtrbChannel::<u32>::new(64);
     /// ```
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         assert!(capacity > 0, "capacity must be greater than zero");
         let (producer, consumer) = rtrb::RingBuffer::new(capacity);
@@ -201,6 +212,7 @@ impl<T: Send + 'static> RtrbChannel<T> {
     ///
     /// let ch = RtrbChannel::<String>::with_default_capacity();
     /// ```
+    #[must_use]
     pub fn with_default_capacity() -> Self {
         Self::new(1024)
     }
@@ -219,6 +231,10 @@ impl<T: Send + 'static> RtrbChannel<T> {
     /// let ch = RtrbChannel::<u32>::new(4);
     /// let tx = ch.sender().unwrap();
     /// ```
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "the only panic is the slot expect, which the sender_bound CAS rules out"
+    )]
     pub fn sender(&self) -> Result<RtrbSender<T>, ChannelError> {
         if self
             .sender_bound
@@ -229,10 +245,17 @@ impl<T: Send + 'static> RtrbChannel<T> {
                 reason: "rtrb SPSC channel already has a sender".into(),
             });
         }
+        // Winning the `sender_bound` CAS (never reset) makes this the only
+        // take of the slot, so it is `Some`; the lock only guards that take,
+        // so it is never poisoned.
+        #[expect(
+            clippy::expect_used,
+            reason = "the sender_bound CAS above makes this the only take"
+        )]
         let producer = self
             .producer
             .lock()
-            .unwrap()
+            .unwrap_or_else(PoisonError::into_inner)
             .take()
             .expect("producer already taken");
         Ok(RtrbSender {
@@ -254,6 +277,10 @@ impl<T: Send + 'static> RtrbChannel<T> {
     /// let ch = RtrbChannel::<u32>::new(4);
     /// let rx = ch.receiver().unwrap();
     /// ```
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "the only panic is the slot expect, which the receiver_bound CAS rules out"
+    )]
     pub fn receiver(&self) -> Result<RtrbReceiver<T>, ChannelError> {
         if self
             .receiver_bound
@@ -264,10 +291,17 @@ impl<T: Send + 'static> RtrbChannel<T> {
                 reason: "rtrb SPSC channel already has a receiver".into(),
             });
         }
+        // Winning the `receiver_bound` CAS (never reset) makes this the only
+        // take of the slot, so it is `Some`; the lock only guards that take,
+        // so it is never poisoned.
+        #[expect(
+            clippy::expect_used,
+            reason = "the receiver_bound CAS above makes this the only take"
+        )]
         let consumer = self
             .consumer
             .lock()
-            .unwrap()
+            .unwrap_or_else(PoisonError::into_inner)
             .take()
             .expect("consumer already taken");
         Ok(RtrbReceiver {
@@ -287,10 +321,15 @@ impl<T: Send + 'static> IUnknown for RtrbChannel<T> {
                 return None;
             }
             let stored = self.sender_iface.get_or_init(|| {
+                // As in `sender()`: the CAS above makes this the only take.
+                #[expect(
+                    clippy::expect_used,
+                    reason = "the sender_bound CAS above makes this the only take"
+                )]
                 let producer = self
                     .producer
                     .lock()
-                    .unwrap()
+                    .unwrap_or_else(PoisonError::into_inner)
                     .take()
                     .expect("producer already taken");
                 let sender = RtrbSender {
@@ -309,10 +348,15 @@ impl<T: Send + 'static> IUnknown for RtrbChannel<T> {
                 return None;
             }
             let stored = self.receiver_iface.get_or_init(|| {
+                // As in `receiver()`: the CAS above makes this the only take.
+                #[expect(
+                    clippy::expect_used,
+                    reason = "the receiver_bound CAS above makes this the only take"
+                )]
                 let consumer = self
                     .consumer
                     .lock()
-                    .unwrap()
+                    .unwrap_or_else(PoisonError::into_inner)
                     .take()
                     .expect("consumer already taken");
                 let receiver = RtrbReceiver {
@@ -327,7 +371,7 @@ impl<T: Send + 'static> IUnknown for RtrbChannel<T> {
         }
     }
 
-    fn version(&self) -> &str {
+    fn version(&self) -> &'static str {
         "1.0.0"
     }
 

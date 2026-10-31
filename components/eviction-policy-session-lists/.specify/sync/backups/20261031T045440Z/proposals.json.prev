@@ -1,0 +1,37 @@
+{
+  "generated": "2026-08-20",
+  "component": "eviction-policy-session-lists",
+  "based_on": "drift-report.{json,md} (2026-08-20; 23 aligned, 1 drifted, 0 not_implemented, 0 unspecced)",
+  "policy": ".specify/sync/PHASE_B_POLICY.md",
+  "prior_pass": "proposals-20260807.json",
+  "summary": { "backfill": 1, "backfill_unspecced": 0, "align": 0, "resolved": 0, "human_decision": 0 },
+  "proposals": [
+    {
+      "id": "esl-001-SC-001-resync",
+      "spec": "001-session-list-eviction",
+      "requirement": "SC-001",
+      "direction": "BACKFILL",
+      "confidence": "HIGH",
+      "rationale": "location=specs/001-session-list-eviction/spec.md:114 and source benches/session_list_benchmark.rs confirm the benchmark measures only this component's hot-path throughput (four benches: track, touch, batch_touch, identify_next_to_evict) through IEvictionPolicy. No comparative session-lists-vs-eviction-policy-lru trace-replay/hit-rate harness exists. Eviction implementation is correct and intentional (FR-001..FR-018, SC-002..SC-006 aligned). SC-001's >=15% figure is an aspirational design goal, not a behavioral requirement the code violates. Spec-lag -> BACKFILL, not ALIGN.",
+      "before": "SC-001 (design goal - not yet verified; downgraded 2026-08-07): ...design target >=15%... 'benches/session_list_benchmark.rs measures only this component's hot-path throughput, not a hit-rate comparison. Until that harness exists, the >=15% figure is a target, not a measured outcome.'",
+      "after": "SC-001 (design goal - not a measured outcome; downgraded 2026-08-07, re-verified 2026-08-20): ...names the four Criterion benches (track, touch, batch_touch, identify_next_to_evict); states it is explicitly NOT a verified measurable outcome; points to align-tasks.md Task 1 as the tracked follow-up.",
+      "applied": true
+    },
+    {
+      "id": "esl-001-metadata",
+      "spec": "001-session-list-eviction",
+      "requirement": "(metadata)",
+      "direction": "BACKFILL",
+      "confidence": "HIGH",
+      "rationale": "Policy: update Last-Synced/Status metadata if present. Added a Last-Synced: 2026-08-20 line under Status.",
+      "before": "(no Last-Synced line)",
+      "after": "**Last-Synced**: 2026-08-20 (spec-sync Phase B; SC-001 re-verified against benches/session_list_benchmark.rs)",
+      "applied": true
+    }
+  ],
+  "no_action": {
+    "not_implemented": [],
+    "unspecced": [],
+    "align": "No new ALIGN items. Pre-existing align-tasks.md Task 1 (build comparative prefix-reload harness) carried forward unchanged."
+  }
+}

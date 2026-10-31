@@ -1,7 +1,7 @@
 //! MPSC throughput benchmarks comparing all MPSC-capable backends.
 //!
-//! Backends: built-in MpscChannel, CrossbeamBounded, CrossbeamUnbounded,
-//! Kanal, TokioMpsc.
+//! Backends: built-in `MpscChannel`, `CrossbeamBounded`, `CrossbeamUnbounded`,
+//! Kanal, `TokioMpsc`.
 //! rtrb excluded (SPSC only).
 
 use component_framework::channel::crossbeam_bounded::CrossbeamBoundedChannel;
@@ -20,6 +20,10 @@ const MSG_COUNT: u64 = 100_000;
 // ---------------------------------------------------------------------------
 // Helper: run MPSC throughput benchmark with N producers
 // ---------------------------------------------------------------------------
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+)]
 fn run_mpsc_u64(
     ch_sender: impl Fn() -> Arc<dyn ISender<u64> + Send + Sync>,
     rx: Arc<dyn IReceiver<u64> + Send + Sync>,
@@ -47,6 +51,10 @@ fn run_mpsc_u64(
     consumer.join().unwrap();
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+)]
 fn run_mpsc_vec(
     ch_sender: impl Fn() -> Arc<dyn ISender<Vec<u8>> + Send + Sync>,
     rx: Arc<dyn IReceiver<Vec<u8>> + Send + Sync>,
@@ -77,6 +85,10 @@ fn run_mpsc_vec(
 // ---------------------------------------------------------------------------
 // MPSC throughput — small messages (u64)
 // ---------------------------------------------------------------------------
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+)]
 fn mpsc_throughput_small(c: &mut Criterion) {
     let mut group = c.benchmark_group("mpsc_throughput_u64");
     group.throughput(Throughput::Elements(MSG_COUNT));
@@ -183,6 +195,10 @@ fn mpsc_throughput_small(c: &mut Criterion) {
 // ---------------------------------------------------------------------------
 // MPSC throughput — large messages (Vec<u8> 1024 bytes)
 // ---------------------------------------------------------------------------
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+)]
 fn mpsc_throughput_large(c: &mut Criterion) {
     let mut group = c.benchmark_group("mpsc_throughput_vec1024");
     group.throughput(Throughput::Elements(MSG_COUNT));

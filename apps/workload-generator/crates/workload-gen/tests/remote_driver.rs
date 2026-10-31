@@ -33,6 +33,14 @@ impl Service for Stub {
     fn hello(&mut self, hello: &Hello) -> HelloAck {
         handshake::answer(hello, 8, 32768)
     }
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test helper outside #[test]: a failure here must fail the test"
+    )]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "stub reply: a test path is a handful of keys"
+    )]
     fn submit_turn(&mut self, turn: &SubmitTurn) -> TurnOutcome {
         self.seen.0.lock().unwrap().push(turn.session);
         TurnOutcome {
@@ -41,6 +49,10 @@ impl Service for Stub {
             ..Default::default()
         }
     }
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test helper outside #[test]: a failure here must fail the test"
+    )]
     fn stats(&mut self) -> Stats {
         // A histogram with known contents, so the merge can be checked rather than trusted.
         let mut h = hdrhistogram::Histogram::<u64>::new_with_bounds(1, 60_000_000, 3).unwrap();
@@ -87,6 +99,10 @@ impl LocalLauncher {
             running: Arc::new(Mutex::new(Vec::new())),
         }
     }
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test helper outside #[test]: a failure here must fail the test"
+    )]
     fn sessions_on(&self, port: u16) -> Vec<u64> {
         for (p, s) in self.seen.lock().unwrap().iter() {
             if *p == port {
@@ -98,6 +114,10 @@ impl LocalLauncher {
 }
 
 impl Launcher for LocalLauncher {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test helper outside #[test]: a failure here must fail the test"
+    )]
     fn launch(&self, spec: &AgentSpec) -> Result<(), String> {
         let seen = Seen::default();
         self.seen.lock().unwrap().push((spec.port, seen.clone()));
@@ -126,6 +146,10 @@ impl Launcher for LocalLauncher {
         self.running.lock().unwrap().push((spec.port, stop));
         Ok(())
     }
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test helper outside #[test]: a failure here must fail the test"
+    )]
     fn kill(&self, spec: &AgentSpec) -> Result<(), String> {
         for (port, stop) in self.running.lock().unwrap().iter() {
             if *port == spec.port {
@@ -146,6 +170,10 @@ impl Launcher for LocalLauncher {
 /// fails. Remembering what has been issued closes that window. A port can still
 /// be taken by an unrelated process between the probe and the real bind; that
 /// would need a retry at the bind site.
+#[expect(
+    clippy::unwrap_used,
+    reason = "test helper outside #[test]: a failure here must fail the test"
+)]
 fn free_port() -> u16 {
     static ISSUED: OnceLock<Mutex<HashSet<u16>>> = OnceLock::new();
     let issued = ISSUED.get_or_init(|| Mutex::new(HashSet::new()));
@@ -153,7 +181,11 @@ fn free_port() -> u16 {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let p = l.local_addr().unwrap().port();
         drop(l);
-        if issued.lock().unwrap_or_else(|e| e.into_inner()).insert(p) {
+        if issued
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(p)
+        {
             return p;
         }
     }
@@ -173,7 +205,7 @@ fn spec(port: u16) -> AgentSpec {
     }
 }
 
-const DESCRIPTION: &str = r#"
+const DESCRIPTION: &str = r"
 version: 1
 blocks: {tokens: 16, bytes: 32768}
 shared_classes:
@@ -188,11 +220,11 @@ session_classes:
     input_growth: {constant: 2}
     output_growth: {constant: 1}
     think_time: {constant: 5}
-"#;
+";
 
 /// The same shape as `DESCRIPTION`, with a migration interval short relative to a session's
 /// life, so a run over 60 virtual seconds must perform migrations rather than merely be able to.
-const MIGRATING: &str = r#"
+const MIGRATING: &str = r"
 version: 1
 blocks: {tokens: 16, bytes: 32768}
 shared_classes:
@@ -208,7 +240,7 @@ session_classes:
     output_growth: {constant: 1}
     think_time: {constant: 1}
     migration_interval: {constant: 1.0}
-"#;
+";
 
 fn options() -> RunOptions {
     RunOptions {

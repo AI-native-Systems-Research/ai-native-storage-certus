@@ -1,36 +1,20 @@
-# Sync Apply Report
+# Sync Apply Report: eviction-policy-lru
 
-Applied: 2026-06-19
+Applied: 2026-10-31T04:54:40Z
+Backup: `backups/20261031T045440Z/`
 
-## Changes Made
+## Specs Updated
 
-### Specs Updated
+| Spec | Item | Change Type |
+|---|---|---|
+| specs/001-lru-eviction-policy/spec.md | FR-002 | Citation update |
 
-| Spec | Requirement | Change Type | Proposal |
-|------|-------------|-------------|----------|
-| 001-lru-eviction-policy | FR-009 | Modified | P1 (backfill) |
-| 001-lru-eviction-policy | FR-010 | Modified | P2 (backfill) |
-| 001-lru-eviction-policy | SC-001 | Modified | P4 (backfill) |
+## Implementation Tasks Generated
 
-### New Specs Created
+None.
 
-(None)
+## Not Applied
 
-### Implementation Tasks Generated
+None.
 
-- 1 task in `.specify/sync/align-tasks.md`:
-  - **NFR-004**: Add trace-level logging to use the ILogger receptacle
-
-### Not Applied
-
-(All proposals were approved and applied)
-
-## Backup
-
-Original spec saved to: `.specify/sync/backups/spec.md.2026-06-19.bak`
-
-## Next Steps
-
-1. Review updated spec: `specs/001-lru-eviction-policy/spec.md` (relocated from `.specify/specs/` this sweep)
-2. Implement align task: Add logging per `.specify/sync/align-tasks.md`
-3. Commit changes: `git add .specify/ && git commit -m "sync: apply drift resolutions for eviction-policy-lru"`
+No `src/` file changed. The `spec_sync_*` frontmatter is left for the final stamping pass.

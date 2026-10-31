@@ -53,7 +53,7 @@ use workload_wire::server::{FnFactory, Server, Service};
 /// One turn as either path sees it: whose it is, what it names, and whether it polls.
 type Turn = (u64, Vec<u64>, bool);
 
-const DESCRIPTION: &str = r#"
+const DESCRIPTION: &str = r"
 version: 1
 blocks: {tokens: 16, bytes: 32768}
 shared_classes:
@@ -68,7 +68,7 @@ session_classes:
     input_growth: {constant: 2}
     output_growth: {constant: 1}
     think_time: {constant: 5}
-"#;
+";
 
 const SPAN: f64 = 120.0;
 const SEED: u64 = 31;
@@ -79,6 +79,10 @@ const SEED: u64 = 31;
 /// take the turn's key path. It is written out here rather than called, because the code it
 /// describes no longer exists: that is what makes this a regression guard against the behaviour
 /// FR-079 removed rather than a comparison of two implementations that both still ship.
+#[expect(
+    clippy::unwrap_used,
+    reason = "test helper outside #[test]: a failure here must fail the test"
+)]
 fn local_turns() -> Vec<Turn> {
     let d: WorkloadDescription = DESCRIPTION.parse().unwrap();
     let mut sim = Simulation::new(&d, SEED, 1).unwrap();
@@ -128,6 +132,10 @@ impl Service for Stub {
     fn hello(&mut self, hello: &Hello) -> HelloAck {
         handshake::answer(hello, 8, 32768)
     }
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test helper outside #[test]: a failure here must fail the test"
+    )]
     fn submit_turn(&mut self, turn: &SubmitTurn) -> TurnOutcome {
         self.seen
             .0
@@ -163,6 +171,11 @@ fn driven_turns(lanes: usize, options: &RunOptions) -> Vec<Turn> {
 }
 
 /// The same, at an explicit pipelining depth.
+#[expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test helper outside #[test]: a failure here must fail the test"
+)]
 fn driven_turns_at_depth(lanes: usize, depth: usize, options: &RunOptions) -> Vec<Turn> {
     let seen = Recorded::default();
     let port = {
@@ -235,7 +248,7 @@ fn remote_turns() -> Vec<Turn> {
 /// however the lanes happen to be scheduled, and that is allowed. What is not allowed is a
 /// session's own turns arriving out of order, because turn n+1's path holds what turn n stored.
 fn by_session(turns: &[Turn]) -> std::collections::BTreeMap<u64, Vec<Turn>> {
-    let mut out: std::collections::BTreeMap<u64, Vec<Turn>> = Default::default();
+    let mut out: std::collections::BTreeMap<u64, Vec<Turn>> = std::collections::BTreeMap::default();
     for t in turns {
         out.entry(t.0).or_default().push(t.clone());
     }
@@ -278,7 +291,8 @@ fn a_turns_path_runs_from_the_root_and_grows() {
     // prefix from the root, so a session's later turns are supersets of its earlier ones — if the
     // paths were empty, or one key long, the equivalence above would be vacuous.
     let local = local_turns();
-    let mut by_session: std::collections::BTreeMap<u64, Vec<usize>> = Default::default();
+    let mut by_session: std::collections::BTreeMap<u64, Vec<usize>> =
+        std::collections::BTreeMap::default();
     for (session, path, _) in &local {
         by_session.entry(*session).or_default().push(path.len());
     }

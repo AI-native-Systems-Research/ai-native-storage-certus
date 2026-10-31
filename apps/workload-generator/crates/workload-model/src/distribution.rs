@@ -139,6 +139,7 @@ impl Distribution {
     /// let d = Distribution::new(Kind::Exponential { mean: 10.0 });
     /// assert_eq!(d.min(), None);
     /// ```
+    #[must_use]
     pub fn new(kind: Kind) -> Self {
         let (min, max) = match &kind {
             Kind::Uniform { min, max } => (Some(*min), Some(*max)),
@@ -175,6 +176,7 @@ impl Distribution {
     /// let d = Distribution::new(Kind::Normal { mean: 5.0, sigma: 1.0 }).bounded(Some(1.0), None);
     /// assert_eq!(d.min(), Some(1.0));
     /// ```
+    #[must_use]
     pub fn bounded(mut self, min: Option<f64>, max: Option<f64>) -> Self {
         if min.is_some() {
             self.min = min;
@@ -186,16 +188,19 @@ impl Distribution {
     }
 
     /// The kind, as written.
+    #[must_use]
     pub fn kind(&self) -> &Kind {
         &self.kind
     }
 
     /// The written lower truncation bound, if any.
+    #[must_use]
     pub fn min(&self) -> Option<f64> {
         self.min
     }
 
     /// The written upper truncation bound, if any.
+    #[must_use]
     pub fn max(&self) -> Option<f64> {
         self.max
     }
@@ -214,6 +219,11 @@ impl Distribution {
     /// let d = Distribution::new(Kind::Exponential { mean: 5.0 });
     /// assert_eq!(d.requested_mean(), 5.0);
     /// ```
+    #[must_use]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a sample count; inexact only above 2^53 samples"
+    )]
     pub fn requested_mean(&self) -> f64 {
         match &self.kind {
             Kind::Constant { value } => *value,
@@ -239,6 +249,10 @@ impl Distribution {
     /// # Errors
     ///
     /// If the file cannot be read, or holds no parsable number.
+    #[expect(
+        clippy::unnecessary_debug_formatting,
+        reason = "the quoted Debug form delimits the path in the error; Display would change the message"
+    )]
     pub fn load_sample_files(&mut self, base_dir: &Path) -> Result<()> {
         let Some(name) = self.sample_file.take() else {
             return Ok(());
@@ -365,6 +379,10 @@ impl Distribution {
         // jumps at the point, so `F(hi) - F(lo)` is legitimately zero there and
         // the emptiness test must not be applied. `{constant: inf}` takes this
         // path too, which is how a description says "never expires".
+        #[expect(
+            clippy::float_cmp,
+            reason = "exact equality is the point-mass test: both bounds are the same value"
+        )]
         let degenerate = lo == hi;
         if !degenerate && f_hi - f_lo <= 0.0 {
             return Err(Error::new(format!(
@@ -399,6 +417,10 @@ impl Distribution {
         // with an observation: `cdf(lo)` already counts the sample at `lo`,
         // while the draw includes it. Deriving both from the same index range
         // keeps the reported mass and the realised draws consistent.
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "sample counts and indices; inexact only above 2^53 samples"
+        )]
         let (kept_mass, authored_mass) = match (&kind, retained) {
             (Kind::Empirical { samples, .. }, Some((first, last))) => {
                 let n = samples.len() as f64;
@@ -551,6 +573,14 @@ impl Kind {
     }
 }
 
+#[expect(
+    clippy::many_single_char_names,
+    reason = "n, i, a, b, x follow the order-statistic notation of the comment"
+)]
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "sample counts and indices; inexact only above 2^53 samples"
+)]
 fn empirical_cdf(samples: &[f64], interpolate: bool, x: f64) -> f64 {
     let n = samples.len();
     if n == 0 {
@@ -576,6 +606,16 @@ fn empirical_cdf(samples: &[f64], interpolate: bool, x: f64) -> f64 {
     (i as f64 + within) / (n - 1) as f64
 }
 
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "sample counts and indices; inexact only above 2^53 samples"
+)]
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "p is a probability, so the floored position is in [0, n]; the saturating \
+              cast plus min() clamps it to a valid index"
+)]
 fn empirical_ppf(samples: &[f64], interpolate: bool, p: f64) -> f64 {
     let n = samples.len();
     if n == 0 {
@@ -637,6 +677,13 @@ impl Resolved {
     ///     assert!((4.0..=6.0).contains(&x));
     /// }
     /// ```
+    #[expect(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "u is in [0, 1) and n is a retained sample count (exact below 2^53), so \
+                  the floored position is in [0, n); min() keeps it a valid index"
+    )]
     pub fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> f64 {
         let u: f64 = rng.gen();
         if let Some((first, last)) = self.retained {
@@ -673,6 +720,11 @@ impl Resolved {
     ///     assert!((0..=5).contains(&r.sample_int(&mut rng)));
     /// }
     /// ```
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the draw is rounded first, so only out-of-i64-range values change, and \
+                  those saturate"
+    )]
     pub fn sample_int<R: Rng + ?Sized>(&self, rng: &mut R) -> i64 {
         assert!(
             self.integral,
@@ -682,12 +734,14 @@ impl Resolved {
     }
 
     /// Whether this was resolved for an integer-valued consumer.
+    #[must_use]
     pub fn is_integral(&self) -> bool {
         self.integral
     }
 
     /// The effective bounds, after folding the written bounds, the consumer's
     /// cap, the kind's support, and any half-unit widening.
+    #[must_use]
     pub fn bounds(&self) -> (f64, f64) {
         (self.lo, self.hi)
     }
@@ -703,7 +757,15 @@ impl Resolved {
     /// let r = d.resolve(None).unwrap();
     /// assert!((r.quantile(0.5) - 5.0).abs() < 1e-12);
     /// ```
+    #[must_use]
     pub fn quantile(&self, p: f64) -> f64 {
+        #[expect(
+            clippy::cast_precision_loss,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "n is a retained sample count (exact below 2^53); the saturating cast \
+                      plus min() clamps the floored position to a valid index"
+        )]
         let x = if let Some((first, last)) = self.retained {
             let n = last - first;
             let idx = first + ((p * n as f64).floor() as usize).min(n - 1);
@@ -735,6 +797,7 @@ impl Resolved {
     /// assert!((eff.mean - 2.5).abs() < 1e-12);
     /// assert_eq!(eff.discarded, 0.0);
     /// ```
+    #[must_use]
     pub fn effective(&self) -> Effective {
         Effective {
             requested_mean: self.requested_mean,
@@ -765,6 +828,14 @@ impl Resolved {
 
     /// The mean actually realised, including the effect of rounding when
     /// integral.
+    #[expect(
+        clippy::float_cmp,
+        reason = "exact equality is the point-mass test: both bounds are the same value"
+    )]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a sample count; inexact only above 2^53 samples"
+    )]
     fn effective_mean(&self) -> f64 {
         // Point mass: the mean is the point, and no enumeration or closed form
         // is meaningful because the CDF has no interval to integrate over.
@@ -806,6 +877,12 @@ impl Resolved {
             return None;
         }
         let k1 = self.hi.floor();
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "k0 and k1 are finite integers; a negative or huge difference saturates \
+                      and is then bounded by the MAX_ENUMERATED check below"
+        )]
         let span = if k1.is_finite() {
             (k1 - k0) as u64 + 1
         } else {
@@ -839,6 +916,10 @@ impl Resolved {
     }
 
     /// Mean of the truncated continuous distribution, in closed form.
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "sample counts; inexact only above 2^53 samples"
+    )]
     fn continuous_mean(&self) -> f64 {
         let (lo, hi) = (self.lo, self.hi);
         match &self.kind {
@@ -974,6 +1055,7 @@ impl Effective {
     /// let untouched = Distribution::new(Kind::Constant { value: 3.0 });
     /// assert!(!untouched.resolve(None).unwrap().effective().differs());
     /// ```
+    #[must_use]
     pub fn differs(&self) -> bool {
         let scale = self.requested_mean.abs().max(1.0);
         (self.mean - self.requested_mean).abs() > 1e-9 * scale
@@ -1003,9 +1085,19 @@ impl<'de> Deserialize<'de> for Num {
             fn visit_f64<E: de::Error>(self, v: f64) -> std::result::Result<Num, E> {
                 Ok(Num(v))
             }
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a number in a description is an f64; integers beyond 2^53 round as \
+                          they would if written with a decimal point"
+            )]
             fn visit_i64<E: de::Error>(self, v: i64) -> std::result::Result<Num, E> {
                 Ok(Num(v as f64))
             }
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a number in a description is an f64; integers beyond 2^53 round as \
+                          they would if written with a decimal point"
+            )]
             fn visit_u64<E: de::Error>(self, v: u64) -> std::result::Result<Num, E> {
                 Ok(Num(v as f64))
             }

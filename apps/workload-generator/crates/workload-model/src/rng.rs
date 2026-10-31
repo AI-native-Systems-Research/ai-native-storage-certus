@@ -34,7 +34,7 @@ pub type Rng = rand_chacha::ChaCha20Rng;
 
 /// Build the generator for a run from its seed.
 ///
-/// The seed is widened to ChaCha's 32-byte key by writing it little-endian into
+/// The seed is widened to `ChaCha`'s 32-byte key by writing it little-endian into
 /// the first eight bytes and leaving the rest zero, which is
 /// `ChaCha20Rng::seed_from_u64`'s own documented behaviour — named here so the
 /// mapping from a recorded `--seed` to a byte stream is stated somewhere.
@@ -49,6 +49,7 @@ pub type Rng = rand_chacha::ChaCha20Rng;
 /// let first: f64 = r.gen();
 /// assert!((0.0..1.0).contains(&first));
 /// ```
+#[must_use]
 pub fn seeded(seed: u64) -> Rng {
     Rng::seed_from_u64(seed)
 }
@@ -74,6 +75,7 @@ pub fn seeded(seed: u64) -> Rng {
 /// let c: u64 = rng::substream(1, "sessions").gen();
 /// assert_eq!(a, c);
 /// ```
+#[must_use]
 pub fn substream(seed: u64, name: &str) -> Rng {
     // The name is folded in with the crate's own splitmix64 rather than a
     // standard-library hasher, for the same reason keys use it: `DefaultHasher`

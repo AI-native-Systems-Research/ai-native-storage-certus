@@ -37,7 +37,7 @@ const EXAMPLE: &str = include_str!(
 
 /// A small description, for the cases where the example's scale would make the test
 /// slow rather than more convincing.
-const SMALL: &str = r#"
+const SMALL: &str = r"
 version: 1
 blocks: {tokens: 16, bytes: 32768}
 shared_classes:
@@ -52,8 +52,12 @@ session_classes:
     input_growth: {constant: 2}
     output_growth: {constant: 1}
     think_time: {constant: 10}
-"#;
+";
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "test helper outside #[test]: a failure here must fail the test"
+)]
 fn write(dir: &Path, name: &str, text: &str) -> std::path::PathBuf {
     let p = dir.join(name);
     fs::write(&p, text).unwrap();

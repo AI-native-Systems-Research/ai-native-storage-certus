@@ -10,7 +10,7 @@
 #   GPU            CDI index of the GPU [0]. Use the GPU on the NVMe drives' NUMA node.
 #   OUTPUT_LEN     tokens generated per request [1]. 1 = query round is cold KV load + prefill.
 #   KV_LAYOUT      set VLLM_KV_CACHE_LAYOUT in vLLM (e.g. BLHNC) [unset]
-#   CONNECTOR      certus = CertusConnector (requests BLHNC itself), stock = vLLM's
+#   CONNECTOR      certus = CertusConnector (requests the stock LBHNC), stock = vLLM's
 #                  OffloadingConnector [certus]
 #   DRIVES         space-separated PCI addresses [0000:61:00.0 0000:62:00.0 0000:63:00.0 0000:64:00.0]
 #   TIER           certus-server --memory-tier-size [12G]

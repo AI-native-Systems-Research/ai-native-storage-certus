@@ -279,6 +279,10 @@ fn hashed_sources(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
 }
 
 #[test]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "file sizes of this crate's sources and Cargo.lock, a few MB at most, fit in usize on any target"
+)]
 fn the_workspace_lockfile_is_part_of_the_identity() {
     // Two nodes that resolved a registry dependency to different versions — one built either
     // side of a `cargo update` — passed the provenance check while running different code,

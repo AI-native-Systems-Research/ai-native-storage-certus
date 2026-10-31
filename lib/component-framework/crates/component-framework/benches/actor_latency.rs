@@ -9,11 +9,19 @@ struct CountHandler {
 }
 
 impl ActorHandler<u64> for CountHandler {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+    )]
     fn handle(&mut self, _msg: u64) {
         *self.count.lock().unwrap() += 1;
     }
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+)]
 fn actor_message_latency(c: &mut Criterion) {
     c.bench_function("actor_send_1000_msgs", |b| {
         b.iter(|| {

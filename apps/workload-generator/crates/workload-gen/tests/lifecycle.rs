@@ -91,6 +91,11 @@ impl LocalLauncher {
     /// Asking the OS for 0 and reading back `local_addr()` never releases the socket, so there
     /// is no window at all. `Server::local_addr`'s own documentation points at this: "how a
     /// test learns the port when it asked for zero."
+    #[expect(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        reason = "test helper outside #[test]: a failure here must fail the test"
+    )]
     fn spawn_any(&self, stale: bool) -> (u16, Arc<AtomicBool>) {
         let server = Server::bind(("127.0.0.1", 0), FnFactory(move || Ok(Stub { stale })))
             .expect("bind the stand-in agent on an OS-chosen port");
@@ -116,6 +121,11 @@ impl LocalLauncher {
     /// `AgentSpec` -- a client is about to connect to that exact number, so retrying elsewhere
     /// is not an option. Prefer [`Self::spawn_any`] wherever the caller can learn the port
     /// afterwards.
+    #[expect(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        reason = "test helper outside #[test]: a failure here must fail the test"
+    )]
     fn spawn(&self, port: u16, stale: bool) -> Arc<AtomicBool> {
         let server = Server::bind(("127.0.0.1", port), FnFactory(move || Ok(Stub { stale })))
             .expect("bind the stand-in agent");
@@ -146,6 +156,10 @@ impl Launcher for LocalLauncher {
         Ok(())
     }
 
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test helper outside #[test]: a failure here must fail the test"
+    )]
     fn kill(&self, spec: &AgentSpec) -> Result<(), String> {
         self.kills.fetch_add(1, Ordering::Relaxed);
         for (port, stop) in self.running.lock().unwrap().iter() {
@@ -175,6 +189,11 @@ impl Launcher for LocalLauncher {
 /// fails. Remembering what has been issued closes that window. A port can still
 /// be taken by an unrelated process between the probe and the real bind; that
 /// would need a retry at the bind site.
+#[expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test helper outside #[test]: a failure here must fail the test"
+)]
 fn free_port() -> u16 {
     static ISSUED: OnceLock<Mutex<HashSet<u16>>> = OnceLock::new();
     let issued = ISSUED.get_or_init(|| Mutex::new(HashSet::new()));
@@ -182,7 +201,11 @@ fn free_port() -> u16 {
         let l = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
         let p = l.local_addr().unwrap().port();
         drop(l);
-        if issued.lock().unwrap_or_else(|e| e.into_inner()).insert(p) {
+        if issued
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(p)
+        {
             return p;
         }
     }
@@ -626,9 +649,6 @@ fn a_refusal_leaves_an_operators_own_agent_alone() {
 }
 
 #[test]
-// The relationship between the two constants is the point, and clippy's suggestion to drop the
-// comparison would remove the guard rather than simplify it.
-#[allow(clippy::assertions_on_constants)]
 fn the_kill_grace_outlasts_the_agents_own_linger() {
     // Why this is asserted rather than left to a comment: a grace period shorter than the linger
     // kills a **healthy** agent partway through releasing its mailbox channels, and because a

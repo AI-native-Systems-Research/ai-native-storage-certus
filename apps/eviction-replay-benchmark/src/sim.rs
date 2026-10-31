@@ -66,6 +66,11 @@ pub struct SimStats {
     pub track_nanos: u128,
 }
 
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "reporting statistic: a ratio printed to one decimal; exactness above 2^52 is \
+              irrelevant"
+)]
 fn mean(nanos: u128, calls: u64) -> f64 {
     if calls == 0 {
         0.0
@@ -76,6 +81,12 @@ fn mean(nanos: u128, calls: u64) -> f64 {
 
 impl SimStats {
     /// Fraction of accesses that were hits, in `[0, 1]`.
+    #[must_use]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "reporting statistic: a ratio printed to one decimal; exactness above 2^52 is \
+                  irrelevant"
+    )]
     pub fn hit_rate(&self) -> f64 {
         if self.accesses == 0 {
             0.0
@@ -87,6 +98,7 @@ impl SimStats {
     /// Mean [`IEvictionPolicy::touch`] latency in nanoseconds.
     ///
     /// [`IEvictionPolicy::touch`]: interfaces::IEvictionPolicy::touch
+    #[must_use]
     pub fn mean_touch_ns(&self) -> f64 {
         mean(self.touch_nanos, self.touch_calls)
     }
@@ -94,6 +106,7 @@ impl SimStats {
     /// Mean [`IEvictionPolicy::identify_next_to_evict`] latency in nanoseconds.
     ///
     /// [`IEvictionPolicy::identify_next_to_evict`]: interfaces::IEvictionPolicy::identify_next_to_evict
+    #[must_use]
     pub fn mean_evict_ns(&self) -> f64 {
         mean(self.evict_nanos, self.evict_calls)
     }
@@ -101,11 +114,18 @@ impl SimStats {
     /// Mean [`IEvictionPolicy::track`] latency in nanoseconds.
     ///
     /// [`IEvictionPolicy::track`]: interfaces::IEvictionPolicy::track
+    #[must_use]
     pub fn mean_track_ns(&self) -> f64 {
         mean(self.track_nanos, self.track_calls)
     }
 
     /// Overall replay throughput in accesses per second.
+    #[must_use]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "reporting statistic: a ratio printed to one decimal; exactness above 2^52 is \
+                  irrelevant"
+    )]
     pub fn ops_per_sec(&self) -> f64 {
         let secs = self.wall.as_secs_f64();
         if secs == 0.0 {
@@ -119,7 +139,12 @@ impl SimStats {
 /// Replay `trace` through `ep` with a cache holding at most `cache_size` blocks.
 ///
 /// A fresh pool is created on `ep`, so the same component instance may be reused
-/// across calls. Panics if `cache_size == 0`.
+/// across calls.
+///
+/// # Panics
+///
+/// Panics if `cache_size == 0`, or if `ep.track` fails on the pool this call
+/// just created (a broken policy implementation).
 ///
 /// ```
 /// use component_core::query_interface;
@@ -145,6 +170,11 @@ impl SimStats {
 /// assert_eq!(stats.hits, 3);       // second pass is all hits
 /// assert_eq!(stats.evictions, 0);  // nothing evicted at this size
 /// ```
+#[expect(
+    clippy::expect_used,
+    reason = "track only fails for an unknown pool, and the pool was created at the top of \
+              this call; failing anyway is a policy bug the benchmark must not paper over"
+)]
 pub fn simulate(ep: &dyn IEvictionPolicy, trace: &Trace, cache_size: usize) -> SimStats {
     assert!(cache_size >= 1, "cache_size must be >= 1");
 

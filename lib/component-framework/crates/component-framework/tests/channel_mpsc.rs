@@ -81,7 +81,7 @@ fn mpsc_closure_when_all_senders_dropped() {
         }
     }
 
-    msgs.sort();
+    msgs.sort_unstable();
     assert_eq!(msgs, vec![1, 2]);
 }
 

@@ -59,11 +59,11 @@ fn two_component_wiring() {
     let consumer = ConsumerComponent::new();
 
     // Get ILogger from logger component
-    let ilogger: Arc<dyn ILogger + Send + Sync> =
+    let logger_iface: Arc<dyn ILogger + Send + Sync> =
         query::<dyn ILogger + Send + Sync>(&*logger).unwrap();
 
     // Connect consumer's receptacle
-    consumer.logger.connect(ilogger.clone()).unwrap();
+    consumer.logger.connect(logger_iface.clone()).unwrap();
     assert!(consumer.logger.is_connected());
 
     // Method dispatch through receptacle
@@ -76,10 +76,10 @@ fn receptacle_disconnect_and_reconnect() {
     let logger = LoggerComponent::new();
     let consumer = ConsumerComponent::new();
 
-    let ilogger: Arc<dyn ILogger + Send + Sync> =
+    let logger_iface: Arc<dyn ILogger + Send + Sync> =
         query::<dyn ILogger + Send + Sync>(&*logger).unwrap();
 
-    consumer.logger.connect(ilogger.clone()).unwrap();
+    consumer.logger.connect(logger_iface.clone()).unwrap();
     consumer.logger.disconnect().unwrap();
 
     // After disconnect, get returns error
@@ -89,7 +89,7 @@ fn receptacle_disconnect_and_reconnect() {
     ));
 
     // Can reconnect
-    consumer.logger.connect(ilogger).unwrap();
+    consumer.logger.connect(logger_iface).unwrap();
     assert!(consumer.logger.is_connected());
 }
 
@@ -98,12 +98,12 @@ fn receptacle_already_connected_error() {
     let logger = LoggerComponent::new();
     let consumer = ConsumerComponent::new();
 
-    let ilogger: Arc<dyn ILogger + Send + Sync> =
+    let logger_iface: Arc<dyn ILogger + Send + Sync> =
         query::<dyn ILogger + Send + Sync>(&*logger).unwrap();
 
-    consumer.logger.connect(ilogger.clone()).unwrap();
+    consumer.logger.connect(logger_iface.clone()).unwrap();
     assert_eq!(
-        consumer.logger.connect(ilogger),
+        consumer.logger.connect(logger_iface),
         Err(ReceptacleError::AlreadyConnected)
     );
 }
@@ -123,9 +123,9 @@ fn component_with_receptacle_used_via_provided_interface() {
     let logger = LoggerComponent::new();
     let consumer = ConsumerComponent::new();
 
-    let ilogger: Arc<dyn ILogger + Send + Sync> =
+    let logger_iface: Arc<dyn ILogger + Send + Sync> =
         query::<dyn ILogger + Send + Sync>(&*logger).unwrap();
-    consumer.logger.connect(ilogger).unwrap();
+    consumer.logger.connect(logger_iface).unwrap();
 
     // Use consumer through its provided IStorage interface
     let storage: Arc<dyn IStorage + Send + Sync> =
@@ -140,9 +140,9 @@ fn receptacle_across_threads() {
     let logger = LoggerComponent::new();
     let consumer = ConsumerComponent::new();
 
-    let ilogger: Arc<dyn ILogger + Send + Sync> =
+    let logger_iface: Arc<dyn ILogger + Send + Sync> =
         query::<dyn ILogger + Send + Sync>(&*logger).unwrap();
-    consumer.logger.connect(ilogger).unwrap();
+    consumer.logger.connect(logger_iface).unwrap();
 
     let consumer_clone = consumer.clone();
     let handle = std::thread::spawn(move || {

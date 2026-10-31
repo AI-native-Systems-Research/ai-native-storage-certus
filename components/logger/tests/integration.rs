@@ -9,6 +9,10 @@ use std::sync::{Arc, Mutex};
 struct TestWriter(Arc<Mutex<Vec<u8>>>);
 
 impl Write for TestWriter {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test writer: a poisoned buffer means an earlier assertion already panicked"
+    )]
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.0.lock().unwrap().extend_from_slice(buf);
         Ok(buf.len())

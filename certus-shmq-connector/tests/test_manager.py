@@ -109,6 +109,99 @@ class FakeRing:
         self.calls.append(("lookup", entries))
         return [True] * len(entries)
 
+    @staticmethod
+    def _expand_blocks(table, keys, block_ids):
+        """Expand a layer table + block ids into legacy ``(key, regions)``
+        entries, as the server's decode_block_batch does, so offset assertions
+        written against the per-region form still hold."""
+        import struct
+
+        off = 0
+        (n_handles,) = struct.unpack_from("<I", table, off)
+        off += 4
+        handles = []
+        for _ in range(n_handles):
+            hb = table[off:off + 64]
+            (dev,) = struct.unpack_from("<i", table, off + 64)
+            handles.append((hb, dev))
+            off += 68
+        (n_layers,) = struct.unpack_from("<H", table, off)
+        off += 2
+        layers = [struct.unpack_from("<IQQI", table, off + 24 * i) for i in range(n_layers)]
+        assert off + 24 * n_layers == len(table)
+        return [
+            (k, [(*handles[idx], base + int(b) * stride, size)
+                 for idx, base, stride, size in layers])
+            for k, b in zip(keys, block_ids)
+        ]
+
+    @staticmethod
+    def _expand_chunks(table, scratch_idx, blocks_per_key, keys, block_ids):
+        """Expand a ChunkBlockBatch into ``(key, regions)`` entries, as the server's
+        decode_chunk_block_batch does: each key's blocks in order, each block's
+        regions in layer order; the j-th CHUNK_SCRATCH maps layer L to the scratch
+        handle at j * sum(sizes) + sum(sizes[:L]) and CHUNK_ABSENT adds nothing."""
+        import struct
+        from certus_shmq_connector.ring import CHUNK_ABSENT, CHUNK_SCRATCH
+
+        off = 0
+        (n_handles,) = struct.unpack_from("<I", table, off)
+        off += 4
+        handles = []
+        for _ in range(n_handles):
+            handles.append((table[off:off + 64], struct.unpack_from("<i", table, off + 64)[0]))
+            off += 68
+        (n_layers,) = struct.unpack_from("<H", table, off)
+        off += 2
+        layers = [struct.unpack_from("<IQQI", table, off + 24 * i) for i in range(n_layers)]
+        assert off + 24 * n_layers == len(table)
+        entries = []
+        block_bytes = sum(layer[3] for layer in layers)
+        for i, k in enumerate(keys):
+            regions = []
+            skipped = 0
+            for b in block_ids[i * blocks_per_key:(i + 1) * blocks_per_key]:
+                if b == CHUNK_ABSENT:
+                    continue
+                scratch_off = skipped * block_bytes
+                if b == CHUNK_SCRATCH:
+                    skipped += 1
+                for idx, base, stride, size in layers:
+                    if b == CHUNK_SCRATCH:
+                        regions.append((*handles[scratch_idx], scratch_off, size))
+                        scratch_off += size
+                    else:
+                        regions.append((*handles[idx], base + int(b) * stride, size))
+            entries.append((k, regions))
+        return entries
+
+    def copy_to_store_chunks(self, table, scratch_idx, blocks_per_key, keys, block_ids,
+                             timings=None):
+        entries = self._expand_chunks(table, scratch_idx, blocks_per_key, list(keys),
+                                      list(block_ids))
+        # Recorded under the per-region name: the chunk tests assert the regions a
+        # store sends, whichever op carries them.
+        self.calls.append(("copy_to_store", entries))
+        self.calls.append(("copy_to_store_chunks", entries))
+        return [e[0] not in self.copy_fail for e in entries]
+
+    def lookup_chunks(self, table, scratch_idx, blocks_per_key, keys, block_ids, timings=None):
+        entries = self._expand_chunks(table, scratch_idx, blocks_per_key, list(keys),
+                                      list(block_ids))
+        self.calls.append(("lookup", entries))
+        self.calls.append(("lookup_chunks", entries))
+        return [True] * len(entries)
+
+    def copy_to_store_blocks(self, table, keys, block_ids, timings=None):
+        entries = self._expand_blocks(table, list(keys), list(block_ids))
+        self.calls.append(("copy_to_store_blocks", entries))
+        return [e[0] not in self.copy_fail for e in entries]
+
+    def lookup_blocks(self, table, keys, block_ids, timings=None):
+        entries = self._expand_blocks(table, list(keys), list(block_ids))
+        self.calls.append(("lookup_blocks", entries))
+        return [True] * len(entries)
+
     def take_events(self, max_events=0):
         self.calls.append(("take_events", max_events))
         # The real server drains its queue on each call; mirror that so a second
@@ -1447,7 +1540,8 @@ def test_store_handler_sends_offsets_per_block():
     results = h.get_finished()
     assert len(results) == 1 and results[0].success
 
-    (entries,) = _calls_of(ring, "copy_to_store")
+    assert _calls_of(ring, "copy_to_store") == []  # block-id op, not per-region
+    (entries,) = _calls_of(ring, "copy_to_store_blocks")
     assert [key for key, _ in entries] == [30, 70]
     # Single-region (N==1): each entry carries one region tuple
     # (handle_bytes, gpu_device_id, offset, size).
@@ -1496,12 +1590,18 @@ def test_transfer_time_is_the_transfer_not_queue_or_reap_wait(monkeypatch):
     executor = ThreadPoolExecutor(max_workers=1)   # job 2 queues behind job 1
     h = handler.worker_class()(ring, [kv], block_size_bytes=1024, executor=executor)
     copy_to_store = ring.copy_to_store
+    copy_to_store_blocks = ring.copy_to_store_blocks
 
     def slow_copy(entries):
         now[0] += 0.25   # each transfer takes 0.25 s
         return copy_to_store(entries)
 
+    def slow_copy_blocks(*args, **kwargs):
+        now[0] += 0.25   # the block-id store op, used when a key holds one GPU block
+        return copy_to_store_blocks(*args, **kwargs)
+
     ring.copy_to_store = slow_copy
+    ring.copy_to_store_blocks = slow_copy_blocks
     for job_id in (1, 2):
         src = GPULoadStoreSpec(block_ids=[job_id], group_sizes=[1], block_indices=[0])
         dst = CertusLoadStoreSpec([BlockLocation(key=job_id)])
@@ -1574,7 +1674,25 @@ def test_chunk_load_from_inside_a_chunk_sends_skipped_blocks_to_scratch(monkeypa
     assert [h[:1] for h, *_ in k30] == [b"s"] * 4 + [b"a", b"b"] * 2
     assert [off for _, _, off, _ in k30[4:]] == [1100, 1107, 1200, 1207]
     assert [off for _, _, off, _ in k40] == [1300, 1307, 1400, 1407, 1500, 1507, 1600, 1607]
-    assert made == [100]     # one scratch buffer, the largest region's size
+    # Each skipped (block, layer) piece at its own scratch bytes: no two overlap.
+    assert [off for _, _, off, _ in k30[:4]] == [0, 100, 200, 300]
+    assert made == [600]     # room for the 3 blocks a 4-block key can skip
+    ex.shutdown()
+
+
+def test_chunk_load_skipping_nothing_allocates_no_scratch(monkeypatch):
+    import certus_shmq_connector.handler as handler
+
+    def no_scratch(n, dev):
+        raise AssertionError("scratch allocated for a load that skips nothing")
+
+    monkeypatch.setattr(handler, "scratch_ipc", no_scratch)
+    ring = FakeRing()
+    w, ex = _chunk_worker(ring, blocks_per_chunk=4)
+    src = CertusLoadStoreSpec([BlockLocation(key=30), BlockLocation(key=40)])
+    w.submit_load(4, src, _gpu_spec([1, 2, 3, 4, 5, 6], first_index=8))
+    w.wait({4})
+    assert all(r.success for r in w.get_finished())
     ex.shutdown()
 
 
@@ -1599,13 +1717,68 @@ def test_chunk_block_count_must_match_keys(blocks, keys, first):
 
 
 def test_one_block_per_key_is_unchanged():
+    # One GPU block per key sends the block-id op; with that op unavailable the worker
+    # falls back to per-region entries, which must carry the same offsets as before
+    # blocks_per_chunk existed.
+    from certus_shmq_connector.handler import worker_class
     ring = FakeRing()
     w, ex = _chunk_worker(ring, blocks_per_chunk=1)
+    w._layer_table = None            # this worker always uses the per-region ops
     dst = CertusLoadStoreSpec([BlockLocation(key=1), BlockLocation(key=2)])
     w.submit_store(4, _gpu_spec([3, 7]), dst)
     w.wait({4})
     (entries,) = _calls_of(ring, "copy_to_store")
     assert [[off for _, _, off, _ in p] for _, p in entries] == [[300, 307], [700, 707]]
+    ex.shutdown()
+
+
+def test_several_blocks_per_key_use_the_chunk_ops():
+    # A key of several GPU blocks goes over the chunk op, not the one-block-per-key
+    # block op and not per-region entries.
+    ring = FakeRing()
+    w, ex = _chunk_worker(ring, blocks_per_chunk=2)
+    dst = CertusLoadStoreSpec([BlockLocation(key=1)])
+    w.submit_store(5, _gpu_spec([3, 7]), dst)
+    w.wait({5})
+    assert not _calls_of(ring, "copy_to_store_blocks")
+    (entries,) = _calls_of(ring, "copy_to_store_chunks")
+    assert len(entries) == 1 and len(entries[0][1]) == 4      # 2 blocks x 2 regions
+    ex.shutdown()
+
+
+@pytest.mark.parametrize("bpc, n_blocks, n_keys, skip", [
+    (4, 8, 2, 0),        # aligned
+    (4, 7, 2, 1),        # a load starting 1 block into its first key
+    (4, 5, 2, 3),        # ... 3 blocks in
+    (4, 6, 2, 0),        # a short last key
+    (4, 3, 2, 2),        # skip and a short last key together
+    (2, 9, 5, 1),
+    (8, 8, 1, 0),
+])
+def test_chunk_ops_send_the_same_regions_as_the_per_region_form(bpc, n_blocks, n_keys, skip):
+    """For every shape of commit 5ce82ee9's mapping, the chunk op's entries (as the
+    server expands them) equal what _chunk_entries sends over the per-region op."""
+    from certus_shmq_connector.handler import _chunk_entries
+
+    regions = [
+        KvCacheIpc(handle_bytes=b"a" * 64, gpu_device_id=0, stride_bytes=100, base_delta=0),
+        KvCacheIpc(handle_bytes=b"b" * 64, gpu_device_id=0, stride_bytes=100, base_delta=7),
+    ]
+    gpu_ids = [50 + 3 * i for i in range(n_blocks)]        # scattered, as vLLM's free list
+    keys = [1000 + i for i in range(n_keys)]
+
+    ring = FakeRing()
+    w, ex = _chunk_worker(ring, blocks_per_chunk=bpc, regions=regions)
+    if skip:
+        w.submit_load(1, CertusLoadStoreSpec([BlockLocation(key=k) for k in keys]),
+                      _gpu_spec(gpu_ids, first_index=skip))
+    else:
+        w.submit_store(1, _gpu_spec(gpu_ids), CertusLoadStoreSpec([BlockLocation(key=k) for k in keys]))
+    w.wait({1})
+    op = "lookup_chunks" if skip else "copy_to_store_chunks"
+    (sent,) = _calls_of(ring, op)
+    want = _chunk_entries(regions, gpu_ids, keys, bpc, skip, w._scratch)
+    assert sent == want
     ex.shutdown()
 
 
@@ -1811,3 +1984,72 @@ def test_a_closed_run_takes_no_later_keys(lr):
     assert scan(mgr, ctx, [1, 2, 3], lr) == [lr.HIT_PENDING, lr.HIT, lr.MISS]
     mgr.on_schedule_end(None)
     assert [k for k, _ in ring.fetches[0][1]] == [U(1)]
+
+
+def test_handler_falls_back_to_region_ops_on_unknown_opcode():
+    """A server without the *_BLOCKS opcodes answers "unknown opcode"; the worker
+    then sends the same blocks over the legacy per-region ops, with the same
+    offsets, and stays on them."""
+    from certus_shmq_connector.handler import GPULoadStoreSpec, worker_class
+    from certus_shmq_connector.ring import RingError
+
+    class OldServerRing(FakeRing):
+        def copy_to_store_blocks(self, table, keys, block_ids, timings=None):
+            self.calls.append(("copy_to_store_blocks", None))
+            raise RingError("server error (op=20): unknown opcode 20")
+
+        def lookup_blocks(self, table, keys, block_ids, timings=None):
+            self.calls.append(("lookup_blocks", None))
+            raise RingError("server error (op=19): unknown opcode 19")
+
+    cls = worker_class()
+    cls._blocks_supported = True      # a class flag other tests may have cleared
+    ring = OldServerRing()
+    regions = [
+        KvCacheIpc(handle_bytes=b"a" * 64, gpu_device_id=0, stride_bytes=1024, base_delta=0),
+        KvCacheIpc(handle_bytes=b"b" * 64, gpu_device_id=0, stride_bytes=1024, base_delta=64),
+    ]
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        h = cls(ring, regions, block_size_bytes=2048, executor=executor)
+        src = GPULoadStoreSpec(block_ids=[3, 7], group_sizes=[2], block_indices=[0])
+        dst = CertusLoadStoreSpec([BlockLocation(key=30), BlockLocation(key=70)])
+        h.transfer_async(job_id=1, spec=(src, dst))
+        h.wait({1})
+        assert h.get_finished()[0].success
+
+        (entries,) = _calls_of(ring, "copy_to_store")
+        assert [[r[2] for r in regs] for _, regs in entries] == [
+            [3 * 1024, 64 + 3 * 1024], [7 * 1024, 64 + 7 * 1024],
+        ]
+        assert len(_calls_of(ring, "copy_to_store_blocks")) == 1
+
+        # The rejection is latched: a load goes straight to the legacy op.
+        load_src = CertusLoadStoreSpec([BlockLocation(key=30)])
+        load_dst = GPULoadStoreSpec(block_ids=[3], group_sizes=[1], block_indices=[0])
+        h.transfer_async(job_id=2, spec=(load_src, load_dst))
+        h.wait({2})
+        assert h.get_finished()[0].success
+        assert _calls_of(ring, "lookup_blocks") == []
+        assert len(_calls_of(ring, "lookup")) == 1
+    finally:
+        cls._blocks_supported = True
+        executor.shutdown()
+
+
+def test_allocate_scratch_allocates_once_for_every_skip(monkeypatch):
+    import certus_shmq_connector.handler as handler
+
+    scratch = KvCacheIpc(handle_bytes=b"s" * 64, gpu_device_id=0, stride_bytes=0, base_delta=0)
+    made = []
+    monkeypatch.setattr(handler, "scratch_ipc", lambda n, dev: made.append(n) or scratch)
+    ring = FakeRing()
+    w, ex = _chunk_worker(ring, blocks_per_chunk=4)
+    w.allocate_scratch()
+    assert made == [3 * 200]  # 3 skippable blocks x 2 regions of 100 B
+    src = CertusLoadStoreSpec([BlockLocation(key=30)])
+    w.submit_load(5, src, _gpu_spec([11], first_index=3))
+    w.wait({5})
+    assert all(r.success for r in w.get_finished())
+    assert made == [600]      # the load reused it
+    ex.shutdown()

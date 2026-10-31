@@ -22,6 +22,10 @@ impl IBenchStorage for BenchComponent {
     }
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+)]
 fn bench_query_interface(c: &mut Criterion) {
     let comp = BenchComponent::new();
 
@@ -29,14 +33,14 @@ fn bench_query_interface(c: &mut Criterion) {
         b.iter(|| {
             let _: Arc<dyn IBenchStorage + Send + Sync> =
                 query::<dyn IBenchStorage + Send + Sync>(black_box(&*comp)).unwrap();
-        })
+        });
     });
 
     c.bench_function("query_interface_miss", |b| {
         b.iter(|| {
             let result = query::<dyn std::fmt::Debug + Send + Sync>(black_box(&*comp));
             assert!(result.is_none());
-        })
+        });
     });
 }
 

@@ -28,6 +28,10 @@ impl ICounter for CounterComponent {
     }
 }
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "signature is fixed by the registry factory type passed to `register`"
+)]
 fn counter_factory(config: Option<&dyn Any>) -> Result<ComponentRef, RegistryError> {
     let val = config
         .and_then(|c| c.downcast_ref::<u32>())
@@ -54,14 +58,14 @@ fn concurrent_registry_access() {
     let registry = Arc::new(ComponentRegistry::new());
     registry.register("counter", counter_factory).unwrap();
 
-    let handles: Vec<_> = (0..10)
+    let handles: Vec<_> = (0..10u32)
         .map(|i| {
             let reg = Arc::clone(&registry);
             std::thread::spawn(move || {
-                let comp = reg.create("counter", Some(&(i as u32))).unwrap();
+                let comp = reg.create("counter", Some(&i)).unwrap();
                 let counter: Arc<dyn ICounter + Send + Sync> =
                     query::<dyn ICounter + Send + Sync>(&*comp).unwrap();
-                assert_eq!(counter.count(), i as u32);
+                assert_eq!(counter.count(), i);
             })
         })
         .collect();

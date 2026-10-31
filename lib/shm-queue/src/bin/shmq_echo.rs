@@ -28,11 +28,11 @@ fn main() {
             "usage:\n  {0} serve <path> [n_channels=8] [cap_req=1048576] [cap_resp=131072]\n  \
              {0} bench <path> [iters=100000] [payload_bytes=256]\n  \
              {0} hold <path> [n_channels=1] [stuck]",
-            args.first().map(String::as_str).unwrap_or("shmq-echo")
+            args.first().map_or("shmq-echo", String::as_str)
         );
         std::process::exit(2);
     };
-    let mode = args.get(1).map(String::as_str).unwrap_or_else(|| usage());
+    let mode = args.get(1).map_or_else(|| usage(), String::as_str);
     let path = args.get(2).cloned().unwrap_or_else(|| usage());
 
     match mode {
@@ -62,6 +62,10 @@ fn parse_or(args: &[String], idx: usize, default: usize) -> usize {
         .unwrap_or(default)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "a test harness: failing to create the mailbox is the failure to report"
+)]
 fn serve(path: &str, n: usize, cap_req: usize, cap_resp: usize) {
     let server = Server::create(path, n, cap_req, cap_resp).expect("create shmq");
     eprintln!(
@@ -128,6 +132,18 @@ fn hold(path: &str, n: usize, stuck: bool) {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "a bench harness: a failed attach, claim or round trip is the failure to report"
+)]
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "latency statistics for a printout: per-request nanoseconds fit u64, the \
+              percentile index is a non-negative fraction of len (clamped to len-1), and \
+              f64 rounding of counts and nanoseconds is far below the printed precision"
+)]
 fn bench(path: &str, iters: usize, payload: usize) {
     let client = Client::attach(path, Duration::from_secs(10)).expect("attach shmq");
     let ch = client.claim_channel().expect("claim channel");
@@ -181,7 +197,7 @@ fn bench(path: &str, iters: usize, payload: usize) {
     println!("  p999       : {:.2} µs", pct(0.999) as f64 / 1000.0);
     println!(
         "  max        : {:.2} µs",
-        *latencies.last().unwrap() as f64 / 1000.0
+        *latencies.last().expect("bench ran at least one iteration") as f64 / 1000.0
     );
     let _ = Ordering::Relaxed;
 }

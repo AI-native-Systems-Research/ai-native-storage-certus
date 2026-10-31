@@ -47,7 +47,7 @@ defects, the third is open.
 
 `op_lookup` resolves each entry's regions first, and entries whose handles fail to open are
 **held back from the batch** and reported as `ok = 0`
-(`lib/shmq-dispatcher/src/translate.rs:749-760`). The counting loop runs only over the
+(`lib/shmq-dispatcher/src/translate.rs:1149-1159`). The counting loop runs only over the
 entries that *were* dispatched, so a held-back entry increments neither `hits` nor `misses`.
 
 It is reported to the client as not-served and is invisible to the counters. That is exactly

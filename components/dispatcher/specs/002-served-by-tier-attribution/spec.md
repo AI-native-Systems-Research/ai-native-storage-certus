@@ -9,6 +9,8 @@
 
 **Last Synced**: 2026-10-14 — spec-sync apply on branch `fix/bundle-dispatcher-ems` (approved by Cornel, 2026-10-18). BACKFILL: FR-008 cold sub-path list corrected (no inline fallback). The warm-sync `ERROR` gap (US1 AS3 / FR-009) and the per-value tests (FR-027 / SC-009) are code-side tasks A-01 and A-08 in `.specify/sync/align-tasks.md`.
 
+**Last Synced**: 2026-10-31 — spec-sync on branch `specsync-b`. BACKFILL: shm-queue line citations re-anchored (`translate.rs:573` → `:1152`, `wire.rs:98-110` → `:194-205`, research `translate.rs:749-760` → `:1149-1159`; all were already stale on unstable); FR-019 notes that the new `LOOKUP_BLOCKS`/`LOOKUP_CHUNKS` opcodes return the same byte. No source changes.
+
 **Input**: Expose, per looked-up key, **which tier actually served it** — local DRAM, local
 SSD, a peer's DRAM, a peer's SSD — or why it was not served. Today a successful `Lookup`
 is indistinguishable across all four, so no tiered hit rate is measurable.
@@ -72,14 +74,14 @@ rewritten against the mailbox; the earlier wording is recorded in `## Reconcilia
 rather than silently dropped, because a reader of the git history will find it.
 
 The tier surfaces by **widening a byte that already exists**. `op_lookup` returns one `ok`
-byte per key (`ok_flags`, `lib/shmq-dispatcher/src/translate.rs:573`), currently `0` or
+byte per key (`ok_flags`, `lib/shmq-dispatcher/src/translate.rs:1152`), currently `0` or
 `1`. `served_by` replaces that byte's value space, keeping `0` = not served so that any
 reader testing `byte != 0` still sees a served key as served.
 
 That is not an invention: `check_state` in the same wire module made exactly this move and
 documented the rule — "Widened from a plain `bool`: `MISS`/`RESIDENT` keep the old `0`/`1`
 meaning, `PENDING` is new, so a reader doing `byte != 0` still sees a pending key as
-'exists'" (`lib/shmq-dispatcher/src/wire.rs:98-110`). This feature follows that precedent
+'exists'" (`lib/shmq-dispatcher/src/wire.rs:194-205`). This feature follows that precedent
 for `LOOKUP`, which means **no new wire structure and no framing change**.
 
 `CHECK` keeps `check_state` untouched. The two answer different questions: `check_state` is
@@ -266,8 +268,8 @@ rework. They must be re-counted at plan time; the line numbers there are known s
    advertised `Avail` out (FR-016), which requires `KeyState` or the result projection to
    gain a tier dimension (`operation.rs:19-27`, `:149-160`) and an `interfaces`-visible type.
    **No wire-protocol change.**
-5. **`lib/shmq-dispatcher`** — widens `LOOKUP`'s per-key `ok` byte (`translate.rs:573`,
-   `wire.rs:98-110`). It owns no `specs/` directory, so the wire change is documented beside
+5. **`lib/shmq-dispatcher`** — widens `LOOKUP`'s per-key `ok` byte (`translate.rs:1152`,
+   `wire.rs:194-205`). It owns no `specs/` directory, so the wire change is documented beside
    `check_state`, which already documents its own widening and its compatibility rule.
 6. **`apps/certus-server` and `apps/certus-server-yaml`** — the counter correction
    (FR-024..FR-026), including a remote-lookup counter. Neither server may report a tier it
@@ -524,8 +526,11 @@ assert identical attribution for identical residency, except where FR-014 specif
 `97e26738` removed. The requirements below carry the same intent onto the mailbox.*
 
 - **FR-019**: The taxonomy MUST be expressed by **widening the existing per-key `ok` byte**
-  that `LOOKUP` returns (`lib/shmq-dispatcher/src/translate.rs:573`). The feature MUST NOT
-  add a wire field, change framing, or alter the request encoding.
+  that `LOOKUP` returns (`lib/shmq-dispatcher/src/translate.rs:1152`). The feature MUST NOT
+  add a wire field, change framing, or alter the request encoding. *(Sync 2026-10-31: `LOOKUP_BLOCKS` (19) and
+  `LOOKUP_CHUNKS` (21) decode a compact block batch into the same per-key regions and share
+  `LOOKUP`'s handler, `lookup_batch` (`translate.rs:1143`), so they return the same byte; the
+  wire documents them as `resp { [tier:u8]*n } // identical to Lookup`, `wire.rs:62`, `:66`.)*
 - **FR-020**: The byte value `0` MUST continue to mean **not served**. There MUST NOT be an
   "unspecified" value: reserving `0` for unknown would silently reclassify every miss, and an
   old server is detected by the protocol version rather than by an in-band sentinel.
@@ -533,7 +538,7 @@ assert identical attribution for identical residency, except where FR-014 specif
   response, and MUST NOT emit a catch-all "served, tier unknown" value — that state is the
   defect this feature removes.
 - **FR-022**: The widening MUST be backward compatible in the sense `check_state` already
-  established (`lib/shmq-dispatcher/src/wire.rs:98-110`): a reader testing `byte != 0`
+  established (`lib/shmq-dispatcher/src/wire.rs:194-205`): a reader testing `byte != 0`
   MUST classify every key exactly as it did before. The Python connector MUST keep working
   untouched.
 - **FR-023**: A server MUST NOT report a tier it did not receive from the dispatcher; it MUST

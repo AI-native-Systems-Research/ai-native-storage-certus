@@ -2,7 +2,7 @@
 //!
 //! # A hostname is not an identity
 //!
-//! A machine routinely runs several Certus instances — one per NUMA domain, or one per NVMe
+//! A machine routinely runs several Certus instances — one per NUMA domain, or one per `NVMe`
 //! device as `deploy/multi-instance/` does, with mailboxes `/dev/shm/certus-shmq-0`, `-1`, … So
 //! an instance is `(host, port, mailbox)`, and two entries may legitimately share a host.
 //!
@@ -93,6 +93,7 @@ impl Instance {
     /// also what the client connects to. Two rows reading `node5` are not a report — the defect
     /// that produced FR-081 — and the mailbox is listed once in the report rather than repeated
     /// on every row.
+    #[must_use]
     pub fn label(&self) -> String {
         format!("{}:{}", self.host, self.port)
     }
@@ -265,15 +266,14 @@ pub struct Hardware {
 /// [`HARDWARE_VERSION`], or if any field is unknown. An unknown field is refused rather than
 /// ignored so a typo is not silently a default — the same reasoning as FR-006.
 pub fn read(explicit: Option<&Path>) -> Result<Option<Hardware>, String> {
-    let (path, implicit) = match explicit {
-        Some(p) => (p.to_path_buf(), false),
-        None => {
-            let p = Path::new(DEFAULT_HARDWARE_FILE);
-            if !p.exists() {
-                return Ok(None);
-            }
-            (p.to_path_buf(), true)
+    let (path, implicit) = if let Some(p) = explicit {
+        (p.to_path_buf(), false)
+    } else {
+        let p = Path::new(DEFAULT_HARDWARE_FILE);
+        if !p.exists() {
+            return Ok(None);
         }
+        (p.to_path_buf(), true)
     };
     let text = std::fs::read_to_string(&path)
         .map_err(|e| format!("cannot read the hardware file {}: {e}", path.display()))?;
@@ -316,7 +316,8 @@ fn digest(text: &str) -> String {
     format!("{acc:016x}")
 }
 
-#[cfg(all(test, feature = "workload-tests"))]
+#[cfg(test)]
+#[cfg(feature = "workload-tests")]
 mod tests {
     use super::*;
 

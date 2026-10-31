@@ -81,7 +81,7 @@ use workload_model::sim::Simulation;
 /// held constant every session has the *same footprint*, so the aggregate working set has a single
 /// characteristic size and the curve cliffs there however popularity is distributed. Scale-free
 /// popularity is not sufficient; the working set has to be scale-free too.
-const CONCENTRATED: &str = r#"
+const CONCENTRATED: &str = r"
 version: 1
 blocks: {tokens: 16, bytes: 32768}
 shared_classes:
@@ -103,10 +103,10 @@ session_classes:
     input_growth: {constant: 1}
     output_growth: {constant: 1}
     think_time: {constant: 5}
-"#;
+";
 
 /// The same workload with `selection` removed, which is the case that must fail the check.
-const UNIFORM: &str = r#"
+const UNIFORM: &str = r"
 version: 1
 blocks: {tokens: 16, bytes: 32768}
 shared_classes:
@@ -123,7 +123,7 @@ session_classes:
     input_growth: {constant: 1}
     output_growth: {constant: 1}
     think_time: {constant: 5}
-"#;
+";
 
 const SPAN: f64 = 600.0;
 const SEED: u64 = 41;
@@ -144,6 +144,10 @@ fn references(yaml: &str) -> Vec<(u64, u64)> {
 }
 
 /// The same, at a chosen seed, so a verdict can be shown not to rest on one draw.
+#[expect(
+    clippy::unwrap_used,
+    reason = "test helper outside #[test]: a failure here must fail the test"
+)]
 fn references_seeded(yaml: &str, seed: u64) -> Vec<(u64, u64)> {
     let d: WorkloadDescription = yaml.parse().unwrap();
     let mut sim = Simulation::new(&d, seed, 1).unwrap();
@@ -177,6 +181,10 @@ struct Point {
 /// Kept O(log n) per reference rather than the obvious list-and-scan: the sweep replays the whole
 /// stream once per capacity point, and a scan per hit made the check take minutes, which is the
 /// difference between a check that runs every time and one that runs when someone remembers.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "test statistic: reference counts are far below 2^52"
+)]
 fn replay(refs: &[(u64, u64)], capacity: usize) -> Point {
     if capacity == 0 || refs.is_empty() {
         return Point {
@@ -195,27 +203,23 @@ fn replay(refs: &[(u64, u64)], capacity: usize) -> Point {
     let (mut hits, mut cross_hits, mut cross_total) = (0usize, 0usize, 0usize);
     for (session, key) in refs {
         clock += 1;
-        let foreign = match first.get(key) {
-            Some(owner) => *owner != *session,
-            None => {
-                first.insert(*key, *session);
-                false
-            }
+        let foreign = if let Some(owner) = first.get(key) {
+            *owner != *session
+        } else {
+            first.insert(*key, *session);
+            false
         };
-        let hit = match at.get(key).copied() {
-            Some(when) => {
-                recency.remove(&when);
-                true
-            }
-            None => {
-                if at.len() == capacity {
-                    if let Some((oldest, evicted)) = recency.iter().next().map(|(k, v)| (*k, *v)) {
-                        recency.remove(&oldest);
-                        at.remove(&evicted);
-                    }
+        let hit = if let Some(when) = at.get(key).copied() {
+            recency.remove(&when);
+            true
+        } else {
+            if at.len() == capacity {
+                if let Some((oldest, evicted)) = recency.iter().next().map(|(k, v)| (*k, *v)) {
+                    recency.remove(&oldest);
+                    at.remove(&evicted);
                 }
-                false
             }
+            false
         };
         recency.insert(clock, *key);
         at.insert(*key, clock);
@@ -253,11 +257,18 @@ fn distinct(refs: &[(u64, u64)]) -> usize {
 /// 0.1% to 10%, for the reason given in the module docs: the top of the ladder must stay inside the
 /// region where the cache is too small, or its hit rate is 1.0 by construction and the shape of the
 /// curve below it stops mattering.
+#[expect(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "a key count far below 2^52 scaled by a fraction in (0, 0.1] and rounded: positive \
+              and smaller than the key count it came from"
+)]
 fn capacities(distinct_keys: usize) -> Vec<usize> {
     let space = distinct_keys.max(1_000) as f64;
     (0..5)
         .map(|i| {
-            let frac = 0.001f64 * 100f64.powf(i as f64 / 4.0);
+            let frac = 0.001f64 * 100f64.powf(f64::from(i) / 4.0);
             ((space * frac).round() as usize).max(1)
         })
         .collect()
@@ -417,6 +428,10 @@ fn the_overall_hit_rate_is_the_wrong_curve_to_sweep() {
 
 #[test]
 #[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "test statistic: reference counts are far below 2^52"
+)]
 fn the_ladder_stops_below_the_key_space_because_the_top_would_otherwise_be_free() {
     // The other thing measurement corrected. At a capacity equal to the key space nothing is ever
     // evicted, so every repeat reference hits whatever the popularity distribution is — and a
@@ -447,6 +462,10 @@ fn the_ladder_stops_below_the_key_space_because_the_top_would_otherwise_be_free(
 
 #[test]
 #[cfg_attr(feature = "ci-fast", ignore = "slow: skipped under --features ci-fast")]
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "test statistic: reference counts are far below 2^52"
+)]
 fn the_two_workloads_differ_in_popularity_but_not_in_how_much_they_reference() {
     // The claim underneath the sweep: `selection` changes which instances are picked, not how many
     // references a run makes. If it changed the reference count, the two curves would not be

@@ -1,23 +1,30 @@
 # Sync Apply Report — dispatcher
 
-Applied: 2026-10-27T04:27:01Z · Branch: `spec-sync/coldload-v3-s20261025` (HEAD `3921112a`, base `a905f89b`) · Approved by the user's sync request (non-interactive)
-Backup: `.specify/sync/backups/20261027T042701Z/` (spec.md, data-model.md, and the previous apply/proposal/drift JSON reports)
+Applied: 2026-10-31T06:30:00Z · Branch `specsync-b` · Backup: `backups/20261031T054807Z/`
 
-## Changes Made
+## Specs updated
 
-| Proposal | File | Requirement | Change Type |
+| Id | Spec | Requirement | Change |
 |---|---|---|---|
-| B-14 | 001 spec.md | SC-007 | Modified |
-| B-15 | 001 spec.md | FR-025 | Modified |
-| B-16 | 001 spec.md | FR-004 | Modified |
-| B-17 | 001 spec.md | FR-009 | Modified |
-| B-18 | 001 spec.md | FR-028 | Modified |
-| B-19 | 001 spec.md | FR-040 | Modified |
-| B-20 | 001 spec.md | US-11 narrative | Modified |
-| B-21 | 001 spec.md | Key Entity Dispatch Map Entry | Modified |
-| B-22 | 001 spec.md | Key Entity Background Writer | Modified |
-| B-23 | 001 spec.md | spec header | Added |
-| B-24 | 001 data-model.md | data-model.md device_index | Modified |
-| D-1 | info/FLOW.svg | info/FLOW.svg | Modified |
+| B-25 | 001 | FR-039 step (2) | Modified |
+| B-26 | 001 | FR-019 | Modified |
+| B-27 | 001 | Clarification Q&A (pipelined reader) | Modified |
+| B-28 | 001 | Key Entities: Pipelined Reader | Modified |
+| B-29 | 001 | Implementation Notes | Modified |
+| B-30 | 001 | US-11 acceptance scenario 4 | Modified |
+| B-31 | 001 | FR-053 | Modified |
+| B-32 | 001 | FR-006 | Modified |
+| B-33 | 001 | data-model.md (CacheKey, DispatcherConfig, BackgroundWriteJob, PendingWrite, Cache Entry Lifecycle, Dispatcher Lifecycle, Relationships) | Modified |
+| B-34 | 002 | spec.md / contracts/served-by.md / research.md shm-queue citations; FR-019 | Modified |
 
-Each edit replaced an `old` string confirmed to occur exactly once. Spec 002 and `contracts/` not touched. No source files changed. No ALIGN tasks generated; `align-tasks.md` unchanged.
+Header lines: spec 001 and spec 002 get a `Last Synced 2026-10-31` line.
+
+## Not applied
+
+| Proposal | Reason |
+|---|---|
+| H-1 (`contracts/idispatcher.md`) | judgment call, not approved |
+
+No `src/` file changed. No align tasks generated. Not stamped (the final pass stamps).
+
+Previous report: `backups/20261031T054807Z/apply-report.md.prev`.

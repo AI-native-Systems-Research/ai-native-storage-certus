@@ -1,0 +1,17 @@
+{
+  "applied": "2026-10-31T04:54:40Z",
+  "backup": "backups/20261031T045440Z/",
+  "specs_updated": [
+    {
+      "spec": "specs/001-optimized-eviction-policy/spec.md",
+      "requirement": "all line citations",
+      "before": "`src/lib.rs` citations past line 74 (US1 AS1-3, US3, US4, FR-001 to FR-011, FR-013, NFR-002, NFR-005, SC-002) and `src/lru_list.rs` citations in FR-009 and FR-012",
+      "after": "each mapped by the diff to its HEAD line (+37 before `create_pool`, +42 after it, +10 in `lru_list.rs`); citations at or before line 73 (`CMS_*`, `CountMinSketch`, `Pool`, `EvictionState`) did not move",
+      "change": "citation",
+      "applied_at": "2026-10-31T04:54:40Z"
+    }
+  ],
+  "align_tasks_generated": 0,
+  "not_applied": [],
+  "source_files_changed": 0
+}

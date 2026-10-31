@@ -145,11 +145,13 @@ impl LogMessage {
     }
 
     /// Returns the severity level of this message.
+    #[must_use]
     pub fn level(&self) -> LogLevel {
         self.level
     }
 
     /// Returns the text content of this message.
+    #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
@@ -205,6 +207,7 @@ impl LogHandler {
     /// use component_core::log::LogHandler;
     /// let handler = LogHandler::new();
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         Self {
             file: None,
@@ -244,6 +247,7 @@ impl LogHandler {
     /// use component_core::log::{LogHandler, LogLevel};
     /// let handler = LogHandler::new().with_min_level(LogLevel::Warn);
     /// ```
+    #[must_use]
     pub fn with_min_level(mut self, level: LogLevel) -> Self {
         self.min_level = level;
         self
@@ -257,6 +261,12 @@ impl Default for LogHandler {
 }
 
 /// Format a `SystemTime` as an RFC-3339 timestamp: `YYYY-MM-DDTHH:MM:SS.mmmZ`.
+#[expect(
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "days = secs / 86400 < 2^48, so days and yoe fit i64; doe = z - era * 146_097 \
+              is in [0, 146_096] by the floor division, so it is non-negative"
+)]
 fn format_timestamp(time: SystemTime) -> String {
     let dur = time.duration_since(UNIX_EPOCH).unwrap_or_default();
     let total_secs = dur.as_secs();
@@ -271,10 +281,10 @@ fn format_timestamp(time: SystemTime) -> String {
 
     // Convert days to Y-M-D using a civil calendar algorithm.
     // Based on Howard Hinnant's algorithm (public domain).
-    let z = days as i64 + 719468;
-    let era = if z >= 0 { z } else { z - 146096 } / 146097;
-    let doe = (z - era * 146097) as u64; // day of era [0, 146096]
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let z = days as i64 + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64; // day of era [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
     let y = yoe as i64 + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let mp = (5 * doy + 2) / 153;
@@ -282,10 +292,7 @@ fn format_timestamp(time: SystemTime) -> String {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
 
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
-        y, m, d, hours, minutes, seconds, millis
-    )
+    format!("{y:04}-{m:02}-{d:02}T{hours:02}:{minutes:02}:{seconds:02}.{millis:03}Z")
 }
 
 impl ActorHandler<LogMessage> for LogHandler {

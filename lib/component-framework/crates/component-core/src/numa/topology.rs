@@ -35,6 +35,7 @@ impl NumaNode {
     /// let topo = NumaTopology::discover().unwrap();
     /// assert_eq!(topo.node(0).unwrap().id(), 0);
     /// ```
+    #[must_use]
     pub fn id(&self) -> usize {
         self.id
     }
@@ -50,6 +51,7 @@ impl NumaNode {
     /// let cpus = topo.node(0).unwrap().cpus();
     /// assert!(!cpus.is_empty());
     /// ```
+    #[must_use]
     pub fn cpus(&self) -> &CpuSet {
         &self.cpus
     }
@@ -68,6 +70,7 @@ impl NumaNode {
     /// // Local distance
     /// assert_eq!(node.distance_to(0), Some(10));
     /// ```
+    #[must_use]
     pub fn distances(&self) -> &[u32] {
         &self.distances
     }
@@ -86,6 +89,7 @@ impl NumaNode {
     /// assert!(node.distance_to(0).is_some());
     /// assert!(node.distance_to(9999).is_none());
     /// ```
+    #[must_use]
     pub fn distance_to(&self, other_node: usize) -> Option<u32> {
         self.distances.get(other_node).copied()
     }
@@ -133,21 +137,20 @@ impl NumaTopology {
     /// assert!(topo.node_count() >= 1);
     /// ```
     pub fn discover() -> Result<Self, NumaError> {
-        match discover_from_sysfs() {
-            Ok(topo) => Ok(topo),
-            Err(_) => {
-                // Fallback: single node with all online CPUs
-                let cpus = super::cpuset::read_online_cpus().map_err(|e| {
-                    NumaError::TopologyUnavailable(format!("cannot read online CPUs: {e}"))
-                })?;
-                Ok(Self {
-                    nodes: vec![NumaNode {
-                        id: 0,
-                        cpus,
-                        distances: vec![10],
-                    }],
-                })
-            }
+        if let Ok(topo) = discover_from_sysfs() {
+            Ok(topo)
+        } else {
+            // Fallback: single node with all online CPUs
+            let cpus = super::cpuset::read_online_cpus().map_err(|e| {
+                NumaError::TopologyUnavailable(format!("cannot read online CPUs: {e}"))
+            })?;
+            Ok(Self {
+                nodes: vec![NumaNode {
+                    id: 0,
+                    cpus,
+                    distances: vec![10],
+                }],
+            })
         }
     }
 
@@ -161,6 +164,7 @@ impl NumaTopology {
     /// let topo = NumaTopology::discover().unwrap();
     /// assert!(topo.node_count() >= 1);
     /// ```
+    #[must_use]
     pub fn node_count(&self) -> usize {
         self.nodes.len()
     }
@@ -175,6 +179,7 @@ impl NumaTopology {
     /// let topo = NumaTopology::discover().unwrap();
     /// assert!(topo.node(0).is_some());
     /// ```
+    #[must_use]
     pub fn node(&self, id: usize) -> Option<&NumaNode> {
         self.nodes.iter().find(|n| n.id == id)
     }
@@ -191,6 +196,7 @@ impl NumaTopology {
     ///     println!("Node {}", node.id());
     /// }
     /// ```
+    #[must_use]
     pub fn nodes(&self) -> &[NumaNode] {
         &self.nodes
     }
@@ -208,6 +214,7 @@ impl NumaTopology {
     /// // CPU 0 should be on some node
     /// assert!(topo.node_for_cpu(0).is_some());
     /// ```
+    #[must_use]
     pub fn node_for_cpu(&self, cpu_id: usize) -> Option<usize> {
         self.nodes
             .iter()
@@ -226,6 +233,7 @@ impl NumaTopology {
     /// let all = topo.online_cpus();
     /// assert!(!all.is_empty());
     /// ```
+    #[must_use]
     pub fn online_cpus(&self) -> CpuSet {
         let mut all = CpuSet::new();
         for node in &self.nodes {

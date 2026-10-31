@@ -1,0 +1,57 @@
+{
+  "generated": "pending",
+  "project": "eviction-policy-session-lists",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 24,
+    "aligned": 23,
+    "drifted": 1,
+    "not_implemented": 0,
+    "unspecced_features": 0
+  },
+  "specs": [
+    {
+      "id": "001-session-list-eviction",
+      "title": "Session-Lineage Eviction Policy",
+      "aligned": [
+        "FR-001",
+        "FR-002",
+        "FR-003",
+        "FR-004",
+        "FR-005",
+        "FR-006",
+        "FR-007",
+        "FR-008",
+        "FR-009",
+        "FR-010",
+        "FR-011",
+        "FR-012",
+        "FR-013",
+        "FR-014",
+        "FR-015",
+        "FR-016",
+        "FR-017",
+        "FR-018",
+        "SC-002",
+        "SC-003",
+        "SC-004",
+        "SC-005",
+        "SC-006"
+      ],
+      "drifted": [
+        {
+          "requirement": "SC-001",
+          "spec_text": "On multi-turn traces, retain session-prefix blocks longer than LRU, reducing reloads by >=15%.",
+          "actual": "No comparative trace-replay harness exists; benches/session_list_benchmark.rs measures only hot-path throughput. Spec itself downgrades this to an unverified design goal (spec.md:114).",
+          "location": "components/eviction-policy-session-lists/specs/001-session-list-eviction/spec.md:114",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [],
+  "conflicts": [],
+  "inputs_sha256": "22f355fbe0ab2ce528f24239a145c9d3598ec01925fa03d7e2e05fe0ab4ac34a",
+  "git_commit": "72c7182b"
+}

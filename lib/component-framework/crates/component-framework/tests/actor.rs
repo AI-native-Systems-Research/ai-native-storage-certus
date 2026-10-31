@@ -1,4 +1,4 @@
-//! Integration tests for actor lifecycle and IUnknown component model.
+//! Integration tests for actor lifecycle and `IUnknown` component model.
 
 use component_framework::actor::{Actor, ActorError, ActorHandler};
 use component_framework::channel::ISender;
@@ -12,15 +12,27 @@ struct RecordHandler {
 }
 
 impl ActorHandler<String> for RecordHandler {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the shared mutex is only poisoned if another thread already panicked; re-panicking is the intended response"
+    )]
     fn handle(&mut self, msg: String) {
         *self.thread_id.lock().unwrap() = Some(thread::current().id());
         self.log.lock().unwrap().push(msg);
     }
 
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the shared mutex is only poisoned if another thread already panicked; re-panicking is the intended response"
+    )]
     fn on_start(&mut self) {
         self.log.lock().unwrap().push("START".into());
     }
 
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the shared mutex is only poisoned if another thread already panicked; re-panicking is the intended response"
+    )]
     fn on_stop(&mut self) {
         self.log.lock().unwrap().push("STOP".into());
     }
@@ -65,7 +77,7 @@ fn actor_full_lifecycle() {
 fn actor_double_activate_error() {
     struct Noop;
     impl ActorHandler<()> for Noop {
-        fn handle(&mut self, _: ()) {}
+        fn handle(&mut self, (): ()) {}
     }
 
     let actor = Actor::new(Noop, |_| {});
@@ -76,21 +88,19 @@ fn actor_double_activate_error() {
 
 #[test]
 fn actor_panic_recovery() {
-    let panics = Arc::new(Mutex::new(Vec::new()));
-    let results = Arc::new(Mutex::new(Vec::new()));
-
     struct PanicOnFive {
         results: Arc<Mutex<Vec<u32>>>,
     }
 
     impl ActorHandler<u32> for PanicOnFive {
         fn handle(&mut self, msg: u32) {
-            if msg == 5 {
-                panic!("five is bad");
-            }
+            assert!(msg != 5, "five is bad");
             self.results.lock().unwrap().push(msg);
         }
     }
+
+    let panics = Arc::new(Mutex::new(Vec::new()));
+    let results = Arc::new(Mutex::new(Vec::new()));
 
     let panics_clone = panics.clone();
     let actor = Actor::new(
@@ -99,7 +109,7 @@ fn actor_panic_recovery() {
         },
         move |payload| {
             let msg = if let Some(s) = payload.downcast_ref::<&str>() {
-                s.to_string()
+                (*s).to_string()
             } else {
                 "unknown".into()
             };
@@ -130,7 +140,7 @@ fn actor_no_resource_leak() {
     struct Tracked;
 
     impl ActorHandler<()> for Tracked {
-        fn handle(&mut self, _: ()) {}
+        fn handle(&mut self, (): ()) {}
         fn on_start(&mut self) {
             ACTIVE_COUNT.fetch_add(1, Ordering::Relaxed);
         }
@@ -154,8 +164,6 @@ fn actor_no_resource_leak() {
 
 #[test]
 fn actor_iunknown_query_isender() {
-    let log = Arc::new(Mutex::new(Vec::new()));
-
     struct LogHandler {
         log: Arc<Mutex<Vec<u32>>>,
     }
@@ -164,6 +172,8 @@ fn actor_iunknown_query_isender() {
             self.log.lock().unwrap().push(msg);
         }
     }
+
+    let log = Arc::new(Mutex::new(Vec::new()));
 
     let actor = Actor::new(LogHandler { log: log.clone() }, |_| {});
 
@@ -181,8 +191,6 @@ fn actor_iunknown_query_isender() {
 
 #[test]
 fn actor_iunknown_isender_and_handle_coexist() {
-    let log = Arc::new(Mutex::new(Vec::new()));
-
     struct LogHandler {
         log: Arc<Mutex<Vec<u32>>>,
     }
@@ -191,6 +199,8 @@ fn actor_iunknown_isender_and_handle_coexist() {
             self.log.lock().unwrap().push(msg);
         }
     }
+
+    let log = Arc::new(Mutex::new(Vec::new()));
 
     let actor = Actor::new(LogHandler { log: log.clone() }, |_| {});
     let sender: Arc<dyn ISender<u32> + Send + Sync> =
@@ -232,8 +242,6 @@ fn actor_iunknown_introspection() {
 
 #[test]
 fn actor_iunknown_isender_from_different_threads() {
-    let log = Arc::new(Mutex::new(Vec::new()));
-
     struct LogHandler {
         log: Arc<Mutex<Vec<u32>>>,
     }
@@ -242,6 +250,8 @@ fn actor_iunknown_isender_from_different_threads() {
             self.log.lock().unwrap().push(msg);
         }
     }
+
+    let log = Arc::new(Mutex::new(Vec::new()));
 
     let actor = Actor::new(LogHandler { log: log.clone() }, |_| {});
     let sender: Arc<dyn ISender<u32> + Send + Sync> =
@@ -277,8 +287,6 @@ fn actor_registerable_in_component_registry() {
     use component_framework::registry::ComponentRegistry;
     use std::any::Any;
 
-    let log = Arc::new(Mutex::new(Vec::new()));
-
     struct LogHandler {
         log: Arc<Mutex<Vec<String>>>,
     }
@@ -287,6 +295,8 @@ fn actor_registerable_in_component_registry() {
             self.log.lock().unwrap().push(msg);
         }
     }
+
+    let log = Arc::new(Mutex::new(Vec::new()));
 
     let log_clone = log.clone();
     let registry = ComponentRegistry::new();
@@ -327,8 +337,6 @@ fn actor_channel_wiring_via_iunknown_query() {
     use component_framework::channel::spsc::SpscChannel;
     use component_framework::channel::IReceiver;
 
-    let log = Arc::new(Mutex::new(Vec::<String>::new()));
-
     struct CollectorHandler {
         log: Arc<Mutex<Vec<String>>>,
     }
@@ -337,6 +345,8 @@ fn actor_channel_wiring_via_iunknown_query() {
             self.log.lock().unwrap().push(msg);
         }
     }
+
+    let log = Arc::new(Mutex::new(Vec::<String>::new()));
 
     // Create actor (keep concrete ref for activate/deactivate) and channel as IUnknown
     let actor = Actor::simple(CollectorHandler { log: log.clone() });

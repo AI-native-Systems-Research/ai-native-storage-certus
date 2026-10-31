@@ -1,22 +1,23 @@
 # Drift Resolution Proposals — dispatcher
 
-Generated: 2026-10-27T04:27:01Z · Branch: `spec-sync/coldload-v3-s20261025` (HEAD `3921112a`, base `a905f89b`) · Based on: `drift-report.json` of the same run.
+Generated: 2026-10-31T06:30:00Z · Branch: `specsync-b` (HEAD `0a71990e`, base `a0292be6`) · Based on: `drift-report.json` of the same run.
 
-All proposals are BACKFILL (code → spec). Code is authoritative: commit `4bb69289` (store-time round-robin drive placement, recorded in the entry's SSD location) was accepted and measured. Approval: the user's sync request (`--interactive` approval); all applied. Previous proposals (2026-10-21) are in `backups/20261027T042701Z/`.
+BACKFILL proposals are approved by the brief's rule (spec text updated to match reviewed, tested code on this branch); B-33 was approved by the user via the lead. H-1 is a judgment call and is not approved.
 
-| Id | Requirement | Before | After |
-|---|---|---|---|
-| B-14 | SC-007 | with key-based drive selection. | store-time drive selection recorded in each entry's SSD location (+ sync note) |
-| B-15 | FR-025 | recover_extent(key, offset, size) | recover_extent(key, loc, size), loc = encode_loc(i, extent.offset) |
-| B-16 | FR-004 | record the SSD offset | record the entry's SSD location; whole object on drive device_index % N; encode_loc |
-| B-17 | FR-009 | (drive source unstated) | extent freed on the drive decoded from the location (select_drive); invalid drive frees nothing |
-| B-18 | FR-028 | (failure list) | adds promote_and_serve's invalid-drive IoError; batch_lookup/promote_to_memory_tier reject before reserving |
-| B-19 | FR-040 | (grouping unstated) | grouped by recorded drive; invalid drive skipped silently |
-| B-20 | US-11 narrative | grouped by target drive | grouped by the drive recorded in their SSD location |
-| B-21 | Key Entity Dispatch Map Entry | ssd_offset | ssd_offset holds (drive << 56) | extent_offset, carried opaquely |
-| B-22 | Key Entity Background Writer | A dedicated thread | one writer per drive; job runs on writer device_index % N |
-| B-23 | spec header | - | Last Synced 2026-10-27 line |
-| B-24 | data-model.md device_index | which data device to target | + chosen round-robin by next_store_drive, recorded in the location |
-| D-1 | info/FLOW.svg | drive_idx = key % num_drives | drive = loc >> 56 (round-robin at store) |
+| Id | Requirement | Before | After | Approved |
+|---|---|---|---|---|
+| B-25 | 001 FR-039 step (2) | a multi-region cold entry's serve_memory_tier_to_gpu sync on the warm stream also waits for queued warm copies | cold entries do not use the warm stream (in-loop pipe-stream delivery, FR-061); only a staged multi-region entry syncs on warm | yes |
+| B-26 | 001 FR-019 | scatter-gather makes one final dual pipe-stream sync | + multi-region object gets one piece batch; final sync is checked and fails every issued object | yes |
+| B-27 | 001 Clarification Q&A (pipelined reader) | one final dual pipe-stream sync | one final, checked dual sync; multi-region piece copies batched in the loop | yes |
+| B-28 | 001 Key Entities: Pipelined Reader | one final dual pipe-stream sync covers the batch | + checked; multi-region job via ColdReadJob::regions / queue_slot_to_regions | yes |
+| B-29 | 001 Implementation Notes | cold pipeline uses coalesced per-object memcpy_h2d_async | + multi-region object: one batched piece copy on the pipe stream | yes |
+| B-30 | 001 US-11 acceptance scenario 4 | error reported for that entry only | + exception: failed final sync fails every issued entry | yes |
+| B-31 | 001 FR-053 | (multi-region staged delivery unstated) | single-region fused SSD->GPU; multi-region reads into staging then serve_memory_tier_to_gpu scatter on warm, synced, before the lease is returned; not part of in-loop delivery | yes |
+| B-32 | 001 FR-006 | (zero-size-region rule unstated) | copies clamped to the slot; zero-size region gets no bytes but does not stop the scatter; only an exhausted slot does | yes |
+| B-33 | 001 data-model.md (CacheKey, DispatcherConfig, BackgroundWriteJob, PendingWrite, Cache Entry Lifecycle, Dispatcher Lifecycle, Relationships) | v0 model: prepare_store/commit_store/cancel_store, [Staging] state, metadata block device, removed config fields | states/transitions/receptacles as the code has them (approved by the user via the lead) | yes |
+| B-34 | 002 spec.md / contracts/served-by.md / research.md shm-queue citations; FR-019 | translate.rs:573, wire.rs:98-110, translate.rs:749-760 | translate.rs:1152, wire.rs:194-205, translate.rs:1149-1159; FR-019 note: LOOKUP_BLOCKS/LOOKUP_CHUNKS return the same byte | yes |
+| H-1 | 001 contracts/idispatcher.md (whole file) | v0 IDispatcher contract: prepare_store/commit_store/cancel_store, dma_copy_to_host/to_device, 5-field DispatcherConfig, no memory tier, no batch/async/store-lifecycle methods | option A: rewrite against components/interfaces/src/idispatcher.rs; option B: mark the file historical and point at the interface source and FR-001 | no — **applied 2026-10-31 (user-approved): marked historical with a pointer to the current contract** |
 
-No ALIGN proposals. Open items carried over unchanged in `align-tasks.md`: A-1…A-5, A-01, A-02, A-04, A-05, A-06, A-08, A-10, N-01.
+Open items carried over unchanged in `align-tasks.md`: A-1…A-5, A-01, A-02, A-04, A-05, A-06, A-08, A-10, N-01.
+
+Previous proposals: `backups/20261031T054807Z/proposals.md.prev`.

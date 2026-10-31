@@ -68,6 +68,9 @@ define_component! {
             // `initialized` mirrors `GpuState::initialized` so the per-key copy
             // paths can read it without the mutex. See `is_initialized` below.
             initialized: std::sync::atomic::AtomicBool,
+            // Whether the loaded CUDA runtime has the `cudaMemcpyBatchAsync`
+            // signature we bind (13.0+). Set once in `initialize`.
+            batch_copy: std::sync::atomic::AtomicBool,
         },
     }
 }
@@ -116,6 +119,34 @@ impl IGpuServices for GpuServicesComponent {
 
             if let Ok(log) = self.logger.get() {
                 log.info(&format!("Found {} qualifying GPU(s)", devices.len()));
+            }
+
+            // The batch binding has the 13.x signature. An older runtime (12.8
+            // has the symbol with an extra argument) would read the arguments
+            // shifted by one, so memcpy_batch_async falls back to one copy per
+            // entry there.
+            let mut version: std::ffi::c_int = 0;
+            // SAFETY: `version` is a live local the runtime writes one int to.
+            let err = unsafe { cuda_ffi::cudaRuntimeGetVersion(&mut version) };
+            let new_enough =
+                err == cuda_ffi::CUDA_SUCCESS && version >= cuda_ffi::CUDA_MEMCPY_BATCH_MIN_RUNTIME;
+            // CERTUS_NO_BATCH_COPY forces the per-copy path (to test it on a 13.x
+            // machine).
+            let forced_off = std::env::var_os("CERTUS_NO_BATCH_COPY").is_some();
+            let batch = new_enough && !forced_off;
+            self.batch_copy
+                .store(batch, std::sync::atomic::Ordering::Release);
+            if let Ok(log) = self.logger.get() {
+                let why = if batch {
+                    "on"
+                } else if forced_off {
+                    "off (CERTUS_NO_BATCH_COPY set; one copy per piece)"
+                } else {
+                    "off (needs CUDA 13.0+; one copy per piece)"
+                };
+                log.info(&format!(
+                    "CUDA runtime {version}: batched piece copies {why}"
+                ));
             }
 
             state.devices = devices;
@@ -297,7 +328,14 @@ impl IGpuServices for GpuServicesComponent {
     }
 
     #[cfg(feature = "spdk")]
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    // The dereference is compiled only with `gpu`, so the lint fires only there.
+    #[cfg_attr(
+        feature = "gpu",
+        expect(
+            clippy::not_unsafe_ptr_arg_deref,
+            reason = "IGpuServices takes device/host addresses as raw pointers; the caller guarantees each is valid for `size` bytes"
+        )
+    )]
     fn dma_copy_to_host(
         &self,
         src: *const std::ffi::c_void,
@@ -507,7 +545,14 @@ impl IGpuServices for GpuServicesComponent {
     }
 
     #[cfg(feature = "spdk")]
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    // The dereference is compiled only with `gpu`, so the lint fires only there.
+    #[cfg_attr(
+        feature = "gpu",
+        expect(
+            clippy::not_unsafe_ptr_arg_deref,
+            reason = "IGpuServices takes device/host addresses as raw pointers; the caller guarantees each is valid for `size` bytes"
+        )
+    )]
     fn dma_copy_to_device(
         &self,
         src: &interfaces::DmaBuffer,
@@ -733,7 +778,14 @@ impl IGpuServices for GpuServicesComponent {
     }
 
     #[cfg(feature = "spdk")]
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    // The dereference is compiled only with `gpu`, so the lint fires only there.
+    #[cfg_attr(
+        feature = "gpu",
+        expect(
+            clippy::not_unsafe_ptr_arg_deref,
+            reason = "IGpuServices takes device/host addresses as raw pointers; the caller guarantees each is valid for `size` bytes"
+        )
+    )]
     fn dma_copy_to_device_async(
         &self,
         src: &interfaces::DmaBuffer,
@@ -787,7 +839,14 @@ impl IGpuServices for GpuServicesComponent {
     }
 
     #[cfg(feature = "spdk")]
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    // The dereference is compiled only with `gpu`, so the lint fires only there.
+    #[cfg_attr(
+        feature = "gpu",
+        expect(
+            clippy::not_unsafe_ptr_arg_deref,
+            reason = "IGpuServices takes device/host addresses as raw pointers; the caller guarantees each is valid for `size` bytes"
+        )
+    )]
     fn memcpy_h2d_async(
         &self,
         src: *const std::ffi::c_void,
@@ -831,7 +890,14 @@ impl IGpuServices for GpuServicesComponent {
     }
 
     #[cfg(feature = "spdk")]
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    // The dereference is compiled only with `gpu`, so the lint fires only there.
+    #[cfg_attr(
+        feature = "gpu",
+        expect(
+            clippy::not_unsafe_ptr_arg_deref,
+            reason = "IGpuServices takes device/host addresses as raw pointers; the caller guarantees each is valid for `size` bytes"
+        )
+    )]
     fn dma_copy_to_host_async(
         &self,
         src: *const std::ffi::c_void,
@@ -885,7 +951,14 @@ impl IGpuServices for GpuServicesComponent {
     }
 
     #[cfg(feature = "spdk")]
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    // The dereference is compiled only with `gpu`, so the lint fires only there.
+    #[cfg_attr(
+        feature = "gpu",
+        expect(
+            clippy::not_unsafe_ptr_arg_deref,
+            reason = "IGpuServices takes device/host addresses as raw pointers; the caller guarantees each is valid for `size` bytes"
+        )
+    )]
     fn memcpy_d2h_async(
         &self,
         src: *const std::ffi::c_void,
@@ -920,6 +993,98 @@ impl IGpuServices for GpuServicesComponent {
             if err != cuda_ffi::CUDA_SUCCESS {
                 return Err(format!(
                     "cudaMemcpyAsync D2H failed: {}",
+                    cuda_ffi::cuda_error_string(err)
+                ));
+            }
+
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "spdk")]
+    fn memcpy_batch_async(
+        &self,
+        dsts: &[*mut std::ffi::c_void],
+        srcs: &[*const std::ffi::c_void],
+        sizes: &[usize],
+        stream: interfaces::GpuStream,
+    ) -> Result<(), String> {
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = (dsts, srcs, sizes, stream);
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            if !self.is_initialized() {
+                return Err("Not initialized: call initialize() first".to_string());
+            }
+            if dsts.len() != srcs.len() || dsts.len() != sizes.len() {
+                return Err(format!(
+                    "memcpy_batch_async: slice lengths differ (dsts {}, srcs {}, sizes {})",
+                    dsts.len(),
+                    srcs.len(),
+                    sizes.len()
+                ));
+            }
+            if dsts.is_empty() {
+                return Ok(());
+            }
+
+            if !self.batch_copy.load(std::sync::atomic::Ordering::Acquire) {
+                // Pre-13.0 runtime: same copies, same stream, one call each.
+                for ((&dst, &src), &size) in dsts.iter().zip(srcs).zip(sizes) {
+                    // SAFETY: the caller guarantees each pointer is valid for its
+                    // size until the stream syncs (see the batch call below);
+                    // cudaMemcpyDefault infers each copy's direction.
+                    let err = unsafe {
+                        cuda_ffi::cudaMemcpyAsync(
+                            dst,
+                            src,
+                            size,
+                            cuda_ffi::CUDA_MEMCPY_DEFAULT,
+                            stream.0,
+                        )
+                    };
+                    if err != cuda_ffi::CUDA_SUCCESS {
+                        return Err(format!(
+                            "cudaMemcpyAsync (batch fallback) failed: {}",
+                            cuda_ffi::cuda_error_string(err)
+                        ));
+                    }
+                }
+                return Ok(());
+            }
+
+            let mut attrs = cuda_ffi::cudaMemcpyAttributes {
+                src_access_order: cuda_ffi::CUDA_MEMCPY_SRC_ACCESS_ORDER_STREAM,
+                ..Default::default()
+            };
+            let mut attrs_idxs: [usize; 1] = [0];
+
+            // SAFETY: the three slices have equal length `dsts.len()`, so the
+            // runtime reads `count` entries from each. `attrs`/`attrs_idxs` are
+            // one-element locals that outlive the call (the runtime copies them
+            // at submission). The caller guarantees every pointer is valid for
+            // its size until the stream syncs and that `stream.0` is a created
+            // stream, not the legacy NULL stream.
+            let err = unsafe {
+                cuda_ffi::cudaMemcpyBatchAsync(
+                    dsts.as_ptr(),
+                    srcs.as_ptr(),
+                    sizes.as_ptr(),
+                    dsts.len(),
+                    &mut attrs,
+                    attrs_idxs.as_mut_ptr(),
+                    1,
+                    stream.0,
+                )
+            };
+
+            if err != cuda_ffi::CUDA_SUCCESS {
+                return Err(format!(
+                    "cudaMemcpyBatchAsync failed: {}",
                     cuda_ffi::cuda_error_string(err)
                 ));
             }

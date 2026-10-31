@@ -1307,19 +1307,32 @@ def bench_prefix_miss(
 
 # ── mode: contention ─────────────────────────────────────────────────────────
 
+# Contention mode: the load thread reads only the batch committed most recently (a one-entry
+# mailbox); a batch replaced before the load reached it is skipped and counted.
+CONTENTION_QUEUE_MAX = 1
+
+
 def bench_contention(
     stack: CputierStack, batch_size: int, min_duration: float,
 ) -> list[BenchResult]:
     """Concurrent store + load streams on the same CPU tier.
 
-    Thread A stores new keys continuously. Thread B loads keys thread A has
-    committed, received via a shared deque. Manager calls are serialized by
-    the stack lock (vLLM's scheduler is single-threaded); GPU→CPU and CPU→GPU
-    DMA run concurrently on separate CUDA streams, and the fs write-through
+    Thread A stores new keys continuously. Thread B loads the batch thread A
+    committed most recently, received via a one-entry mailbox. Manager calls are
+    serialized by the stack lock (vLLM's scheduler is single-threaded); GPU→CPU and
+    CPU→GPU DMA run concurrently on separate CUDA streams, and the fs write-through
     competes with both.
+
+    The load reads the newest batch, not the oldest: with an unbounded
+    oldest-first queue a store faster than the load let the backlog grow, so the
+    load reached keys the tier had already evicted and measured its own lag (the
+    certus-connector-bench contention mode had the same flaw; workbench session
+    s20261031-092234). A batch replaced before the load took it is reported as
+    skipped. A slow load still shows as lower load throughput.
     """
     stop_event = threading.Event()
-    committed_queue: collections.deque = collections.deque()
+    committed_queue: collections.deque = collections.deque(maxlen=CONTENTION_QUEUE_MAX)
+    mailbox_lock = threading.Lock()   # the skipped count and the pop see one state
     barrier = threading.Barrier(2)
     errors: list[BaseException] = []
 
@@ -1328,7 +1341,7 @@ def bench_contention(
     load_phases = _phases("touch", "lookup", "lookup_wait", "prepare_load",
                           "submit_load", "get_finished", "complete_load")
     store_state = {"total_blocks": 0, "drops": 0}
-    load_state = {"total_blocks": 0, "misses": 0}
+    load_state = {"total_blocks": 0, "misses": 0, "skipped_batches": 0}
     base_seed = _fresh_seed()
     stack.take_events()
     removed_before = stack.counters["cpu_removed"]
@@ -1346,7 +1359,10 @@ def bench_contention(
                 store_state["total_blocks"] += s
                 store_state["drops"] += d
                 if s:
-                    committed_queue.append(batch_keys)
+                    with mailbox_lock:
+                        if len(committed_queue) == committed_queue.maxlen:
+                            load_state["skipped_batches"] += 1   # replaced before the load took it
+                        committed_queue.append(batch_keys)
                 elif d:
                     # A dropped store is retried no sooner than the next
                     # engine step; spinning would starve the load thread.
@@ -1361,7 +1377,8 @@ def bench_contention(
             time.sleep(0.5)  # let stores seed some keys
             while not stop_event.is_set():
                 try:
-                    batch_keys = committed_queue.popleft()
+                    with mailbox_lock:
+                        batch_keys = committed_queue.pop()   # the newest committed batch
                 except IndexError:
                     time.sleep(0.001)
                     continue
@@ -1407,7 +1424,8 @@ def bench_contention(
     store_result.print_report()
     print(f"  Store drops: {store_state['drops']}")
     load_result.print_report()
-    print(f"  Load misses: {load_state['misses']}  Evictions: {total_evictions}")
+    print(f"  Load misses: {load_state['misses']}  Evictions: {total_evictions}  "
+          f"Skipped store batches: {load_state['skipped_batches']}")
     return [store_result, load_result]
 
 

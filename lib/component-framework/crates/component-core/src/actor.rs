@@ -8,7 +8,7 @@
 use std::any::{Any, TypeId};
 use std::fmt;
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::thread::{self, JoinHandle};
 
 use crate::channel::mpsc::{MpscChannel, MpscReceiver, MpscSender};
@@ -30,6 +30,9 @@ pub enum ActorError {
     ShutdownTimeout,
     /// Setting CPU affinity failed.
     AffinityFailed(String),
+    /// `activate()` called on an actor that already ran: actors are single-use
+    /// (its handler and receiver moved into the first activation's thread).
+    AlreadyConsumed,
 }
 
 impl fmt::Display for ActorError {
@@ -40,6 +43,7 @@ impl fmt::Display for ActorError {
             Self::SendFailed(msg) => write!(f, "send failed: {msg}"),
             Self::ShutdownTimeout => write!(f, "actor shutdown timed out"),
             Self::AffinityFailed(msg) => write!(f, "affinity failed: {msg}"),
+            Self::AlreadyConsumed => write!(f, "actor already ran; construct a new one"),
         }
     }
 }
@@ -49,6 +53,11 @@ impl std::error::Error for ActorError {}
 // Actor lifecycle states
 const STATE_IDLE: u8 = 0;
 const STATE_RUNNING: u8 = 1;
+
+/// What an actor's new thread reports to `activate`: `Ok` once it is pinned,
+/// or the error plus the handler and receiver it was given, so they can be
+/// put back.
+type Startup<M, H> = Result<(), (ActorError, H, MpscReceiver<M>)>;
 
 /// Trait that users implement to define actor's message-handling behavior.
 ///
@@ -125,6 +134,11 @@ pub struct ActorHandle<M: Send + 'static> {
     channel: Arc<MpscChannel<M>>,
 }
 
+#[expect(
+    clippy::missing_fields_in_debug,
+    reason = "only liveness is worth showing; the thread handle, shared state and channel \
+              have no useful Debug, and the existing output format is kept"
+)]
 impl<M: Send + 'static> fmt::Debug for ActorHandle<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ActorHandle")
@@ -367,11 +381,11 @@ where
     error_callback: Arc<dyn Fn(Box<dyn Any + Send>) + Send + Sync>,
     state: Arc<AtomicU8>,
     /// MPSC channel for inbound messages — created at construction time
-    /// so `ISender<M>` is available via IUnknown before activation.
+    /// so `ISender<M>` is available via `IUnknown` before activation.
     channel: Arc<MpscChannel<M>>,
-    /// Receiver stored until activate() takes it.
+    /// Receiver stored until `activate()` takes it.
     receiver: Mutex<Option<MpscReceiver<M>>>,
-    /// Lazily created sender interface for IUnknown queries.
+    /// Lazily created sender interface for `IUnknown` queries.
     sender_iface: OnceLock<Box<dyn Any + Send + Sync>>,
     /// Cached interface metadata for introspection.
     interface_info: Vec<InterfaceInfo>,
@@ -468,6 +482,11 @@ where
         Self::build(handler, capacity, error_callback)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "receiver() fails only when a receiver is already bound, and the channel was \
+                  created on the line above"
+    )]
     fn build(
         handler: H,
         capacity: usize,
@@ -518,15 +537,24 @@ where
     /// let actor = Actor::new(Noop, |_| {})
     ///     .with_cpu_affinity(CpuSet::from_cpu(0).unwrap());
     /// ```
+    #[must_use]
     pub fn with_cpu_affinity(self, affinity: CpuSet) -> Self {
-        *self.cpu_affinity.lock().unwrap() = Some(affinity);
+        // The lock is only held to store or clone an `Option<CpuSet>`, which
+        // cannot panic, so it is never poisoned.
+        *self
+            .cpu_affinity
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(affinity);
         self
     }
 
     /// Set or change the CPU affinity for this actor's thread.
     ///
-    /// Only valid when the actor is idle. Returns
-    /// [`ActorError::AlreadyActive`] if the actor is running.
+    /// Only valid when the actor is idle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ActorError::AlreadyActive`] if the actor is running.
     ///
     /// # Examples
     ///
@@ -546,7 +574,10 @@ where
         if self.is_active() {
             return Err(ActorError::AlreadyActive);
         }
-        *self.cpu_affinity.lock().unwrap() = Some(affinity);
+        *self
+            .cpu_affinity
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(affinity);
         Ok(())
     }
 
@@ -566,7 +597,10 @@ where
     /// assert!(actor.cpu_affinity().is_none());
     /// ```
     pub fn cpu_affinity(&self) -> Option<CpuSet> {
-        self.cpu_affinity.lock().unwrap().clone()
+        self.cpu_affinity
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// Activate the actor: spawn its thread and start the message loop.
@@ -575,7 +609,13 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`ActorError::AlreadyActive`] if the actor is already running.
+    /// - [`ActorError::AlreadyActive`] if the actor is already running.
+    /// - [`ActorError::AlreadyConsumed`] if the actor ran before and was
+    ///   deactivated: actors are single-use, so construct a new one.
+    /// - [`ActorError::AffinityFailed`] if a CPU affinity is set and its CPUs
+    ///   are not all online, or the new thread could not be pinned to them.
+    ///   The actor is then left idle with its handler, so it can be activated
+    ///   again (e.g. after `set_cpu_affinity`).
     ///
     /// # Examples
     ///
@@ -596,7 +636,20 @@ where
     /// // We can't activate again from the same Actor while handle exists.
     /// handle.deactivate().unwrap();
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: the only `expect` is on `MpscChannel::sender`, which
+    /// always returns `Ok`.
     pub fn activate(&self) -> Result<ActorHandle<M>, ActorError> {
+        // Validate CPU IDs before claiming the actor (FR-004), so a bad set
+        // leaves it idle with its handler and receiver in place.
+        let affinity = self.cpu_affinity();
+        if let Some(ref cpus) = affinity {
+            crate::numa::validate_cpus(cpus)
+                .map_err(|e| ActorError::AffinityFailed(e.to_string()))?;
+        }
+
         // CAS: IDLE -> RUNNING
         if self
             .state
@@ -611,111 +664,55 @@ where
             return Err(ActorError::AlreadyActive);
         }
 
+        #[expect(clippy::expect_used, reason = "MpscChannel::sender never returns Err")]
         let sender = self.channel.sender().expect("MPSC sender creation");
-        let receiver = self
-            .receiver
-            .lock()
-            .unwrap()
-            .take()
-            .expect("receiver already taken — actor activated twice without reset");
-
-        let mut handler = self
-            .handler
-            .lock()
-            .unwrap()
-            .take()
-            .expect("handler already taken — actor activated twice without reset");
+        // These locks only guard a take/put: nothing that can panic runs while
+        // one is held, so they are never poisoned.
+        let taken = (
+            self.receiver
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take(),
+            self.handler
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take(),
+        );
+        // Both are Some until a thread starts its message loop with them; they
+        // come back if it fails to pin (below), so None means the actor ran.
+        let (Some(receiver), Some(mut handler)) = taken else {
+            self.restore(taken.0, taken.1);
+            self.state.store(STATE_IDLE, Ordering::Release);
+            return Err(ActorError::AlreadyConsumed);
+        };
 
         let error_callback = Arc::clone(&self.error_callback);
-        let affinity = self.cpu_affinity.lock().unwrap().clone();
 
-        // Validate CPU IDs before spawning the thread (FR-004).
-        if let Some(ref cpus) = affinity {
-            crate::numa::validate_cpus(cpus)
-                .map_err(|e| ActorError::AffinityFailed(e.to_string()))?;
-        }
-
-        // Use a channel to propagate affinity errors from the spawned thread.
-        let (startup_tx, startup_rx) = std::sync::mpsc::channel::<Result<(), ActorError>>();
+        // The thread reports whether pinning worked; on failure it hands the
+        // handler and receiver back so the actor stays usable.
+        let (startup_tx, startup_rx) = std::sync::mpsc::channel::<Startup<M, H>>();
 
         let thread = thread::spawn(move || {
             // Apply CPU affinity if configured.
             if let Some(ref cpus) = affinity {
                 if let Err(e) = crate::numa::set_thread_affinity(cpus) {
-                    let _ = startup_tx.send(Err(ActorError::AffinityFailed(e.to_string())));
+                    let err = ActorError::AffinityFailed(e.to_string());
+                    let _ = startup_tx.send(Err((err, handler, receiver)));
                     return;
                 }
             }
             let _ = startup_tx.send(Ok(()));
 
-            handler.on_start();
-
-            const PARK_THRESHOLD: u64 = 10_000_000;
-            const PARK_DURATION: std::time::Duration = std::time::Duration::from_millis(10);
-            let mut idle_count: u64 = 0;
-
-            loop {
-                match receiver.try_recv() {
-                    Ok(msg) => {
-                        idle_count = 0;
-                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            handler.handle(msg);
-                        }));
-
-                        if let Err(panic_payload) = result {
-                            error_callback(panic_payload);
-                        }
-                    }
-                    Err(ChannelError::Empty) => {
-                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            handler.on_idle()
-                        }));
-
-                        match result {
-                            Ok(did_work) => {
-                                if did_work {
-                                    idle_count = 0;
-                                } else {
-                                    idle_count += 1;
-                                }
-                            }
-                            Err(panic_payload) => {
-                                error_callback(panic_payload);
-                                idle_count += 1;
-                            }
-                        }
-
-                        if idle_count >= PARK_THRESHOLD {
-                            receiver.register_for_unpark();
-                            thread::park_timeout(PARK_DURATION);
-                            idle_count = 0;
-                        }
-                    }
-                    Err(ChannelError::Closed) => {
-                        // Drain any messages that were queued before the channel closed.
-                        while let Ok(msg) = receiver.try_recv() {
-                            let result =
-                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                    handler.handle(msg);
-                                }));
-                            if let Err(panic_payload) = result {
-                                error_callback(panic_payload);
-                            }
-                        }
-                        break;
-                    }
-                    Err(_) => break,
-                }
-            }
-
-            handler.on_stop();
+            run_message_loop(&mut handler, &receiver, &*error_callback);
         });
 
         // Wait for the thread to confirm affinity was set successfully.
         match startup_rx.recv() {
-            Ok(Err(e)) => {
-                // Affinity failed — join the thread and reset state.
+            Ok(Err((e, handler, receiver))) => {
+                // Affinity failed: the loop never ran, so put the handler and
+                // receiver back and leave the actor idle.
                 let _ = thread.join();
+                self.restore(Some(receiver), Some(handler));
                 self.state.store(STATE_IDLE, Ordering::Release);
                 return Err(e);
             }
@@ -735,6 +732,16 @@ where
             state: Arc::clone(&self.state),
             channel: Arc::clone(&self.channel),
         })
+    }
+
+    /// Put back whichever of the receiver and handler `activate` took.
+    fn restore(&self, receiver: Option<MpscReceiver<M>>, handler: Option<H>) {
+        if receiver.is_some() {
+            *self.receiver.lock().unwrap_or_else(PoisonError::into_inner) = receiver;
+        }
+        if handler.is_some() {
+            *self.handler.lock().unwrap_or_else(PoisonError::into_inner) = handler;
+        }
     }
 
     /// Check whether the actor is currently running.
@@ -769,6 +776,7 @@ where
     fn query_interface_raw(&self, id: TypeId) -> Option<&(dyn Any + Send + Sync)> {
         if id == TypeId::of::<Arc<dyn ISender<M> + Send + Sync>>() {
             let stored = self.sender_iface.get_or_init(|| {
+                #[expect(clippy::expect_used, reason = "MpscChannel::sender never returns Err")]
                 let sender = self.channel.sender().expect("MPSC sender creation");
                 let arc: Arc<dyn ISender<M> + Send + Sync> = Arc::new(sender);
                 Box::new(arc)
@@ -779,7 +787,7 @@ where
         }
     }
 
-    fn version(&self) -> &str {
+    fn version(&self) -> &'static str {
         "1.0.0"
     }
 
@@ -800,6 +808,80 @@ where
             detail: "actor has no receptacles".into(),
         })
     }
+}
+
+/// The actor thread's body after startup: run `on_start`, process messages
+/// (calling `on_idle` and eventually parking while the inbox is empty) until
+/// the channel closes, drain what is left, then run `on_stop`. A panic in
+/// `handle` or `on_idle` is caught and passed to `error_callback`.
+fn run_message_loop<M, H>(
+    handler: &mut H,
+    receiver: &MpscReceiver<M>,
+    error_callback: &(dyn Fn(Box<dyn Any + Send>) + Send + Sync),
+) where
+    M: Send + 'static,
+    H: ActorHandler<M>,
+{
+    const PARK_THRESHOLD: u64 = 10_000_000;
+    const PARK_DURATION: std::time::Duration = std::time::Duration::from_millis(10);
+
+    handler.on_start();
+
+    let mut idle_count: u64 = 0;
+
+    loop {
+        match receiver.try_recv() {
+            Ok(msg) => {
+                idle_count = 0;
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    handler.handle(msg);
+                }));
+
+                if let Err(panic_payload) = result {
+                    error_callback(panic_payload);
+                }
+            }
+            Err(ChannelError::Empty) => {
+                let result =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler.on_idle()));
+
+                match result {
+                    Ok(did_work) => {
+                        if did_work {
+                            idle_count = 0;
+                        } else {
+                            idle_count += 1;
+                        }
+                    }
+                    Err(panic_payload) => {
+                        error_callback(panic_payload);
+                        idle_count += 1;
+                    }
+                }
+
+                if idle_count >= PARK_THRESHOLD {
+                    receiver.register_for_unpark();
+                    thread::park_timeout(PARK_DURATION);
+                    idle_count = 0;
+                }
+            }
+            Err(ChannelError::Closed) => {
+                // Drain any messages that were queued before the channel closed.
+                while let Ok(msg) = receiver.try_recv() {
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        handler.handle(msg);
+                    }));
+                    if let Err(panic_payload) = result {
+                        error_callback(panic_payload);
+                    }
+                }
+                break;
+            }
+            Err(_) => break,
+        }
+    }
+
+    handler.on_stop();
 }
 
 /// Spawn a forwarder thread that reads messages from a [`crate::channel::Receiver`] and
@@ -841,6 +923,7 @@ where
 /// fwd.join().unwrap();
 /// assert_eq!(*items.lock().unwrap(), vec![1, 2]);
 /// ```
+#[must_use]
 pub fn pipe<M: Send + 'static>(
     receiver: crate::channel::Receiver<M>,
     handle: ActorHandle<M>,
@@ -891,6 +974,7 @@ pub fn pipe<M: Send + 'static>(
 /// fwd.join().unwrap();
 /// assert_eq!(*items.lock().unwrap(), vec![1, 2]);
 /// ```
+#[must_use]
 pub fn pipe_mpsc<M: Send + 'static>(
     receiver: crate::channel::mpsc::MpscReceiver<M>,
     handle: ActorHandle<M>,
@@ -919,6 +1003,48 @@ mod tests {
         fn handle(&mut self, _msg: u32) {
             *self.count.lock().unwrap() += 1;
         }
+    }
+
+    #[test]
+    fn activate_after_deactivate_returns_already_consumed() {
+        // Used to panic ("handler already taken"): actors are single-use.
+        let actor = Actor::new(
+            CountHandler {
+                count: Arc::default(),
+            },
+            |_| {},
+        );
+        actor.activate().unwrap().deactivate().unwrap();
+        assert!(!actor.is_active());
+        assert_eq!(actor.activate().unwrap_err(), ActorError::AlreadyConsumed);
+        assert_eq!(actor.activate().unwrap_err(), ActorError::AlreadyConsumed);
+        assert!(!actor.is_active());
+    }
+
+    #[test]
+    fn bad_cpu_set_leaves_the_actor_idle_and_usable() {
+        // Used to leave the state RUNNING with no thread, and the handler gone.
+        let count = Arc::new(Mutex::new(0));
+        let actor = Actor::new(
+            CountHandler {
+                count: Arc::clone(&count),
+            },
+            |_| {},
+        )
+        .with_cpu_affinity(crate::numa::CpuSet::from_cpu(999).unwrap());
+        assert!(matches!(
+            actor.activate(),
+            Err(ActorError::AffinityFailed(_))
+        ));
+        assert!(!actor.is_active());
+        // Fix the affinity: the same actor starts, with its handler.
+        actor
+            .set_cpu_affinity(crate::numa::CpuSet::from_cpu(0).unwrap())
+            .unwrap();
+        let handle = actor.activate().unwrap();
+        handle.send(1).unwrap();
+        handle.deactivate().unwrap();
+        assert_eq!(*count.lock().unwrap(), 1);
     }
 
     #[test]
@@ -970,8 +1096,6 @@ mod tests {
 
     #[test]
     fn send_messages_processed_sequentially() {
-        let log = Arc::new(Mutex::new(Vec::new()));
-
         struct OrderHandler {
             log: Arc<Mutex<Vec<u32>>>,
         }
@@ -982,6 +1106,7 @@ mod tests {
             }
         }
 
+        let log = Arc::new(Mutex::new(Vec::new()));
         let actor = Actor::new(OrderHandler { log: log.clone() }, |_| {});
         let handle = actor.activate().unwrap();
 
@@ -998,8 +1123,6 @@ mod tests {
 
     #[test]
     fn messages_processed_on_different_thread() {
-        let actor_thread_id = Arc::new(Mutex::new(None));
-
         struct ThreadIdHandler {
             tid: Arc<Mutex<Option<thread::ThreadId>>>,
         }
@@ -1010,6 +1133,7 @@ mod tests {
             }
         }
 
+        let actor_thread_id = Arc::new(Mutex::new(None));
         let actor = Actor::new(
             ThreadIdHandler {
                 tid: actor_thread_id.clone(),
@@ -1026,22 +1150,19 @@ mod tests {
 
     #[test]
     fn panic_recovery_with_error_callback() {
-        let panic_count = Arc::new(Mutex::new(0u32));
-        let msg_count = Arc::new(Mutex::new(0u32));
-
         struct PanicHandler {
             msg_count: Arc<Mutex<u32>>,
         }
 
         impl ActorHandler<u32> for PanicHandler {
             fn handle(&mut self, msg: u32) {
-                if msg == 42 {
-                    panic!("intentional panic");
-                }
+                assert!(msg != 42, "intentional panic");
                 *self.msg_count.lock().unwrap() += 1;
             }
         }
 
+        let panic_count = Arc::new(Mutex::new(0u32));
+        let msg_count = Arc::new(Mutex::new(0u32));
         let panic_count_clone = panic_count.clone();
         let actor = Actor::new(
             PanicHandler {
@@ -1066,9 +1187,6 @@ mod tests {
 
     #[test]
     fn on_start_and_on_stop_called() {
-        let started = Arc::new(Mutex::new(false));
-        let stopped = Arc::new(Mutex::new(false));
-
         struct LifecycleHandler {
             started: Arc<Mutex<bool>>,
             stopped: Arc<Mutex<bool>>,
@@ -1084,6 +1202,8 @@ mod tests {
             }
         }
 
+        let started = Arc::new(Mutex::new(false));
+        let stopped = Arc::new(Mutex::new(false));
         let actor = Actor::new(
             LifecycleHandler {
                 started: started.clone(),
@@ -1187,8 +1307,6 @@ mod tests {
 
     #[test]
     fn iunknown_query_isender() {
-        let log = Arc::new(Mutex::new(Vec::new()));
-
         struct LogHandler {
             log: Arc<Mutex<Vec<u32>>>,
         }
@@ -1198,6 +1316,7 @@ mod tests {
             }
         }
 
+        let log = Arc::new(Mutex::new(Vec::new()));
         let actor = Actor::new(LogHandler { log: log.clone() }, |_| {});
 
         // Query ISender before activation
@@ -1214,8 +1333,6 @@ mod tests {
 
     #[test]
     fn iunknown_isender_and_handle_coexist() {
-        let log = Arc::new(Mutex::new(Vec::new()));
-
         struct LogHandler {
             log: Arc<Mutex<Vec<u32>>>,
         }
@@ -1225,6 +1342,7 @@ mod tests {
             }
         }
 
+        let log = Arc::new(Mutex::new(Vec::new()));
         let actor = Actor::new(LogHandler { log: log.clone() }, |_| {});
 
         let sender: Arc<dyn ISender<u32> + Send + Sync> =

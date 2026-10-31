@@ -109,7 +109,7 @@ pub fn bind(
         .iter()
         .find(|info| info.name == interface_name)
         .ok_or_else(|| RegistryError::BindingFailed {
-            detail: format!("provider does not have interface '{}'", interface_name),
+            detail: format!("provider does not have interface '{interface_name}'"),
         })?;
 
     // 2. Find the receptacle by name from consumer metadata
@@ -118,7 +118,7 @@ pub fn bind(
         .iter()
         .find(|info| info.name == receptacle_name)
         .ok_or_else(|| RegistryError::BindingFailed {
-            detail: format!("consumer does not have receptacle '{}'", receptacle_name),
+            detail: format!("consumer does not have receptacle '{receptacle_name}'"),
         })?;
 
     // 3. Verify type compatibility

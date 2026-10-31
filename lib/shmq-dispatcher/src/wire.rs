@@ -58,6 +58,14 @@
 //!                   transfer endpoint `peer` ("host:port") into the memory tier.
 //!                   Never waits for the transfer: a started key reads PENDING on
 //!                   Check until it is RESIDENT or MISS. See `crate::fetch`.)
+//! LookupBlocks      (19): req  = BlockBatch (see below)
+//!                         resp { [tier:u8]*n }   // identical to Lookup
+//! CopyToStoreBlocks (20): req  = BlockBatch (see below)
+//!                         resp { [ok:u8]*n }     // identical to CopyToStore
+//! LookupChunks      (21): req  = ChunkBlockBatch (see below)
+//!                         resp { [tier:u8]*n }   // identical to Lookup
+//! CopyToStoreChunks (22): req  = ChunkBlockBatch (see below)
+//!                         resp { [ok:u8]*n }     // identical to CopyToStore
 //! ```
 //!
 //! ## HandleBatch (CopyToStore / Lookup / Populate)
@@ -79,6 +87,51 @@
 //!               ] * n_entries,
 //! }
 //! ```
+//!
+//! ## `BlockBatch` (`LookupBlocks` / `CopyToStoreBlocks`)
+//!
+//! Every region offset of a block is `base_delta + block_id * stride` of its
+//! layer, so instead of one region list per entry the client sends a per-layer
+//! table once and one block id per key. The server expands it into exactly the
+//! `HandleBatch` entries the client would have sent: region `L` of entry `i` is
+//! `(layers[L].handle_idx, layers[L].base_delta + block_ids[i] * layers[L].stride,
+//! layers[L].size)`, in layer order, so the slot layout `sum(sizes[0..L])` is
+//! the same as for a `HandleBatch`.
+//!
+//! ```text
+//! BlockBatch {
+//!   n_handles:  u32,
+//!   handles:    [ cuda_ipc_handle: u8[64], gpu_device_id: i32 ]  * n_handles,
+//!   n_layers:   u16,
+//!   layers:     [ handle_idx: u32, base_delta: u64, stride: u64, size: u32 ] * n_layers,
+//!   n_entries:  u32,
+//!   keys:       [ key: u64 ]      * n_entries,
+//!   block_ids:  [ block_id: u64 ] * n_entries,
+//! }
+//! ```
+//!
+//! ## `ChunkBlockBatch` (`LookupChunks` / `CopyToStoreChunks`)
+//!
+//! The same, for keys of `blocks_per_key` GPU blocks (vLLM offload blocks larger
+//! than the GPU block): each key sends `blocks_per_key` block ids, and its regions
+//! are each block's regions in layer order, block after block. Two block ids are
+//! markers: `CHUNK_SCRATCH` sends the block's layers to `scratch_idx`'s handle (a
+//! load starting inside its first key; the bytes are discarded), the key's `j`-th
+//! scratch block's layer `L` at `j * sum(sizes) + sum(sizes[0..L])` so no two
+//! scratch pieces overlap, and `CHUNK_ABSENT` adds no regions (the short last key
+//! of a transfer).
+//!
+//! ```text
+//! ChunkBlockBatch {
+//!   n_handles, handles, n_layers, layers   // as in BlockBatch
+//!   scratch_idx:    u32,                    // handle for CHUNK_SCRATCH blocks (any value if unused)
+//!   blocks_per_key: u16,
+//!   n_entries:      u32,
+//!   keys:           [ key: u64 ] * n_entries,
+//!   block_ids:      [ block_id: u64 ] * (n_entries * blocks_per_key),
+//! }
+//! ```
+//! Responses as for `Lookup` / `CopyToStore`.
 //!
 //! # Response status
 //!
@@ -106,7 +159,20 @@ pub mod op {
     pub const TOUCH_CHECK: u32 = 16;
     pub const FETCH: u32 = 17;
     pub const CLEAR_ALL: u32 = 18;
+    pub const LOOKUP_BLOCKS: u32 = 19;
+    pub const COPY_TO_STORE_BLOCKS: u32 = 20;
+    pub const LOOKUP_CHUNKS: u32 = 21;
+    pub const COPY_TO_STORE_CHUNKS: u32 = 22;
 }
+
+/// `ChunkBlockBatch` block id for a GPU block the load does not want (it starts
+/// inside its first key): its layers' bytes go to the scratch handle, each at its
+/// own offset (see `ChunkBlockBatch` above).
+/// Kept in sync with `ring.py`.
+pub const CHUNK_SCRATCH: u64 = u64::MAX;
+/// `ChunkBlockBatch` block id for a GPU block the key does not hold (the short
+/// last key of a transfer): no regions. Kept in sync with `ring.py`.
+pub const CHUNK_ABSENT: u64 = u64::MAX - 1;
 
 /// An UNPIN key count meaning "release every pin held on this channel" (no keys
 /// follow). A count of 0 already means "unpin nothing", so the marker is the one
@@ -350,6 +416,10 @@ mod tests {
         assert_eq!(op::TOUCH_CHECK, 16);
         assert_eq!(op::FETCH, 17);
         assert_eq!(op::CLEAR_ALL, 18);
+        assert_eq!(op::LOOKUP_BLOCKS, 19);
+        assert_eq!(op::COPY_TO_STORE_BLOCKS, 20);
+        assert_eq!(op::LOOKUP_CHUNKS, 21);
+        assert_eq!(op::COPY_TO_STORE_CHUNKS, 22);
     }
 
     /// The Check response byte is a tri-state wire contract shared with the

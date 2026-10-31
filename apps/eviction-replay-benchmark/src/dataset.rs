@@ -47,6 +47,7 @@ pub const DATASETS: &[(&str, &str, &str)] = &[
 ];
 
 /// Remote filename for a dataset id, or `None` if the id is unknown.
+#[must_use]
 pub fn filename(id: &str) -> Option<&'static str> {
     DATASETS
         .iter()
@@ -55,6 +56,7 @@ pub fn filename(id: &str) -> Option<&'static str> {
 }
 
 /// Human-readable description for a dataset id.
+#[must_use]
 pub fn describe(id: &str) -> Option<&'static str> {
     DATASETS
         .iter()
@@ -64,6 +66,12 @@ pub fn describe(id: &str) -> Option<&'static str> {
 
 /// Ensure the named dataset is present in `/tmp`, downloading it if the cached
 /// copy is missing or empty. Returns the local path.
+///
+/// # Errors
+///
+/// Returns `InvalidInput` if `id` is not a known dataset, or an error if
+/// `curl` cannot be run, exits unsuccessfully, or the downloaded file cannot
+/// be moved into place.
 pub fn ensure(id: &str) -> io::Result<PathBuf> {
     let file = filename(id).ok_or_else(|| {
         io::Error::new(

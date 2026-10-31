@@ -25,7 +25,7 @@
 //!
 //! Because of the one genuine *second* implementation: an offline consumer
 //! analysing a trace it did not produce must recompute its keys to check them.
-//! [`std::collections::hash_map::DefaultHasher`] (SipHash) is not stable across
+//! [`std::collections::hash_map::DefaultHasher`] (`SipHash`) is not stable across
 //! Rust releases and `ahash` is not stable across its own, so either would make
 //! a trace verifiable only by the exact binary that wrote it — and silently, since
 //! the trace still loads and replays. So the mix function is written out here,
@@ -168,6 +168,7 @@ const _: () = {
 /// assert_eq!(splitmix64(0), 0xe220_a839_7b1d_cdaf);
 /// ```
 #[inline]
+#[must_use]
 pub fn splitmix64(x: u64) -> u64 {
     let x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
     let mut z = x;
@@ -192,6 +193,7 @@ pub fn splitmix64(x: u64) -> u64 {
 /// assert_eq!(key(ROOT_PARENT, 1), splitmix64(splitmix64(0) ^ 1));
 /// ```
 #[inline]
+#[must_use]
 pub fn key(parent: CacheKey, salt: u64) -> CacheKey {
     splitmix64(splitmix64(parent) ^ salt)
 }
@@ -226,6 +228,7 @@ pub fn key(parent: CacheKey, salt: u64) -> CacheKey {
 /// assert_eq!(shared_salt(0, 0, 0) >> 62, 1);
 /// ```
 #[inline]
+#[must_use]
 pub fn shared_salt(class_id: u64, instance_index: u64, block_ordinal: u64) -> u64 {
     assert!(
         class_id < CLASS_LIMIT,
@@ -260,6 +263,7 @@ pub fn shared_salt(class_id: u64, instance_index: u64, block_ordinal: u64) -> u6
 /// assert_eq!(input_salt(7, 3) >> 62, 2);
 /// ```
 #[inline]
+#[must_use]
 pub fn input_salt(session_id: u64, block_ordinal: u64) -> u64 {
     session_salt(INPUT_TAG, session_id, block_ordinal)
 }
@@ -281,6 +285,7 @@ pub fn input_salt(session_id: u64, block_ordinal: u64) -> u64 {
 /// assert_eq!(output_salt(7, 3) >> 62, 3);
 /// ```
 #[inline]
+#[must_use]
 pub fn output_salt(session_id: u64, block_ordinal: u64) -> u64 {
     session_salt(OUTPUT_TAG, session_id, block_ordinal)
 }
