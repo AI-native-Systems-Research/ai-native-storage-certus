@@ -1,0 +1,168 @@
+{
+  "generated": "2026-10-27T04:27:01Z",
+  "analysis_run": "2026-10-27",
+  "project": "dispatcher",
+  "branch": "spec-sync/coldload-v3-s20261025",
+  "head": "3921112a",
+  "based_on": "drift-report.json (same run)",
+  "mode": "interactive (approval given by the user's sync request, applied non-interactively)",
+  "applied": true,
+  "summary": {
+    "proposals": 12,
+    "backfill": 12,
+    "align": 0,
+    "new_spec": 0,
+    "supersede": 0,
+    "human_decision": 0,
+    "approved": 12
+  },
+  "carried_over_open": [
+    "A-1",
+    "A-2",
+    "A-3",
+    "A-4",
+    "A-5",
+    "A-01",
+    "A-02",
+    "A-04",
+    "A-05",
+    "A-06",
+    "A-08",
+    "A-10",
+    "N-01"
+  ],
+  "proposals": [
+    {
+      "id": "B-14",
+      "spec": "001",
+      "requirement": "SC-007",
+      "direction": "BACKFILL",
+      "before": "with key-based drive selection.",
+      "after": "store-time drive selection recorded in each entry's SSD location (+ sync note)",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": "B-15",
+      "spec": "001",
+      "requirement": "FR-025",
+      "direction": "BACKFILL",
+      "before": "recover_extent(key, offset, size)",
+      "after": "recover_extent(key, loc, size), loc = encode_loc(i, extent.offset)",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": "B-16",
+      "spec": "001",
+      "requirement": "FR-004",
+      "direction": "BACKFILL",
+      "before": "record the SSD offset",
+      "after": "record the entry's SSD location; whole object on drive device_index % N; encode_loc",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": "B-17",
+      "spec": "001",
+      "requirement": "FR-009",
+      "direction": "BACKFILL",
+      "before": "(drive source unstated)",
+      "after": "extent freed on the drive decoded from the location (select_drive); invalid drive frees nothing",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": "B-18",
+      "spec": "001",
+      "requirement": "FR-028",
+      "direction": "BACKFILL",
+      "before": "(failure list)",
+      "after": "adds promote_and_serve's invalid-drive IoError; batch_lookup/promote_to_memory_tier reject before reserving",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": "B-19",
+      "spec": "001",
+      "requirement": "FR-040",
+      "direction": "BACKFILL",
+      "before": "(grouping unstated)",
+      "after": "grouped by recorded drive; invalid drive skipped silently",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": "B-20",
+      "spec": "001",
+      "requirement": "US-11 narrative",
+      "direction": "BACKFILL",
+      "before": "grouped by target drive",
+      "after": "grouped by the drive recorded in their SSD location",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": "B-21",
+      "spec": "001",
+      "requirement": "Key Entity Dispatch Map Entry",
+      "direction": "BACKFILL",
+      "before": "ssd_offset",
+      "after": "ssd_offset holds (drive << 56) | extent_offset, carried opaquely",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": "B-22",
+      "spec": "001",
+      "requirement": "Key Entity Background Writer",
+      "direction": "BACKFILL",
+      "before": "A dedicated thread",
+      "after": "one writer per drive; job runs on writer device_index % N",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": "B-23",
+      "spec": "001",
+      "requirement": "spec header",
+      "direction": "BACKFILL",
+      "before": "-",
+      "after": "Last Synced 2026-10-27 line",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": "B-24",
+      "spec": "001",
+      "requirement": "data-model.md device_index",
+      "direction": "BACKFILL",
+      "before": "which data device to target",
+      "after": "+ chosen round-robin by next_store_drive, recorded in the location",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": "D-1",
+      "spec": "001",
+      "requirement": "info/FLOW.svg",
+      "direction": "BACKFILL",
+      "before": "drive_idx = key % num_drives",
+      "after": "drive = loc >> 56 (round-robin at store)",
+      "rationale": "code authoritative: 4bb69289 accepted and measured; placement moved from a key hash to a drive recorded in the SSD location",
+      "confidence": "HIGH",
+      "approved": true
+    }
+  ]
+}
