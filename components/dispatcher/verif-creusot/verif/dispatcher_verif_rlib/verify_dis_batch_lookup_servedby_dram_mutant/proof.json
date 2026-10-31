@@ -2,13 +2,13 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_batch_lookup": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_batch_lookup": { "prover": "alt-ergo", "time": 0.033 },
       "vc_verify_dis_batch_lookup_servedby_dram__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.038 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.026 }, null ]
           }
         ]
       }

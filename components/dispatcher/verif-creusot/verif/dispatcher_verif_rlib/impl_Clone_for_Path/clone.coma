@@ -1,4 +1,4 @@
-(* #"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/lookup.rs" 122 9 122 29 *)
+(* #"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/lookup.rs" 122 9 122 29 *)
 
 (* <Path as std::clone::Clone> *)
 
@@ -10,7 +10,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_Path [#"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/lookup.rs" 122 9 122 29]
+let clone_Path [#"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/lookup.rs" 122 9 122 29]
   (self: t_Path) (return (x: t_Path)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_Path = Any.any_l () | & self: t_Path = self ]) [ return (result: t_Path) -> (! return {result}) ]

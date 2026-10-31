@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_serve_memory_tier_to_gpu": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_serve_memory_tier_to_gpu": { "prover": "alt-ergo", "time": 0.026 },
       "vc_verify_dis_batch_lookup_scatter_bounded__mutant": null
     }
   }

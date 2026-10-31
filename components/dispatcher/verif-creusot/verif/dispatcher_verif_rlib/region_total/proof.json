@@ -2,9 +2,9 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_len_Ipc": { "prover": "alt-ergo", "time": 0.02 },
-      "vc_padd": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_region_total": { "prover": "alt-ergo", "time": 0.039 }
+      "vc_len_Ipc": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_padd": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_region_total": { "prover": "alt-ergo", "time": 0.045 }
     }
   }
 }

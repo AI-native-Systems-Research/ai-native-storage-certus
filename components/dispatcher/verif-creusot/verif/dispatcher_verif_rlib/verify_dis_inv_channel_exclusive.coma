@@ -1,20 +1,20 @@
-(* #"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/drivers.rs" 2142 0 2142 71 *)
+(* #"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/drivers.rs" 2138 0 2138 71 *)
 
-let%span smapping = "/home/cornel/repair-j33-rc21/components/dispatcher/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
-let%span svec = "/home/cornel/repair-j33-rc21/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
-let%span sbg = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 118 11 118 23
-let%span sbg'0 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 119 10 119 42
-let%span sbg'1 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 120 10 124 1
-let%span sbg'2 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 115 16 115 86
-let%span sbg'3 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 109 16 109 37
-let%span sbg'4 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 143 11 143 85
-let%span sbg'5 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 144 10 144 59
-let%span sdrivers = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/drivers.rs" 2143 12 2143 39
-let%span sdrivers'0 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/drivers.rs" 2144 18 2144 30
-let%span sdrivers'1 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/drivers.rs" 2145 18 2145 140
-let%span sdrivers'2 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/drivers.rs" 2148 12 2148 37
-let%span sdrivers'3 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/drivers.rs" 2149 26 2149 38
-let%span sdrivers'4 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/drivers.rs" 2141 11 2141 23
+let%span smapping = "/home/cornel/repair-j33-rc22/components/dispatcher/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
+let%span svec = "/home/cornel/repair-j33-rc22/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sbg = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/bg.rs" 118 11 118 23
+let%span sbg'0 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/bg.rs" 119 10 119 42
+let%span sbg'1 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/bg.rs" 120 10 124 1
+let%span sbg'2 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/bg.rs" 115 16 115 86
+let%span sbg'3 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/bg.rs" 109 16 109 37
+let%span sbg'4 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/bg.rs" 143 11 143 85
+let%span sbg'5 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/bg.rs" 144 10 144 59
+let%span sdrivers = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/drivers.rs" 2139 12 2139 39
+let%span sdrivers'0 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/drivers.rs" 2140 18 2140 30
+let%span sdrivers'1 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/drivers.rs" 2141 18 2141 140
+let%span sdrivers'2 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/drivers.rs" 2144 12 2144 37
+let%span sdrivers'3 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/drivers.rs" 2145 26 2145 38
+let%span sdrivers'4 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/drivers.rs" 2137 11 2137 23
 
 use creusot.prelude.MutBorrow
 use creusot.int.UInt64
@@ -126,7 +126,6 @@ type t_W = {
   cluster: bool;
   threads: int;
   rw: Map.map int UInt64.t;
-  rw_base: int;
   cfree: Map.map int int;
   wf: Map.map UInt64.t bool }
 
@@ -136,7 +135,7 @@ type t_Vec_u64_Global
 
 type t_Option_u64 = None'0 | Some'0 UInt64.t
 
-predicate nodup [#"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 114 0 114 33] (v: Seq.seq UInt64.t) =
+predicate nodup [#"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/bg.rs" 114 0 114 33] (v: Seq.seq UInt64.t) =
   [%#sbg'2] forall i: int, j: int. 0 <= i /\ i < j /\ j < Seq.length v -> Seq.get v i <> Seq.get v j
 
 constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
@@ -151,7 +150,7 @@ function index_Mapping_Int_Int [@inline:trivial] (self: Map.map int int) (a: int
 
 meta "rewrite_def" function index_Mapping_Int_Int
 
-function pending [#"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 108 0 108 35] (w: t_W) (c'0: UInt64.t) : int
+function pending [#"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/bg.rs" 108 0 108 35] (w: t_W) (c'0: UInt64.t) : int
  = [%#sbg'3] index_Mapping_Int_Int w.cfree (UInt64.t'int c'0 + 1000000)
 
 let chan_pool_checkout (s: MutBorrow.t t_S) (free: MutBorrow.t t_Vec_u64_Global) (return (x: t_Option_u64)) =
@@ -200,7 +199,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let verify_dis_inv_channel_exclusive [#"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/drivers.rs" 2142 0 2142 71]
+let verify_dis_inv_channel_exclusive [#"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/drivers.rs" 2138 0 2138 71]
   (s: MutBorrow.t t_S) (free: MutBorrow.t t_Vec_u64_Global) (return (x: ())) =
 {[@stop_split] [@expl:verify_dis_inv_channel_exclusive requires] [%#sdrivers'4] nodup (view_Vec_u64_Global free.current)}
   (! bb0

@@ -2,15 +2,15 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_before_deadline": { "prover": "alt-ergo", "time": 0.026 },
-      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.014 },
-      "vc_elim_Err'0": { "prover": "alt-ergo", "time": 0.025 },
-      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.026 },
-      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_ensure_initialized": { "prover": "alt-ergo", "time": 0.013 },
-      "vc_evict_and_insert": { "prover": "alt-ergo", "time": 0.027 },
-      "vc_rec_store_backpressure": { "prover": "alt-ergo", "time": 0.026 },
-      "vc_reserve_memory": { "prover": "z3", "time": 2.0 }
+      "vc_before_deadline": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_elim_Err'0": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_ensure_initialized": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_evict_and_insert": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_rec_store_backpressure": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_reserve_memory": { "prover": "z3", "time": 2.3 }
     }
   }
 }

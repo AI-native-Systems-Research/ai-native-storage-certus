@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_tier_event_stats": { "prover": "alt-ergo", "time": 0.037 },
+      "vc_tier_event_stats": { "prover": "alt-ergo", "time": 0.032 },
       "vc_verify_dis_tier_stats_read_only": {
         "prover": "alt-ergo",
-        "time": 0.154
+        "time": 0.183
       }
     }
   }

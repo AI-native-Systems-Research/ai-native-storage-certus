@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_evict_one_clean": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_verify_dis_tier_stats_blocked_causes": {
+        "prover": "alt-ergo",
+        "time": 0.1
+      }
+    }
+  }
+}

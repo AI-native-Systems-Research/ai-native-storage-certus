@@ -77,6 +77,10 @@ mod repair_test_eviction_events_dropped;
 #[path = "repair_test_failed_promotion_releases_slot.rs"]
 mod repair_test_failed_promotion_releases_slot;
 
+#[cfg(test)]
+#[path = "repair_test_eviction_errors_counted_unpersisted.rs"]
+mod repair_test_eviction_errors_counted_unpersisted;
+
 use parking_lot::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -1191,13 +1195,24 @@ impl DispatcherComponent {
                 Err(interfaces::DispatchMapError::ActiveReferences(_)) => {
                     self.tier_counters.record_eviction_blocked_by_pin();
                 }
-                Err(_) => {
-                    // The only other refusal for a resident entry is a missing
-                    // ssd_offset, i.e. write-through has not landed. Counted rather
-                    // than inferred by subtraction, so a third cause appearing later
-                    // shows up as the two counters failing to sum to the scanned
-                    // total instead of being silently attributed to this one.
+                Err(interfaces::DispatchMapError::InvalidState(_)) => {
+                    // The dispatch-map signals "memory-tier entry has no SSD
+                    // offset (write-through not complete)" with InvalidState,
+                    // so that refusal is the unpersisted one. Counted rather
+                    // than inferred by subtraction, so a third cause appearing
+                    // later shows up as the two counters failing to sum to the
+                    // scanned total instead of being silently attributed to
+                    // this one.
                     self.tier_counters.record_eviction_blocked_unpersisted();
+                }
+                Err(_) => {
+                    // A refusal that is neither a pin nor a missing ssd_offset
+                    // (e.g. KeyNotFound: a memory-tier slot `reserve_memory`
+                    // inserted whose dispatch-map entry is not registered yet).
+                    // FR-033 reserves each counter for its own cause, so this
+                    // must increment NEITHER — a third cause has to stay
+                    // visible as the two counters failing to sum to the
+                    // scanned total, not be absorbed into the unpersisted one.
                 }
             }
             // Write-through incomplete (no ssd_offset) so it can't be demoted.

@@ -1,4 +1,4 @@
-(* #"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/misc.rs" 5 9 5 29 *)
+(* #"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/misc.rs" 5 9 5 29 *)
 
 (* <Cold as std::clone::Clone> *)
 
@@ -12,7 +12,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_Cold [#"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/misc.rs" 5 9 5 29] (self: t_Cold)
+let clone_Cold [#"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/misc.rs" 5 9 5 29] (self: t_Cold)
   (return (x: t_Cold)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_Cold = Any.any_l () | & self: t_Cold = self ]) [ return (result: t_Cold) -> (! return {result}) ]

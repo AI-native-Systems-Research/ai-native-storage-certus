@@ -79,6 +79,27 @@ pub fn ev_ctr(a: Ctr, b: Ctr) -> bool {
 // evict_one_clean (lib.rs:1050)
 // ---------------------------------------------------------------------------
 
+/// Every candidate of the list is a resident entry held by a pin.
+#[logic(open)]
+pub fn list_pinned(w: W, cands: Seq<u64>) -> bool {
+    pearlite! { forall<j: Int> 0 <= j && j < cands.len() ==>
+        has(w, cands[j]) && (ent(w, cands[j]).rr@ > 0 || ent(w, cands[j]).wr@ > 0) }
+}
+
+/// Every candidate of the list is resident, unpinned and unpersisted.
+#[logic(open)]
+pub fn list_unpersisted(w: W, cands: Seq<u64>) -> bool {
+    pearlite! { forall<j: Int> 0 <= j && j < cands.len() ==>
+        has(w, cands[j]) && ent(w, cands[j]).rr@ == 0 && ent(w, cands[j]).wr@ == 0
+        && !persisted(ent(w, cands[j]).loc) }
+}
+
+/// Every candidate of the list has no dispatch-map entry yet.
+#[logic(open)]
+pub fn list_unregistered(w: W, cands: Seq<u64>) -> bool {
+    pearlite! { forall<j: Int> 0 <= j && j < cands.len() ==> !has(w, cands[j]) }
+}
+
 #[ensures((^s).p == s.p)]
 #[ensures(evict_frame(*s.g, *(^s).g) && ev_ctr((*s.g).c, (*(^s).g).c))]
 #[ensures(result ==> (*(^s).g).c.ev_mem == (*s.g).c.ev_mem + 1 && (*(^s).g).c.exhausted == (*s.g).c.exhausted)]
@@ -87,6 +108,21 @@ pub fn ev_ctr(a: Ctr, b: Ctr) -> bool {
     && (*(^s).g).dm == (*s.g).dm.insert(cand0(*s.g), dem_ent(ent(*s.g, cand0(*s.g))))
     && (*(^s).g).mt == (*s.g).mt.remove(cand0(*s.g))
     && (*(^s).g).used == (if (*s.g).used >= (*s.g).mt.lookup(cand0(*s.g)).size@ { (*s.g).used - (*s.g).mt.lookup(cand0(*s.g)).size@ } else { 0 }))]
+// DIS-TIER-STATS-BLOCKED-CAUSES: each candidate refused because it holds a pin
+// adds one to evictions_blocked_by_pin, each candidate refused for lacking an
+// SSD offset adds one to evictions_blocked_unpersisted, per candidate examined
+// (a scan whose every candidate is refused for that cause adds the candidate
+// count), and a refusal that is neither of those (KeyNotFound: an unregistered
+// slot) adds to neither counter.
+#[ensures(list_pinned(*s.g, (*s.g).ok[(*s.g).tick]) ==> !result
+    && (*(^s).g).c.blk_pin == (*s.g).c.blk_pin + (*s.g).ok[(*s.g).tick].len()
+    && (*(^s).g).c.blk_unp == (*s.g).c.blk_unp)]
+#[ensures(list_unpersisted(*s.g, (*s.g).ok[(*s.g).tick]) ==> !result
+    && (*(^s).g).c.blk_unp == (*s.g).c.blk_unp + (*s.g).ok[(*s.g).tick].len()
+    && (*(^s).g).c.blk_pin == (*s.g).c.blk_pin)]
+#[ensures(list_unregistered(*s.g, (*s.g).ok[(*s.g).tick]) ==> !result
+    && (*(^s).g).c.blk_pin == (*s.g).c.blk_pin
+    && (*(^s).g).c.blk_unp == (*s.g).c.blk_unp)]
 pub fn evict_one_clean(s: &mut S, scan: usize) -> bool {
     let g0 = snapshot!(*s.g);
     let p0 = snapshot!(s.p);
@@ -98,6 +134,12 @@ pub fn evict_one_clean(s: &mut S, scan: usize) -> bool {
     #[invariant(scan@ >= 1 && g0.ok[g0.tick].len() >= 1 && evictable(*g0, cand0(*g0)) ==> i@ == 0)]
     #[invariant(evict_frame(*g0, *s.g) && ev_ctr(g0.c, (*s.g).c))]
     #[invariant((*s.g).c.ev_mem == g0.c.ev_mem && (*s.g).c.exhausted == g0.c.exhausted)]
+    // No dispatch-map transition happened yet (every refusal leaves the world
+    // unchanged), so the candidate under examination still has its g0 state.
+    #[invariant((*s.g).dm == g0.dm && (*s.g).mt == g0.mt && (*s.g).used == g0.used && (*s.g).cap == g0.cap)]
+    #[invariant(list_pinned(*g0, cands@) ==> (*s.g).c.blk_pin == g0.c.blk_pin + i@ && (*s.g).c.blk_unp == g0.c.blk_unp)]
+    #[invariant(list_unpersisted(*g0, cands@) ==> (*s.g).c.blk_unp == g0.c.blk_unp + i@ && (*s.g).c.blk_pin == g0.c.blk_pin)]
+    #[invariant(list_unregistered(*g0, cands@) ==> (*s.g).c.blk_pin == g0.c.blk_pin && (*s.g).c.blk_unp == g0.c.blk_unp)]
     while i < cands.len() {
         let cand = cands[i];
         match dm_try_evict(s, cand) {
@@ -110,9 +152,14 @@ pub fn evict_one_clean(s: &mut S, scan: usize) -> bool {
             Err(DmE::ActiveRefs) => {
                 rec_blocked_by_pin(s);
             }
-            Err(_) => {
+            Err(DmE::InvalidState) => {
                 rec_blocked_unpersisted(s);
             }
+            // KeyNotFound (a slot with no dispatch-map entry yet) and any other
+            // refusal that is neither a pin nor a missing ssd_offset: counted in
+            // neither counter, so the two counters' sum against the scanned
+            // total exposes the third cause instead of absorbing it.
+            Err(_) => {}
         }
         i += 1;
     }

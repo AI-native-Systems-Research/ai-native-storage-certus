@@ -1,7 +1,7 @@
-(* #"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/evict.rs" 28 0 28 42 *)
+(* #"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/evict.rs" 28 0 28 42 *)
 
-let%span sevict = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/evict.rs" 29 20 29 78
-let%span sevict'0 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/evict.rs" 27 10 27 102
+let%span sevict = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/evict.rs" 29 20 29 78
+let%span sevict'0 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/evict.rs" 27 10 27 102
 
 use creusot.prelude.MutBorrow
 use creusot.int.UInt64
@@ -113,7 +113,6 @@ type t_W = {
   cluster: bool;
   threads: int;
   rw: Map.map int UInt64.t;
-  rw_base: int;
   cfree: Map.map int int;
   wf: Map.map UInt64.t bool }
 
@@ -127,7 +126,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let rec_eviction_from_memory [#"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/evict.rs" 28 0 28 42]
+let rec_eviction_from_memory [#"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/evict.rs" 28 0 28 42]
   (s: MutBorrow.t t_S) (return (x: ())) = (! bb0
   [ bb0 = s0
     [ s0 = [ &s <- { s with current = { s.current with g = ([%#sevict] { dm = s.current.g.dm;
@@ -162,7 +161,6 @@ let rec_eviction_from_memory [#"/home/cornel/repair-j33-rc21/components/dispatch
                                                                          cluster = s.current.g.cluster;
                                                                          threads = s.current.g.threads;
                                                                          rw = s.current.g.rw;
-                                                                         rw_base = s.current.g.rw_base;
                                                                          cfree = s.current.g.cfree;
                                                                          wf = s.current.g.wf }) } } ] s1
     | s1 = -{resolve_refmut_S s}- s2
@@ -201,7 +199,6 @@ let rec_eviction_from_memory [#"/home/cornel/repair-j33-rc21/components/dispatch
         cluster = s.current.g.cluster;
         threads = s.current.g.threads;
         rw = s.current.g.rw;
-        rw_base = s.current.g.rw_base;
         cfree = s.current.g.cfree;
         wf = s.current.g.wf }}
     (! return {result}) ]

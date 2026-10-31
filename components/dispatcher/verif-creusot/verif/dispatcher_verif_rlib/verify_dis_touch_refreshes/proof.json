@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_touch": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_touch": { "prover": "alt-ergo", "time": 0.012 },
       "vc_verify_dis_touch_refreshes": {
         "prover": "alt-ergo",
-        "time": 0.076
+        "time": 0.045
       }
     }
   }

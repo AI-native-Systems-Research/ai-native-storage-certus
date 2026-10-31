@@ -2,13 +2,13 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_chan_pool_checkout": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_chan_pool_checkout": { "prover": "alt-ergo", "time": 0.027 },
       "vc_verify_dis_inv_channel_exclusive__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.028 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.034 }, null ]
           }
         ]
       }

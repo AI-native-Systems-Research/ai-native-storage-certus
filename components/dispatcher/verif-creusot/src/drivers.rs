@@ -1600,6 +1600,35 @@ pub fn verify_dis_inv_eviction_unpersisted_skipped__mutant(s: &mut S, needed: u3
     evict_for_space(s, needed, max_attempts)
 }
 
+// DIS-TIER-STATS-BLOCKED-CAUSES (002 FR-033): each eviction candidate refused
+// because it holds a read pin increases evictions_blocked_by_pin by one, each
+// candidate refused for lacking an SSD offset increases
+// evictions_blocked_unpersisted by one, counted per candidate examined (a scan
+// whose every candidate is refused for that cause adds the candidate count),
+// and a refusal that is neither (KeyNotFound: an unregistered slot) increases
+// neither counter.
+#[ensures(list_pinned(*s.g, (*s.g).ok[(*s.g).tick]) ==> !result
+    && (*(^s).g).c.blk_pin == (*s.g).c.blk_pin + (*s.g).ok[(*s.g).tick].len()
+    && (*(^s).g).c.blk_unp == (*s.g).c.blk_unp)]
+#[ensures(list_unpersisted(*s.g, (*s.g).ok[(*s.g).tick]) ==> !result
+    && (*(^s).g).c.blk_unp == (*s.g).c.blk_unp + (*s.g).ok[(*s.g).tick].len()
+    && (*(^s).g).c.blk_pin == (*s.g).c.blk_pin)]
+#[ensures(list_unregistered(*s.g, (*s.g).ok[(*s.g).tick]) ==> !result
+    && (*(^s).g).c.blk_pin == (*s.g).c.blk_pin
+    && (*(^s).g).c.blk_unp == (*s.g).c.blk_unp)]
+pub fn verify_dis_tier_stats_blocked_causes(s: &mut S, scan: usize) -> bool {
+    evict_one_clean(s, scan)
+}
+
+// The twin asserts the OLD catch-all behaviour: every refusal that is not a
+// pin was booked as unpersisted, so a scan of unregistered slots (KeyNotFound,
+// a third cause) also incremented evictions_blocked_unpersisted.
+#[ensures(list_unregistered(*s.g, (*s.g).ok[(*s.g).tick]) && (*s.g).ok[(*s.g).tick].len() >= 1 ==>
+    (*(^s).g).c.blk_unp == (*s.g).c.blk_unp + (*s.g).ok[(*s.g).tick].len())]
+pub fn verify_dis_tier_stats_blocked_causes__mutant(s: &mut S, scan: usize) -> bool {
+    evict_one_clean(s, scan)
+}
+
 #[ensures(match result { Err(e) => e == DE::Alloc && evict_frame((*s.g), (*(^s).g)), Ok(()) => (*(^s).g).used + needed@ <= (*(^s).g).cap })]
 #[ensures(max_attempts@ == 0 && (*s.g).used + needed@ > (*s.g).cap ==> result == Err(DE::Alloc) && (*(^s).g) == (*s.g))]
 pub fn verify_dis_inv_eviction_bounded_fails(s: &mut S, needed: u32, max_attempts: usize) -> Result<(), DE> {

@@ -1,6 +1,6 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_rec_promotions_to_gpu": { "prover": "z3", "time": 0.008 } }
+    "Coma": { "vc_rec_promotions_to_gpu": { "prover": "z3", "time": 0.017 } }
   }
 }

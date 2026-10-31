@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_process_write_job": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_process_write_job": { "prover": "alt-ergo", "time": 0.021 },
       "vc_verify_dis_populate_no_lru_refresh_by_writer": {
         "prover": "alt-ergo",
-        "time": 0.057
+        "time": 0.068
       }
     }
   }
