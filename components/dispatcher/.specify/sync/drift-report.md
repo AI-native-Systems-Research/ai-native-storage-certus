@@ -1,12 +1,12 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-31T15:59:02Z
-spec_sync_git_commit: b26aacb5
-spec_sync_inputs_sha256: f77081c0bc8dc375182f810c6ae67558974b52a8e909eec8185958fbe25233a3
+spec_sync_synced_at: 2026-10-31T16:04:45Z
+spec_sync_git_commit: 27f1dd98
+spec_sync_inputs_sha256: c104e1be7c98cf404405c866539a3b0558f6bbfd81c7a2647b7253a771de5bdc
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
-> **Re-stamp 2026-10-31 (layout only).** `specs/001-dispatcher-cache-interface/data-model.md`: the three diagrams are redrawn within 80 columns so a Markdown preview does not wrap them. Same states, transitions and methods; no analysis below changes.
+> **Re-stamp 2026-10-31 (layout only).** `specs/001-dispatcher-cache-interface/data-model.md`: the lifecycle diagrams are redrawn as box-and-arrow state diagrams within 80 columns, with the cases the picture leaves out listed under it. Same states, transitions and methods; no analysis below changes.
 > **Sync 2026-10-31 (branch `specsync-b`: optimizer session `s20261029-094947` merged onto unstable, plus `55a4ddd4` clippy) — delta, drift resolved by backfill. Not stamped here: the final pass stamps every component on the merged tree.** Base `a0292be6` (`origin/unstable`, fresh stamp), HEAD `0a71990e`. Inputs changed by `4941320a` (batched piece copies), `615d9d0d` (in-loop multi-region cold delivery, checked final sync), the merge `6a917346`, `633d5026` (the 2026-10-30 spec entry) and `55a4ddd4` (rustfmt only in `src/lib.rs` and one test). `cargo test -p dispatcher --lib`: 145 passed.
 >
 > - **Verified, the 2026-10-30 entry holds:** FR-003 (`populate` → `copy_gpu_to_memory_async` on `store`, `src/lib.rs:3568-3580`), FR-006 (`serve_memory_tier_to_gpu` → `queue_slot_to_regions`, `:1421-1435`; no-stream `dma_copy_to_device` fallback `:1436-1474`), FR-037 (warm batched H2D, `store` D2H), FR-039 step (2) "batched" wording, FR-056 `copy_gpu_to_memory_async` (`:3826-3915`: `PieceBatch` push/flush on a created stream `:3889-3907`, one `memcpy_d2h_async` per region on a NULL stream `:3875-3888`), Implementation Notes D2H/H2D sentences. `PieceBatch`: at most 64 copies per call (`src/pipeline.rs:66`), one entry → the plain memcpy, two or more → `memcpy_batch_async` (`:113-128`). FR-061's in-loop bullet (optimizer's own edit): `ColdReadJob::regions` (`:569-579`), multi-region delivery when the last segment lands (`:1357-1383`), `h2d_issued` (`:1218`, `:1384`), checked dual sync failing every issued object (`:1474-1491`), caller no longer scatters after promote (`src/lib.rs:2912-2932`); tests `repair_test_failed_promotion_releases_slot.rs:943` (delivery) and `:985` (failed sync), `lib.rs:6901` (one batch per block, warm and store).
