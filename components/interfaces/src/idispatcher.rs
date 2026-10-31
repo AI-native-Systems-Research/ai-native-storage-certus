@@ -336,7 +336,7 @@ pub struct ClearAll {
 ///
 /// All fields are monotonic since process start; subtract two successive
 /// snapshots to obtain a per-interval delta. Returned by
-/// [`IDispatcher::tier_event_stats`].
+/// `IDispatcher::tier_event_stats`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TierEventStats {
     /// Blocks promoted SSD -> DRAM (memory tier), across all promote paths.

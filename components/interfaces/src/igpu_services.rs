@@ -584,7 +584,7 @@ define_interface! {
         /// ```
         fn device_of_ptr(&self, ptr: *const std::ffi::c_void) -> Result<i32, String>;
 
-        /// Destroy a CUDA stream previously created with [`create_stream`].
+        /// Destroy a CUDA stream previously created with [`create_stream`](Self::create_stream).
         ///
         /// # Errors
         ///
@@ -604,7 +604,7 @@ define_interface! {
         /// Query whether all operations on a CUDA stream have completed.
         ///
         /// Returns `Ok(true)` if all operations are complete, `Ok(false)` if
-        /// work is still in-flight. Unlike [`stream_synchronize`], this does
+        /// work is still in-flight. Unlike [`stream_synchronize`](Self::stream_synchronize), this does
         /// not block.
         ///
         /// # Errors
