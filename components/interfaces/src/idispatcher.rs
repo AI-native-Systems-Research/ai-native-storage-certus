@@ -745,7 +745,8 @@ component_macros::define_interface! {
         /// DMA-copy from GPU into a previously reserved memory-tier slot.
         ///
         /// The slot must have been allocated by a prior `reserve_memory` call.
-        /// Issues one `cudaMemcpyAsync` per region on the given stream and returns
+        /// Issues the regions' copies on the given stream, batched (`IGpuServices::
+        /// memcpy_batch_async`; one plain copy for a single region), and returns
         /// immediately. The N regions are gathered contiguously into the one slot
         /// (region L lands at `slot + sum of preceding region sizes`), so a block
         /// split into N per-layer GPU allocations (vLLM 0.23+) is stored as one
