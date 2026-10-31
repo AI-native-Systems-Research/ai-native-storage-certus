@@ -123,6 +123,14 @@ OP_CLEAR_ALL = 18
 UNPIN_ALL = 0xFFFFFFFF
 OP_LOOKUP_BLOCKS = 19
 OP_COPY_TO_STORE_BLOCKS = 20
+OP_LOOKUP_CHUNKS = 21
+OP_COPY_TO_STORE_CHUNKS = 22
+
+# ChunkBlockBatch block-id markers (mirror wire::CHUNK_SCRATCH / CHUNK_ABSENT): a GPU
+# block the load does not want (its bytes go to the scratch handle), and one the key
+# does not hold (the short last key of a transfer).
+CHUNK_SCRATCH = 0xFFFFFFFFFFFFFFFF
+CHUNK_ABSENT = 0xFFFFFFFFFFFFFFFE
 
 STATUS_OK = 0
 
@@ -280,9 +288,14 @@ def encode_handle_batch(entries) -> bytes:
     return bytes(head) + bytes(body)
 
 
-def encode_layer_table(layers) -> bytes:
+def encode_layer_table(layers, extra_handles=None):
     """The fixed head of a BlockBatch (LookupBlocks / CopyToStoreBlocks request),
     from ``n_handles`` through the layers array.
+
+    With ``extra_handles`` (``[(handle_bytes[64], gpu_device_id)]``, for a
+    ChunkBlockBatch's scratch buffer), those are listed after the layers'
+    handles, are not layers, and the call returns ``(table, index of the first
+    extra handle)``.
 
     ``layers`` is ``[(handle_bytes[64], gpu_device_id, base_delta, stride, size)]``
     in layer order. Distinct ``(handle_bytes, gpu_device_id)`` pairs are emitted
@@ -305,13 +318,18 @@ def encode_layer_table(layers) -> bytes:
             table_rows.append(tkey)
         rows += _LAYER_ROW.pack(idx, base_delta, stride, size)
 
+    first_extra = len(table_rows)
+    for tkey in extra_handles or ():
+        table_rows.append(tkey)
     head = bytearray(struct.pack("<I", len(table_rows)))
     for hb, dev in table_rows:
         if len(hb) != 64:
             raise RingError(f"CUDA IPC handle must be 64 bytes, got {len(hb)}")
         head += hb
         head += struct.pack("<i", dev)
-    return bytes(head) + bytes(rows)
+    if extra_handles is None:
+        return bytes(head) + bytes(rows)
+    return bytes(head) + bytes(rows), first_extra
 
 
 def encode_block_entries(keys: Sequence[int], block_ids: Sequence[int]) -> bytes:
@@ -327,6 +345,25 @@ def encode_block_entries(keys: Sequence[int], block_ids: Sequence[int]) -> bytes
         return struct.pack(fmt, n, *keys, *block_ids)
     except struct.error:
         return struct.pack(fmt, n, *[k & _U64_MASK for k in keys], *block_ids)
+
+
+def encode_chunk_entries(scratch_idx: int, blocks_per_key: int, keys: Sequence[int],
+                         block_ids: Sequence[int]) -> bytes:
+    """`{ scratch_idx:u32, blocks_per_key:u16, n:u32, [key:u64]*n,
+    [block_id:u64]*(n*blocks_per_key) }`: the per-call tail of a ChunkBlockBatch,
+    after the layer table. ``block_ids`` holds ``blocks_per_key`` ids per key, in
+    key order; CHUNK_SCRATCH / CHUNK_ABSENT mark a skipped / absent block."""
+    n = len(keys)
+    if blocks_per_key < 1 or blocks_per_key > 0xFFFF:
+        raise RingError(f"blocks_per_key must be 1..65535, got {blocks_per_key}")
+    if len(block_ids) != n * blocks_per_key:
+        raise RingError(f"{n} keys x {blocks_per_key} != {len(block_ids)} block ids")
+    fmt = f"<IHI{n}Q{n * blocks_per_key}Q"
+    try:
+        return struct.pack(fmt, scratch_idx, blocks_per_key, n, *keys, *block_ids)
+    except struct.error:
+        return struct.pack(fmt, scratch_idx, blocks_per_key, n,
+                           *[k & _U64_MASK for k in keys], *block_ids)
 
 
 def chunk_handle_batches(entries, cap_req: int, log=None):
@@ -1096,6 +1133,48 @@ class Ring:
             if timings is not None:
                 t0 = time.perf_counter_ns()
             data = table + encode_block_entries(ck, block_ids[i:i + per_chunk])
+            if timings is not None:
+                encode_ns += time.perf_counter_ns() - t0
+            results.extend(decode_ok_flags(self._dispatch(opcode, data), len(ck)))
+        if timings is not None:
+            timings.append(encode_ns)
+        return results
+
+    def copy_to_store_chunks(self, table: bytes, scratch_idx: int, blocks_per_key: int,
+                             keys: Sequence[int], block_ids: Sequence[int], timings=None) -> list[bool]:
+        """CopyToStoreChunks: ``table`` from :func:`encode_layer_table`,
+        ``blocks_per_key`` block ids per key (see :func:`encode_chunk_entries`).
+        Chunked by key count to fit cap_req; results in key order."""
+        return self._chunk_batch_op(OP_COPY_TO_STORE_CHUNKS, table, scratch_idx,
+                                    blocks_per_key, keys, block_ids, timings)
+
+    def lookup_chunks(self, table: bytes, scratch_idx: int, blocks_per_key: int,
+                      keys: Sequence[int], block_ids: Sequence[int], timings=None) -> list[bool]:
+        """LookupChunks: as :meth:`copy_to_store_chunks`; hit flags in key order."""
+        return self._chunk_batch_op(OP_LOOKUP_CHUNKS, table, scratch_idx,
+                                    blocks_per_key, keys, block_ids, timings)
+
+    def _chunk_batch_op(self, opcode: int, table: bytes, scratch_idx: int, blocks_per_key: int,
+                        keys, block_ids, timings=None) -> list[bool]:
+        keys = list(keys)
+        if not keys:
+            return []
+        block_ids = list(block_ids)
+        per_chunk = (self._cap_req - len(table) - 10) // (8 + 8 * blocks_per_key)
+        if per_chunk < 1:
+            raise RingError(
+                f"layer table of {len(table)} B leaves no room for a key of "
+                f"{blocks_per_key} blocks in cap_req {self._cap_req} B"
+            )
+        results: list[bool] = []
+        encode_ns = 0
+        for i in range(0, len(keys), per_chunk):
+            ck = keys[i:i + per_chunk]
+            if timings is not None:
+                t0 = time.perf_counter_ns()
+            data = table + encode_chunk_entries(
+                scratch_idx, blocks_per_key, ck,
+                block_ids[i * blocks_per_key:(i + len(ck)) * blocks_per_key])
             if timings is not None:
                 encode_ns += time.perf_counter_ns() - t0
             results.extend(decode_ok_flags(self._dispatch(opcode, data), len(ck)))

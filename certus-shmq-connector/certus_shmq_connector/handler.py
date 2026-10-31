@@ -37,7 +37,7 @@ from .compat import (
 
 from .gpu import KvCacheIpc, scratch_ipc
 from .mediums import CertusLoadStoreSpec, ns_key
-from .ring import encode_layer_table
+from .ring import CHUNK_ABSENT, CHUNK_SCRATCH, encode_layer_table
 
 # Direction tags. Only used to populate the ≤0.24 ``TransferResult.transfer_type``
 # (dropped on 0.26); kept as the natural label for a job's direction either way.
@@ -300,18 +300,76 @@ def _build_worker_class():
                 )
             except Exception:  # noqa: BLE001 - odd region objects use the legacy path
                 self._layer_table = None
+            # For keys of several GPU blocks: the same layers plus the scratch buffer as
+            # a last table row (scratch_idx), built once the scratch buffer exists.
+            self._chunk_table: tuple[bytes, int] | None = None
             self._encode_log = _ENCODE_LOG
 
         # Cleared the first time a server rejects a *_BLOCKS opcode as unknown,
         # so every later call (on any worker) goes straight to the legacy ops.
         _blocks_supported = True
+        _chunks_supported = True
+
+        def _chunk_ids(self, gpu_block_ids, n_keys: int, skip: int):
+            """``blocks_per_chunk`` block ids per key for a ChunkBlockBatch: the same
+            mapping as ``_chunk_entries`` (skipped blocks first, a short last key),
+            with CHUNK_SCRATCH / CHUNK_ABSENT for the blocks without a GPU block."""
+            bpc = self._blocks_per_chunk
+            expected = n_keys * bpc - skip
+            if not 0 <= skip < bpc or not (expected - bpc < len(gpu_block_ids) <= expected):
+                raise AssertionError(
+                    f"{len(gpu_block_ids)} GPU blocks do not fill {n_keys} keys of "
+                    f"{bpc} blocks (first {skip} skipped)"
+                )
+            ids = [CHUNK_SCRATCH] * skip + [int(b) for b in gpu_block_ids]
+            ids += [CHUNK_ABSENT] * (n_keys * bpc - len(ids))
+            return ids
+
+        def _chunk_table_for(self):
+            """The ChunkBlockBatch head for this worker and its scratch row's index:
+            the layer table, with the scratch buffer listed as one more handle (not as
+            a layer). Allocates the scratch buffer on first use; built once."""
+            if self._chunk_table is None:
+                with self._scratch_lock:
+                    if self._scratch is None:
+                        self._scratch = scratch_ipc(
+                            max(r.stride_bytes for r in self._kv_regions),
+                            self._kv_regions[0].gpu_device_id,
+                        )
+                    self._chunk_table = encode_layer_table(
+                        [(r.handle_bytes, r.gpu_device_id, int(r.base_delta),
+                          int(r.stride_bytes), int(r.stride_bytes)) for r in self._kv_regions],
+                        extra_handles=[(self._scratch.handle_bytes, self._scratch.gpu_device_id)],
+                    )
+            return self._chunk_table
 
         def _ring_blocks(self, op: str, gpu_block_ids, ns_keys, skip: int = 0):
-            """Send one load/store over the *_BLOCKS op, or the per-region op when
-            the server or this worker's regions don't support it, or when a key holds
-            several GPU blocks (the block-id ops carry one block id per key). Returns
-            the per-key results in key order."""
+            """Send one load/store over the compact ops: *_BLOCKS for one GPU block
+            per key, *_CHUNKS for several. Falls back to the per-region op when the
+            server or this worker's regions don't support them. Returns the per-key
+            results in key order."""
             log = self._encode_log
+            if (self._layer_table is not None and self._blocks_per_chunk > 1
+                    and CertusShmqWorker._chunks_supported):
+                fn = self._ring.lookup_chunks if op == "load" else self._ring.copy_to_store_chunks
+                timings = [] if log is not None else None
+                t0 = time.perf_counter_ns() if log is not None else 0
+                try:
+                    table, scratch_idx = self._chunk_table_for()
+                    ids = self._chunk_ids(gpu_block_ids, len(ns_keys), skip)
+                    results = fn(table, scratch_idx, self._blocks_per_chunk, ns_keys, ids,
+                                 timings=timings)
+                except Exception as e:  # noqa: BLE001 - only unknown-opcode falls back
+                    if not _is_unknown_opcode(e):
+                        raise
+                    CertusShmqWorker._chunks_supported = False
+                else:
+                    if log is not None:
+                        total = time.perf_counter_ns() - t0
+                        enc = timings[0] if timings else 0
+                        log.record(op, len(ns_keys), len(gpu_block_ids) * len(self._kv_regions),
+                                   "chunks", enc, total - enc)
+                    return results
             if (self._layer_table is not None and self._blocks_per_chunk == 1
                     and CertusShmqWorker._blocks_supported):
                 fn = self._ring.lookup_blocks if op == "load" else self._ring.copy_to_store_blocks
