@@ -2,6 +2,15 @@
 
 **Crate**: `interfaces` | **Feature gate**: `spdk`
 
+> **Historical (v0 contract), kept for reference: not the current interface.** *(Spec-sync 2026-10-31, H-1.)*
+> This file describes the original `IDispatcher`: `prepare_store` / `commit_store` /
+> `cancel_store`, a five-field config, no memory tier. None of that exists now. The current
+> interface is `components/interfaces/src/idispatcher.rs` (the doc comment on each method is
+> its contract), specified by `spec.md` FR-001 (method inventory), FR-039 (`batch_lookup`),
+> FR-056 (the GPU-staged store and the durability methods) and FR-059 (`batch_populate`); the
+> entry states are in `data-model.md`. `specs/002-served-by-tier-attribution/contracts/idispatcher.md`
+> is the current contract for the served-by additions.
+
 ## Definition
 
 ```rust

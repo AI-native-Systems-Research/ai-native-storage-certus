@@ -160,7 +160,9 @@
       "location": "contracts/idispatcher.md:1-200; components/interfaces/src/idispatcher.rs",
       "rationale": "no requirement cites the file; recorded out of scope on 2026-10-27; which option is a documentation-scope choice",
       "confidence": "MEDIUM",
-      "approved": false
+      "approved": true,
+      "status": "applied",
+      "resolution": "marked historical: a header names the v0 contract and points to interfaces/src/idispatcher.rs, spec.md FR-001/039/056/059, data-model.md and the 002 served-by contract (user-approved alongside the data-model.md fix)"
     }
   ],
   "previous": "backups/20261031T054807Z/proposals.json.prev"
