@@ -1,4 +1,4 @@
-//! IPartitionTable interface and associated types for GPT partition management.
+//! `IPartitionTable` interface and associated types for GPT partition management.
 
 use std::fmt;
 
@@ -40,7 +40,7 @@ pub struct PartitionConfig {
     pub sector_size: u32,
     /// Total number of sectors on the device.
     pub total_sectors: u64,
-    /// NVMe namespace ID.
+    /// `NVMe` namespace ID.
     pub ns_id: u32,
     /// Partition specifications (ordered).
     pub partitions: Vec<PartitionSpec>,

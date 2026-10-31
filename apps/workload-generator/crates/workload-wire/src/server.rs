@@ -359,8 +359,8 @@ pub fn serve_connection_until<S: Read + Write, H: Service>(
         match read_header(stream, &mut head, stop) {
             Ok(Next::Frame) => {}
             // A clean close between frames is how a run ends, not a failure.
-            Ok(Next::Closed) => return Ok(Served::Closed),
-            Ok(Next::Stopped) => return Ok(Served::Closed),
+            // A stop request ends the connection the same way.
+            Ok(Next::Closed | Next::Stopped) => return Ok(Served::Closed),
             Err(e) => return Err(ServerError::Io(e)),
         }
         let header = Header::decode(&head, max_body)?;
@@ -537,6 +537,7 @@ impl<F: ServiceFactory> Server<F> {
     }
 
     /// Set the largest body this server will accept.
+    #[must_use]
     pub fn with_max_body(mut self, max_body: u32) -> Self {
         self.max_body = max_body;
         self
@@ -546,12 +547,14 @@ impl<F: ServiceFactory> Server<F> {
     ///
     /// Zero exits as soon as the count reaches zero, which is what a test wants and what a run
     /// does not: a generator opening its lanes one at a time would be cut off.
+    #[must_use]
     pub fn with_linger(mut self, linger: Duration) -> Self {
         self.linger = linger;
         self
     }
 
     /// How long to wait for the very first connection before giving up.
+    #[must_use]
     pub fn with_first_connect_timeout(mut self, timeout: Duration) -> Self {
         self.first_connect_timeout = timeout;
         self
@@ -568,6 +571,11 @@ impl<F: ServiceFactory> Server<F> {
     /// If the listener cannot be polled. A failure on one connection is logged to stderr
     /// and closes that connection; it does not stop the agent, because the generator will
     /// see the close, name the node and abort the run itself.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "public signature: the agent's main hands over the stop flag it shares with its \
+                  signal handler, and each connection thread takes its own clone of it"
+    )]
     pub fn serve(&self, stop: Arc<AtomicBool>) -> io::Result<()> {
         self.listener.set_nonblocking(true)?;
         let mut threads = Vec::new();

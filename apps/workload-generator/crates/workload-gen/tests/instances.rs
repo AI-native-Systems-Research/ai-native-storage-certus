@@ -16,7 +16,7 @@ use workload_gen::hardware::{self, Instance, DEFAULT_MAILBOX, DEFAULT_PORT};
 
 /// A description small enough to load fast, and never actually driven here: every refusal under
 /// test happens before an agent is contacted.
-const DESCRIPTION: &str = r#"
+const DESCRIPTION: &str = r"
 version: 1
 blocks: {tokens: 16, bytes: 32768}
 shared_classes:
@@ -31,7 +31,7 @@ session_classes:
     input_growth: {constant: 1}
     output_growth: {constant: 1}
     think_time: {constant: 1}
-"#;
+";
 
 /// The example in the repository root, which the contract names and a test must keep parseable.
 fn example_file() -> std::path::PathBuf {
@@ -66,6 +66,11 @@ fn the_example_hardware_file_parses() {
 }
 
 /// Write `text` to a temporary hardware file and read it.
+#[expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test helper outside #[test]: a failure here must fail the test"
+)]
 fn read_text(text: &str) -> Result<hardware::Hardware, String> {
     let dir = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("hw.yml");
@@ -127,6 +132,10 @@ fn the_rate_can_be_infinite_in_the_file_as_well_as_on_the_command_line() {
 // ---------------------------------------------------------------------------
 
 /// A `run` invocation with the given extra flags, against nothing that is listening.
+#[expect(
+    clippy::unwrap_used,
+    reason = "test helper outside #[test]: a failure here must fail the test"
+)]
 fn run_argv(extra: &[&str]) -> i32 {
     let dir = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("d.yml");
@@ -229,6 +238,11 @@ fn a_bad_instance_string_is_refused_by_the_parser_with_its_reason() {
 // ---------------------------------------------------------------------------
 
 /// Run the real binary in `dir`, returning its exit code and its error stream.
+#[expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test helper outside #[test]: a failure here must fail the test"
+)]
 fn run_in(dir: &Path, extra: &[&str]) -> (i32, String) {
     let path = dir.join("d.yml");
     std::fs::write(&path, DESCRIPTION).unwrap();

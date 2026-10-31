@@ -52,7 +52,15 @@ impl<T: Send + 'static> ISender<T> for KanalSender<T> {
     }
 }
 
+// SAFETY: the only field is a `kanal::Sender<T>`, which is an
+// `Arc<Mutex<ChannelInternal<T>>>`: every access to the queue goes through
+// kanal's mutex, and kanal declares `ChannelInternal<T>: Send` for `T: Send`,
+// so moving the handle to another thread is sound.
 unsafe impl<T: Send> Send for KanalSender<T> {}
+// SAFETY: sharing `&KanalSender` only lets threads call `send`/`try_send`,
+// which take kanal's internal mutex before touching the queue, so concurrent
+// calls are serialised; values of `T` only move between threads (`T: Send`),
+// they are never shared.
 unsafe impl<T: Send> Sync for KanalSender<T> {}
 
 /// Receiver wrapper for kanal channels implementing [`IReceiver`].
@@ -91,7 +99,12 @@ impl<T: Send + 'static> IReceiver<T> for KanalReceiver<T> {
     }
 }
 
+// SAFETY: the only field is a `kanal::Receiver<T>`, an
+// `Arc<Mutex<ChannelInternal<T>>>` like the sender; see `KanalSender`.
 unsafe impl<T: Send> Send for KanalReceiver<T> {}
+// SAFETY: `recv`/`try_recv` through `&KanalReceiver` take kanal's internal
+// mutex before touching the queue, so concurrent receives are serialised;
+// each received `T` is moved out to one thread (`T: Send`).
 unsafe impl<T: Send> Sync for KanalReceiver<T> {}
 
 /// Kanal bounded channel component.
@@ -145,6 +158,7 @@ impl<T: Send + 'static> KanalChannel<T> {
     ///
     /// let ch = KanalChannel::<u32>::new(64);
     /// ```
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         assert!(capacity > 0, "capacity must be greater than zero");
         let (tx, rx) = kanal::bounded(capacity);
@@ -177,11 +191,17 @@ impl<T: Send + 'static> KanalChannel<T> {
     ///
     /// let ch = KanalChannel::<String>::with_default_capacity();
     /// ```
+    #[must_use]
     pub fn with_default_capacity() -> Self {
         Self::new(1024)
     }
 
     /// Get a sender endpoint. Can be called multiple times (multi-producer).
+    ///
+    /// # Errors
+    ///
+    /// None: this always returns `Ok`. The `Result` matches the other
+    /// channel components' `sender()`.
     ///
     /// # Examples
     ///
@@ -260,7 +280,7 @@ impl<T: Send + 'static> IUnknown for KanalChannel<T> {
         }
     }
 
-    fn version(&self) -> &str {
+    fn version(&self) -> &'static str {
         "1.0.0"
     }
 

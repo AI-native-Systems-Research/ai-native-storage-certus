@@ -37,9 +37,29 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 const WARMUP: usize = 100;
-const ITERATIONS: usize = 10_000;
+const ITERATIONS: u32 = 10_000;
+
+/// Records the CPU affinity its actor thread observes.
+struct CpuReporter {
+    observed: Arc<Mutex<Vec<usize>>>,
+}
+impl ActorHandler<()> for CpuReporter {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the shared mutex is only poisoned if another thread already panicked; re-panicking is the intended response"
+    )]
+    fn handle(&mut self, _msg: ()) {
+        if let Ok(cpus) = component_core::numa::get_thread_affinity() {
+            *self.observed.lock().unwrap() = cpus.iter().collect();
+        }
+    }
+}
 
 /// Measure round-trip latency between two CPUs.
+#[expect(
+    clippy::unwrap_used,
+    reason = "example program: a failed framework call is a bug in the example, and panicking with the error is how it reports it"
+)]
 fn measure_roundtrip(cpu_send: usize, cpu_recv: usize) -> Option<std::time::Duration> {
     // Forward channel: main -> echo actor
     let fwd = SpscChannel::<u64>::new(64);
@@ -85,7 +105,7 @@ fn measure_roundtrip(cpu_send: usize, cpu_recv: usize) -> Option<std::time::Dura
 
     // Timed iterations
     let start = Instant::now();
-    for i in 0..ITERATIONS as u64 {
+    for i in 0..u64::from(ITERATIONS) {
         fwd_tx.send(i).unwrap();
         reply_rx.recv().unwrap();
     }
@@ -98,6 +118,11 @@ fn measure_roundtrip(cpu_send: usize, cpu_recv: usize) -> Option<std::time::Dura
     Some(elapsed)
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "example program: a failed framework call is a bug in the example, and panicking with the error is how it reports it"
+)]
 fn main() {
     println!("=== NUMA Pinning Example ===\n");
 
@@ -125,11 +150,8 @@ fn main() {
         );
         match measure_roundtrip(cpus0[0], cpus0[1]) {
             Some(elapsed) => {
-                let per_msg = elapsed / ITERATIONS as u32;
-                println!(
-                    "  {} round-trips in {:.2?} ({:.0?}/msg)\n",
-                    ITERATIONS, elapsed, per_msg
-                );
+                let per_msg = elapsed / ITERATIONS;
+                println!("  {ITERATIONS} round-trips in {elapsed:.2?} ({per_msg:.0?}/msg)\n");
             }
             None => println!("  Failed to run same-node test\n"),
         }
@@ -140,20 +162,14 @@ fn main() {
     // 3. Cross-node latency (if available)
     if topo.node_count() >= 2 {
         let node1 = topo.node(1).expect("No node 1");
-        let cpu0 = cpus0[0];
-        let cpu1 = node1.cpus().iter().next().expect("Node 1 has no CPUs");
+        let node0_cpu = cpus0[0];
+        let node1_cpu = node1.cpus().iter().next().expect("Node 1 has no CPUs");
 
-        println!(
-            "Cross-node test: CPU {} (node 0) <-> CPU {} (node 1)",
-            cpu0, cpu1
-        );
-        match measure_roundtrip(cpu0, cpu1) {
+        println!("Cross-node test: CPU {node0_cpu} (node 0) <-> CPU {node1_cpu} (node 1)");
+        match measure_roundtrip(node0_cpu, node1_cpu) {
             Some(elapsed) => {
-                let per_msg = elapsed / ITERATIONS as u32;
-                println!(
-                    "  {} round-trips in {:.2?} ({:.0?}/msg)\n",
-                    ITERATIONS, elapsed, per_msg
-                );
+                let per_msg = elapsed / ITERATIONS;
+                println!("  {ITERATIONS} round-trips in {elapsed:.2?} ({per_msg:.0?}/msg)\n");
             }
             None => println!("  Failed to run cross-node test\n"),
         }
@@ -165,17 +181,6 @@ fn main() {
     println!("Actor with CPU affinity:");
     let first_cpu = topo.online_cpus().iter().next().unwrap();
     let observed = Arc::new(Mutex::new(Vec::new()));
-
-    struct CpuReporter {
-        observed: Arc<Mutex<Vec<usize>>>,
-    }
-    impl ActorHandler<()> for CpuReporter {
-        fn handle(&mut self, _msg: ()) {
-            if let Ok(cpus) = component_core::numa::get_thread_affinity() {
-                *self.observed.lock().unwrap() = cpus.iter().collect();
-            }
-        }
-    }
 
     let actor = Actor::new(
         CpuReporter {

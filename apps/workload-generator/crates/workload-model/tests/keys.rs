@@ -192,25 +192,25 @@ fn session_salt_layout_matches_the_contract() {
 #[test]
 #[should_panic(expected = "block_ordinal")]
 fn shared_ordinal_beyond_its_field_panics() {
-    keys::shared_salt(0, 0, 1 << 24);
+    let _ = keys::shared_salt(0, 0, 1 << 24);
 }
 
 #[test]
 #[should_panic(expected = "instance_index")]
 fn instance_index_beyond_its_field_panics() {
-    keys::shared_salt(0, 1 << 26, 0);
+    let _ = keys::shared_salt(0, 1 << 26, 0);
 }
 
 #[test]
 #[should_panic(expected = "class_id")]
 fn class_id_beyond_its_field_panics() {
-    keys::shared_salt(1 << 12, 0, 0);
+    let _ = keys::shared_salt(1 << 12, 0, 0);
 }
 
 #[test]
 #[should_panic(expected = "session_id")]
 fn session_id_beyond_its_field_panics() {
-    keys::input_salt(1 << 38, 0);
+    let _ = keys::input_salt(1 << 38, 0);
 }
 
 #[test]

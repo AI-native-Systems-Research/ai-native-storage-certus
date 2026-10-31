@@ -9,7 +9,7 @@
 
 use std::any::{Any, TypeId};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use crate::error::RegistryError;
 use crate::interface::{InterfaceInfo, ReceptacleInfo};
@@ -83,11 +83,21 @@ pub struct TokioReceiver<T> {
 }
 
 impl<T: Send + 'static> IReceiver<T> for TokioReceiver<T> {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the lock is poisoned only if an earlier recv panicked inside blocking_recv \
+                  (called from an async runtime); failing loudly again is kept"
+    )]
     fn recv(&self) -> Result<T, ChannelError> {
         let mut guard = self.inner.lock().unwrap();
         guard.blocking_recv().ok_or(ChannelError::Closed)
     }
 
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the lock is poisoned only if an earlier recv panicked inside blocking_recv \
+                  (called from an async runtime); failing loudly again is kept"
+    )]
     fn try_recv(&self) -> Result<T, ChannelError> {
         let mut guard = self.inner.lock().unwrap();
         guard.try_recv().map_err(|e| match e {
@@ -148,6 +158,7 @@ impl<T: Send + 'static> TokioMpscChannel<T> {
     ///
     /// let ch = TokioMpscChannel::<u32>::new(64);
     /// ```
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         assert!(capacity > 0, "capacity must be greater than zero");
         let (tx, rx) = tokio::sync::mpsc::channel(capacity);
@@ -180,11 +191,17 @@ impl<T: Send + 'static> TokioMpscChannel<T> {
     ///
     /// let ch = TokioMpscChannel::<String>::with_default_capacity();
     /// ```
+    #[must_use]
     pub fn with_default_capacity() -> Self {
         Self::new(1024)
     }
 
     /// Get a sender endpoint. Can be called multiple times (multi-producer).
+    ///
+    /// # Errors
+    ///
+    /// None: this always returns `Ok`. The `Result` matches the other
+    /// channel components' `sender()`.
     ///
     /// # Examples
     ///
@@ -215,6 +232,10 @@ impl<T: Send + 'static> TokioMpscChannel<T> {
     /// let ch = TokioMpscChannel::<u32>::new(4);
     /// let rx = ch.receiver().unwrap();
     /// ```
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "the only panic is the slot expect, which the receiver_bound CAS rules out"
+    )]
     pub fn receiver(&self) -> Result<TokioReceiver<T>, ChannelError> {
         if self
             .receiver_bound
@@ -225,10 +246,17 @@ impl<T: Send + 'static> TokioMpscChannel<T> {
                 reason: "tokio MPSC channel already has a receiver".into(),
             });
         }
+        // Winning the `receiver_bound` CAS (never reset) makes this the only
+        // take of the slot, so it is `Some`; the lock only guards that take,
+        // so it is never poisoned.
+        #[expect(
+            clippy::expect_used,
+            reason = "the receiver_bound CAS above makes this the only take"
+        )]
         let rx = self
             .rx
             .lock()
-            .unwrap()
+            .unwrap_or_else(PoisonError::into_inner)
             .take()
             .expect("receiver already taken");
         Ok(TokioReceiver {
@@ -257,10 +285,15 @@ impl<T: Send + 'static> IUnknown for TokioMpscChannel<T> {
                 return None;
             }
             let stored = self.receiver_iface.get_or_init(|| {
+                // As in `receiver()`: the CAS above makes this the only take.
+                #[expect(
+                    clippy::expect_used,
+                    reason = "the receiver_bound CAS above makes this the only take"
+                )]
                 let rx = self
                     .rx
                     .lock()
-                    .unwrap()
+                    .unwrap_or_else(PoisonError::into_inner)
                     .take()
                     .expect("receiver already taken");
                 let receiver = TokioReceiver {
@@ -275,7 +308,7 @@ impl<T: Send + 'static> IUnknown for TokioMpscChannel<T> {
         }
     }
 
-    fn version(&self) -> &str {
+    fn version(&self) -> &'static str {
         "1.0.0"
     }
 

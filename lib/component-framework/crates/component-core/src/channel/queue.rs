@@ -128,6 +128,7 @@ impl<T> RingBuffer<T> {
     /// // Not a power of two — panics
     /// let rb = RingBuffer::<u8>::new(3);
     /// ```
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         assert!(
             capacity > 0 && capacity.is_power_of_two(),
@@ -150,8 +151,11 @@ impl<T> RingBuffer<T> {
 
     /// Try to push a value into the buffer (non-blocking).
     ///
-    /// Returns `Ok(())` if the value was enqueued, or `Err(value)` giving
-    /// the value back if the buffer is full.
+    /// Returns `Ok(())` if the value was enqueued.
+    ///
+    /// # Errors
+    ///
+    /// `Err(value)`, giving the value back, if the buffer is full.
     ///
     /// # Safety Invariant
     ///
@@ -267,11 +271,19 @@ impl<T> Drop for RingBuffer<T> {
     }
 }
 
-// SAFETY: RingBuffer is Send if T is Send (values are moved across threads).
-// It is Sync because push and pop operate on disjoint slots protected by
-// atomic head/tail ordering. The single-producer/single-consumer invariant
-// is enforced by the Sender/Receiver wrappers.
+// SAFETY: a `RingBuffer` owns its slots and the `T`s in them; moving it to
+// another thread moves those values, which `T: Send` permits. The `UnsafeCell`s
+// only make it `!Sync`, not `!Send`.
 unsafe impl<T: Send> Send for RingBuffer<T> {}
+// SAFETY: one `push` caller and one `pop` caller may run concurrently: the
+// producer writes only the slot at `tail` while `tail - head < capacity` and
+// publishes it with a Release store of `tail`; the consumer reads only the
+// slot at `head < tail` after an Acquire load of `tail`, and hands it back
+// with a Release store of `head`. So the two never touch one slot at once,
+// and each `T` moves to exactly one thread. This relies on at most one
+// thread pushing and one popping at a time, which `push`/`pop` document but
+// do not check (they are safe `&self` methods): two concurrent pushers (or
+// poppers) on a shared `RingBuffer` would race on one slot.
 unsafe impl<T: Send> Sync for RingBuffer<T> {}
 
 // ---------------------------------------------------------------------------
@@ -344,6 +356,7 @@ impl<T> MpscRingBuffer<T> {
     /// // Not a power of two — panics
     /// let rb = MpscRingBuffer::<u8>::new(3);
     /// ```
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         assert!(
             capacity > 0 && capacity.is_power_of_two(),
@@ -370,8 +383,11 @@ impl<T> MpscRingBuffer<T> {
     /// Try to push a value into the buffer (non-blocking, lock-free).
     ///
     /// Multiple threads may call `push` concurrently. Returns `Ok(())` if
-    /// the value was enqueued, or `Err(value)` giving the value back if
-    /// the buffer is full.
+    /// the value was enqueued.
+    ///
+    /// # Errors
+    ///
+    /// `Err(value)`, giving the value back, if the buffer is full.
     ///
     /// # Examples
     ///
@@ -383,6 +399,11 @@ impl<T> MpscRingBuffer<T> {
     /// assert!(rb.push(20).is_ok());
     /// assert_eq!(rb.push(30).unwrap_err(), 30); // full, value returned
     /// ```
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "Vyukov's sequence check: the wrapping counters are compared through their \
+                  signed difference, so reinterpreting them as isize is intended"
+    )]
     pub fn push(&self, value: T) -> Result<(), T> {
         let mut pos = self.tail.load(Ordering::Relaxed);
 
@@ -391,36 +412,40 @@ impl<T> MpscRingBuffer<T> {
             let seq = slot.sequence.load(Ordering::Acquire);
             let diff = seq as isize - pos as isize;
 
-            if diff == 0 {
-                // Slot is available — try to claim it
-                match self.tail.compare_exchange_weak(
-                    pos,
-                    pos.wrapping_add(1),
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                ) {
-                    Ok(_) => {
-                        // SAFETY: We have exclusive access to this slot via CAS.
-                        // No other producer can claim the same slot, and the consumer
-                        // won't read it until we publish the sequence number.
-                        unsafe {
-                            (*slot.value.get()).write(value);
+            match diff.cmp(&0) {
+                std::cmp::Ordering::Equal => {
+                    // Slot is available — try to claim it
+                    match self.tail.compare_exchange_weak(
+                        pos,
+                        pos.wrapping_add(1),
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    ) {
+                        Ok(_) => {
+                            // SAFETY: We have exclusive access to this slot via CAS.
+                            // No other producer can claim the same slot, and the consumer
+                            // won't read it until we publish the sequence number.
+                            unsafe {
+                                (*slot.value.get()).write(value);
+                            }
+                            // Publish: set sequence to pos + 1 so the consumer can read it
+                            slot.sequence.store(pos.wrapping_add(1), Ordering::Release);
+                            return Ok(());
                         }
-                        // Publish: set sequence to pos + 1 so the consumer can read it
-                        slot.sequence.store(pos.wrapping_add(1), Ordering::Release);
-                        return Ok(());
-                    }
-                    Err(actual) => {
-                        // Lost the race — retry with updated position
-                        pos = actual;
+                        Err(actual) => {
+                            // Lost the race — retry with updated position
+                            pos = actual;
+                        }
                     }
                 }
-            } else if diff < 0 {
-                // Slot not yet consumed — buffer is full
-                return Err(value);
-            } else {
-                // Another producer is working on this slot — reload tail
-                pos = self.tail.load(Ordering::Relaxed);
+                std::cmp::Ordering::Less => {
+                    // Slot not yet consumed — buffer is full
+                    return Err(value);
+                }
+                std::cmp::Ordering::Greater => {
+                    // Another producer is working on this slot — reload tail
+                    pos = self.tail.load(Ordering::Relaxed);
+                }
             }
         }
     }
@@ -444,6 +469,11 @@ impl<T> MpscRingBuffer<T> {
     /// assert_eq!(rb.pop(), Some(42));
     /// assert_eq!(rb.pop(), None);
     /// ```
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "Vyukov's sequence check: the wrapping counters are compared through their \
+                  signed difference, so reinterpreting them as isize is intended"
+    )]
     pub fn pop(&self) -> Option<T> {
         let pos = self.head.load(Ordering::Relaxed);
         let slot = &self.slots[pos & self.mask];
@@ -507,11 +537,18 @@ impl<T> Drop for MpscRingBuffer<T> {
     }
 }
 
-// SAFETY: MpscRingBuffer is Send if T is Send (values are moved across threads).
-// It is Sync because push uses CAS on tail and per-slot sequences to serialize
-// writes, and pop operates on a disjoint head counter. The single-consumer
-// invariant is enforced by the MpscReceiver wrapper.
+// SAFETY: an `MpscRingBuffer` owns its slots and the `T`s in them; moving it
+// to another thread moves those values, which `T: Send` permits.
 unsafe impl<T: Send> Send for MpscRingBuffer<T> {}
+// SAFETY: any number of `push` callers may run concurrently: a producer
+// writes a slot only after winning the CAS on `tail` for that position while
+// the slot's sequence equals the position, so no two producers write one
+// slot, and it publishes the write with a Release store of the sequence. The
+// consumer reads a slot only after an Acquire load shows its sequence is
+// `pos + 1`, then frees it with a Release store. Each `T` moves to exactly
+// one thread. This relies on at most one thread popping at a time, which
+// `pop` documents but does not check (it is a safe `&self` method): two
+// concurrent poppers on a shared `MpscRingBuffer` would read one slot twice.
 unsafe impl<T: Send> Sync for MpscRingBuffer<T> {}
 
 #[cfg(test)]
@@ -663,11 +700,11 @@ mod tests {
         use std::sync::Arc;
         use std::thread;
 
+        const COUNT: u64 = 100_000;
+
         let rb = Arc::new(RingBuffer::<u64>::new(1024));
         let rb_producer = Arc::clone(&rb);
         let rb_consumer = Arc::clone(&rb);
-
-        const COUNT: u64 = 100_000;
 
         let producer = thread::spawn(move || {
             let mut val = 0u64;
@@ -680,8 +717,8 @@ mod tests {
         });
 
         let consumer = thread::spawn(move || {
-            let mut received = Vec::with_capacity(COUNT as usize);
-            while received.len() < COUNT as usize {
+            let mut received = Vec::with_capacity(usize::try_from(COUNT).unwrap());
+            while received.len() < usize::try_from(COUNT).unwrap() {
                 if let Some(val) = rb_consumer.pop() {
                     received.push(val);
                 } else {
@@ -694,7 +731,7 @@ mod tests {
         producer.join().unwrap();
         let received = consumer.join().unwrap();
 
-        assert_eq!(received.len(), COUNT as usize);
+        assert_eq!(received.len(), usize::try_from(COUNT).unwrap());
         for (i, &val) in received.iter().enumerate() {
             assert_eq!(val, i as u64, "FIFO violation at index {i}");
         }
@@ -864,11 +901,11 @@ mod tests {
         use std::sync::Arc;
         use std::thread;
 
-        let rb = Arc::new(MpscRingBuffer::<u64>::new(1024));
         const PRODUCERS: u64 = 8;
         const PER_PRODUCER: u64 = 12_500;
         const TOTAL: u64 = PRODUCERS * PER_PRODUCER;
 
+        let rb = Arc::new(MpscRingBuffer::<u64>::new(1024));
         let mut handles = vec![];
         for pid in 0..PRODUCERS {
             let rb_clone = Arc::clone(&rb);
@@ -887,8 +924,8 @@ mod tests {
 
         let rb_consumer = Arc::clone(&rb);
         let consumer = thread::spawn(move || {
-            let mut received = Vec::with_capacity(TOTAL as usize);
-            while received.len() < TOTAL as usize {
+            let mut received = Vec::with_capacity(usize::try_from(TOTAL).unwrap());
+            while received.len() < usize::try_from(TOTAL).unwrap() {
                 if let Some(val) = rb_consumer.pop() {
                     received.push(val);
                 } else {
@@ -903,9 +940,9 @@ mod tests {
         }
         let mut received = consumer.join().unwrap();
 
-        assert_eq!(received.len(), TOTAL as usize);
+        assert_eq!(received.len(), usize::try_from(TOTAL).unwrap());
         // Values may arrive out-of-order across producers, but all must be present
-        received.sort();
+        received.sort_unstable();
         let expected: Vec<u64> = (0..TOTAL).collect();
         assert_eq!(received, expected);
     }

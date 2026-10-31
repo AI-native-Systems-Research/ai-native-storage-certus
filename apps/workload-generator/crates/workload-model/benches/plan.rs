@@ -74,9 +74,13 @@ use workload_model::plan::OperationPlan;
 use workload_model::sim::Simulation;
 
 /// Build a description with the given session length and shared-pool shape.
+#[expect(
+    clippy::expect_used,
+    reason = "benchmark setup: a failure is a bug in the benchmark, and aborting is the report"
+)]
 fn description(turns: u32, pool: u32, draw: u32, sessions: u32) -> WorkloadDescription {
     format!(
-        r#"
+        r"
 version: 1
 blocks: {{tokens: 16, bytes: 32768}}
 shared_classes:
@@ -92,7 +96,7 @@ session_classes:
     input_growth: {{constant: 2}}
     output_growth: {{constant: 1}}
     think_time: {{constant: 10}}
-"#
+"
     )
     .parse()
     .expect("the benchmark's own description must parse")
@@ -100,6 +104,10 @@ session_classes:
 
 /// Run one plan build and return it, so the benchmark measures the whole path:
 /// population events, selection, binding, key chaining, and plan recording.
+#[expect(
+    clippy::expect_used,
+    reason = "benchmark setup: a failure is a bug in the benchmark, and aborting is the report"
+)]
 fn build(description: &WorkloadDescription, span: f64) -> OperationPlan {
     let mut sim = Simulation::new(description, 1, 1).expect("valid description");
     let mut plan = OperationPlan::default();
@@ -132,6 +140,10 @@ fn per_key(c: &mut Criterion) {
 /// The projection is offered as an interactive query, so it has its own budget: it
 /// must stay far below the cost of the run it is describing, or `validate --until n`
 /// stops being a one-second answer.
+#[expect(
+    clippy::expect_used,
+    reason = "benchmark setup: a failure is a bug in the benchmark, and aborting is the report"
+)]
 fn projection(c: &mut Criterion) {
     let d = description(40, 2_000, 16, 10_000);
     c.bench_function("projection_10k_sessions", |b| {

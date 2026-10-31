@@ -12,6 +12,10 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 use eviction_policy_session_lists::EvictionPolicySessionListsComponent;
 use interfaces::{BlockSemantics, EvictionHandle, IEvictionPolicy};
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark harness: a failed setup or policy call must abort the run"
+)]
 fn ep() -> Arc<dyn IEvictionPolicy + Send + Sync> {
     let comp = EvictionPolicySessionListsComponent::new_default();
     query_interface!(comp, IEvictionPolicy).unwrap()
@@ -19,6 +23,10 @@ fn ep() -> Arc<dyn IEvictionPolicy + Send + Sync> {
 
 /// Populate a single pool with `blocks` blocks spread across `sessions`
 /// chains (round-robin), returning the policy, pool id, and handles.
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark harness: a failed setup or policy call must abort the run"
+)]
 fn populate(
     blocks: u64,
     sessions: u64,
@@ -29,7 +37,7 @@ fn populate(
 ) {
     let ep = ep();
     let pool = ep.create_pool();
-    let mut handles = Vec::with_capacity(blocks as usize);
+    let mut handles = Vec::with_capacity(usize::try_from(blocks).unwrap());
     for k in 0..blocks {
         let session_id = k % sessions;
         let h = ep.track(pool, k, BlockSemantics { session_id }).unwrap();
@@ -38,6 +46,10 @@ fn populate(
     (ep, pool, handles)
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark harness: a failed setup or policy call must abort the run"
+)]
 fn bench_track(c: &mut Criterion) {
     let mut group = c.benchmark_group("track");
     for &blocks in &[10_000u64, 100_000, 1_000_000] {
@@ -61,6 +73,10 @@ fn bench_track(c: &mut Criterion) {
     group.finish();
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark harness: a failed setup or policy call must abort the run"
+)]
 fn bench_touch(c: &mut Criterion) {
     let (ep, _pool, handles) = populate(1_000_000, 1_000_000 / 16);
     let mut group = c.benchmark_group("touch");
@@ -76,6 +92,10 @@ fn bench_touch(c: &mut Criterion) {
     group.finish();
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark harness: a failed setup or policy call must abort the run"
+)]
 fn bench_batch_touch(c: &mut Criterion) {
     let (ep, _pool, handles) = populate(1_000_000, 1_000_000 / 16);
     let mut group = c.benchmark_group("batch_touch");

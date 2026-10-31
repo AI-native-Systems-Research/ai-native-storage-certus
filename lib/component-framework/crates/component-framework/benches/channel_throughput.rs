@@ -11,6 +11,10 @@ use component_framework::channel::spsc::SpscChannel;
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::thread;
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+)]
 fn spsc_throughput(c: &mut Criterion) {
     c.bench_function("spsc_1m_messages", |b| {
         b.iter(|| {
@@ -41,6 +45,10 @@ fn spsc_throughput(c: &mut Criterion) {
     });
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+)]
 fn mpsc_throughput(c: &mut Criterion) {
     c.bench_function("mpsc_8_producers_10k_each", |b| {
         b.iter(|| {

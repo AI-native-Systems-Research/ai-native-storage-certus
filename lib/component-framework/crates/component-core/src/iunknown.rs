@@ -121,6 +121,8 @@ pub trait IUnknown: Send + Sync {
     /// receptacle name, queries the provider for the matching interface
     /// type, and connects the receptacle.
     ///
+    /// # Errors
+    ///
     /// Returns `Err(RegistryError::BindingFailed)` if the receptacle name
     /// is unknown, the provider doesn't offer the needed interface, or the
     /// receptacle is already connected.

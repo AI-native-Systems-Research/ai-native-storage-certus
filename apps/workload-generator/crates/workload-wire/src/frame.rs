@@ -155,6 +155,7 @@ pub mod op_kind {
     /// An unknown value is named rather than refused: a `Stats` reply carrying an opcode this
     /// build does not know is a reporting curiosity, and losing the whole run's latency figures
     /// over it would be the wrong trade.
+    #[must_use]
     pub fn name(kind: u32) -> &'static str {
         match u8::try_from(kind) {
             Ok(CHECK) => "CHECK",
@@ -234,6 +235,7 @@ pub struct Header {
 
 impl Header {
     /// Encode into 12 bytes.
+    #[must_use]
     pub fn encode(&self) -> [u8; HEADER_BYTES] {
         let mut b = [0u8; HEADER_BYTES];
         b[0..4].copy_from_slice(&self.len.to_le_bytes());
@@ -257,17 +259,24 @@ impl Header {
                 have: bytes.len(),
             });
         }
-        let len = u32::from_le_bytes(bytes[0..4].try_into().expect("4 bytes"));
+        let len = u32::from_le_bytes(field(bytes, 0));
         if len > max_body {
             return Err(WireError::TooLarge { len, max: max_body });
         }
         Ok(Self {
             len,
-            opcode: u16::from_le_bytes(bytes[4..6].try_into().expect("2 bytes")),
-            flags: u16::from_le_bytes(bytes[6..8].try_into().expect("2 bytes")),
-            corr: u32::from_le_bytes(bytes[8..12].try_into().expect("4 bytes")),
+            opcode: u16::from_le_bytes(field(bytes, 4)),
+            flags: u16::from_le_bytes(field(bytes, 6)),
+            corr: u32::from_le_bytes(field(bytes, 8)),
         })
     }
+}
+
+/// The `N` bytes of `bytes` starting at `at`. The caller has checked the length.
+fn field<const N: usize>(bytes: &[u8], at: usize) -> [u8; N] {
+    let mut out = [0u8; N];
+    out.copy_from_slice(&bytes[at..at + N]);
+    out
 }
 
 /// A cursor that fails rather than reading past the end.
@@ -279,6 +288,7 @@ pub struct Reader<'a> {
 
 impl<'a> Reader<'a> {
     /// A reader over one frame body.
+    #[must_use]
     pub fn new(bytes: &'a [u8]) -> Self {
         Self { bytes, at: 0 }
     }
@@ -299,6 +309,12 @@ impl<'a> Reader<'a> {
         Ok(out)
     }
 
+    fn array<const N: usize>(&mut self) -> Result<[u8; N], WireError> {
+        let mut out = [0u8; N];
+        out.copy_from_slice(self.take(N)?);
+        Ok(out)
+    }
+
     /// Read a `u8`.
     ///
     /// # Errors
@@ -314,9 +330,7 @@ impl<'a> Reader<'a> {
     ///
     /// If the body is exhausted.
     pub fn u16(&mut self) -> Result<u16, WireError> {
-        Ok(u16::from_le_bytes(
-            self.take(2)?.try_into().expect("2 bytes"),
-        ))
+        Ok(u16::from_le_bytes(self.array()?))
     }
 
     /// Read a little-endian `u32`.
@@ -325,9 +339,7 @@ impl<'a> Reader<'a> {
     ///
     /// If the body is exhausted.
     pub fn u32(&mut self) -> Result<u32, WireError> {
-        Ok(u32::from_le_bytes(
-            self.take(4)?.try_into().expect("4 bytes"),
-        ))
+        Ok(u32::from_le_bytes(self.array()?))
     }
 
     /// Read a little-endian `u64`.
@@ -336,9 +348,7 @@ impl<'a> Reader<'a> {
     ///
     /// If the body is exhausted.
     pub fn u64(&mut self) -> Result<u64, WireError> {
-        Ok(u64::from_le_bytes(
-            self.take(8)?.try_into().expect("8 bytes"),
-        ))
+        Ok(u64::from_le_bytes(self.array()?))
     }
 
     /// Read `n` bytes.
@@ -363,6 +373,7 @@ impl<'a> Reader<'a> {
     }
 
     /// Bytes not yet consumed.
+    #[must_use]
     pub fn remaining(&self) -> usize {
         self.bytes.len() - self.at
     }
@@ -376,11 +387,13 @@ pub struct Writer {
 
 impl Writer {
     /// An empty body.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// An empty body with room for `n` bytes.
+    #[must_use]
     pub fn with_capacity(n: usize) -> Self {
         Self {
             bytes: Vec::with_capacity(n),
@@ -418,11 +431,13 @@ impl Writer {
     }
 
     /// The body written so far.
+    #[must_use]
     pub fn as_slice(&self) -> &[u8] {
         &self.bytes
     }
 
     /// Take the body.
+    #[must_use]
     pub fn into_bytes(self) -> Vec<u8> {
         self.bytes
     }
@@ -432,6 +447,12 @@ impl Writer {
     /// # Panics
     ///
     /// If the body exceeds `u32::MAX`, which no legitimate frame approaches.
+    #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "the length field is u32 by protocol; a body over 4 GiB is a caller bug, \
+                  documented under # Panics"
+    )]
     pub fn frame(self, opcode: u16, flags: u16, corr: u32) -> Vec<u8> {
         let len = u32::try_from(self.bytes.len()).expect("a body under 4 GiB");
         let header = Header {
@@ -461,6 +482,7 @@ pub struct Hello {
 
 impl Hello {
     /// Encode the body.
+    #[must_use]
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer::with_capacity(4 + BUILD_ID_BYTES + 2 + self.mailbox.len());
         w.u32(self.proto_version)
@@ -509,6 +531,7 @@ pub struct HelloAck {
 
 impl HelloAck {
     /// Encode the body.
+    #[must_use]
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer::with_capacity(4 + BUILD_ID_BYTES + 4 + 4 + 2);
         w.u32(self.proto_version)
@@ -553,6 +576,16 @@ pub struct SubmitTurn {
 
 impl SubmitTurn {
     /// Encode the body.
+    ///
+    /// # Panics
+    ///
+    /// If the path holds more than `u32::MAX` keys, which the key count field cannot carry.
+    #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "the key count is u32 by protocol; a path that long is a caller bug, \
+                  documented under # Panics"
+    )]
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer::with_capacity(8 + 2 + 4 + self.path.len() * 8);
         w.u64(self.session)
@@ -595,6 +628,7 @@ impl SubmitTurn {
     }
 
     /// Whether an event poll was requested.
+    #[must_use]
     pub fn polls_events(&self) -> bool {
         self.flags & submit_flags::POLL_EVENTS != 0
     }
@@ -624,6 +658,7 @@ pub struct TurnOutcome {
 
 impl TurnOutcome {
     /// Encode the body.
+    #[must_use]
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer::with_capacity(6 * 4 + 8);
         w.u32(self.resident)
@@ -731,6 +766,7 @@ impl Counters {
     /// so this is `lookup_hits` — and it was briefly a field of its own, which a live run
     /// immediately caught reporting zero while the per-turn outcomes said eight. Two
     /// representations of one quantity can disagree; one cannot.
+    #[must_use]
     pub fn blocks_read(&self) -> u64 {
         self.lookup_hits
     }
@@ -739,6 +775,7 @@ impl Counters {
     ///
     /// An accepted `COPY_TO_STORE` is the only thing that sends one, so a declined transfer
     /// moved nothing. Derived for the same reason as [`Counters::blocks_read`].
+    #[must_use]
     pub fn blocks_written(&self) -> u64 {
         self.transfers_attempted
             .saturating_sub(self.transfers_declined)
@@ -831,6 +868,17 @@ pub struct Stats {
 
 impl Stats {
     /// Encode the body.
+    ///
+    /// # Panics
+    ///
+    /// If there are more than `u16::MAX` operation entries, or one histogram serializes to
+    /// more than `u32::MAX` bytes; the protocol's count and length fields cannot carry either.
+    #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "the entry count is u16 and each histogram length u32 by protocol; exceeding \
+                  either is a caller bug, documented under # Panics"
+    )]
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer::new();
         self.counters.encode(&mut w);
@@ -880,6 +928,7 @@ pub struct ShutdownAck {
 
 impl ShutdownAck {
     /// Encode the body.
+    #[must_use]
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer::with_capacity(16);
         w.u64(self.ops_submitted).u64(self.ops_failed);
@@ -919,6 +968,7 @@ pub struct ClearCacheAck {
 
 impl ClearCacheAck {
     /// A successful clear of `entries` entries.
+    #[must_use]
     pub fn cleared(entries: u64) -> Self {
         Self {
             entries,
@@ -935,11 +985,13 @@ impl ClearCacheAck {
     }
 
     /// Whether the clear happened.
+    #[must_use]
     pub fn is_ok(&self) -> bool {
         self.error.is_empty()
     }
 
     /// Encode the body.
+    #[must_use]
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer::with_capacity(12 + self.error.len());
         w.u64(self.entries)
@@ -976,6 +1028,7 @@ pub struct DrainAck {
 
 impl DrainAck {
     /// Encode the body.
+    #[must_use]
     pub fn encode(&self) -> Vec<u8> {
         Writer::with_capacity(4)
             .u32(self.pending)

@@ -168,6 +168,7 @@ impl Projection {
     /// let text = project(&d, 100.0, 1).unwrap().render();
     /// assert!(text.contains("invocations"));
     /// ```
+    #[must_use]
     pub fn render(&self) -> String {
         let mut out = format!(
             "projection for a {:.0}-virtual-second span:\n  \
@@ -193,6 +194,10 @@ impl Projection {
 }
 
 /// Format a byte count the way a refusal message should read.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "only the rounded {v:.2} display uses the f64; the exact count is printed beside it"
+)]
 fn human_bytes(n: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut v = n as f64;
@@ -228,6 +233,20 @@ pub fn project(description: &WorkloadDescription, span: f64, seed: u64) -> Resul
 /// # Errors
 ///
 /// As [`project`].
+#[expect(
+    clippy::too_many_lines,
+    reason = "one pass per class computing a single projection; the steps share running totals"
+)]
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "pool sizes and the poll cadence are counts, inexact only above 2^53"
+)]
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "each estimate is a non-negative product of means, ceil'd; an absurd one \
+              saturates at u64::MAX, which is the intended reading of an upper bound"
+)]
 pub fn project_with(
     description: &WorkloadDescription,
     span: f64,
@@ -328,8 +347,7 @@ pub fn project_with(
             let nominal = description
                 .shared_classes
                 .by_index(index)
-                .map(|(_, c)| c.pool.size.nominal())
-                .unwrap_or(0);
+                .map_or(0, |(_, c)| c.pool.size.nominal());
             let count = u.count.resolve_integral(Some(nominal as f64))?;
             shared_blocks += count.effective().mean * shared_length[index];
         }
@@ -385,6 +403,10 @@ pub fn project_with(
 /// with a sampled second moment can make `E[T²] - E[T]²` come out negative for a
 /// near-degenerate distribution, and a negative variance in a projection is worse
 /// than a slightly noisier one.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "a turn count and the fixed draw count; both far below 2^53"
+)]
 fn turn_moments<R: rand::Rng + ?Sized>(turns: &Resolved, rng: &mut R) -> (f64, f64) {
     let mut sum = 0.0;
     let mut sum_sq = 0.0;
@@ -408,6 +430,10 @@ fn turn_moments<R: rand::Rng + ?Sized>(turns: &Resolved, rng: &mut R) -> (f64, f
 /// If a distribution cannot be resolved, or no session class can produce turns at
 /// all — in which case no span would reach the target and returning a number would
 /// be a lie.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "pool sizes and an invocation target are counts, inexact only above 2^53"
+)]
 pub fn span_for_invocations(description: &WorkloadDescription, target: u64) -> Result<f64> {
     let mut rate = 0.0;
     for (_, _, class) in description.session_classes.iter() {

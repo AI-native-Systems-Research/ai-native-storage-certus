@@ -1,4 +1,4 @@
-//! IDispatchMap interface and associated types for the dispatch map component.
+//! `IDispatchMap` interface and associated types for the dispatch map component.
 
 use std::fmt;
 
@@ -29,6 +29,11 @@ pub enum LookupResult {
 // SAFETY: The pointer in MemoryTier refers to memory in the memory-tier pool,
 // which is thread-safe (mmap'd region protected by dispatch-map mutex).
 unsafe impl Send for LookupResult {}
+// SAFETY: `LookupResult` has no interior mutability and never dereferences
+// `MemoryTier::pointer`; through `&LookupResult` a thread can only copy the
+// address out. The pool memory it points to has no thread affinity, and any
+// dereference is the caller's own `unsafe` code, which must follow the
+// dispatch map's read/write reference protocol.
 unsafe impl Sync for LookupResult {}
 
 /// Errors returned by `IDispatchMap` operations.
@@ -50,7 +55,7 @@ pub enum DispatchMapError {
     NotInitialized(String),
     /// Reference count underflow (release when already zero).
     RefCountUnderflow(CacheKey),
-    /// Reference count overflow (acquire when already at u32::MAX).
+    /// Reference count overflow (acquire when already at `u32::MAX`).
     RefCountOverflow(CacheKey),
     /// Downgrade requested but no write reference is held.
     NoWriteReference(CacheKey),
@@ -147,7 +152,7 @@ component_macros::define_interface! {
         /// inverse of `convert_memory_tier_to_block` and, crucially, does NOT
         /// remove/recreate the entry — so it works while the entry is pinned
         /// (`read_ref > 0`), which is exactly the case during a load
-        /// (prepare_load pins, then the lookup promotes the cold block).
+        /// (`prepare_load` pins, then the lookup promotes the cold block).
         /// `ssd_offset` retains the original block offset so the promoted entry
         /// remains demotable/evictable without data loss.
         ///
@@ -162,13 +167,13 @@ component_macros::define_interface! {
 
         /// Check if a memory-tier entry is safe to evict.
         ///
-        /// Returns `true` if the entry exists, is in MemoryTier state with
+        /// Returns `true` if the entry exists, is in `MemoryTier` state with
         /// `ssd_offset: Some(_)`, and has no active read/write references.
         fn is_evictable(&self, key: CacheKey) -> bool;
 
-        /// Atomically check evictability and transition to BlockDevice.
+        /// Atomically check evictability and transition to `BlockDevice`.
         ///
-        /// Under a single lock hold: verifies the entry is in MemoryTier with
+        /// Under a single lock hold: verifies the entry is in `MemoryTier` with
         /// `ssd_offset: Some(_)` and `read_ref == 0 && write_ref == 0`, then
         /// transitions it to `BlockDevice { offset }`. Returns `Ok(())` on
         /// success. After this returns Ok, no new reader can obtain the
@@ -177,11 +182,11 @@ component_macros::define_interface! {
         /// Returns `Err(KeyNotFound)` if the key doesn't exist,
         /// `Err(ActiveReferences)` if a read or write reference is held, or
         /// `Err(InvalidState)` if the entry is otherwise not evictable (no
-        /// ssd_offset, or not in MemoryTier state). The pin case has its own
+        /// `ssd_offset`, or not in `MemoryTier` state). The pin case has its own
         /// variant because callers count the two causes separately.
         fn try_evict_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError>;
 
-        /// Insert a recovered extent as a BlockDevice entry.
+        /// Insert a recovered extent as a `BlockDevice` entry.
         ///
         /// Used during recovery to rebuild the dispatch map from persisted
         /// extents without allocating DMA buffers.

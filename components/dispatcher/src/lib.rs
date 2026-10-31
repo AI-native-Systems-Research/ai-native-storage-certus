@@ -1450,11 +1450,13 @@ impl DispatcherComponent {
                             -1,
                         )
                     }
-                    .map_err(|e| {
-                        DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}"))
-                    })?;
+                    .map_err(|e| DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}")))?;
                     let r = gpu
-                        .dma_copy_to_device(&buf, region.address as *mut std::ffi::c_void, copy_size)
+                        .dma_copy_to_device(
+                            &buf,
+                            region.address as *mut std::ffi::c_void,
+                            copy_size,
+                        )
                         .map_err(|e| {
                             DispatcherError::IoError(format!(
                                 "GPU DMA copy (memory-tier→device) failed: {e}"

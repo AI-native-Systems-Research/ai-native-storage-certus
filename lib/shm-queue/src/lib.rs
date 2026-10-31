@@ -239,10 +239,21 @@ struct Mapping {
     unlink_on_drop: bool,
 }
 
-// SAFETY: the mapping is a shared-memory region addressed purely through raw
-// pointers + atomics; all field access below uses atomic or single-word
-// aligned operations that are safe to issue from multiple threads.
+// SAFETY: a `Mapping` owns a `MAP_SHARED` mmap region and its descriptor;
+// neither is tied to the thread that created it. The region stays mapped
+// until `Drop` unmaps it, whichever thread runs that, and `path` is an owned
+// `PathBuf`. Nothing in it is thread-local, so moving it between threads is
+// sound.
 unsafe impl Send for Mapping {}
+// SAFETY: through `&Mapping` the fields `ptr`/`len`/`fd`/`path`/`unlink_on_drop`
+// are only read, never written. The bytes behind `ptr` are already shared
+// with other processes, so they are only touched through `header()` (whose
+// mutable fields are atomics; the plain fields are written once, before
+// `magic` is published) or the `unsafe` accessors, whose callers follow the
+// depth-1 mailbox protocol: each cell has one writer at a time, and the
+// reader observes its `seq` publish with `Acquire` before reading it. That
+// protocol orders access between threads exactly as it does between
+// processes.
 unsafe impl Sync for Mapping {}
 
 impl Mapping {
@@ -273,7 +284,7 @@ impl Mapping {
         // Keep the fd open for the life of the mapping.
         std::mem::forget(file);
         Ok(Mapping {
-            ptr: ptr as *mut u8,
+            ptr: ptr.cast::<u8>(),
             len,
             fd,
             path: path.to_path_buf(),
@@ -282,20 +293,49 @@ impl Mapping {
     }
 
     #[inline]
+    #[expect(
+        clippy::cast_ptr_alignment,
+        reason = "mmap returns a page-aligned base, which satisfies Header's 8-byte alignment"
+    )]
     fn header(&self) -> &Header {
         // SAFETY: base of a mapping at least size_of::<Header>() long; Header is
         // repr(C) and its atomics share layout with their plain counterparts.
         unsafe { &*(self.ptr as *const Header) }
     }
 
+    /// Pointer to the `u32` word at byte `off` of the mapping.
+    ///
+    /// # Safety
+    /// `off + 4` must not exceed the mapping's length and `off` must be a
+    /// multiple of 4.
     #[inline]
+    #[expect(
+        clippy::cast_ptr_alignment,
+        reason = "the base is page-aligned and callers pass 4-byte-aligned offsets: header \
+                  fields, and control-block words at 0/4/8/12 of 64-byte-aligned blocks"
+    )]
     unsafe fn u32_at(&self, off: usize) -> *mut u32 {
-        unsafe { self.ptr.add(off) as *mut u32 }
+        // SAFETY: the caller guarantees `off` lies within the mapping, so the
+        // offset pointer stays inside the one mmap allocation.
+        unsafe { self.ptr.add(off).cast::<u32>() }
     }
 
+    /// The atomic `u32` word at byte `off` of the mapping.
+    ///
+    /// # Safety
+    /// Same as [`Mapping::u32_at`]: `off + 4` within the mapping, `off` a
+    /// multiple of 4.
     #[inline]
+    #[expect(
+        clippy::cast_ptr_alignment,
+        reason = "the base is page-aligned and callers pass 4-byte-aligned offsets: header \
+                  fields, and control-block words at 0/4/8/12 of 64-byte-aligned blocks"
+    )]
     unsafe fn atomic_at(&self, off: usize) -> &AtomicU32 {
-        unsafe { &*(self.ptr.add(off) as *const AtomicU32) }
+        // SAFETY: the caller guarantees an in-bounds, 4-byte-aligned word; the
+        // mapping is readable and writable for as long as `&self` lives, and
+        // `AtomicU32` has the layout of `u32`, so any bit pattern is valid.
+        unsafe { &*self.ptr.add(off).cast::<AtomicU32>() }
     }
 
     /// Read `len` bytes at `off` as an immutable slice into the mapping.
@@ -305,6 +345,8 @@ impl Mapping {
     /// store must have been observed (Acquire) before calling.
     #[inline]
     unsafe fn read_bytes(&self, off: usize, len: usize) -> &[u8] {
+        // SAFETY: the caller guarantees `[off, off+len)` is inside the mapping,
+        // which stays mapped for the borrow of `&self`; any byte is a valid `u8`.
         unsafe { std::slice::from_raw_parts(self.ptr.add(off), len) }
     }
 
@@ -318,6 +360,9 @@ impl Mapping {
     /// `[off, off+src.len())` must lie within the mapping.
     #[inline]
     unsafe fn write_bytes(&self, off: usize, src: &[u8]) {
+        // SAFETY: the caller guarantees `[off, off+src.len())` is inside the
+        // writable mapping; `src` is a Rust slice, so it cannot overlap the
+        // raw shared region we write through.
         unsafe {
             ptr::copy_nonoverlapping(src.as_ptr(), self.ptr.add(off), src.len());
         }
@@ -328,7 +373,7 @@ impl Drop for Mapping {
     fn drop(&mut self) {
         // SAFETY: ptr/len came from this mmap; fd is ours.
         unsafe {
-            libc::munmap(self.ptr as *mut libc::c_void, self.len);
+            libc::munmap(self.ptr.cast::<libc::c_void>(), self.len);
             libc::close(self.fd);
         }
         if self.unlink_on_drop {
@@ -345,10 +390,12 @@ impl Drop for Mapping {
 /// `addr` must point to a live, 4-byte-aligned atomic word inside a shared
 /// mapping.
 pub unsafe fn futex_wake(addr: *const AtomicU32, n: i32) -> i64 {
+    // SAFETY: the caller guarantees `addr` is a live, aligned futex word; the
+    // remaining arguments are the FUTEX_WAKE form (timeout and uaddr2 unused).
     unsafe {
         libc::syscall(
             libc::SYS_futex,
-            addr as *const u32,
+            addr.cast::<u32>(),
             libc::FUTEX_WAKE, // shared (NOT _PRIVATE)
             n,
             ptr::null::<libc::timespec>(),
@@ -366,18 +413,27 @@ pub unsafe fn futex_wake(addr: *const AtomicU32, n: i32) -> i64 {
 /// # Safety
 /// `addr` must point to a live, 4-byte-aligned atomic word inside a shared
 /// mapping.
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "tv_sec: callers pass timeouts of milliseconds to seconds, far below i64::MAX \
+              seconds; expected: the kernel compares the raw 32-bit futex word, so the u32 \
+              bit pattern is passed through as the int the syscall declares"
+)]
 pub unsafe fn futex_wait(addr: *const AtomicU32, expected: u32, timeout: Option<Duration>) -> i64 {
+    let ts = timeout.map(|d| libc::timespec {
+        tv_sec: d.as_secs() as libc::time_t,
+        tv_nsec: libc::c_long::from(d.subsec_nanos()),
+    });
+    let tsp = ts
+        .as_ref()
+        .map_or(ptr::null::<libc::timespec>(), ptr::from_ref);
+    // SAFETY: the caller guarantees `addr` is a live, aligned futex word;
+    // `tsp` is null or points at `ts`, which outlives the call; uaddr2 is
+    // unused by FUTEX_WAIT.
     unsafe {
-        let ts = timeout.map(|d| libc::timespec {
-            tv_sec: d.as_secs() as libc::time_t,
-            tv_nsec: d.subsec_nanos() as libc::c_long,
-        });
-        let tsp = ts
-            .as_ref()
-            .map_or(ptr::null::<libc::timespec>(), |t| t as *const _);
         libc::syscall(
             libc::SYS_futex,
-            addr as *const u32,
+            addr.cast::<u32>(),
             libc::FUTEX_WAIT, // shared (NOT _PRIVATE)
             expected as i32,
             tsp,
@@ -418,6 +474,16 @@ impl std::fmt::Debug for Server {
 
 impl Server {
     /// Create (or recreate) the shared region and publish it ready.
+    ///
+    /// # Errors
+    ///
+    /// Any I/O error from creating or opening the file at `path`, sizing it
+    /// to the layout, or `mmap`-ing it.
+    ///
+    /// # Panics
+    ///
+    /// If `num_channels` is not in `1..=4096`, or `cap_req` or `cap_resp` is
+    /// below 64.
     pub fn create(
         path: impl AsRef<Path>,
         num_channels: usize,
@@ -438,6 +504,13 @@ impl Server {
         let hdr = map.header();
         let gen = fresh_generation();
         // SAFETY: single-threaded init before magic is published; plain writes.
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "num_channels is asserted <= 4096 and CONTROL_SIZE is 64; the caps and \
+                      the stride/offset derived from them must fit the u32 header fields of the \
+                      client ABI. create does not range-check that: callers use caps of a few \
+                      MiB, and a cap above u32::MAX would truncate here as it always has"
+        )]
         unsafe {
             *map.u32_at(memoffset(&hdr.abi_version, hdr)) = ABI_VERSION;
             *map.u32_at(memoffset(&hdr.generation, hdr)) = gen;
@@ -455,16 +528,19 @@ impl Server {
     }
 
     #[inline]
+    #[must_use]
     pub fn channel_count(&self) -> usize {
         self.layout.num_channels
     }
 
     #[inline]
+    #[must_use]
     pub fn cap_req(&self) -> usize {
         self.layout.cap_req
     }
 
     #[inline]
+    #[must_use]
     pub fn cap_resp(&self) -> usize {
         self.layout.cap_resp
     }
@@ -489,6 +565,7 @@ impl Server {
     /// `seq == last_seen` and treat it as already-consumed). The re-sync problem
     /// this once tried to solve is instead handled by the header `generation`
     /// (bumped on recreate) plus the fresh-zero guarantee.
+    #[must_use]
     pub fn seq_baseline(&self) -> Vec<u32> {
         vec![0u32; self.layout.num_channels]
     }
@@ -505,6 +582,11 @@ impl Server {
         *last_seen = seq;
         // SAFETY: opcode/len are plain aligned words; seq (Acquire) ordered
         // their producer stores before us. len is clamped to cap_req.
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "the ABI carries cap_req in a u32 header field, so it must fit u32 (create \
+                      does not check this; callers use caps of a few MiB)"
+        )]
         let (opcode, len) = unsafe {
             (
                 *self.map.u32_at(base + OFF_OPCODE),
@@ -532,6 +614,11 @@ impl Server {
         let rc = base + self.layout.resp_control_off;
         let len = data.len().min(self.layout.cap_resp);
         // SAFETY: response payload/control lie within the channel block.
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "len is clamped to cap_resp, which the ABI carries in a u32 header field, \
+                      so it must fit u32 (create does not check this; callers use a few MiB)"
+        )]
         unsafe {
             self.map
                 .write_bytes(base + self.layout.resp_payload_off, &data[..len]);
@@ -569,6 +656,15 @@ impl std::fmt::Debug for Client {
 
 impl Client {
     /// Attach to an existing region, spinning until the server publishes ready.
+    ///
+    /// # Errors
+    ///
+    /// - Any I/O error from opening or `mmap`-ing the file at `path` (e.g.
+    ///   `NotFound` when no server has created it).
+    /// - [`io::ErrorKind::TimedOut`] if the server has not published ready
+    ///   within `ready_timeout`.
+    /// - [`io::ErrorKind::InvalidData`] if the server's ABI version or layout
+    ///   (control size, channel stride, channels offset) differs from ours.
     pub fn attach(path: impl AsRef<Path>, ready_timeout: Duration) -> io::Result<Client> {
         // First map just the header to learn the geometry, then remap the full
         // region. Simpler: map a header-sized region to read caps, compute
@@ -799,6 +895,18 @@ impl Client {
     /// `spin_iters` bounds the busy-spin before parking; `attempt_timeout`
     /// bounds each futex park; `deadline` is the overall hard deadline after
     /// which the server is treated as dead.
+    ///
+    /// # Errors
+    ///
+    /// - [`io::ErrorKind::BrokenPipe`] if, after the heartbeat stood still, the
+    ///   mailbox path is found to hold a restarted server (this mapping is
+    ///   orphaned and the client must reattach).
+    /// - [`io::ErrorKind::TimedOut`] if no reply arrives within `deadline`.
+    ///
+    /// # Panics
+    ///
+    /// If `data` is longer than the request capacity, or `channel` is not a
+    /// channel index of this mailbox.
     pub fn request(
         &self,
         channel: usize,
@@ -819,6 +927,10 @@ impl Client {
         // Publish the request: payload, len, opcode, then seq LAST (Release).
         // SAFETY: all offsets lie within the channel block; seq store orders the
         // prior plain stores before the server's Acquire load observes seq.
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "data.len() is asserted <= cap_req, which a Client reads from a u32 header field"
+        )]
         unsafe {
             self.map
                 .write_bytes(base + self.layout.req_payload_off, data);
@@ -884,6 +996,10 @@ impl Client {
         }
     }
 
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "a Client's cap_resp is read from a u32 header field, so it fits u32"
+    )]
     fn read_response(&self, rc: usize) -> (u32, Vec<u8>) {
         // SAFETY: response seq (Acquire) already ordered these producer stores
         // before us; status/len are plain aligned words, len clamped to cap.
@@ -930,16 +1046,21 @@ fn ofd_lock(file: &File, off: i64) -> io::Result<bool> {
 
 /// Best-effort per-thread id for the channel-claim owner word (uniqueness is
 /// not required for correctness — any non-zero value marks the channel taken).
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "gettid returns a positive pid_t, at most pid_max (2^22), so it fits u32"
+)]
 fn thread_id() -> u32 {
     // SAFETY: gettid is always available on Linux and takes no arguments.
-    (unsafe { libc::syscall(libc::SYS_gettid) } as u32).wrapping_mul(2654435761)
+    (unsafe { libc::syscall(libc::SYS_gettid) } as u32).wrapping_mul(2_654_435_761)
 }
 
 /// Byte offset of a `Header` field from the header base, for the plain-store
 /// init path (avoids `&mut` aliasing through the shared atomics).
 #[inline]
 fn memoffset<T>(field: &T, hdr: &Header) -> usize {
-    (field as *const T as usize) - (hdr as *const Header as usize)
+    (ptr::from_ref(field) as usize) - (ptr::from_ref(hdr) as usize)
 }
 
 #[cfg(test)]

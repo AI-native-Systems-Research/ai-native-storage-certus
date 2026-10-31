@@ -25,6 +25,10 @@ impl IBench for BenchComp {
     }
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+)]
 fn bench_registry_create(c: &mut Criterion) {
     let registry = ComponentRegistry::new();
     registry
@@ -44,6 +48,10 @@ fn bench_registry_create(c: &mut Criterion) {
     });
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+)]
 fn bench_registry_register_unregister(c: &mut Criterion) {
     c.bench_function("registry_register_unregister", |b| {
         let registry = ComponentRegistry::new();

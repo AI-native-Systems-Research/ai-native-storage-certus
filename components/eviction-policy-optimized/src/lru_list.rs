@@ -34,6 +34,11 @@ impl LruList {
     }
 
     /// Insert a key at the front (least recently used). Returns the node index.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "EvictionHandle carries a u32 index by interface; a pool holds one node per \
+                  cached block of its tier, far below u32::MAX"
+    )]
     pub(crate) fn push_front(&mut self, key: CacheKey) -> u32 {
         let idx = if let Some(free_idx) = self.free.pop() {
             self.nodes[free_idx as usize] = Node {
@@ -72,6 +77,11 @@ impl LruList {
     }
 
     /// Insert a key at the back (most recently used). Returns the node index.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "EvictionHandle carries a u32 index by interface; a pool holds one node per \
+                  cached block of its tier, far below u32::MAX"
+    )]
     pub(crate) fn push_back(&mut self, key: CacheKey) -> u32 {
         let idx = if let Some(free_idx) = self.free.pop() {
             self.nodes[free_idx as usize] = Node {

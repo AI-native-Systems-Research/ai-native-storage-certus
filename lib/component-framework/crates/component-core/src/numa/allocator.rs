@@ -38,6 +38,7 @@ impl NumaAllocator {
     /// let alloc = NumaAllocator::new(0);
     /// assert_eq!(alloc.node_id(), 0);
     /// ```
+    #[must_use]
     pub fn new(node_id: usize) -> Self {
         Self { node_id }
     }
@@ -52,6 +53,7 @@ impl NumaAllocator {
     /// let alloc = NumaAllocator::new(1);
     /// assert_eq!(alloc.node_id(), 1);
     /// ```
+    #[must_use]
     pub fn node_id(&self) -> usize {
         self.node_id
     }
@@ -86,7 +88,7 @@ impl NumaAllocator {
         }
 
         // Round up to page size for mmap.
-        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
+        let page_size = page_size();
         let alloc_size = (size + page_size - 1) & !(page_size - 1);
 
         // SAFETY: mmap with MAP_ANONYMOUS | MAP_PRIVATE allocates fresh memory.
@@ -123,7 +125,7 @@ impl NumaAllocator {
                 ptr,
                 alloc_size,
                 libc::MPOL_BIND,
-                &nodemask as *const libc::c_ulong,
+                std::ptr::addr_of!(nodemask),
                 self.node_id + 2, // maxnode: must be > highest node bit + 1
                 0u32,             // flags
             );
@@ -132,11 +134,11 @@ impl NumaAllocator {
         // Touch first page to fault it onto the target node.
         // SAFETY: ptr is valid, alloc_size >= page_size.
         unsafe {
-            std::ptr::write_volatile(ptr as *mut u8, 0);
+            std::ptr::write_volatile(ptr.cast::<u8>(), 0);
         }
 
         // SAFETY: mmap succeeded, so ptr is non-null.
-        Ok(unsafe { NonNull::new_unchecked(ptr as *mut u8) })
+        Ok(unsafe { NonNull::new_unchecked(ptr.cast::<u8>()) })
     }
 
     /// Deallocate memory previously allocated by [`alloc`](Self::alloc).
@@ -148,13 +150,27 @@ impl NumaAllocator {
     /// - `layout` must match the layout used for the original allocation.
     /// - The pointer must not have been deallocated already.
     pub unsafe fn dealloc(&self, ptr: NonNull<u8>, layout: Layout) {
+        let page_size = page_size();
+        let alloc_size = (layout.size() + page_size - 1) & !(page_size - 1);
+        // SAFETY: the caller guarantees `ptr` came from `alloc` with this
+        // `layout` and was not freed yet, so `[ptr, ptr + alloc_size)` is
+        // exactly the region that `alloc` mapped (same page rounding).
         unsafe {
-            let page_size = libc::sysconf(libc::_SC_PAGESIZE) as usize;
-            let alloc_size = (layout.size() + page_size - 1) & !(page_size - 1);
-            // SAFETY: caller guarantees ptr was returned by our alloc() and layout matches.
-            libc::munmap(ptr.as_ptr() as *mut libc::c_void, alloc_size);
+            libc::munmap(ptr.as_ptr().cast::<libc::c_void>(), alloc_size);
         }
     }
+}
+
+/// The system page size.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "sysconf(_SC_PAGESIZE) cannot fail on Linux and returns a small positive \
+              power of two (4 KiB-64 KiB)"
+)]
+fn page_size() -> usize {
+    // SAFETY: sysconf takes an integer name and reads no caller memory.
+    (unsafe { libc::sysconf(libc::_SC_PAGESIZE) }) as usize
 }
 
 #[cfg(test)]
@@ -173,7 +189,9 @@ mod tests {
         let layout = Layout::from_size_align(4096, 8).unwrap();
         let ptr = alloc.alloc(layout).unwrap();
         // ptr is NonNull so it's guaranteed non-null; verify we can write to it.
+        // SAFETY: `ptr` is a fresh, writable allocation of at least 4096 bytes.
         unsafe { std::ptr::write_volatile(ptr.as_ptr(), 0xAA) };
+        // SAFETY: `ptr` came from `alloc` with this `layout` and is freed once.
         unsafe { alloc.dealloc(ptr, layout) };
     }
 
@@ -183,6 +201,8 @@ mod tests {
         let layout = Layout::from_size_align(1024 * 1024, 8).unwrap(); // 1 MB
         let ptr = alloc.alloc(layout).unwrap();
         // Write and read back to verify usability
+        // SAFETY: `ptr` is a fresh, writable, zero-filled allocation of at
+        // least 1 MiB, and nothing else references it.
         unsafe {
             let slice = std::slice::from_raw_parts_mut(ptr.as_ptr(), 1024 * 1024);
             slice[0] = 42;
@@ -190,6 +210,8 @@ mod tests {
             assert_eq!(slice[0], 42);
             assert_eq!(slice[1024 * 1024 - 1], 99);
         }
+        // SAFETY: `ptr` came from `alloc` with this `layout` and is freed once;
+        // the slice above is out of scope.
         unsafe { alloc.dealloc(ptr, layout) };
     }
 

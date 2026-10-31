@@ -43,13 +43,17 @@
 //! difference to the resulting `f64`. Truncating them to satisfy
 //! `clippy::excessive_precision` would make the constants no longer diffable
 //! against their source, which is the only way to check a transcription of forty
-//! magic numbers. The lint is therefore allowed, per table, on that ground.
+//! magic numbers. The lint is therefore expected, on each table where it fires,
+//! on that ground.
 
 /// Chebyshev coefficients for `erfc`, from Numerical Recipes 3rd ed.
 ///
 /// Measured accuracy against a reference `erfc` over `x ∈ [-12, 12]`: max
 /// relative error 3.5e-14, re-checked by `erfc_matches_reference_values` below.
-#[allow(clippy::excessive_precision)]
+#[expect(
+    clippy::excessive_precision,
+    reason = "digits kept exactly as published so the table stays diffable against its source"
+)]
 const ERFC_COF: [f64; 28] = [
     -1.302_653_719_781_709_4,
     6.419_697_923_564_902_6e-1,
@@ -132,25 +136,21 @@ pub(crate) fn normal_pdf(x: f64) -> f64 {
 // absolute; one Halley refinement against `normal_cdf` takes it to ~3.5e-13,
 // which is what `normal_ppf` returns.
 #[rustfmt::skip]
-#[allow(clippy::excessive_precision)]
 const PROBIT_A: [f64; 6] = [
     -3.969_683_028_665_376e1, 2.209_460_984_245_205e2, -2.759_285_104_469_687e2,
     1.383_577_518_672_69e2, -3.066_479_806_614_716e1, 2.506_628_277_459_239,
 ];
 #[rustfmt::skip]
-#[allow(clippy::excessive_precision)]
 const PROBIT_B: [f64; 5] = [
     -5.447_609_879_822_406e1, 1.615_858_368_580_409e2, -1.556_989_798_598_866e2,
     6.680_131_188_771_972e1, -1.328_068_155_288_572e1,
 ];
 #[rustfmt::skip]
-#[allow(clippy::excessive_precision)]
 const PROBIT_C: [f64; 6] = [
     -7.784_894_002_430_293e-3, -3.223_964_580_411_365e-1, -2.400_758_277_161_838,
     -2.549_732_539_343_734, 4.374_664_141_464_968, 2.938_163_982_698_783,
 ];
 #[rustfmt::skip]
-#[allow(clippy::excessive_precision)]
 const PROBIT_D: [f64; 4] = [
     7.784_695_709_041_462e-3, 3.224_671_290_700_398e-1, 2.445_134_137_142_996,
     3.754_408_661_907_416,
@@ -226,7 +226,10 @@ mod tests {
     // asserted.
 
     #[rustfmt::skip]
-    #[allow(clippy::excessive_precision)]
+    #[expect(
+        clippy::excessive_precision,
+        reason = "reference digits kept as printed by the independent implementation"
+    )]
     const ERFC_REF: [(f64, f64); 13] = [
         (-8.0, 2.000_000_000_000_000_0e0),
         (-5.0, 1.999_999_999_998_462_56e0),
@@ -244,7 +247,10 @@ mod tests {
     ];
 
     #[rustfmt::skip]
-    #[allow(clippy::excessive_precision)]
+    #[expect(
+        clippy::excessive_precision,
+        reason = "reference digits kept as printed by the independent implementation"
+    )]
     const PPF_REF: [(f64, f64); 15] = [
         (1e-10, -6.361_340_902_404_055_7e0),
         (1e-06, -4.753_424_308_822_898_68e0),

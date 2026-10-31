@@ -1,4 +1,4 @@
-//! IRemoteLookup interface and associated types.
+//! `IRemoteLookup` interface and associated types.
 
 use std::fmt;
 use std::time::Duration;
@@ -51,13 +51,13 @@ pub struct LookupConfig {
     /// Grace period, measured from an operation's finalize, before an orphaned
     /// landing slot (one exposed to a still-live peer whose one-sided write never
     /// resolved) is force-reclaimed: the peer's QP is torn down (Disconnect →
-    /// DisconnectAck) and only then is the buffer freed. Bounds the lifetime of a
+    /// `DisconnectAck`) and only then is the buffer freed. Bounds the lifetime of a
     /// buffer that a peer could still DMA into, without ever freeing one under a
     /// possibly-pending write.
     pub connection_teardown_timeout: Duration,
     /// Maximum number of retry rounds re-targeting alternate peers.
     pub max_retry_rounds: u32,
-    /// Maximum keys per KEY_QUERY message before splitting into multiple SHOUTs.
+    /// Maximum keys per `KEY_QUERY` message before splitting into multiple SHOUTs.
     pub max_keys_per_query: usize,
     /// RoCE IPv4 the responder binds to (handed to the responder admin).
     pub bind_ip: String,

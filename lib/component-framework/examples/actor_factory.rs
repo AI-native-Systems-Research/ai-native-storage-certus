@@ -1,4 +1,4 @@
-//! Actor factory example: create actor components through the ComponentRegistry.
+//! Actor factory example: create actor components through the `ComponentRegistry`.
 //!
 //! Demonstrates:
 //! - Registering an actor factory with typed configuration
@@ -58,6 +58,10 @@ struct LogActorConfig {
 // 2. Register and use the factory
 // ---------------------------------------------------------------------------
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "example program: a failed framework call is a bug in the example, and panicking with the error is how it reports it"
+)]
 fn main() {
     println!("=== Actor Factory Example ===\n");
 

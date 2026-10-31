@@ -102,7 +102,7 @@ use rand::Rng;
 
 use crate::description::RankBy;
 use crate::distribution::Resolved;
-use crate::pool::SharedPool;
+use crate::pool::{SharedInstance, SharedPool};
 
 /// How often a draw could not deliver what was asked, and why (FR-023).
 ///
@@ -125,11 +125,13 @@ impl SelectionStats {
     /// realistically covers, so the draw was completed by taking the next-highest-ranked
     /// unchosen instances. Counted rather than left to be inferred from a hit-rate curve that
     /// looks slightly flatter than it should.
+    #[must_use]
     pub fn exhausted_retries(&self) -> u64 {
         self.exhausted_retries
     }
 
     /// Draws made.
+    #[must_use]
     pub fn draws(&self) -> u64 {
         self.draws
     }
@@ -137,6 +139,7 @@ impl SelectionStats {
     /// Draws truncated because the description asked for more instances than the
     /// pool can ever hold. **An authoring error** the load-time gate should have
     /// caught (FR-004); a non-zero count here means it was evaded.
+    #[must_use]
     pub fn bound_by_nominal(&self) -> u64 {
         self.bound_by_nominal
     }
@@ -144,6 +147,7 @@ impl SelectionStats {
     /// Draws truncated because the live count was momentarily below the nominal
     /// size. Expected under a fluctuating population, and not an error — but it
     /// narrows the requested count distribution, which is why it is reported.
+    #[must_use]
     pub fn bound_by_live(&self) -> u64 {
         self.bound_by_live
     }
@@ -151,22 +155,30 @@ impl SelectionStats {
     /// Draws that found the pool **empty** and delivered nothing. Counted apart
     /// because the session then has no shared prefix from that class at all; see
     /// the module docs on `e^-N`.
+    #[must_use]
     pub fn empty_pool(&self) -> u64 {
         self.empty_pool
     }
 
     /// Instances asked for, summed over all draws.
+    #[must_use]
     pub fn requested(&self) -> u64 {
         self.requested
     }
 
     /// Instances actually delivered, summed over all draws.
+    #[must_use]
     pub fn delivered(&self) -> u64 {
         self.delivered
     }
 
     /// Fraction of draws either bound truncated, in `0.0..=1.0`. Zero draws gives
     /// zero rather than a NaN, so a report never prints one.
+    #[must_use]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "draw counters; inexact only above 2^53 draws"
+    )]
     pub fn binding_fraction(&self) -> f64 {
         if self.draws == 0 {
             return 0.0;
@@ -180,6 +192,11 @@ impl SelectionStats {
     /// different questions: a bound that binds on every draw but costs one
     /// instance each time is a very different distortion from one that binds
     /// rarely and costs most of the draw.
+    #[must_use]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "instance counters; inexact only above 2^53 instances"
+    )]
     pub fn shortfall_fraction(&self) -> f64 {
         if self.requested == 0 {
             return 0.0;
@@ -210,6 +227,7 @@ pub struct Selector {
 
 impl Selector {
     /// Build a selector for a class with the given index space.
+    #[must_use]
     pub fn new(rank_by: RankBy) -> Self {
         Self {
             rank_by,
@@ -235,12 +253,14 @@ impl Selector {
     ///
     /// The distribution is over **rank**, not over slot or key, which is what gives
     /// [`RankBy`] its meaning — see the module docs.
+    #[must_use]
     pub fn with_selection(mut self, selection: Option<Resolved>) -> Self {
         self.selection = selection;
         self
     }
 
     /// Whether draws are concentrated rather than uniform.
+    #[must_use]
     pub fn is_concentrated(&self) -> bool {
         self.selection.is_some()
     }
@@ -256,16 +276,19 @@ impl Selector {
     /// `None` means the working set is the whole key space — the regime in which a capacity sweep
     /// cannot discriminate between eviction policies, and which a report has to be able to say
     /// rather than leave to be inferred from the shape of the curve.
+    #[must_use]
     pub fn effective_ranks(&self) -> Option<f64> {
         self.selection.as_ref().map(|d| d.effective().p90.max(0.0))
     }
 
     /// The index space this selector draws over.
+    #[must_use]
     pub fn rank_by(&self) -> RankBy {
         self.rank_by
     }
 
     /// What the draws have and have not delivered so far (FR-023).
+    #[must_use]
     pub fn stats(&self) -> SelectionStats {
         self.stats
     }
@@ -319,11 +342,16 @@ impl Selector {
         match self.rank_by {
             // Rank is the slot itself, so rank order is slot order. Empty slots
             // are simply absent: a vacant position has nothing to select.
-            RankBy::Slot => self.candidates.extend(pool.selectable().map(|i| i.slot())),
+            RankBy::Slot => self
+                .candidates
+                .extend(pool.selectable().map(SharedInstance::slot)),
             // Rank 0 is newest.
-            RankBy::Recency => self.candidates.extend(pool.by_recency().map(|i| i.slot())),
+            RankBy::Recency => self
+                .candidates
+                .extend(pool.by_recency().map(SharedInstance::slot)),
         }
-        let live = self.candidates.len() as u64;
+        let live_len = self.candidates.len();
+        let live = live_len as u64;
         let nominal = pool.nominal();
         // `live` may exceed `nominal`: a Poisson population fluctuates both ways,
         // and FR-022 bounds the draw by the *smaller* of the two, so a pool
@@ -349,7 +377,8 @@ impl Selector {
             self.stats.empty_pool += 1;
         }
 
-        let k = bound as usize;
+        // `bound <= live`, which came from a `usize`, so the conversion cannot fail.
+        let k = usize::try_from(bound).unwrap_or(live_len);
         match self.selection.clone() {
             // Partial Fisher-Yates: after k steps the first k entries are a uniform
             // sample without replacement, and no allocation happened.
@@ -362,7 +391,7 @@ impl Selector {
             }
             // Concentrated: ranks come from the distribution, so a spread narrower than the pool
             // makes the working set smaller than the key space.
-            Some(dist) => self.draw_ranked(&dist, k, live as usize, rng),
+            Some(dist) => self.draw_ranked(&dist, k, live_len, rng),
         }
         self.candidates.sort_unstable();
         &self.candidates
@@ -404,6 +433,12 @@ impl Selector {
             if !raw.is_finite() {
                 continue;
             }
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "raw is finite and clamped to >= 0; the saturating cast plus min() \
+                          keeps the rank inside the live range"
+            )]
             let rank = (raw.round().max(0.0) as usize).min(live.saturating_sub(1));
             if !self.picked.contains(&rank) {
                 self.picked.push(rank);

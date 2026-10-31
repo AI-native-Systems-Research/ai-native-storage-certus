@@ -35,6 +35,10 @@ struct FanInConsumer {
 }
 
 impl ActorHandler<(usize, u32)> for FanInConsumer {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the shared mutex is only poisoned if another thread already panicked; re-panicking is the intended response"
+    )]
     fn handle(&mut self, msg: (usize, u32)) {
         let (producer_id, _value) = msg;
         let mut counts = self.counts.lock().unwrap();
@@ -43,6 +47,10 @@ impl ActorHandler<(usize, u32)> for FanInConsumer {
         }
     }
 
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the shared mutex is only poisoned if another thread already panicked; re-panicking is the intended response"
+    )]
     fn on_stop(&mut self) {
         let counts = self.counts.lock().unwrap();
         let total: u32 = counts.iter().sum();
@@ -53,12 +61,16 @@ impl ActorHandler<(usize, u32)> for FanInConsumer {
     }
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "example program: a failed framework call is a bug in the example, and panicking with the error is how it reports it"
+)]
 fn main() {
     println!("=== Actor Fan-In Example ===");
     println!("  3 producers -> MPSC channel -> 1 consumer\n");
 
     let num_producers = 3;
-    let msgs_per_producer = 100;
+    let msgs_per_producer: u32 = 100;
 
     let counts = Arc::new(Mutex::new(vec![0u32; num_producers]));
 
@@ -79,7 +91,7 @@ fn main() {
     for pid in 0..num_producers {
         let tx = ch.sender().unwrap();
         producer_handles.push(std::thread::spawn(move || {
-            for i in 0..msgs_per_producer as u32 {
+            for i in 0..msgs_per_producer {
                 tx.send((pid, i)).unwrap();
             }
             println!("  Producer {pid} sent {msgs_per_producer} messages");
@@ -100,7 +112,10 @@ fn main() {
     // Verify
     let counts = counts.lock().unwrap();
     let total: u32 = counts.iter().sum();
-    assert_eq!(total, (num_producers * msgs_per_producer) as u32);
+    assert_eq!(
+        u64::from(total),
+        num_producers as u64 * u64::from(msgs_per_producer)
+    );
 
     println!("\n=== Fan-in complete: all {total} messages received ===");
 }

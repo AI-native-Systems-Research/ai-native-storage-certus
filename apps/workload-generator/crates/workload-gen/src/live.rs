@@ -155,6 +155,7 @@ pub enum Pacing {
 impl Pacing {
     /// The name the report prints, since a paced figure and a work-conserving one are not
     /// comparable and would otherwise be quoted side by side.
+    #[must_use]
     pub fn name(self) -> &'static str {
         match self {
             Self::Real => "paced",
@@ -253,21 +254,30 @@ pub struct LiveStats {
 
 impl LiveStats {
     /// Underruns across all lanes.
+    #[must_use]
     pub fn underruns(&self) -> u64 {
         self.lanes.iter().map(|l| l.underruns).sum()
     }
 
     /// Pops across all lanes.
+    #[must_use]
     pub fn pops(&self) -> u64 {
         self.lanes.iter().map(|l| l.pops).sum()
     }
 
     /// Smallest depth any lane saw at pop time.
+    #[must_use]
     pub fn min_depth(&self) -> usize {
         self.lanes.iter().map(|l| l.min_depth).min().unwrap_or(0)
     }
 
     /// Fraction of pops that underran.
+    #[must_use]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "run statistic: counts and microsecond totals from one run are far below 2^52, \
+                  and the result is a rate or fraction"
+    )]
     pub fn fraction_underrun(&self) -> f64 {
         let pops = self.pops();
         if pops == 0 {
@@ -278,6 +288,7 @@ impl LiveStats {
     }
 
     /// Microseconds lanes spent waiting for the producer, summed across lanes.
+    #[must_use]
     pub fn producer_wait_us(&self) -> u64 {
         self.lanes.iter().map(|l| l.producer_wait_us).sum()
     }
@@ -286,6 +297,7 @@ impl LiveStats {
     ///
     /// Reported beside the aggregate because one starved lane among sixteen is invisible in a
     /// mean — the aggregate would read 1/16th of its true severity.
+    #[must_use]
     pub fn worst_lane_producer_wait_us(&self) -> u64 {
         self.lanes
             .iter()
@@ -300,6 +312,12 @@ impl LiveStats {
     /// sixteen lane-seconds per wallclock second to spend, and this is the share of them lost
     /// to an empty queue. That makes it read directly as the amount by which the reported
     /// throughput understates Certus — which is exactly the claim FR-062 has to adjudicate.
+    #[must_use]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "run statistic: counts and microsecond totals from one run are far below 2^52, \
+                  and the result is a rate or fraction"
+    )]
     pub fn producer_wait_fraction(&self) -> f64 {
         let lane_time_us = self.elapsed * 1e6 * self.lanes.len() as f64;
         if lane_time_us <= 0.0 {
@@ -310,51 +328,61 @@ impl LiveStats {
     }
 
     /// Requests issued.
+    #[must_use]
     pub fn requests(&self) -> u64 {
         self.lanes.iter().map(|l| l.counters.requests).sum()
     }
 
     /// Key references issued.
+    #[must_use]
     pub fn key_references(&self) -> u64 {
         self.lanes.iter().map(|l| l.counters.key_references).sum()
     }
 
     /// Operations skipped for want of a GPU payload buffer.
+    #[must_use]
     pub fn skipped_needing_gpu(&self) -> u64 {
         self.lanes.iter().map(|l| l.skipped_needing_gpu).sum()
     }
 
     /// Keys those skipped operations would have moved.
+    #[must_use]
     pub fn skipped_keys(&self) -> u64 {
         self.lanes.iter().map(|l| l.skipped_keys).sum()
     }
 
     /// `CHECK` keys reported `RESIDENT`.
+    #[must_use]
     pub fn check_resident(&self) -> u64 {
         self.lanes.iter().map(|l| l.counters.check_resident).sum()
     }
 
     /// `CHECK` keys reported `PENDING`.
+    #[must_use]
     pub fn check_pending(&self) -> u64 {
         self.lanes.iter().map(|l| l.counters.check_pending).sum()
     }
 
     /// `CHECK` keys reported `MISS`.
+    #[must_use]
     pub fn check_miss(&self) -> u64 {
         self.lanes.iter().map(|l| l.counters.check_miss).sum()
     }
 
     /// `LOOKUP` keys that returned data.
+    #[must_use]
     pub fn lookup_hits(&self) -> u64 {
         self.lanes.iter().map(|l| l.counters.lookup_hits).sum()
     }
 
     /// `LOOKUP` keys that did not.
+    #[must_use]
     pub fn lookup_misses(&self) -> u64 {
         self.lanes.iter().map(|l| l.counters.lookup_misses).sum()
     }
 
     /// Keys a `RESERVE` was asked for.
+    #[must_use]
     pub fn reserves_attempted(&self) -> u64 {
         self.lanes
             .iter()
@@ -363,6 +391,7 @@ impl LiveStats {
     }
 
     /// Keys a `COMMIT_STORE` was asked for.
+    #[must_use]
     pub fn commits_attempted(&self) -> u64 {
         self.lanes
             .iter()
@@ -371,6 +400,7 @@ impl LiveStats {
     }
 
     /// Keys a `RESERVE` declined.
+    #[must_use]
     pub fn reserves_declined(&self) -> u64 {
         self.lanes
             .iter()
@@ -384,6 +414,7 @@ impl LiveStats {
     /// is a correctness failure rather than a cache outcome, so [`LiveStats::is_valid`] treats
     /// it as invalidating: a throughput measured while the wrong data came back is not a
     /// result.
+    #[must_use]
     pub fn payload_mismatches(&self) -> u64 {
         self.lanes
             .iter()
@@ -392,6 +423,7 @@ impl LiveStats {
     }
 
     /// Loaded blocks checked, so a mismatch count has a denominator.
+    #[must_use]
     pub fn payloads_verified(&self) -> u64 {
         self.lanes
             .iter()
@@ -400,6 +432,7 @@ impl LiveStats {
     }
 
     /// Keys a `COPY_TO_STORE` declined.
+    #[must_use]
     pub fn transfers_declined(&self) -> u64 {
         self.lanes
             .iter()
@@ -408,6 +441,7 @@ impl LiveStats {
     }
 
     /// Keys a `COPY_TO_STORE` was asked for.
+    #[must_use]
     pub fn transfers_attempted(&self) -> u64 {
         self.lanes
             .iter()
@@ -418,6 +452,7 @@ impl LiveStats {
     /// Blocks whose payload Certus sent us: `LOOKUP` hits, and only those.
     ///
     /// A `LOOKUP` miss transfers nothing, so counting it would invent bandwidth.
+    #[must_use]
     pub fn blocks_read(&self) -> u64 {
         self.lookup_hits()
     }
@@ -426,31 +461,41 @@ impl LiveStats {
     ///
     /// `COPY_TO_STORE` is where the DMA happens (`copy_gpu_to_memory_async`); `RESERVE` and
     /// `COMMIT_STORE` are control. A declined transfer moved nothing.
+    #[must_use]
     pub fn blocks_written(&self) -> u64 {
         self.transfers_attempted()
             .saturating_sub(self.transfers_declined())
     }
 
     /// Payload bytes read from Certus.
+    #[must_use]
     pub fn read_bytes(&self) -> u64 {
         self.blocks_read() * self.block_bytes
     }
 
     /// Payload bytes written to Certus.
+    #[must_use]
     pub fn write_bytes(&self) -> u64 {
         self.blocks_written() * self.block_bytes
     }
 
     /// Payload bytes read per wallclock second.
+    #[must_use]
     pub fn read_bytes_per_second(&self) -> f64 {
         self.per_second(self.read_bytes())
     }
 
     /// Payload bytes written per wallclock second.
+    #[must_use]
     pub fn write_bytes_per_second(&self) -> f64 {
         self.per_second(self.write_bytes())
     }
 
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "run statistic: counts and microsecond totals from one run are far below 2^52, \
+                  and the result is a rate or fraction"
+    )]
     fn per_second(&self, n: u64) -> f64 {
         if self.elapsed > 0.0 {
             n as f64 / self.elapsed
@@ -460,21 +505,25 @@ impl LiveStats {
     }
 
     /// Keys a `COMMIT_STORE` declined.
+    #[must_use]
     pub fn commits_declined(&self) -> u64 {
         self.lanes.iter().map(|l| l.counters.commits_declined).sum()
     }
 
     /// Turns held for their due time — the `n` a lateness percentile needs (FR-066a).
+    #[must_use]
     pub fn paced_turns(&self) -> u64 {
         self.lanes.iter().map(|l| l.paced_turns).sum()
     }
 
     /// Lateness at a quantile, in microseconds.
+    #[must_use]
     pub fn lateness_us(&self, quantile: f64) -> u64 {
         self.lateness.value_at_quantile(quantile)
     }
 
     /// Worst lateness seen, in microseconds.
+    #[must_use]
     pub fn max_lateness_us(&self) -> u64 {
         self.lateness.max()
     }
@@ -483,6 +532,7 @@ impl LiveStats {
     ///
     /// Only meaningful under [`Pacing::Real`]; a work-conserving run has no schedule, so this is
     /// vacuously true there and [`LiveStats::is_valid`] uses the underrun count instead.
+    #[must_use]
     pub fn kept_the_schedule(&self) -> bool {
         if self.pacing == Pacing::None || self.lateness.is_empty() {
             return true;
@@ -504,6 +554,7 @@ impl LiveStats {
     /// applying FR-062 would invalidate every paced run. What replaces it is lateness, and it
     /// fails for the same underlying reason: the pace came from somewhere other than the
     /// workload's own timing.
+    #[must_use]
     pub fn is_valid(&self) -> bool {
         // A wrong block invalidates as surely as either, and for the same reason: the
         // throughput would describe something other than the system serving this workload
@@ -521,6 +572,12 @@ impl LiveStats {
     }
 
     /// Keys per second over the timed window.
+    #[must_use]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "run statistic: counts and microsecond totals from one run are far below 2^52, \
+                  and the result is a rate or fraction"
+    )]
     pub fn keys_per_second(&self) -> f64 {
         if self.elapsed > 0.0 {
             self.key_references() as f64 / self.elapsed
@@ -548,6 +605,7 @@ impl LiveStats {
     ///
     /// Server-side write-through to SSD is additional traffic Certus generates on its own
     /// and is not counted here: this is what crossed the client boundary.
+    #[must_use]
     pub fn bytes_per_second(&self) -> f64 {
         self.per_second(self.read_bytes() + self.write_bytes())
     }
@@ -559,6 +617,7 @@ impl LiveStats {
     /// the requested rate** — it should come out at approximately [`LiveStats::rate`], and a
     /// shortfall is accumulated lateness arriving by a second route. The two must agree; if they
     /// do not, one of them is measuring something else.
+    #[must_use]
     pub fn virtual_to_wallclock(&self) -> f64 {
         if self.elapsed > 0.0 {
             self.virtual_span / self.elapsed
@@ -571,6 +630,7 @@ impl LiveStats {
     ///
     /// `None` for a work-conserving run, which asked for no rate. Zero or negative means the
     /// schedule was kept; positive is the same information the lateness percentiles carry.
+    #[must_use]
     pub fn rate_shortfall(&self) -> Option<f64> {
         if self.pacing == Pacing::None || self.rate <= 0.0 {
             return None;
@@ -804,7 +864,8 @@ where
     }
 }
 
-#[cfg(all(test, feature = "workload-tests"))]
+#[cfg(test)]
+#[cfg(feature = "workload-tests")]
 mod tests {
     use super::*;
 
@@ -929,6 +990,11 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::float_cmp,
+        reason = "the inputs are small integers and powers of two, so every expected rate is \
+                  exact; an epsilon would hide a real arithmetic change"
+    )]
     fn rates_aggregate_across_lanes_and_never_produce_a_nan() {
         let s = stats(
             vec![
@@ -972,6 +1038,11 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::float_cmp,
+        reason = "the inputs are small integers and powers of two, so every expected rate is \
+                  exact; an epsilon would hide a real arithmetic change"
+    )]
     fn bandwidth_counts_a_lookup_hit_as_read_and_an_accepted_transfer_as_write() {
         // The only two payload-moving operations. A LOOKUP miss brings no bytes, and a
         // declined COPY_TO_STORE sends none, so both are excluded — otherwise a run against
@@ -1132,9 +1203,11 @@ mod tests {
     }
 
     #[test]
-    // The constant value is the point: this is a guard against a later "let's make it bigger",
-    // and clippy's suggestion to drop it would remove the guard rather than simplify it.
-    #[allow(clippy::assertions_on_constants)]
+    #[expect(
+        clippy::assertions_on_constants,
+        reason = "the constant value is the point: this guards against a later \"let's make it \
+                  bigger\", and dropping the assertion would remove the guard"
+    )]
     fn depth_is_in_turns_and_capped_so_memory_does_not_track_the_span() {
         // The property that makes an unbounded run possible. Stated as an assertion
         // because it is the reason the queue exists, and a later "let's make it bigger"

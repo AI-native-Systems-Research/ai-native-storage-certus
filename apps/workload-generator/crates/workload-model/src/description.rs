@@ -91,11 +91,13 @@ pub struct Declared<T> {
 
 impl<T> Declared<T> {
     /// Number of declared entries.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Whether nothing was declared.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -109,16 +111,19 @@ impl<T> Declared<T> {
     }
 
     /// Look a value up by name.
+    #[must_use]
     pub fn get(&self, name: &str) -> Option<&T> {
         self.entries.iter().find(|(n, _)| n == name).map(|(_, v)| v)
     }
 
     /// The declaration index of a name — its `class_id` in a key salt.
+    #[must_use]
     pub fn index_of(&self, name: &str) -> Option<usize> {
         self.entries.iter().position(|(n, _)| n == name)
     }
 
     /// The entry at a declaration index.
+    #[must_use]
     pub fn by_index(&self, index: usize) -> Option<(&str, &T)> {
         self.entries.get(index).map(|(n, v)| (n.as_str(), v))
     }
@@ -175,6 +180,7 @@ pub enum Population {
 
 impl Population {
     /// The nominal size, whichever form this is.
+    #[must_use]
     pub fn nominal(&self) -> u64 {
         match self {
             Population::Poisson(n) | Population::Exact(n) => *n,
@@ -194,10 +200,9 @@ impl<'de> Deserialize<'de> for Population {
                 Ok(Population::Poisson(v))
             }
             fn visit_i64<E: de::Error>(self, v: i64) -> std::result::Result<Population, E> {
-                if v < 0 {
-                    return Err(E::custom(format!("population {v} is negative")));
-                }
-                Ok(Population::Poisson(v as u64))
+                u64::try_from(v)
+                    .map(Population::Poisson)
+                    .map_err(|_| E::custom(format!("population {v} is negative")))
             }
             fn visit_map<M: MapAccess<'de>>(
                 self,
@@ -412,6 +417,10 @@ impl WorkloadDescription {
     /// ```
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
+        #[expect(
+            clippy::unnecessary_debug_formatting,
+            reason = "the quoted Debug form delimits the path in the error; Display would change the message"
+        )]
         let text = std::fs::read_to_string(path)
             .map_err(|e| Error::new(format!("cannot read {path:?}: {e}")))?;
         let mut d: Self = text.parse()?;
@@ -426,7 +435,7 @@ impl WorkloadDescription {
     ///
     /// If a named sample file cannot be read or holds no numbers.
     pub fn load_sample_files(&mut self, base_dir: &Path) -> Result<()> {
-        for (name, class) in self.shared_classes.entries.iter_mut() {
+        for (name, class) in &mut self.shared_classes.entries {
             class
                 .length
                 .load_sample_files(base_dir)
@@ -440,8 +449,8 @@ impl WorkloadDescription {
                     .map_err(|e| e.within(format!("shared_classes.{name}.pool.selection")))?;
             }
         }
-        for (name, class) in self.session_classes.entries.iter_mut() {
-            for u in class.uses.iter_mut() {
+        for (name, class) in &mut self.session_classes.entries {
+            for u in &mut class.uses {
                 let cls = u.class.clone();
                 u.count
                     .load_sample_files(base_dir)
@@ -523,7 +532,15 @@ impl WorkloadDescription {
                 Ok(r) => {
                     let eff = r.effective();
                     report.note_effective(at("length"), eff);
-                    if eff.hi.is_finite() && eff.hi as u64 >= keys::MAX_BLOCKS_PER_STREAM {
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        clippy::cast_sign_loss,
+                        reason = "hi is finite here; the saturating floor is the intended \
+                                  comparison against an integer bound"
+                    )]
+                    let too_long =
+                        eff.hi.is_finite() && eff.hi as u64 >= keys::MAX_BLOCKS_PER_STREAM;
+                    if too_long {
                         report.refuse(format!(
                             "{}: an instance of up to {} blocks exceeds the {} the key \
                              salt can encode",
@@ -602,7 +619,12 @@ impl WorkloadDescription {
                 ));
             }
             if let Some(sel) = &class.pool.selection {
-                match sel.resolve_integral(Some((nominal - 1) as f64)) {
+                #[expect(
+                    clippy::cast_precision_loss,
+                    reason = "a pool size; inexact only above 2^53 slots"
+                )]
+                let max = (nominal - 1) as f64;
+                match sel.resolve_integral(Some(max)) {
                     Ok(r) => report.note_effective(at("pool.selection"), r.effective()),
                     Err(e) => report.refuse(e.within(at("pool.selection")).to_string()),
                 }
@@ -610,6 +632,10 @@ impl WorkloadDescription {
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "a flat sequence of independent per-field checks; splitting it would scatter them without simplifying any"
+    )]
     fn validate_session_classes(&self, report: &mut Report) {
         if self.session_classes.is_empty() {
             report.refuse("session_classes is empty, so there is no workload to run");
@@ -655,7 +681,12 @@ impl WorkloadDescription {
                 let nominal = target.pool.size.nominal();
                 // The pool size is the implied maximum on the count, and FR-004
                 // refuses a truncation that discards more than 5% of the mass.
-                match u.count.resolve_integral(Some(nominal as f64)) {
+                #[expect(
+                    clippy::cast_precision_loss,
+                    reason = "a pool size; inexact only above 2^53 slots"
+                )]
+                let max = nominal as f64;
+                match u.count.resolve_integral(Some(max)) {
                     Ok(r) => {
                         let eff = r.effective();
                         report.note_effective(path.clone(), eff);
@@ -747,7 +778,12 @@ impl WorkloadDescription {
                 let (t, g) = (turns.effective().hi, growth.effective().hi);
                 if t.is_finite() && g.is_finite() {
                     let worst = t * g;
-                    if worst >= keys::MAX_BLOCKS_PER_STREAM as f64 {
+                    #[expect(
+                        clippy::cast_precision_loss,
+                        reason = "MAX_BLOCKS_PER_STREAM is 2^24, exact in f64"
+                    )]
+                    let limit = keys::MAX_BLOCKS_PER_STREAM as f64;
+                    if worst >= limit {
                         report.refuse(format!(
                             "{}: up to {t} turns of up to {g} input blocks is {worst} blocks, \
                              at or beyond the {} one session stream can encode",
@@ -802,18 +838,21 @@ impl Report {
     }
 
     /// Reasons the description was refused. Empty on success.
+    #[must_use]
     pub fn refusals(&self) -> &[String] {
         &self.refusals
     }
 
     /// Advisory notes worth printing at load time — a uniform selection that
     /// flattens popularity, a defaulted `rank_by`, and the like.
+    #[must_use]
     pub fn notes(&self) -> &[String] {
         &self.notes
     }
 
     /// Every parameter whose effective distribution differs from what was
     /// written, with the realised statistics (FR-003).
+    #[must_use]
     pub fn effective(&self) -> &[(String, Effective)] {
         &self.effective
     }
@@ -827,7 +866,9 @@ impl Report {
     ///
     /// assert_eq!(Report::default().render(), "the description is consistent\n");
     /// ```
+    #[must_use]
     pub fn render(&self) -> String {
+        use std::fmt::Write as _;
         let mut out = String::new();
         if self.effective.is_empty() && self.notes.is_empty() {
             return "the description is consistent\n".to_string();
@@ -835,18 +876,20 @@ impl Report {
         if !self.effective.is_empty() {
             out.push_str("effective values that differ from the file:\n");
             for (path, e) in &self.effective {
-                out.push_str(&format!(
+                // Writing to a `String` cannot fail.
+                let _ = write!(
+                    out,
                     "  {path}: requested mean {:.4}, effective mean {:.4}",
                     e.requested_mean, e.mean
-                ));
+                );
                 if e.discarded > 0.0 {
-                    out.push_str(&format!(" ({:.2}% of mass discarded)", e.discarded * 100.0));
+                    let _ = write!(out, " ({:.2}% of mass discarded)", e.discarded * 100.0);
                 }
                 out.push('\n');
             }
         }
         for n in &self.notes {
-            out.push_str(&format!("note: {n}\n"));
+            let _ = writeln!(out, "note: {n}");
         }
         out
     }
