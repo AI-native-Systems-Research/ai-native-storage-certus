@@ -74,13 +74,25 @@ build_server(){
     ( cd "$spdk" && ./configure --prefix="$build" --without-crypto && make -j"$(nproc)" && make install ) \
       >"${SPDK_TIER_DIR}/spdk-build.log" 2>&1 || die "SPDK build failed; see ${SPDK_TIER_DIR}/spdk-build.log"
   fi
+  local head; head="$(git -C "$REPO_ROOT" rev-parse HEAD)" || die "cannot resolve HEAD of ${REPO_ROOT}"
+  local rebuild=0
   if [[ ! -d "$wt" ]]; then
-    log "creating server worktree ${wt} at $(git -C "$REPO_ROOT" rev-parse --short HEAD)"
-    git -C "$REPO_ROOT" worktree add --detach "$wt" HEAD >/dev/null || die "git worktree add failed"
+    log "creating server worktree ${wt} at ${head:0:8}"
+    git -C "$REPO_ROOT" worktree add --detach "$wt" "$head" >/dev/null || die "git worktree add failed"
     rm -f "${wt}/deps/spdk" "${wt}/deps/spdk-build"
     ln -s "$spdk" "${wt}/deps/spdk"; ln -s "$build" "${wt}/deps/spdk-build"
+    rebuild=1
+  elif [[ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" != "$head" ]]; then
+    # The server must match the connector baked into the images (shm-queue ABI etc.),
+    # which are built from REPO_ROOT, so follow REPO_ROOT's HEAD. Only uncommitted
+    # local edits to tracked files block this (the deps/spdk* symlinks are ignored).
+    [[ -z "$(git -C "$wt" status --porcelain --untracked-files=no)" ]] \
+      || die "server worktree ${wt} has local changes; commit/discard them or set SERVER_BIN"
+    log "server worktree ${wt} at $(git -C "$wt" rev-parse --short=8 HEAD) != HEAD ${head:0:8}; updating + rebuilding"
+    git -C "$wt" checkout -q --detach "$head" || die "git checkout ${head:0:8} in ${wt} failed"
+    rebuild=1
   fi
-  if [[ ! -x "${wt}/target/release/certus-server-yaml" ]]; then
+  if (( rebuild )) || [[ ! -x "${wt}/target/release/certus-server-yaml" ]]; then
     [[ -e "${GDRCOPY_LIB_PATH}/libgdrapi.so" ]] || die "libgdrapi.so not found in ${GDRCOPY_LIB_PATH} (set GDRCOPY_LIB_PATH)"
     log "building certus-server-yaml against the private SPDK"
     # gpu-services' build.rs does not rerun on GDRCOPY_LIB_PATH changes; clean it so it does.
@@ -141,36 +153,32 @@ probe_server(){
   log "probe OK: $(grep -m1 -o 'memory-tier: initialized with [0-9]* MiB pool' "$plog")"
 }
 
-# gen-{gqa,mha}-iobound-report.py hardcode "32 GiB DRAM/CPU tier both arms"; record the real size.
-fix_report_header(){
-  /usr/bin/python3 - "$1" "$CPU_TIER_GB" <<'EOF'
-import sys
-p, gb = sys.argv[1], sys.argv[2]
-s = open(p).read()
-old = "32 GiB DRAM/CPU tier both arms"
-if old in s:
-    open(p, "w").write(s.replace(old, f"<b>{gb} GiB</b> DRAM/CPU tier both arms (Certus: certus-server-yaml "
-        "built against a private SPDK with DPDK RTE_MAX_MEM_MB_PER_LIST/PER_TYPE raised)"))
-EOF
-}
-
 # Cross-sweep summary from each report's results table.
 write_summary(){
   /usr/bin/python3 - "$SWEEP_DIR" $STREAMS <<'EOF'
 import html, os, re, sys
 sweep, streams = sys.argv[1], sys.argv[2:]
-cols = ["tokens/s", "req/s", "TTFT p50 (ms)", "TTFT p99 (ms)", "errored", "KV load (TiB)", "load time (s)", "ext hit %"]
+cols = ["offload block (tok)", "run (s)", "tokens/s", "req/s", "TTFT p50 (s)", "TTFT p99 (s)", "errored",
+        "vLLM queue mean (s)", "ext hit %", "computed %", "KV load (TiB)", "load GB/s, wall clock (busiest 5 min)", "SSD read into host memory (TiB)",
+        "SSD read not delivered to GPU, at least (TiB)", "summed load job time, SSD→GPU (s)"]
 rows = []
 for n in streams:
     p = os.path.join(sweep, f"{n}streams", "report.html")
     if not os.path.exists(p):
         rows.append([n, "(no report)"] + [""] * len(cols)); continue
-    t = re.search(r"<table[\s\S]*?</table>", open(p).read()).group(0)
-    trs = [[html.unescape(re.sub(r"<[^>]+>", "", c)).strip() for c in re.findall(r"<t[dh][^>]*>([\s\S]*?)</t[dh]>", tr)]
-           for tr in re.findall(r"<tr[\s\S]*?</tr>", t)]
-    hdr = trs[0]; ai = hdr.index("Arm")
-    for r in trs[1:]:
-        rows.append([n, r[ai]] + [r[hdr.index(c)] if c in hdr else "" for c in cols])
+    # The report has a results table and a KV I/O table, one row per arm in each;
+    # merge them by arm. Other tables (the run-setup table) have no "Arm" column.
+    by_arm = {}
+    for t in re.findall(r"<table[\s\S]*?</table>", open(p).read()):
+        trs = [[html.unescape(re.sub(r"<[^>]+>", "", c)).strip() for c in re.findall(r"<t[dh][^>]*>([\s\S]*?)</t[dh]>", tr)]
+               for tr in re.findall(r"<tr[\s\S]*?</tr>", t)]
+        if not trs or "Arm" not in trs[0]:
+            continue
+        hdr = trs[0]; ai = hdr.index("Arm")
+        for r in trs[1:]:
+            by_arm.setdefault(r[ai], {}).update(zip(hdr, r))
+    for arm, vals in by_arm.items():
+        rows.append([n, arm] + [vals.get(c, "") for c in cols])
 head = ["streams", "arm"] + cols
 md = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)] + ["| " + " | ".join(r) + " |" for r in rows]
 open(os.path.join(sweep, "summary.md"), "w").write("\n".join(md) + "\n")
@@ -204,7 +212,6 @@ for n in $STREAMS; do
     "$MATRIX" >"${SWEEP_DIR}/matrix-${n}streams.log" 2>&1
   failed=$(ls -d "$dir"/*/FAILED 2>/dev/null | wc -l)
   if [[ -f "${dir}/report.html" ]]; then
-    fix_report_header "${dir}/report.html"
     log "${n} streams done -> ${dir}/report.html (${failed} failed arms)"
   else
     log "${n} streams: NO report (see ${SWEEP_DIR}/matrix-${n}streams.log)"

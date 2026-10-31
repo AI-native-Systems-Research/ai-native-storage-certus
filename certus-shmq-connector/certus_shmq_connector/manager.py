@@ -39,7 +39,7 @@ from .compat import (
 from . import compat as _compat
 
 from .mediums import BlockLocation, CertusLoadStoreSpec, denamespace_key, ns_key
-from .ring import CHECK_MISS, CHECK_RESIDENT, REASON_REMOVED
+from .ring import CHECK_MISS, CHECK_PENDING, CHECK_RESIDENT, FETCH_OK, REASON_REMOVED
 
 # Clock for the lookup cache's age limit. Monotonic (never steps back with
 # wall-clock changes), integer nanoseconds. Module-level so tests can replace it.
@@ -58,6 +58,101 @@ def _lookup_cache_ttl_ns() -> int:
             f"microseconds, got {raw!r}"
         ) from None
     return max(0, ttl_us) * 1000
+
+
+def _fetch_budget_ns() -> int:
+    """Read ``CERTUS_FETCH_BUDGET_MS`` (default 500): the fixed part of how long a
+    request may wait on an explicit fetch before vLLM is told to compute the
+    rest -- enough for a first contact with a peer. 0 disables fetching
+    altogether."""
+    raw = os.environ.get("CERTUS_FETCH_BUDGET_MS", "500")
+    try:
+        ms = int(raw)
+    except ValueError:
+        raise ValueError(
+            f"CERTUS_FETCH_BUDGET_MS must be an integer number of ms, got {raw!r}"
+        ) from None
+    return max(0, ms) * 1_000_000
+
+
+def _fetch_budget_per_key_ns() -> int:
+    """Read ``CERTUS_FETCH_BUDGET_US_PER_BLOCK`` (default 2500): the part of the
+    budget that grows with the run, per key of the run the request waits on
+    (a block of one rank: under TP=W a logical block is W keys, each 1/W the
+    size). Both a fetch and
+    the recompute it saves grow with the run, so a flat budget is too short for
+    a long prompt or too long for a short one. The default is about twice the
+    measured warm fetch of a 2.25 MiB block (~1.2 ms) and under the measured
+    prefill recompute of one (~3 ms on an A30)."""
+    raw = os.environ.get("CERTUS_FETCH_BUDGET_US_PER_BLOCK", "2500")
+    try:
+        us = int(raw)
+    except ValueError:
+        raise ValueError(
+            f"CERTUS_FETCH_BUDGET_US_PER_BLOCK must be an integer number of "
+            f"microseconds, got {raw!r}"
+        ) from None
+    return max(0, us) * 1000
+
+
+#: The kv_transfer_params key naming the peer to fetch from, "host:port".
+FETCH_HINT_KEY = "certus_fetch_from"
+#: Where llm-d's routing sidecar names a peer pod for a cached-prefix pull.
+LLMD_SOURCE_KEY = "remote_kv_source"
+
+_PEERS: "PeerResolver | None" = None
+
+
+def _peer_resolver():
+    global _PEERS
+    if _PEERS is None:
+        from .peers import PeerResolver
+
+        _PEERS = PeerResolver()
+    return _PEERS
+
+
+def _fetch_peer(req_context) -> str | None:
+    """The certus instance to fetch this request's miss run from, or None.
+
+    ``certus_fetch_from`` (set by a client or proxy) names it directly and wins.
+    Otherwise llm-d's sidecar may name a source pod, ``remote_kv_source``; its
+    certus is resolved from the pod's ``certus.ai/transfer-endpoint`` annotation
+    (``peers.py``)."""
+    params = getattr(req_context, "kv_transfer_params", None)
+    if not params:
+        return None
+    peer = params.get(FETCH_HINT_KEY)
+    if peer:
+        return str(peer)
+    src = params.get(LLMD_SOURCE_KEY)
+    if isinstance(src, dict) and src.get("remote_host"):
+        return _peer_resolver().resolve(str(src["remote_host"]))
+    return None
+
+
+class _Fetch:
+    """One request's explicit fetch: the run of keys it is fetching, in prefix
+    order, and where it stands.
+
+    ``collecting``: the request's scan is being answered HIT_PENDING key by key
+    from its first local miss, gathering the run; ``on_schedule_end`` sends it.
+    ``sent``: the FETCH went out; run keys answer from their state (PENDING is
+    HIT_PENDING). ``done``: the budget ran out or the fetch could not start;
+    answer as if there were no hint."""
+
+    __slots__ = ("peer", "started_ns", "budget_ns", "run", "keys", "phase", "closed")
+
+    def __init__(self, peer: str, now_ns: int, budget_ns: int):
+        self.peer = peer
+        self.started_ns = now_ns
+        # The fixed part until the FETCH is sent; then it grows by the run.
+        self.budget_ns = budget_ns
+        self.run: list[int] = []
+        self.keys: set[int] = set()
+        self.phase = "collecting"
+        # A key that is not a local miss ended the run being gathered.
+        self.closed = False
 
 
 def _key_to_u64(key: OffloadKey) -> int:
@@ -170,6 +265,8 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # take_events() is drained by vLLM's core scheduler every step whether or
         # not KV events are enabled, so only yield events when they are.
         self._events_enabled = bool(events_enabled)
+        # Store events, emitted by complete_store and drained by take_events.
+        self._pending_events: list = []
         # bounded reverse map: folded u64 -> original OffloadKey, so REMOVED
         # events can carry real keys (the fold is not reversible).
         self._key_reverse: OrderedDict[int, bytes] = OrderedDict()
@@ -262,6 +359,23 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # Diagnostic Check log, only when OPTIMIZER_ARTIFACTS_DIR is set.
         artifacts_dir = os.environ.get("OPTIMIZER_ARTIFACTS_DIR")
         self._check_log = _LookupCheckLog(artifacts_dir) if artifacts_dir else None
+        # Explicit fetches, by request id (see contracts/shmq-fetch.md). vLLM's
+        # prefix scan continues past HIT_PENDING and stops at MISS, so answering
+        # HIT_PENDING from a hinted request's first local miss shows the manager
+        # the rest of the run in the same scan; on_schedule_end, called once per
+        # scheduler step after scheduling, sends one FETCH for it.
+        self._fetch_budget_ns = _fetch_budget_ns()
+        self._fetch_budget_per_key_ns = _fetch_budget_per_key_ns()
+        self._fetches: dict[str, _Fetch] = {}
+        # Counters (fetch_stats()): fetches sent, runs refused by the server,
+        # HIT_PENDING answers, budgets spent, run keys answered HIT afterwards.
+        self.fetch_counts = {
+            "sent": 0,
+            "refused": 0,
+            "pending_answers": 0,
+            "budget_spent": 0,
+            "hits_after_fetch": 0,
+        }
 
     def set_block_size_bytes(self, block_size_bytes: int) -> None:
         """Update the per-block Reserve size once the true KV-cache tensor
@@ -337,6 +451,12 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         # at module level and resolved per call (``_compat.lookup_result``), so
         # a patched or reloaded compat still applies.
         self._last_op_was_lookup = True
+        if self._fetch_budget_ns and _compat.CAPS.lookup_returns_enum:
+            peer = _fetch_peer(req_context)
+            if peer is not None:
+                answer = self._fetch_lookup(_key_to_u64(key), peer, req_context)
+                if answer is not None:
+                    return answer
         # The maps are used only while the TouchCheck that filled them is at
         # most the TTL old (see __init__); TTL 0 never uses them.
         fresh = bool(self._lookup_cache_ttl_ns) and (
@@ -421,6 +541,108 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         except TypeError:  # an unhashable key cannot have a raw entry
             pass
         return hit
+
+    # ── explicit fetch ──
+
+    def _state_of(self, logical_key: int) -> int:
+        """One logical block's state across its W shards: RESIDENT if every
+        shard is, PENDING if any is (and none missing), MISS otherwise."""
+        states = self._ring.check_states(self._ns_all(logical_key))
+        if states and all(s == CHECK_RESIDENT for s in states):
+            return CHECK_RESIDENT
+        if states and all(s != CHECK_MISS for s in states):
+            return CHECK_PENDING
+        return CHECK_MISS
+
+    def _fetch_lookup(self, k: int, peer: str, req_context):
+        """Lookup for a request that names a peer. Returns the answer, or None
+        to answer as if there were no hint."""
+        req_id = getattr(req_context, "req_id", None)
+        if req_id is None:
+            return None
+        now = _monotonic_ns()
+        f = self._fetches.get(req_id)
+        if f is None:
+            f = self._fetches[req_id] = _Fetch(peer, now, self._fetch_budget_ns)
+        if f.phase != "done" and now - f.started_ns > f.budget_ns:
+            # The wait is over: vLLM computes what has not landed. The fetch
+            # itself carries on and lands in the cache for later requests.
+            f.phase = "done"
+            self.fetch_counts["budget_spent"] += 1
+        if f.phase == "done":
+            return None
+        state = self._state_of(k)
+        if f.phase == "sent":
+            if k not in f.keys:
+                # Not part of the run: the run ended before it.
+                return _compat.lookup_result(state == CHECK_RESIDENT)
+            if state == CHECK_PENDING:
+                self.fetch_counts["pending_answers"] += 1
+                return _compat.lookup_result_pending()
+            if state == CHECK_RESIDENT:
+                self.fetch_counts["hits_after_fetch"] += 1
+            return _compat.lookup_result(state == CHECK_RESIDENT)
+        # collecting
+        if state == CHECK_MISS and not f.closed:
+            if k not in f.keys:
+                f.run.append(k)
+                f.keys.add(k)
+            self.fetch_counts["pending_answers"] += 1
+            return _compat.lookup_result_pending()
+        if f.run:
+            f.closed = True  # a key already here, or pending, ends the run
+        if state == CHECK_PENDING:
+            # Someone else's store in flight: not loadable yet (see
+            # _check_all_present).
+            return _compat.lookup_result(False)
+        return _compat.lookup_result(state == CHECK_RESIDENT)
+
+    def _send_fetches(self) -> None:
+        """Send one FETCH per request whose run was gathered this step."""
+        for req_id, f in list(self._fetches.items()):
+            if f.phase != "collecting" or not f.run:
+                continue
+            entries = [
+                (nk, self._block_size_bytes) for k in f.run for nk in self._ns_all(k)
+            ]
+            status, started = self._ring.fetch(f.peer, entries)
+            if status != FETCH_OK:
+                # No endpoint, a bad peer, too many keys: never retried for this
+                # request, which then behaves as if it named no peer.
+                f.phase = "done"
+                self.fetch_counts["refused"] += 1
+                print(
+                    f"[certus-shmq] fetch for {req_id} from {f.peer} refused "
+                    f"(status {status}); computing instead",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                continue
+            # A logical block is in the run only if all W of its shards started;
+            # the run ends at the first that is not.
+            w = self._world_size
+            run = []
+            for i, k in enumerate(f.run):
+                if not all(started[i * w:(i + 1) * w]):
+                    break
+                run.append(k)
+            f.run = run
+            f.keys = set(run)
+            f.budget_ns += self._fetch_budget_per_key_ns * len(run) * w
+            f.phase = "sent"
+            self.fetch_counts["sent"] += 1
+
+    def on_schedule_end(self, context=None) -> None:
+        """Once per scheduler step, after scheduling: send the runs gathered."""
+        self._send_fetches()
+
+    def on_request_finished(self, req_context=None) -> None:
+        req_id = getattr(req_context, "req_id", None)
+        if req_id is not None:
+            self._fetches.pop(req_id, None)
+
+    def fetch_stats(self) -> dict[str, int]:
+        return dict(self.fetch_counts, live=len(self._fetches))
 
     def _drop_lookup_cache(self) -> None:
         """Forget every kept lookup answer (both maps)."""
@@ -623,7 +845,7 @@ class ShmqCertusOffloadingManager(OffloadingManager):
     def complete_store(
         self, keys: Iterable[OffloadKey], req_context=None, success: bool = True
     ) -> None:
-        keys = list(keys)
+        keys = list(keys)  # read more than once: the commit, its group, the store event
         int_keys = _keys_to_u64s(keys)
         if not int_keys:
             return
@@ -632,6 +854,19 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         if success:
             self._ring.commit_store(expanded)
             self._record_commit_group(keys, int_keys)
+            if self._events_enabled:
+                # Tell vLLM's events tracker these blocks are now in certus; it
+                # publishes them as BlockStored (with the token ids it took at
+                # store time, when self_describing_kv_events is on), so a router
+                # indexing KV events learns this pod's certus holds them -- the
+                # decode pod that generated an answer, for one
+                # (peer-selection.md, milestone 3). One event per call, logical
+                # keys, as vLLM's own keys: each W-shard commit is one store.
+                self._pending_events.append(
+                    OffloadingEvent(
+                        keys=keys, medium=offload_event_medium(), removed=False
+                    )
+                )
         else:
             self._ring.abort_store(expanded)
             for k in int_keys:
@@ -743,6 +978,10 @@ class ShmqCertusOffloadingManager(OffloadingManager):
         if seen:
             # A removed block may still be in the kept lookup answers.
             self._drop_lookup_cache()
+        # Stores first: a block stored and evicted between two drains must read
+        # stored-then-removed.
+        stored, self._pending_events = self._pending_events, []
+        yield from stored
         if removed and self._events_enabled:
             yield OffloadingEvent(
                 keys=removed,

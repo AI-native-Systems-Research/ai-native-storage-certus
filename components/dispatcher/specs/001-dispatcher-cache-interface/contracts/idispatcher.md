@@ -43,8 +43,9 @@ define_interface! {
         /// Remove a cache entry, freeing all associated resources.
         ///
         /// Removes the dispatch map entry first, then frees the memory-tier slot. The removal is refused while a reader or client holds a pin; the pin of the key's own pending write-through is taken over instead (001 FR-018).
-        /// If the entry is on a block device, frees the SSD extent via the
-        /// extent manager.
+        /// If the entry has an SSD copy (it is on a block device, or it is
+        /// resident and its write-through has landed), frees the SSD extent
+        /// via the extent manager.
         ///
         /// # Errors
         /// Returns `DispatcherError::KeyNotFound` if the key does not exist.
@@ -103,6 +104,25 @@ define_interface! {
         /// # Errors
         /// Returns `DispatcherError::KeyNotFound` if the key does not exist.
         fn touch(&self, key: CacheKey) -> Result<(), DispatcherError>;
+
+        /// Read a pinned block-tier entry, `len` bytes at extent `offset`, into a
+        /// fresh bounce buffer from the memory tier, for serving a peer (FR-062).
+        /// The caller holds the pin for the call. Never promotes, never touches
+        /// the cache. Blocks until the read completes — no device timeout.
+        ///
+        /// # Errors
+        /// `NoSpace` (reserve full now), `NeverFits` (never can be: larger than
+        /// the reserve, no data drives, or a drive block that does not divide
+        /// the reserve's 4 KiB pages), `Io` (the read failed; the buffer has
+        /// been freed, or, if a read ended without its completion, leaked and
+        /// logged; either way the caller owns no buffer), `NotInitialized`.
+        /// Holds no dispatcher-wide lock across the device read, so a hung
+        /// read does not hold up `shutdown`.
+        fn read_to_bounce(&self, key: CacheKey, offset: u64, len: u32)
+            -> Result<BounceBuffer, BounceError>;
+
+        /// Free a buffer from `read_to_bounce` once nothing can still read it.
+        fn release_bounce(&self, buf: BounceBuffer);
     }
 }
 ```
@@ -168,7 +188,7 @@ the SPDK environment for device initialization and DMA buffer allocation.
 
 - `populate()` guarantees the entry is registered in the dispatch map before returning.
 - `shutdown()` guarantees no background threads are running when it returns.
-- `remove()` guarantees, when it returns `Ok`, that the dispatch map entry is removed, so no new lookup can obtain its memory-tier pointer. When it returns `KeyNotFound`, nothing was freed.
+- `remove()` guarantees, when it returns `Ok`, that the dispatch map entry is removed, so no new lookup can obtain its memory-tier pointer. When it returns `KeyNotFound` because the entry is held, nothing was freed and the entry is unchanged: same location, same slot, same references (001 edge case "remove").
 - `prepare_store()` guarantees the key is visible via `check()` after return.
 - `commit_store()` guarantees data is persisted to SSD when it returns.
 - `cancel_store()` guarantees no resources remain allocated for the key.

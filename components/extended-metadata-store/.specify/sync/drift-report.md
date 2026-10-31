@@ -1,11 +1,14 @@
 ---
 spec_sync_component: extended-metadata-store
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-23T18:00:34Z
-spec_sync_git_commit: d7a24d58
-spec_sync_inputs_sha256: eb692b8a29295009a88968bf0d014c0a7a63ef33c38a560c87095c9bc9c3aba7
+spec_sync_synced_at: 2026-10-29T23:35:11Z
+spec_sync_git_commit: 1de9052f9
+spec_sync_inputs_sha256: fb3fe4293095a71bc2eb67a4e85a84305b89b4a7e516c702a960429f0e969c95
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-29 (branch `fix/dispatcher-remove-ssd-extent`, merged with unstable `e35618b2`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (the `IDispatcher::check` doc gains an `# Errors` section, B-17 of the dispatcher sync). No analysis below changes.
+> **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IDispatcher::clear_all`) and the rebase brought unstable's changes. No analysis below changes.
+
 > **Re-stamp 2026-10-23 (branch `unstable`, commit `d7a24d58` "Fix workspace build warnings" plus the spec-sync follow-up).** That commit only fixed warnings under the workspace lint posture: it added `Debug` impls, narrowed unreachable `pub` items to `pub(crate)`, wrapped `unsafe fn` bodies in explicit `unsafe {}` blocks, and the follow-up ran `rustfmt`. It also touched `components/interfaces` (a `Debug` impl for `Command`), which changes every component's digest. This component's own `src/` and `specs/` are unchanged, so no re-analysis was needed. All citations were re-verified by diff-mapping each base line to its new position. Status stays `clean`.
 
 > **Re-stamp 2026-10-21 (transitive, `components/interfaces` changed on branch `fix/dispatcher-remove-clear-mt`).** Only `components/interfaces` changed for this component: `IDispatcher` doc comments (`flush_to_ssd` errors, `clear_memory_tier`, `batch_lookup`) and the interfaces spec (FR-008, FR-009, FR-017, FR-018, FR-018a, FR-021, FR-023, Overview, NFR-002, Implementation Notes; text only, no type or signature changed). This component uses some of the named items (2 files), but no type, signature or behaviour of them changed. This component's last full sync below stands; no re-analysis was needed.

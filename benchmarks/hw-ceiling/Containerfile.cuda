@@ -1,0 +1,36 @@
+# Containerfile.cuda — profile-hardware-ceiling.sh with GPU paths.
+#
+# Superset of the deps-only Containerfile: adds the CUDA toolkit (nvcc) so the
+# GPU benches (cuda_bw_test, cuda_d2d_test) compile and run inside the container.
+# The host must expose GPUs to podman via CDI (nvidia-ctk + /etc/cdi/nvidia.yaml);
+# run with `--device nvidia.com/gpu=all`.
+#
+# Base: nvidia/cuda devel on UBI9 (RHEL 9.6 ABI, keeps parity with the host and
+# the deps-only image). CUDA 13.0 toolkit runs under the host's 13.2 driver
+# (forward-compatible). Pin the tag so the image is reproducible.
+#
+# Still does NOT include SPDK/vfio tooling — the destructive SPDK/BAR1 paths
+# stay on the host. This image covers detection + cpu-features + nvme-inspect
+# (fio) + host-RAM memcpy + GPU H2D/D2H + GPU D2D.
+FROM docker.io/nvidia/cuda:13.0.1-devel-ubi9
+
+# UBI9 ships dnf; these all live in ubi/BaseOS/AppStream (no RH subscription).
+# python3.12 for check-amd-proc-features.py; fio + nvme-cli for inspect-nvme.py;
+# numactl for NUMA-aware runs; gcc/make are already present in the -devel image
+# but listed for clarity; pciutils/kmod for detection.
+# numactl-devel supplies numa.h, needed to compile memcpy_bench (-lnuma).
+# hostname binary is absent from the minimal CUDA/UBI9 image; add it.
+RUN dnf -y install \
+        python3.12 python3.12-pip \
+        fio nvme-cli numactl numactl-libs numactl-devel \
+        make pciutils kmod util-linux hostname \
+    && dnf clean all
+
+RUN python3.12 -m pip install --no-cache-dir py-cpuinfo==9.0.0
+
+# nvcc lives under /usr/local/cuda/bin in the CUDA image — the profiler's tool
+# discovery globs /usr/local/cuda*/bin/nvcc, so this is found automatically.
+ENV PATH=/usr/local/cuda/bin:/usr/bin:$PATH
+
+WORKDIR /work
+ENTRYPOINT ["/bin/bash"]

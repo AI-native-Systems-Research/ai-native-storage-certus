@@ -438,17 +438,29 @@ def offload_event_medium():
     ``KeyError``. Feature-detected (not version-gated) because 0.27/0.28 are
     run without being in ``SUPPORTED_VERSIONS``. On <=0.26 ``medium`` is a plain
     string; ``"STORAGE"`` matches what later releases report.
+
+    ``CERTUS_EVENT_MEDIUM=cpu`` reports ``CPU`` instead, for llm-d's
+    p2p-source-producer, which counts only the ``cpu`` tier as one a peer can
+    pull from (peer-selection.md, milestone 3). Accurate when the event is sent:
+    a store always lands in certus's memory tier, which is host DRAM. It goes
+    stale on demotion -- certus sends no event when it moves a block to SSD,
+    since the block stays fetchable -- so a router counts SSD-resident blocks as
+    CPU. And it cannot be told apart from vLLM's own CPU offload tier, should a
+    deployment run one beside certus.
     """
     import importlib
 
+    want = os.environ.get("CERTUS_EVENT_MEDIUM", "storage").strip().upper()
+    if want not in ("STORAGE", "CPU"):
+        raise ValueError(f"CERTUS_EVENT_MEDIUM={want!r}: expected storage or cpu")
     try:
         base = importlib.import_module("vllm.v1.kv_offload.base")
     except ImportError:
-        return "STORAGE"
+        return want
     medium = getattr(base, "Medium", None)
     if medium is not None:
-        return medium.STORAGE
-    return "STORAGE"
+        return getattr(medium, want)
+    return want
 
 
 def kv_events_enabled(*sources) -> bool:
@@ -581,6 +593,22 @@ def gpu_block_ids(load_store_spec) -> list[int]:
     """Ordered GPU block ids from a ``GPULoadStoreSpec``. Isolated so a change to
     how vLLM stores block ids (np array vs list, attribute name) lives in one place."""
     return [int(b) for b in load_store_spec.block_ids]
+
+
+def gpu_first_block_index(load_store_spec) -> int:
+    """Index in the request of the first GPU block in a single-group
+    ``GPULoadStoreSpec`` (0.26+ ``block_indices[0]``); 0 when the spec carries
+    none. With offload blocks larger than the GPU block, a load can start inside
+    its first offloaded block, at ``index % blocks_per_chunk``."""
+    indices = getattr(load_store_spec, "block_indices", None)
+    if indices is None or len(indices) == 0:
+        return 0
+    sizes = getattr(load_store_spec, "group_sizes", None)
+    if sizes is not None and len(sizes) > 1:
+        raise ValueError(
+            f"Certus shmq connector supports one KV cache group; got {len(sizes)}"
+        )
+    return int(indices[0])
 
 
 def new_request_offloading_context():

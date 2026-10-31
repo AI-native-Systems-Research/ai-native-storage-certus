@@ -1,11 +1,11 @@
-# llm-d deployment (A30 cluster, optional certus KV offload)
+# llm-d deployment (per-GPU profiles, optional certus KV offload or P/D split)
 
-Deploys [llm-d](https://github.com/llm-d/llm-d) on this cluster and, optionally,
-points its vLLM modelservers at certus as a KV-cache offload tier.
+Deploys [llm-d](https://github.com/llm-d/llm-d) and, optionally, points its vLLM
+modelservers at certus as a KV-cache offload tier, or splits prefill from decode.
 
 **This repo holds the sources; the llm-d checkout is a disposable build area.**
-Nothing here is pushed to the llm-d project — the tuning is site-specific (A30
-memory sizing, this cluster's NUMA layout, our registry). The checkout is pinned
+Nothing here is pushed to the llm-d project — the tuning is specific to our GPU
+types and to the certus integration. The checkout is pinned
 to `llm-d.ref` and re-materialized on every run, so a stale hand-edit inside it
 cannot survive.
 
@@ -13,23 +13,66 @@ cannot survive.
 
 ```
 deploy/llm-d/
-  install.sh                  end-to-end deploy (was ~/llm-d-install.sh)
+  install.sh                  end-to-end deploy; hardware-independent
   llm-d.ref                   pinned upstream llm-d revision
-  a30/
-    kustomization.yaml        overlay on llm-d's ../base
-    patch-a30.yaml            A30 retuning (replicas, args, resources, cache)
-  publish-image.sh            build + push the modelserver image
-  a30-certus/
-    kustomization.yaml        overlay layered on ../a30 (apply-time)
-    patch-certus.yaml         hostIPC, entrypoint, cache env, mailbox mount
-    entrypoint-certus.sh      derives the mailbox from the GPU's NUMA domain
+  site.env.example            template for the private site file
+  publish-image.sh            build + push the certus modelserver image
+  bench/                      multi-turn benchmark driver
+  profiles/
+    a30/                      tuning for one NVIDIA A30 (24Gi) per engine
+      agg/                    aggregated serving
+        kustomization.yaml    overlay on llm-d's optimized-baseline base
+        patch.yaml            model, args, resources, model cache
+      certus/                 certus KV offload
+        kustomization.yaml    overlay layered on ../agg
+        patch.yaml            hostIPC, entrypoint, cache env, mailbox mount
+        entrypoint-certus.sh  derives the mailbox from the GPU's NUMA domain;
+                              wraps an existing --kv-transfer-config
+      pd/                     prefill/decode disaggregation
+        kustomization.yaml    overlay on llm-d's pd-disaggregation base
+        patch.yaml            prefill + decode engines, NIXL over TCP
+      pd-certus/              P/D with certus beside NIXL
+        kustomization.yaml    overlay layered on ../pd
+        patch.yaml            certus/'s wiring, on both roles
 ```
 
-`a30/` and `a30-certus/` here are **sources**. `install.sh` copies them into
-`<llm-d>/guides/optimized-baseline/modelserver/gpu/vllm/`, because `a30` consumes
-llm-d's `../base` and `a30-certus` consumes `../a30` — kustomize will not resolve
-a relative resource outside its own root, so the overlays have to live next to
-what they extend. Do not hand-edit them there; change the sources here.
+## Profiles and the private site file
+
+Configuration comes in two layers, split by what is safe to publish:
+
+- **`profiles/<gpu>/` is committed.** It holds tuning for a GPU type: model,
+  memory sizing, TP, KV transport. It knows nothing about any particular machine.
+  Adding a GPU type means adding a profile with whichever roles (`agg`, `certus`,
+  `pd`) it supports.
+- **The site file is not committed.** It is the only place that names real
+  infrastructure: which profile the cluster uses, replica counts (i.e. how many
+  GPUs there are), node names for P/D placement, and the image registry.
+  `install.sh` reads `${XDG_CONFIG_HOME:-~/.config}/certus/llm-d-site.env`, or
+  `SITE_ENV=<path>`. Start from `site.env.example`. The default location is
+  outside the repo, so the file cannot be committed by accident. It is sourced as
+  bash and sets defaults only (`: "${VAR:=value}"`), so a variable set in the
+  caller's environment still wins for a one-off run.
+
+Replica counts are required. `install.sh` stops rather than defaulting them,
+because a silent default of 1 would leave GPUs idle. `install.sh` wraps the
+profile in a generated overlay (`site-<NAMESPACE>/`, beside it in the llm-d
+checkout). That overlay sets the replica counts and the nodeSelector that
+confines pods to the instance's nodes, so the committed profile files are applied
+unmodified. This is also why the profiles carry a placeholder of 1 replica.
+
+The overlays are **sources**. `install.sh` copies them into the llm-d checkout,
+beside the base each one consumes: `agg` and `certus` into
+`<llm-d>/guides/optimized-baseline/modelserver/gpu/vllm/`, and `pd` into
+`<llm-d>/guides/pd-disaggregation/modelserver/gpu/vllm/`. kustomize will not
+resolve a relative resource outside its own root, so an overlay has to sit next
+to what it extends. `install.sh` refuses to overwrite a directory llm-d itself
+ships under the same name.
+
+The checkout is a scratch area. By default `install.sh` makes a fresh blobless
+clone in a `mktemp -d /tmp/llm-d.XXXXXX` directory (~40MB, a few seconds) and
+deletes it on exit. `KEEP_LLMD=1` keeps it and prints its path, so you can
+inspect what was applied. `LLMD_DIR=<path>` reuses a persistent checkout
+instead; it is reset to `llm-d.ref` on every run.
 
 Both are ordinary kustomize overlays. An earlier version instead copied `base/*`
 and replayed two `ex` scripts over it, which failed **silently** whenever
@@ -38,7 +81,7 @@ the overlay stayed byte-identical to base, with nothing to notice. That happened
 once already. Now upstream changes flow through, and structural breakage surfaces
 at the `kubectl kustomize` step.
 
-Two kustomize details worth knowing if you edit `patch-a30.yaml`:
+Two kustomize details worth knowing if you edit a profile's `patch.yaml`:
 
 - `env` merges by name, so dropping base's `HF_TOKEN` entry needs an explicit
   `$patch: delete` — omitting it is not enough.
@@ -47,6 +90,182 @@ Two kustomize details worth knowing if you edit `patch-a30.yaml`:
   no error. Hence base's `torch-compile-cache` is deleted and a
   differently-named `model-cache` added, with the `/.cache` mount repointed by
   its `mountPath` merge key.
+
+## Setting up a new cluster
+
+### Prerequisites
+
+- `kubectl` with cluster-admin on the target cluster, plus `helm` (v3.8+, for
+  OCI charts) and `git` on the machine you run `install.sh` from. Outbound
+  HTTPS to GitHub, ghcr.io and Hugging Face.
+- NVIDIA GPU operator (or device plugin) installed, so nodes advertise
+  `nvidia.com/gpu`.
+- A profile under `profiles/` for your GPU type. If there isn't one, see
+  [Adding a GPU profile](#adding-a-gpu-profile).
+- For `WITH_CERTUS=1` only: see [certus offload prerequisites](#certus-offload-prerequisites).
+
+### 1. Collect the values
+
+```bash
+kubectl get nodes -o custom-columns='NAME:.metadata.name,GPUS:.status.allocatable.nvidia\.com/gpu'
+ls deploy/llm-d/profiles
+```
+
+The `GPUS` total is your replica budget: every engine in a profile takes one GPU.
+Nodes showing `<none>` have no GPUs and are ignored.
+
+### 2. Write the site file
+
+```bash
+mkdir -p ~/.config/certus
+cp deploy/llm-d/site.env.example ~/.config/certus/llm-d-site.env
+chmod 600 ~/.config/certus/llm-d-site.env
+$EDITOR ~/.config/certus/llm-d-site.env
+```
+
+The required values ship empty, and `install.sh` refuses to run until they are
+filled in:
+
+| Variable | Needed for | Value |
+|---|---|---|
+| `PROFILE` | always | directory under `profiles/` for your GPU type |
+| `NAMESPACE` | always | the instance's name; default `llm-d-quickstart` |
+| `AGG_NODES` | default, `WITH_CERTUS=1` | space-separated node names to serve on |
+| `AGG_REPLICAS` | default, `WITH_CERTUS=1` | total GPUs on `AGG_NODES` |
+| `PD_PREFILL_REPLICAS`, `PD_DECODE_REPLICAS` | `PD=1` | split of the total GPUs |
+| `PD_PREFILL_NODES`, `PD_DECODE_NODES` | `PD=1` | space-separated node names whose GPUs cover each role |
+| `CERTUS_REGISTRY`, `CERTUS_REPO` | `WITH_CERTUS=1` | where `publish-image.sh` pushed the image |
+| `ROUTER_NODEPORT` | optional | expose the router at this port (30000-32767) on every node; see [Driving a workload through the router](#driving-a-workload-through-the-router) |
+
+The rules that tie them together:
+
+- Every model-server pod is confined to the nodes its site file lists. Nothing
+  lands on an unlisted GPU node, even an idle one.
+- Prefill + decode replicas should equal the GPU total. Fewer leaves GPUs idle;
+  more leaves pods `Pending`.
+- Each role's nodes need at least as many GPUs as that role's replicas.
+  Placement is per role, not per pod: decode pods go to any `pd-decode` node with
+  a free GPU.
+- A node may appear in both lists. Its GPUs are then shared first come, first
+  served, so prefer disjoint lists when the GPU counts allow it.
+
+Worked examples, with made-up node names:
+
+<details>
+<summary>One node, 4 GPUs</summary>
+
+```bash
+: "${PROFILE:=a30}"
+: "${AGG_NODES:=gpu-0}"
+: "${AGG_REPLICAS:=4}"
+# PD: 1 prefill + 3 decode on the same node.
+: "${PD_PREFILL_REPLICAS:=1}"
+: "${PD_DECODE_REPLICAS:=3}"
+: "${PD_PREFILL_NODES:=gpu-0}"
+: "${PD_DECODE_NODES:=gpu-0}"
+```
+
+</details>
+
+<details>
+<summary>Two nodes, 2 GPUs each, prefill on one node and decode on the other</summary>
+
+```bash
+: "${PROFILE:=a30}"
+: "${AGG_NODES:=gpu-a gpu-b}"
+: "${AGG_REPLICAS:=4}"
+: "${PD_PREFILL_REPLICAS:=2}"
+: "${PD_DECODE_REPLICAS:=2}"
+: "${PD_PREFILL_NODES:=gpu-a}"
+: "${PD_DECODE_NODES:=gpu-b}"
+```
+
+</details>
+
+<details>
+<summary>Three nodes, 1 + 2 + 2 GPUs, decode-heavy for long chats, with certus</summary>
+
+```bash
+: "${PROFILE:=a30}"
+: "${AGG_NODES:=gpu-small gpu-big-1 gpu-big-2}"
+: "${AGG_REPLICAS:=5}"
+: "${PD_PREFILL_REPLICAS:=1}"
+: "${PD_DECODE_REPLICAS:=4}"
+: "${PD_PREFILL_NODES:=gpu-small}"
+: "${PD_DECODE_NODES:=gpu-big-1 gpu-big-2}"
+: "${CERTUS_REGISTRY:=registry.example.com}"
+: "${CERTUS_REPO:=my-team-docker-local}"
+```
+
+</details>
+
+### 3. Check it, then deploy
+
+```bash
+DRY_RUN=1 PD=1 deploy/llm-d/install.sh   # or without PD=1 for aggregated
+```
+
+A dry run makes no changes to the cluster. It loads the site file, renders the
+manifests against the pinned llm-d, and, if a cluster is reachable, checks
+read-only that every named node exists, has the GPUs for its replicas, and is not
+held by another instance. Then it prints the plan: profile, images, the nodes the
+instance would hold, node labels it would apply, any Deployments it would delete,
+and the path of the rendered YAML. A typo'd node name is an error;
+too few GPUs is a warning, since those pods would only sit `Pending`. With no
+cluster reachable, the node and GPU checks are skipped, so you can still check a
+site file on a laptop.
+
+When the plan looks right, run the same command without `DRY_RUN=1`. The first
+start downloads the model weights, so allow several minutes per node.
+
+## Several instances in one cluster
+
+Instances can share a cluster as long as their nodes don't overlap. Each
+instance is one namespace: its own router, InferencePool, model servers and
+service address. Give each its own site file with a distinct `NAMESPACE` and
+node lists:
+
+```bash
+SITE_ENV=~/.config/certus/llm-d-site-a.env PD=1 deploy/llm-d/install.sh
+SITE_ENV=~/.config/certus/llm-d-site-b.env      deploy/llm-d/install.sh
+```
+
+How the separation is enforced:
+
+- **Nodes are owned.** `install.sh` labels each node the instance uses
+  `llm-d.ai/instance=<NAMESPACE>`. Every model-server pod selects on that label
+  as well as on its P/D role label. The rendered manifests carry it, so it holds
+  even if someone applies them by hand.
+- **Claims are checked before anything is written.** Naming a node another
+  instance holds is an error. So is still holding a node your own site file no
+  longer lists. Re-run with `RELEASE_NODES=1` to give it up; this also clears its
+  P/D role labels. Moving a node between instances means releasing it from the
+  first, then claiming it in the second.
+- **Placement changes roll the pods.** Changing a node label never moves a
+  running pod. So the pod template carries a hash of which nodes hold which role
+  (`llm-d.ai/placement`), and any change to it restarts the model servers onto
+  the new placement.
+- **Traffic stays inside the instance.** Each router's InferencePool only matches
+  pods in its own namespace. Send each instance's clients to its own service
+  (`kubectl get svc -n <NAMESPACE> quickstart-epp`). For the benchmark, use
+  `bench/multiturn_http.py --namespace <NAMESPACE>`.
+- **`UNINSTALL=1`** removes an instance's model servers and router, and releases
+  its nodes. The namespace is kept, since secrets such as `artifactory-creds` may
+  have been created in it by hand.
+
+What is still shared:
+
+- **The InferencePool CRD** is cluster-wide, and every run re-applies it from
+  llm-d's `GAIE_VERSION` (default `latest`). `install.sh` prints a note when other
+  instances exist. To stop instances from changing the CRD under each other,
+  export the same pinned `GAIE_VERSION` for all of them.
+- **certus is per node, and remote lookup can cross instances.** Each node's
+  certus servers serve whichever instance holds the node, and nothing here
+  changes that. If certus remote lookup is on, instances whose nodes are in one
+  lookup group can serve each other's cached KV. Use separate certus `rl-group`s
+  to keep measurements apart.
+- **The model cache** is a hostPath on each node, which is safe: it holds weights,
+  not per-instance state.
 
 ## Upstream pinning
 
@@ -59,22 +278,129 @@ silently on the next deploy. After a bump, re-run `install.sh` — the
 ## Usage
 
 ```bash
-deploy/llm-d/install.sh                 # plain A30 deployment
+deploy/llm-d/install.sh                 # aggregated serving
 WITH_CERTUS=1 deploy/llm-d/install.sh   # + certus KV-cache offload
+PD=1 deploy/llm-d/install.sh            # prefill/decode disaggregation
+PD=1 WITH_CERTUS=1 deploy/llm-d/install.sh   # P/D, certus beside NIXL
+DRY_RUN=1 PD=1 deploy/llm-d/install.sh  # show the plan; change nothing
+UNINSTALL=1 deploy/llm-d/install.sh     # remove the instance; free its nodes
 ```
+
+Other knobs (see the header of `install.sh`): `SITE_ENV` to pick a site file
+(one per instance), `RELEASE_NODES=1` to give up nodes the site file no longer
+lists, `KEEP_LLMD=1` to keep the scratch llm-d checkout, `LLMD_DIR` to reuse
+one, and `LLMD_REF` to try another llm-d revision.
+
+Switching between the aggregated and P/D layouts deletes the other layout's
+Deployments first, because each is sized to every GPU. That is an outage for the
+length of the switch.
+
+## Driving a workload through the router
+
+The router is the instance's front door: an OpenAI-compatible endpoint in front
+of the scheduler, the same API as a single vLLM (`/v1/completions`,
+`/v1/chat/completions`), so a load generator built for one vLLM needs only a new
+base URL.
+
+- **From a cluster node**: the router's ClusterIP, port 80 --
+  `http://$(kubectl get svc -n llm-d-quickstart quickstart-epp -o jsonpath='{.spec.clusterIP}')/v1`.
+  The address changes if the router is reinstalled, so look it up, do not
+  hard-code it. (`*.svc.cluster.local` resolves only inside pods.)
+- **From outside the cluster**: `ROUTER_NODEPORT=30080 deploy/llm-d/install.sh`
+  (with your usual `PD=1` / `WITH_CERTUS=1`) adds a NodePort Service, so
+  `http://<any node>:30080/v1` reaches the router. A re-run without it removes
+  it. For a quick look without one: `kubectl port-forward -n llm-d-quickstart
+  svc/quickstart-epp 8000:80` -- fine for a few requests, a bottleneck for load.
+
+**Counting hits across the fleet.** Through the router a request's counts land on
+several servers, not one. `benchmarks/synthetic-agentic/scrape_prom.py --k8s`
+finds them all -- every model-server pod and every certus server -- and writes
+the usual `[prom] round` lines with the SUM under the usual keys (so
+`render_kvprofile` reads the fleet as one server) and each source's own values
+as `<label>.<key>`: `prefill.*`, `decode0.*`, `decode1.*`,
+`certus-<node>-numa<N>.*`. Under P/D read per-request counters per role: a
+request runs on both engines, so `request_success` and `prefix_cache_queries`
+are counted twice in the sum. Discovery runs once at start; restart the scraper
+after restarting pods.
+
+```bash
+benchmarks/synthetic-agentic/scrape_prom.py --k8s --interval 10 --out run.prom.log &
+# ... drive the workload at the router ...
+kill %1      # one final sample, then exits
+```
+
+## Prefill/decode disaggregation (`PD=1`)
+
+`profiles/a30/pd` runs prefill and decode engines of one A30 each at TP=1, with
+vLLM's `NixlConnector` handing KV from prefill to decode. The site file sets how
+many of each (`PD_PREFILL_REPLICAS`, `PD_DECODE_REPLICAS`) and which nodes they
+run on. It is a testbed
+for P/D routing, not a tuned deployment.
+
+- **Choosing the ratio.** For long multi-turn chat, favour decode. Once KV is
+  handed over, every in-flight sequence lives on a decode GPU, and one A30 holds
+  only ~30k tokens of KV, so decode capacity runs out first. For
+  long-prompt/short-output traffic the ratio goes the other way.
+- **Placement is by label, not node name.** Prefill selects
+  `llm-d.ai/pd-prefill=true` and decode selects `llm-d.ai/pd-decode=true`, both
+  combined with the instance label (see
+  [Several instances in one cluster](#several-instances-in-one-cluster)).
+  `install.sh` applies them from `PD_PREFILL_NODES` / `PD_DECODE_NODES`, or
+  fails if neither the variables nor existing labels name a node. Set them in
+  the site file.
+- **Transport is UCX over TCP on the pod network, with a host staging buffer**
+  (`kv_buffer_device: cpu`, `UCX_TLS=tcp`). It proves the handoff works but is
+  too slow to measure it: a 4k-token prompt carries ~600MB of Qwen3-8B KV,
+  which takes seconds at pod-network speeds. A RoCE NIC is not enough to do
+  better from an ordinary pod. With the shared RDMA device plugin, a pod outside
+  the host network namespace sees `/dev/infiniband` but an empty GID table, so
+  RDMA needs a Multus side-network on the RoCE port or `hostNetwork`. GPU-direct
+  transfers also need `nvidia-peermem` loaded on the host.
+- **Request path.** The EPP's `pd-disaggregation` profile picks a prefill and a
+  decode endpoint. The request goes to the decode pod's routing sidecar on :8000,
+  which sends the prompt to prefill, then forwards to its local vLLM on :8200,
+  which pulls the KV over NIXL. `llm_d_epp_pd_decision_total` on the EPP shows
+  whether requests are really being split.
+- **`peakPrefillThroughput` is upstream's value** (33821 tok/s, gpt-oss-120b on
+  H200). It sets when the prefix-affinity filter gives way to load, so on A30s
+  it is effectively "never". Re-measure with llm-d's
+  `guides/recipes/router/calibration` before trusting any affinity behaviour.
+- **With certus (`WITH_CERTUS=1`): `profiles/a30/pd-certus`.** Each role runs
+  `MultiConnector[NixlConnector, Offloading(certus)]`, NIXL first. The certus
+  entrypoint lifts `pd`'s `--kv-transfer-config` out of the args and wraps it,
+  so the NIXL settings stay in `pd/patch.yaml` alone. MultiConnector loads from
+  the first connector with a hit, and every connector saves:
+  - **decode**: NIXL pulls the prompt GPU->GPU as before; certus only stores.
+  - **prefill**: NIXL claims nothing, so certus serves what its node holds,
+    and with `kv_transfer_params: {"certus_fetch_from": "<ip>:<port>"}` on a
+    request, fetches the prompt's blocks from that certus instance first (its
+    transfer endpoint, as it logs at start; the `full-transfer` server profile).
+  - The outer config carries the first connector's `kv_role` and
+    `kv_load_failure_policy`: the scheduler reads the policy from the outer
+    config only, so decode's `fail` would otherwise silently become the default.
+  - Needs a connector image with the fetch path (`publish-image.sh`) and certus
+    servers on the prefill and decode nodes; see
+    [certus offload prerequisites](#certus-offload-prerequisites).
+- **Restarting the prefill pod: restart decode too.** NIXL's decode side caches
+  the prefill agent. With the vLLM 0.30 image a restarted prefill can segfault
+  decode, or leave it failing every handoff for up to an hour (llm-d's
+  `docs/operations/disaggregation/vllm.md`, "Stale NIXL Agent Cache"):
+  ```bash
+  kubectl delete pod -n llm-d-quickstart -l llm-d.ai/role=decode
+  ```
 
 ## What the A30 tuning does
 
-llm-d's `base` targets Qwen3-32B on 2 GPUs. `patch-a30.yaml` retunes it for one
-A30: model `Qwen3-8B`, `--tensor-parallel-size=1`, `nvidia.com/gpu: 1`,
-`replicas: 3`, halved cpu/memory, and three changes worth calling out:
+llm-d's `base` targets Qwen3-32B on 2 GPUs. `profiles/a30/agg/patch.yaml` retunes
+it for one A30 per replica: model `Qwen3-8B`, `--tensor-parallel-size=1`,
+`nvidia.com/gpu: 1`, halved cpu/memory, and three changes worth calling out:
 
 - **`--max-model-len=16384`.** An A30 is 24Gi; ~15.3Gi of bf16 weights plus
   activations and CUDA graphs leave only ~4.11Gi for KV cache, while Qwen3-8B
   advertises a 40960 context needing 5.62Gi — vLLM refuses to start. 16384 needs
   ~2.25Gi, giving `Maximum concurrency ... 1.83x`.
-- **`maxSurge: 0, maxUnavailable: 1`.** 3 replicas on exactly 3 GPUs leaves no
-  spare for a surge pod. With the default 25% surge a rolling update deadlocks:
+- **`maxSurge: 0, maxUnavailable: 1`.** One replica per GPU leaves no spare for
+  a surge pod. With the default 25% surge a rolling update deadlocks:
   the old ReplicaSet holds every GPU and never goes Ready, so it is never scaled
   down.
 - **`HF_HOME` / `VLLM_CACHE_ROOT` into a `/home/llm-d-cache` hostPath.** The
@@ -89,6 +415,43 @@ A30: model `Qwen3-8B`, `--tensor-parallel-size=1`, `nvidia.com/gpu: 1`,
 The HF token secret is deliberately **not** created: Qwen3-8B is ungated and the
 HF_TOKEN env block is commented out. The "unauthenticated requests to the HF Hub"
 warning only costs download rate limit.
+
+## Adding a GPU profile
+
+A profile is safe to publish: it describes a GPU type, not a cluster. Start from
+the closest existing one:
+
+```bash
+cp -r deploy/llm-d/profiles/a30 deploy/llm-d/profiles/<gpu>
+```
+
+Then edit `agg/patch.yaml` and `pd/patch.yaml`. Keep the two in step: P/D
+hands KV from one engine to another, so both sides must run the same model and
+context length.
+
+- **Model and context length.** The rule is the one in
+  [What the A30 tuning does](#what-the-a30-tuning-does): weights plus activations
+  and CUDA graphs must leave enough GPU memory for one full `--max-model-len`
+  sequence of KV, or vLLM refuses to start. Its startup log prints the KV
+  capacity (`GPU KV cache size: N tokens`) and `Maximum concurrency`. Pick a
+  length below N, and leave headroom if you want more than one request at a time.
+- **One GPU per engine.** The replica arithmetic in the site file assumes every
+  engine takes one GPU (`--tensor-parallel-size=1`, `nvidia.com/gpu: 1`). A
+  model too big for one GPU needs TP>1 and a matching GPU request. Then each
+  replica takes TP GPUs, so document that in the profile's comments for whoever
+  writes the site file. For P/D, decode TP must be >= prefill TP.
+- **cpu/memory requests**, sized to the host RAM a node can spare per GPU.
+- **Gated models** need the `llm-d-hf-token` secret. Drop the
+  `HF_TOKEN` `$patch: delete` entries and create the secret in the namespace.
+- **`certus/`** depends on the certus connector, not on the GPU, so it usually
+  carries over unchanged. Keep `TENSOR_PARALLEL_SIZE` in its patch equal to the
+  TP in `agg`. Delete any role directory the profile does not support;
+  `install.sh` reports a missing role clearly.
+
+Check with `DRY_RUN=1 PROFILE=<gpu> deploy/llm-d/install.sh`, with and
+without `PD=1`. The rendered YAML it prints is exactly what would be applied.
+Only real infrastructure goes in the site file; keep node names, GPU counts and
+registries out of the profile.
 
 ## certus offload prerequisites
 
@@ -189,10 +552,13 @@ orphaned client no matter how much traffic its engine is serving.
 kubectl logs -n certus <certus-pod> --tail=5 | grep shmq-flow
 ```
 
-This is a known gap rather than a configuration error — the connector has no
-reconnect path, and the shm header already carries the `generation` and
-`heartbeat` fields a client would need to detect it. Fixing it properly belongs
-in the connector; until then, order the restarts.
+The connector now detects this on its first request after the restart: once
+the old mailbox's heartbeat has stood still for 0.5 s it finds a different
+server `generation` at the mailbox path and fails the request at once with
+`ServerRestartedError` ("certus server ... restarted ... Restart this engine"),
+instead of after the 30 s deadline. It still does not reconnect -- the old
+server's pins and reservations are gone -- so the engine still dies and the pod
+restarts; ordering the restarts as above avoids even that.
 
 ## GPU / NUMA / mailbox mapping
 

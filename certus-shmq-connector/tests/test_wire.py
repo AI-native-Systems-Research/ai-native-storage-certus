@@ -372,12 +372,45 @@ def test_touch_states_raises_other_server_errors():
     assert r._touch_check_supported
 
 
+# ── Fetch (17): mirrors wire.rs and translate.rs op_fetch ───────────────────
+
+
+def test_fetch_opcode_and_statuses_match_wire_rs():
+    assert ring.OP_FETCH == 17
+    assert (ring.FETCH_OK, ring.FETCH_NO_ENDPOINT, ring.FETCH_BAD_PEER, ring.FETCH_TOO_MANY) == (
+        0, 1, 2, 3)
+
+
+def test_fetch_request_layout():
+    import struct
+
+    b = ring.encode_fetch("10.0.0.5:7481", [(1, 4096), (2**64 - 1, 65536)])
+    assert b[:2] == struct.pack("<H", 13) and b[2:15] == b"10.0.0.5:7481"
+    assert struct.unpack_from("<I", b, 15) == (2,)
+    assert struct.unpack_from("<QIQI", b, 19) == (1, 4096, 2**64 - 1, 65536)
+    assert len(b) == 19 + 2 * 12
+
+
+def test_fetch_response_decodes_only_when_ok():
+    assert ring.decode_fetch(bytes([0, 1, 1, 0]), 3) == (0, [True, True, False])
+    assert ring.decode_fetch(bytes([1]), 2) == (1, [False, False])
+    assert ring.decode_fetch(b"", 2) == (ring.FETCH_NO_ENDPOINT, [False, False])
+
+
+def test_fetch_on_an_old_server_is_no_endpoint_and_remembered():
+    unknown = (_STATUS_ERROR, f"unknown opcode {ring.OP_FETCH}".encode())
+    r = _ScriptedRing([unknown])
+    assert r.fetch("h:1", [(1, 8)]) == (ring.FETCH_NO_ENDPOINT, [False])
+    assert r.fetch("h:1", [(2, 8)]) == (ring.FETCH_NO_ENDPOINT, [False])
+    assert r.sent == [ring.OP_FETCH], "not asked again"
+
+
 # ── BlockBatch (LookupBlocks / CopyToStoreBlocks): layer table + block ids ───
 
 
 def test_block_opcodes_have_the_wire_values():
     # wire.rs: LOOKUP_BLOCKS=17, COPY_TO_STORE_BLOCKS=18.
-    assert (ring.OP_LOOKUP_BLOCKS, ring.OP_COPY_TO_STORE_BLOCKS) == (17, 18)
+    assert (ring.OP_LOOKUP_BLOCKS, ring.OP_COPY_TO_STORE_BLOCKS) == (19, 20)
 
 
 def _decode_block_batch(blob: bytes):

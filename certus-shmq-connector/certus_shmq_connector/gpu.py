@@ -42,6 +42,8 @@ def _load_cuda():
     libcudart.cudaIpcGetMemHandle.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
     libcudart.cudaGetDevice.restype = ctypes.c_int
     libcudart.cudaGetDevice.argtypes = [ctypes.POINTER(ctypes.c_int)]
+    libcudart.cudaMalloc.restype = ctypes.c_int
+    libcudart.cudaMalloc.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t]
 
     # Driver API: cuMemGetAddressRange(CUdeviceptr *base, size_t *size, CUdeviceptr dptr).
     # CUdeviceptr is an unsigned integer the width of a pointer.
@@ -131,4 +133,22 @@ def ipc_for_tensor(data_ptr: int, stride_bytes: int, gpu_device_id: int) -> KvCa
         gpu_device_id=gpu_device_id,
         stride_bytes=stride_bytes,
         base_delta=data_ptr - alloc_base,
+    )
+
+
+def scratch_ipc(nbytes: int, gpu_device_id: int) -> KvCacheIpc:
+    """A GPU buffer of ``nbytes`` for the pieces of a load that vLLM did not ask
+    for (a load that starts inside an offloaded block). Every block id maps to the
+    buffer's start (``stride_bytes == 0``). Allocated once per worker and kept for
+    the process's lifetime."""
+    _load_cuda()
+    ptr = ctypes.c_void_p()
+    err = _libcudart.cudaMalloc(ctypes.byref(ptr), ctypes.c_size_t(nbytes))
+    if err != 0:
+        raise RuntimeError(f"cudaMalloc({nbytes}) for the load scratch buffer failed: {err}")
+    return KvCacheIpc(
+        handle_bytes=_ipc_handle(ptr.value),
+        gpu_device_id=gpu_device_id,
+        stride_bytes=0,
+        base_delta=0,
     )

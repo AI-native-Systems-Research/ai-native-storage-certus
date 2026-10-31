@@ -73,9 +73,9 @@ KV_CACHE_BYTES="${KV_CACHE_BYTES:-}"
 SHM_PATH="${SHM_PATH:-/dev/shm/certus-shmq}"   # mailbox file (shared into container)
 SLAB_SIZE_BYTES="${SLAB_SIZE_BYTES:-2097152}"  # offload block size — MUST match certus-server
 # Offloaded block size in TOKENS (vLLM kv_connector_extra_config "block_size"). Must
-# be a multiple of the GPU block size (16 by default). The Certus connector offloads
-# one GPU block per key, so any value other than the GPU block size is rejected at
-# startup (it would silently corrupt KV). Leave unset (default).
+# be a multiple of the GPU block size (16 by default); each offloaded key then holds
+# block_size / 16 GPU blocks in one slot (vLLM >= 0.26). Unset (default) = same as
+# the GPU block.
 OFFLOAD_BLOCK_SIZE="${OFFLOAD_BLOCK_SIZE:-}"
 
 # ── Container / store ────────────────────────────────────────────────────────────

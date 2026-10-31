@@ -3,7 +3,12 @@
 # Build the certus container image and push to a registry.
 #
 # Usage:
-#   deploy/k8s/build-image-and-push.sh [--no-push] [--tag <tag>]
+#   deploy/k8s/build-image-and-push.sh [--no-push] [--tag <tag>] [--profile <name>]
+#
+#   --profile full-transfer   (default) full + the certus-to-certus transfer
+#                             endpoint behind shm-queue FETCH (explicit fetch)
+#   --profile full-remote     remote-lookup over zyre + RDMA (to be retired)
+#   --profile <other>         any profiles/<other>.yaml; set CERTUS_FEATURES too
 #
 # Required environment variables:
 #   CERTUS_REGISTRY  — Container registry hostname (e.g. registry.example.com)
@@ -11,7 +16,9 @@
 #
 # Optional environment variables:
 #   CERTUS_IMAGE     — Image name (default: certus)
-#   CERTUS_TAG       — Image tag (default: latest); overridden by --tag flag
+#   CERTUS_TAG       — Image tag (default: repo short SHA); overridden by --tag
+#   CERTUS_PROFILE   — Build profile (default: full-transfer); overridden by --profile
+#   CERTUS_FEATURES  — Cargo features (default: the profile's, see below)
 #
 # Must be run from the top-level directory of the source repository.
 #
@@ -50,8 +57,7 @@ CERTUS_TAG="${CERTUS_TAG:-$(git rev-parse --short HEAD 2>/dev/null || echo lates
 # full-remote profile (remote-lookup over zyre + hardware RDMA), matching
 # scripts/build-certus-full-remote-spdk.sh. Overriding CERTUS_FEATURES with just
 # "spdk" reverts to a server that accepts --rl-group but cannot remote-look-up.
-CERTUS_PROFILE="${CERTUS_PROFILE:-full-remote}"
-CERTUS_FEATURES="${CERTUS_FEATURES:-spdk,rdma,remote-lookup-rdma-initiator/rdma,remote-lookup-rdma-responder/rdma}"
+CERTUS_PROFILE="${CERTUS_PROFILE:-full-transfer}"
 
 # --- Parse command-line arguments ---
 NO_PUSH=false
@@ -60,9 +66,26 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --no-push) NO_PUSH=true; shift ;;
         --tag)     CERTUS_TAG="$2"; shift 2 ;;
+        --profile) CERTUS_PROFILE="$2"; shift 2 ;;
         *)         echo "Unknown arg: $1"; exit 1 ;;
     esac
 done
+
+# Each profile's features, unless CERTUS_FEATURES says otherwise. full-transfer
+# mirrors scripts/build-certus-full-transfer.sh, full-remote
+# scripts/build-certus-full-remote-spdk.sh.
+if [ -z "${CERTUS_FEATURES:-}" ]; then
+    case "$CERTUS_PROFILE" in
+        full-remote)   CERTUS_FEATURES="spdk,rdma,remote-lookup-rdma-initiator/rdma,remote-lookup-rdma-responder/rdma" ;;
+        full-transfer) CERTUS_FEATURES="spdk,rdma" ;;
+        *) echo "ERROR: no default features for profile '$CERTUS_PROFILE'; set CERTUS_FEATURES." >&2
+           exit 1 ;;
+    esac
+fi
+if [ ! -f "apps/certus-server-yaml/profiles/${CERTUS_PROFILE}.yaml" ]; then
+    echo "ERROR: no profile apps/certus-server-yaml/profiles/${CERTUS_PROFILE}.yaml" >&2
+    exit 1
+fi
 
 FULL_IMAGE="${CERTUS_REGISTRY}/${CERTUS_REPO}/${CERTUS_IMAGE}:${CERTUS_TAG}"
 

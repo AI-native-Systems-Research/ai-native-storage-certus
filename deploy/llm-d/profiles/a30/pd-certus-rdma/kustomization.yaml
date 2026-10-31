@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# pd-certus with NIXL's KV handoff over RDMA, GPU to GPU, instead of TCP through
+# a host buffer. Each model-server pod gets a second interface on the RoCE port
+# (the `roce` network, deploy/k8s/rdma-network/) with its own address and RoCE
+# GID, and an RDMA device; pods keep their flannel IPs and ports, so the router,
+# the sidecar and every port stay as in pd-certus, for any number of GPUs.
+#
+# Measured on node2/node5 (benchmarks/multiturn-router): pod to pod over `roce`
+# 173 Gb/s; GPU memory to GPU memory line rate except reads out of node5's GPU
+# (~91 Gb/s, cross-socket), against ~107 MB/s for NIXL over TCP.
+resources:
+  - ../pd-certus
+
+patches:
+  - path: patch.yaml

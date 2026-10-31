@@ -130,9 +130,11 @@ impl PieceBatch {
 
 /// Queue the H2D copies that scatter one contiguous memory-tier slot to its
 /// GPU regions on `stream` (no sync): region L reads from
-/// `slot + sum(sizes[0..L])`, each copy clamped to `slot_size` and the list
-/// stopping at the first zero-size copy. Shared by the warm serve and the
-/// in-loop multi-region delivery of [`scatter_gather_multi_drive_zero_copy`].
+/// `slot + sum(sizes[0..L])`, each copy clamped to `slot_size`. A zero-size
+/// region receives zero bytes but does not end the scatter (the regions after it
+/// still get theirs); only an exhausted slot stops it, since no later region can
+/// have bytes left. Shared by the warm serve and the in-loop multi-region
+/// delivery of [`scatter_gather_multi_drive_zero_copy`].
 pub(crate) fn queue_slot_to_regions(
     gpu: &dyn IGpuServices,
     stream: GpuStream,
@@ -144,18 +146,21 @@ pub(crate) fn queue_slot_to_regions(
     let mut batch = PieceBatch::new();
     let mut off: usize = 0;
     for region in regions {
-        let copy_size = (region.size as usize).min(slot_size.saturating_sub(off));
-        if copy_size == 0 {
+        let rest = slot_size.saturating_sub(off);
+        if rest == 0 {
             break;
         }
-        batch.push(
-            gpu,
-            stream,
-            &single,
-            region.address as *mut std::ffi::c_void,
-            (slot as usize + off) as *const std::ffi::c_void,
-            copy_size,
-        )?;
+        let copy_size = (region.size as usize).min(rest);
+        if copy_size > 0 {
+            batch.push(
+                gpu,
+                stream,
+                &single,
+                region.address as *mut std::ffi::c_void,
+                (slot as usize + off) as *const std::ffi::c_void,
+                copy_size,
+            )?;
+        }
         off += region.size as usize;
     }
     batch.flush(gpu, stream, &single)
@@ -1637,6 +1642,144 @@ pub unsafe fn pipelined_ssd_to_dram_only(
     }
 
     Ok(())
+}
+
+/// Read timeout for [`read_into_bounce`], in milliseconds: one that never fires.
+///
+/// The block-device actor's timeout forgets an operation while the drive may
+/// still write its buffer. For a bounce buffer that is unsafe: the buffer would be
+/// freed and handed to another entry under a read still in flight. So this path
+/// waits for every read to complete, however long the device takes, and a hung
+/// device surfaces as the requesting peer's own reply deadline. `u32::MAX` ms
+/// (~49 days) rather than `u64::MAX`, which overflows the actor's deadline
+/// arithmetic.
+pub const BOUNCE_READ_TIMEOUT_MS: u64 = u32::MAX as u64;
+
+/// How [`read_into_bounce`] failed: whether its buffer may be freed.
+#[derive(Debug)]
+pub enum BounceReadError {
+    /// Every read submitted has completed; `dst` is free.
+    Settled(String),
+    /// A read may still be writing `dst`.
+    Unsettled(String),
+}
+
+/// Read `total_bytes` from `start_lba` into `dst`, which must lie in a bounce
+/// buffer, keeping up to `max_queue_depth` segments in flight.
+///
+/// Unlike [`pipelined_ssd_to_dram_only`], an error does not return while reads
+/// are outstanding: every submitted segment is waited for. On success, and on
+/// a [`BounceReadError::Settled`] failure, the device holds no reference to
+/// `dst` and the buffer may be freed. On [`BounceReadError::Unsettled`] a read
+/// ended without proof the drive stopped writing — a timeout, or an error the
+/// actor reports *before* the controller reset that stops the DMA — and the
+/// buffer must never be reused.
+///
+/// # Errors
+///
+/// [`BounceReadError::Settled`] if a segment failed and every submitted read
+/// has completed; [`BounceReadError::Unsettled`] if a read may still be
+/// writing `dst`.
+///
+/// # Safety
+/// - `dst` must be valid, DMA-capable memory for `total_bytes` rounded up to the
+///   block size, untouched by anyone else until this returns.
+pub unsafe fn read_into_bounce(
+    drive: &dyn IBlockDevice,
+    channels: &ClientChannels,
+    dst: *mut u8,
+    start_lba: u64,
+    total_bytes: usize,
+    chunk_size: usize,
+    max_queue_depth: usize,
+) -> Result<(), BounceReadError> {
+    let block_size = drive.block_size() as usize;
+    let aligned_bytes = total_bytes.next_multiple_of(block_size);
+    let segments = io_segmenter::segment_io(
+        start_lba,
+        aligned_bytes,
+        chunk_size as u32,
+        block_size as u32,
+    );
+    let num_chunks = segments.len();
+    let mut bufs = Vec::with_capacity(num_chunks);
+    for seg in &segments {
+        // SAFETY: inside `dst`, whose extent the caller guarantees.
+        let ptr = unsafe { dst.add(seg.buffer_offset).cast::<std::ffi::c_void>() };
+        // SAFETY: `noop_free` — the memory belongs to the buffer, not the wrapper.
+        let buf = unsafe {
+            DmaBuffer::from_raw(ptr, seg.length.next_multiple_of(block_size), noop_free, -1)
+        }
+        .map_err(|e| BounceReadError::Settled(format!("wrapping segment: {e}")))?;
+        bufs.push(Arc::new(Mutex::new(buf)));
+    }
+
+    let limit = max_queue_depth.min(num_chunks).max(1);
+    let (mut submitted, mut outstanding) = (0usize, 0usize);
+    let mut failure: Option<String> = None;
+    let mut unsettled = false;
+    loop {
+        // Submit while there is room, unless something already failed.
+        while failure.is_none() && submitted < num_chunks && outstanding < limit {
+            let sent = channels.command_tx.send(Command::ReadAsync {
+                ns_id: 1,
+                lba: segments[submitted].lba,
+                buf: Arc::clone(&bufs[submitted]),
+                timeout_ms: BOUNCE_READ_TIMEOUT_MS,
+                tag: submitted as u64,
+            });
+            match sent {
+                Ok(()) => {
+                    submitted += 1;
+                    outstanding += 1;
+                }
+                Err(e) => failure = Some(format!("submitting segment {submitted}: {e}")),
+            }
+        }
+        if outstanding == 0 {
+            break;
+        }
+        match channels.completion_rx.recv() {
+            Ok(Completion::ReadDone { result, tag, .. }) => {
+                outstanding -= 1;
+                if let Err(e) = result {
+                    failure.get_or_insert(format!("segment {tag}: {e}"));
+                }
+            }
+            Ok(
+                c @ (Completion::Error {
+                    handle: Some(_), ..
+                }
+                | Completion::Timeout { .. }),
+            ) => {
+                // The actor forgot one of our reads without its completion: a
+                // timeout (`BOUNCE_READ_TIMEOUT_MS` makes that unreachable in
+                // practice) or an error sent before a controller reset. The
+                // drive may still be writing, so `dst` is not ours to reuse.
+                outstanding -= 1;
+                unsettled = true;
+                failure.get_or_insert(format!("read ended without data: {c:?}"));
+            }
+            Ok(other) => {
+                // Ends none of our reads; they may all still be out.
+                failure.get_or_insert(format!("unexpected completion: {other:?}"));
+            }
+            Err(_) => {
+                // The device actor is gone, and with it every pending read:
+                // nothing can still write into `dst`.
+                failure.get_or_insert("completion channel disconnected".into());
+                break;
+            }
+        }
+    }
+    for buf in bufs {
+        std::mem::forget(Arc::try_unwrap(buf).ok());
+    }
+    match failure {
+        None => Ok(()),
+        Some(m) if unsettled => Err(BounceReadError::Unsettled(m)),
+        Some(m) => Err(BounceReadError::Settled(m)),
+    }
 }
 
 /// Multi-object pipelined SSD→DRAM transfer without GPU DMA.

@@ -28,4 +28,7 @@ pub struct StackConfig {
     pub resolved_pci_addrs: RefCell<Vec<String>>,
     /// NUMA node of the first selected drive (populated by init_spdk_env).
     pub resolved_numa_node: RefCell<Option<i32>>,
+    /// The transfer endpoint's name, `"ip:port"`, once it listens (populated by
+    /// init_transfer_endpoint). Published beside the mailbox: see `main`.
+    pub transfer_endpoint_name: RefCell<Option<String>>,
 }
