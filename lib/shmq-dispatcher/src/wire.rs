@@ -115,9 +115,11 @@
 //! The same, for keys of `blocks_per_key` GPU blocks (vLLM offload blocks larger
 //! than the GPU block): each key sends `blocks_per_key` block ids, and its regions
 //! are each block's regions in layer order, block after block. Two block ids are
-//! markers: `CHUNK_SCRATCH` sends every layer to `scratch_idx`'s handle at offset
-//! 0 (a load starting inside its first key; the bytes are discarded) and
-//! `CHUNK_ABSENT` adds no regions (the short last key of a transfer).
+//! markers: `CHUNK_SCRATCH` sends the block's layers to `scratch_idx`'s handle (a
+//! load starting inside its first key; the bytes are discarded), the key's `j`-th
+//! scratch block's layer `L` at `j * sum(sizes) + sum(sizes[0..L])` so no two
+//! scratch pieces overlap, and `CHUNK_ABSENT` adds no regions (the short last key
+//! of a transfer).
 //!
 //! ```text
 //! ChunkBlockBatch {
@@ -164,7 +166,8 @@ pub mod op {
 }
 
 /// `ChunkBlockBatch` block id for a GPU block the load does not want (it starts
-/// inside its first key): each layer's bytes go to the scratch handle at offset 0.
+/// inside its first key): its layers' bytes go to the scratch handle, each at its
+/// own offset (see `ChunkBlockBatch` above).
 /// Kept in sync with `ring.py`.
 pub const CHUNK_SCRATCH: u64 = u64::MAX;
 /// `ChunkBlockBatch` block id for a GPU block the key does not hold (the short

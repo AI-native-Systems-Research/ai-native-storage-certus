@@ -34,6 +34,10 @@ def main() -> int:
     p.add_argument("--keys", type=int, default=64)
     p.add_argument("--pressure", type=int, default=0, help="keys stored in the pressure case (0: skip)")
     p.add_argument("--shm-path", default="/dev/shm/certus-shmq")
+    p.add_argument("--cases", default="aligned,unaligned,short_tail,ssd,pressure",
+                   help="comma-separated cases to run")
+    p.add_argument("--no-compact", action="store_true",
+                   help="force the per-region ops (no LookupBlocks/Chunks)")
     a = p.parse_args()
 
     sys.path[:0] = [str(a.repo / "certus-shmq-connector"), str(a.repo / "apps" / "python")]
@@ -73,8 +77,13 @@ def main() -> int:
     dst_r, dst = tensors(False)
     pool = ThreadPoolExecutor(max_workers=4)
     W = bench.worker_class()
+    if a.no_compact:
+        W._blocks_supported = False
+        W._chunks_supported = False
     store_w = W(ring, src_r, block_bytes, pool, rank=0, world_size=1, blocks_per_chunk=bpc)
     load_w = W(ring, dst_r, block_bytes, pool, rank=0, world_size=1, blocks_per_chunk=bpc)
+    if bpc > 1:
+        load_w.allocate_scratch()  # as the connector does at startup
 
     class Spec:
         def __init__(self, ids, first):
@@ -110,7 +119,8 @@ def main() -> int:
         ids = random.sample(range(gpu_blocks), min(nblk, gpu_blocks))
         ids = [ids[i % len(ids)] for i in range(nblk)]
         expect = {}
-        step = 16
+        # Keys per request: a load's GPU blocks (dst_ids 0..) must fit the tensors.
+        step = max(1, min(16, gpu_blocks // bpc))
         for i in range(0, n_keys, step):
             ks = keys[i:i + step]
             # Stamp just before this batch's store: with more blocks than GPU slots a
@@ -161,11 +171,16 @@ def main() -> int:
               f"starts {list(starts)}, {bad} region pages differ", flush=True)
         bench._remove_keys(ring, keys, 1)
 
-    case("aligned", a.keys, False)
-    case("unaligned", a.keys, False, starts=tuple(range(1, bpc)))
-    case("short_tail", a.keys, False, tail_short=bpc - 1)
-    case("ssd", a.keys, True, starts=(0, bpc - 1))
-    if a.pressure:
+    run_cases = set(a.cases.split(","))
+    if "aligned" in run_cases:
+        case("aligned", a.keys, False)
+    if "unaligned" in run_cases:
+        case("unaligned", a.keys, False, starts=tuple(range(1, bpc)))
+    if "short_tail" in run_cases:
+        case("short_tail", a.keys, False, tail_short=bpc - 1)
+    if "ssd" in run_cases:
+        case("ssd", a.keys, True, starts=(0, bpc - 1))
+    if a.pressure and "pressure" in run_cases:
         case("pressure", a.pressure, False, starts=(0, 1))
     pool.shutdown(wait=True)
     print("RESULT", "PASS" if ok else "FAIL")

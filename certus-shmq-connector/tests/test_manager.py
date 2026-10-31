@@ -2035,3 +2035,21 @@ def test_handler_falls_back_to_region_ops_on_unknown_opcode():
     finally:
         cls._blocks_supported = True
         executor.shutdown()
+
+
+def test_allocate_scratch_allocates_once_for_every_skip(monkeypatch):
+    import certus_shmq_connector.handler as handler
+
+    scratch = KvCacheIpc(handle_bytes=b"s" * 64, gpu_device_id=0, stride_bytes=0, base_delta=0)
+    made = []
+    monkeypatch.setattr(handler, "scratch_ipc", lambda n, dev: made.append(n) or scratch)
+    ring = FakeRing()
+    w, ex = _chunk_worker(ring, blocks_per_chunk=4)
+    w.allocate_scratch()
+    assert made == [3 * 200]  # 3 skippable blocks x 2 regions of 100 B
+    src = CertusLoadStoreSpec([BlockLocation(key=30)])
+    w.submit_load(5, src, _gpu_spec([11], first_index=3))
+    w.wait({5})
+    assert all(r.success for r in w.get_finished())
+    assert made == [600]      # the load reused it
+    ex.shutdown()

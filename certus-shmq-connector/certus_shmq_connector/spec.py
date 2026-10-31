@@ -130,7 +130,13 @@ def _resolve_dp_rank() -> int:
 
 
 def _check_slot_size(block_bytes: int, blocks_per_chunk: int) -> None:
-    """A key's slot (``blocks_per_chunk`` GPU blocks) is sized in a u32 on the wire."""
+    """A key's slot (``blocks_per_chunk`` GPU blocks) is sized in a u32 on the wire,
+    and a ChunkBlockBatch counts a key's blocks in a u16."""
+    if blocks_per_chunk > 0xFFFF:
+        raise ValueError(
+            f"blocks_per_chunk={blocks_per_chunk} is past the wire's 65535 GPU blocks "
+            f"per key. Lower block_size / blocks_per_chunk."
+        )
     if block_bytes * blocks_per_chunk > 0xFFFFFFFF:
         raise ValueError(
             f"blocks_per_chunk={blocks_per_chunk} x {block_bytes}-byte GPU blocks is "
@@ -340,6 +346,11 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
             rank=rank, world_size=self._world_size,
             blocks_per_chunk=self._blocks_per_chunk,
         )
+        if self._blocks_per_chunk > 1:
+            # A load starting inside a key needs scratch for the blocks it skips
+            # (up to blocks_per_chunk - 1 of them). Allocated now: vLLM treats a failed
+            # load as fatal, so an allocation must not fail mid-serve.
+            self._worker.allocate_scratch()
         return self._worker
 
     def get_worker(self, kv_caches):

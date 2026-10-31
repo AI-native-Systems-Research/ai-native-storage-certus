@@ -300,7 +300,7 @@ def _build_worker_class():
             self._world_size = int(world_size)
             # GPU blocks per key (vLLM's blocks_per_chunk). A load that starts
             # inside its first chunk sends the skipped blocks' pieces to a scratch
-            # buffer, allocated on first use.
+            # buffer (allocate_scratch(), or on first use).
             self._blocks_per_chunk = int(blocks_per_chunk)
             self._scratch: KvCacheIpc | None = None
             self._scratch_lock = threading.Lock()
@@ -344,7 +344,8 @@ def _build_worker_class():
             return ids
 
         def _scratch_buffer(self) -> KvCacheIpc:
-            """The load scratch buffer, allocated on the first load that skips blocks."""
+            """The load scratch buffer: allocated by allocate_scratch(), else on the
+            first load that skips blocks."""
             with self._scratch_lock:
                 if self._scratch is None:
                     self._scratch = scratch_ipc(
@@ -352,6 +353,13 @@ def _build_worker_class():
                         self._kv_regions[0].gpu_device_id,
                     )
                 return self._scratch
+
+        def allocate_scratch(self) -> None:
+            """Allocate the load scratch buffer now rather than on first use."""
+            nbytes = _scratch_bytes(self._kv_regions, self._blocks_per_chunk)
+            self._scratch_buffer()
+            print(f"[certus-shmq] load scratch buffer {nbytes / (1 << 20):.1f} MiB "
+                  f"({self._blocks_per_chunk - 1} GPU blocks)", flush=True)
 
         def _chunk_table_for(self, skip: int):
             """The ChunkBlockBatch head and its scratch handle's index. With nothing

@@ -409,7 +409,7 @@ def test_fetch_on_an_old_server_is_no_endpoint_and_remembered():
 
 
 def test_block_opcodes_have_the_wire_values():
-    # wire.rs: LOOKUP_BLOCKS=17, COPY_TO_STORE_BLOCKS=18.
+    # wire.rs: LOOKUP_BLOCKS=19, COPY_TO_STORE_BLOCKS=20 (17/18 are FETCH/CLEAR_ALL).
     assert (ring.OP_LOOKUP_BLOCKS, ring.OP_COPY_TO_STORE_BLOCKS) == (19, 20)
 
 
@@ -565,3 +565,11 @@ def test_slot_size_past_u32_is_refused():
     _check_slot_size(2 << 20, 2047)
     with pytest.raises(ValueError):
         _check_slot_size(2 << 20, 2048)
+
+
+def test_blocks_per_key_past_u16_is_refused():
+    from certus_shmq_connector.spec import _check_slot_size
+
+    _check_slot_size(4096, 0xFFFF)
+    with pytest.raises(ValueError):
+        _check_slot_size(4096, 0x10000)
