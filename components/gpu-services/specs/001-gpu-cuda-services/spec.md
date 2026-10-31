@@ -4,7 +4,7 @@
 **Created**: 2026-04-29
 **Status**: Draft
 **Last-Synced**: 2026-09-03 (spec-sync: FR-017 ALIGN — `destroy_stream` and `stream_synchronize` now enforce the "require prior initialization" guard the FR promises, matching their sibling stream/device methods; FR-008 exception extended to document `pub mod cuda_ffi` and the `dma`-module cleanup free-functions as deliberate public surface.)
-**Last-Synced**: 2026-10-31 (spec-sync, branch `specsync-b`: BACKFILL new FR-026 `memcpy_batch_async` (`cudaMemcpyBatchAsync`, CUDA 13.x signature, `srcAccessOrder` STREAM), which the optimizer branch added with no requirement; Assumptions feature-flag line extended. The `not_unsafe_ptr_arg_deref` attribute change and `build.rs` `expect`s are behaviour-identical and touch no requirement. No source changes.)
+**Last-Synced**: 2026-10-31 (spec-sync, branch `specsync-b`: BACKFILL new FR-026 `memcpy_batch_async` (`cudaMemcpyBatchAsync`, CUDA 13.x signature, `srcAccessOrder` STREAM; per-copy fallback below a 13.0 runtime, commit `8b800832`), which the optimizer branch added with no requirement; Assumptions feature-flag line extended. The `not_unsafe_ptr_arg_deref` attribute change and `build.rs` `expect`s are behaviour-identical and touch no requirement. No source changes.)
 **Input**: User description: "GPU Services component providing CUDA library initialization, GPU hardware scanning, IPC handle deserialization, memory pinning, and DMA buffer creation for SSD-to-GPU data transfer"
 
 ## Clarifications
@@ -424,11 +424,18 @@ by a verification read-back.
   each other, every pointer stays valid until the stream is synchronized,
   host pointers are CUDA-pinned, and `stream` is a created stream, not the
   legacy NULL stream (the runtime rejects it). The FFI binding uses the
-  CUDA 13.x signature (no `failIdx` argument), so the component MUST be
-  built and run against a CUDA 13.x runtime for this method; the CUDA 12.8
-  runtime exports the same symbol with an extra `failIdx` parameter.
-  *(Backfilled 2026-10-31 from `src/lib.rs:973-1038`,
-  `src/cuda_ffi.rs:87-106`, `:157-167`,
+  CUDA 13.x signature (no `failIdx` argument); CUDA 12.8-12.9 export the
+  same symbol with an extra `failIdx` parameter, so calling it there would
+  pass shifted arguments. `initialize()` MUST therefore read the runtime
+  version once (`cudaRuntimeGetVersion`) and enable the batch call only at
+  13000 or later. Below that, or when `CERTUS_NO_BATCH_COPY` is set,
+  `memcpy_batch_async` MUST issue the same copies on the same stream as one
+  `cudaMemcpyAsync` each with `cudaMemcpyDefault` (direction from the
+  pointers), so callers see the same result on any runtime. The choice is
+  logged at startup.
+  *(Backfilled 2026-10-31 from `src/lib.rs:1005-1091`,
+  `src/lib.rs:124-147` (version check, commit `8b800832`),
+  `src/cuda_ffi.rs:70-75`, `:116`, `:157-167`,
   `interfaces/src/igpu_services.rs:745-768`; added by optimizer session
   `s20261029-094947`, commit `4941320a`. Used by the dispatcher's
   `PieceBatch` for per-block warm scatter and store gather.)*
