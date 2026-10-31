@@ -1,22 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
-"""vLLM's OffloadingConnector, asking for one contiguous KV piece per block.
+"""vLLM's OffloadingConnector, with an opt-in KV cache layout request.
 
 vLLM resolves one KV cache layout for the whole model from the connector
 *class*'s ``get_required_kvcache_layout()`` (vllm/v1/attention/backends/utils.py
 ``resolve_kv_cache_layout``); an ``OffloadingSpec`` such as
-``CertusShmqOffloadingSpec`` has no say. The stock ``OffloadingConnector``
-requests ``LBHNC`` (layer-outermost), so every block reaches Certus as one
-region per layer — 32 pieces of 64 KiB for Llama-3-8B — and the server copies
-each piece separately. ``BLHNC`` (block-outermost) makes a block one contiguous
-piece across all layers; on vLLM 0.30 with Llama-3-8B that halved
-LongDocQA's query round (7.6 s to 3.9 s).
+``CertusShmqOffloadingSpec`` has no say. By default this class makes the stock
+``OffloadingConnector``'s request: ``LBHNC`` (layer-outermost), so every block
+reaches Certus as one region per layer — 32 pieces of 64 KiB for Llama-3-8B —
+and the layout matches ``NixlConnector``'s, so the two can share a
+``MultiConnector``. Certus copies a block's pieces as batched GPU copies; on
+vLLM 0.30 with Llama-3-8B, LongDocQA's query round took 3.06 s with ``LBHNC``
+and 3.27 s with ``BLHNC`` (one contiguous piece per block).
 
-This class changes only that request. It is a request, not a setting: vLLM uses
-it only when every attention backend in the model supports ``BLHNC``, and
-otherwise logs a warning and falls back to the backends' default, so a model on
-an unsupported backend still starts. ``VLLM_KV_CACHE_LAYOUT``, when set,
-overrides it. Before vLLM 0.29 the hook took legacy layout names and no
-block-outermost layout existed, so there it defers to the stock connector.
+``CERTUS_KV_CACHE_LAYOUT=<name>`` (e.g. ``BLHNC``) makes the class request that
+layout instead. It is a request, not a setting: vLLM uses it only when every
+attention backend in the model supports it, and otherwise logs a warning and
+falls back to the backends' default, so a model on an unsupported backend still
+starts. ``VLLM_KV_CACHE_LAYOUT``, when set, overrides it.
 
 Use it in place of ``OffloadingConnector``:
 
@@ -25,20 +25,11 @@ Use it in place of ``OffloadingConnector``:
       "kv_role": "kv_both",
       "kv_connector_extra_config": {"spec_name": "CertusShmqOffloadingSpec",
         "spec_module_path": "certus_shmq_connector.spec", ...}}'
-
-``CERTUS_KV_CACHE_LAYOUT`` overrides the requested layout (e.g. ``LBHNC`` to
-compare against the stock request); an empty value defers to the stock
-connector.
 """
 
 from __future__ import annotations
 
 import os
-
-from .compat import CAPS
-
-# Requested when nothing overrides it: one contiguous all-layer piece per block.
-DEFAULT_LAYOUT = "BLHNC"
 
 try:
     from vllm.distributed.kv_transfer.kv_connector.v1.offloading_connector import (
@@ -49,19 +40,12 @@ except ImportError:  # vLLM not installed (unit tests, benchmark shim)
 
 
 def requested_layout(stock: str | None) -> str | None:
-    """Layout to request, given the stock OffloadingConnector's request.
-
-    The stock request is kept where it carries meaning Certus must not override
-    (hisparse asks for BLHNC already; any non-default stock choice is respected
-    by only replacing the plain LBHNC default).
-    """
+    """Layout to request, given the stock OffloadingConnector's request: the
+    stock request, unless ``CERTUS_KV_CACHE_LAYOUT`` names another one (empty:
+    the stock request)."""
     override = os.environ.get("CERTUS_KV_CACHE_LAYOUT")
     if override is not None:
         return override.strip() or stock
-    if not CAPS.kvcache_layout_enum:
-        return stock
-    if stock in (None, "LBHNC"):
-        return DEFAULT_LAYOUT
     return stock
 
 

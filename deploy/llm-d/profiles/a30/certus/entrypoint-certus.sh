@@ -100,8 +100,8 @@ set -- "${args[@]}"
 
 kv_cfg="$(python3 - "$shm_path" "$CERTUS_SLAB_SIZE_BYTES" "$existing_kv" "$CERTUS_OFFLOAD_PROMPT_ONLY" "$CERTUS_KV_EVENTS" <<'PY'
 import json, sys
-# Alone, certus is CertusConnector: OffloadingConnector asking vLLM for the
-# BLHNC layout, so a block is one contiguous piece across layers.
+# Alone, certus is CertusConnector: OffloadingConnector whose layout request can
+# be changed with CERTUS_KV_CACHE_LAYOUT (default: the stock LBHNC request).
 certus = {
     "kv_connector": "CertusConnector",
     "kv_connector_module_path": "certus_shmq_connector.connector",
@@ -129,8 +129,9 @@ if sys.argv[3]:
         sys.exit("args already name a MultiConnector; not nesting one in another")
     # Beside NIXL, plain OffloadingConnector: vLLM uses one KV layout for the
     # whole model, MultiConnector refuses connectors that ask for different
-    # ones, and NIXL asks for LBHNC -- CertusConnector's BLHNC would stop the
-    # engine at start ("KV cache layout mismatch").
+    # ones, and NIXL asks for LBHNC -- CertusConnector with
+    # CERTUS_KV_CACHE_LAYOUT=BLHNC would stop the engine at start ("KV cache
+    # layout mismatch"). The stock connector always asks for LBHNC.
     certus = dict(certus, kv_connector="OffloadingConnector")
     del certus["kv_connector_module_path"]
     cfg = {

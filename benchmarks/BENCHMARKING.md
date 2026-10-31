@@ -114,7 +114,7 @@ Offloading Backend (Certus / CPUOffloadingSpec)
 
 | Backend | Configuration | What it proves |
 |---|---|---|
-| **Certus (SHMQ)** | CertusConnector (OffloadingConnector requesting the BLHNC KV layout) + CertusShmqOffloadingSpec (shared-memory queue to `certus-server`; DRAM hot cache + NVMe cold tier) | Full Certus value: larger effective cache means fewer misses |
+| **Certus (SHMQ)** | CertusConnector (OffloadingConnector; requests the stock LBHNC KV layout unless `CERTUS_KV_CACHE_LAYOUT` names another) + CertusShmqOffloadingSpec (shared-memory queue to `certus-server`; DRAM hot cache + NVMe cold tier) | Full Certus value: larger effective cache means fewer misses |
 | **CPUOffloadingSpec** (vLLM built-in) | OffloadingConnector + CPUOffloadingSpec (DRAM-only offload tier) | Fair baseline — same scheduler code path, different storage tier |
 | **llm-d FS backend** | OffloadingConnector + SharedStorageOffloadingSpec (POSIX filesystem, e.g. XFS on NVMe) | Proves SPDK advantage over kernel filesystem path |
 | **No offloading** (GPU-only) | No kv_transfer_config — vLLM recomputes on eviction | Worst-case baseline: what happens without any offload tier |

@@ -44,30 +44,26 @@ buffer. Needs vLLM 0.26 or newer; on older versions only the default is accepted
 
 ## KV cache layout
 
-`CertusConnector` asks vLLM for the `BLHNC` layout. With it, each block's KV for all
-layers is one contiguous piece, and Certus moves it in one copy. vLLM's own `OffloadingConnector`
-asks for `LBHNC`, which splits each block into one piece per layer (32 for Llama-3-8B). On vLLM
-0.30, Llama-3-8B, FlashAttention, LongDocQA's query round took 3.9 s with `BLHNC` against 7.6 s
-with `LBHNC`.
+`CertusConnector` asks vLLM for the same layout as vLLM's own `OffloadingConnector`: `LBHNC` on
+vLLM 0.29 and later, which splits each block into one piece per layer (32 for Llama-3-8B). Certus
+copies a block's pieces as batched GPU copies, so the split costs little: on vLLM 0.30,
+Llama-3-8B, FlashAttention, LongDocQA's query round took 3.06 s with `LBHNC` and 3.27 s with
+`BLHNC` (one contiguous piece per block; medians of 3 runs each). `NixlConnector` also asks for
+`LBHNC`, so the default works beside it in a `MultiConnector`, which refuses connectors that ask
+for different layouts ("KV cache layout mismatch").
 
-- **Opt-in.** A config that names `"kv_connector": "OffloadingConnector"` with the Certus spec
-  still works, with the `LBHNC` layout.
-- **vLLM 0.29 or later.** Earlier versions used other layout names and had no block-outermost
-  layout, so there the class makes the stock request and nothing changes.
-- **A request, not a setting.** vLLM uses it only when every attention backend in the model
-  supports `BLHNC`. Otherwise it logs a warning and keeps its default; the connector works as before.
-  FlashAttention and FlashInfer accept it. CPU, ROCm, FlexAttention, TurboQuant and some MLA paths
-  do not. See `vllm/v1/attention/backends/*` `supported_kv_cache_layouts()`.
-- **Not beside NIXL.** vLLM uses one layout for the whole model, and `MultiConnector` refuses
-  connectors that ask for different ones: `NixlConnector` asks for `LBHNC`, so
-  `MultiConnector[NixlConnector, CertusConnector]` stops the engine at start ("KV cache layout
-  mismatch"). Under P/D name plain `OffloadingConnector` with the Certus spec, as
-  `deploy/llm-d/profiles/a30/certus/entrypoint-certus.sh` does when it wraps NIXL.
-- **Overrides.** `VLLM_KV_CACHE_LAYOUT` (vLLM's) takes precedence over the request.
-  `CERTUS_KV_CACHE_LAYOUT=<name>` makes the class request that layout instead, e.g. `LBHNC` for a
-  comparison; `CERTUS_KV_CACHE_LAYOUT=` (empty) makes it request what the stock connector would.
+- **Opting into another layout.** `CERTUS_KV_CACHE_LAYOUT=<name>`, e.g. `BLHNC`, makes the class
+  request that layout instead (`CERTUS_KV_CACHE_LAYOUT=` empty: the stock request). Not beside
+  NIXL: `MultiConnector[NixlConnector, CertusConnector]` with `BLHNC` stops the engine at start.
+- **A request, not a setting.** vLLM uses a requested layout only when every attention backend in
+  the model supports it. Otherwise it logs a warning and keeps its default; the connector works as
+  before. FlashAttention and FlashInfer accept `BLHNC`. CPU, ROCm, FlexAttention, TurboQuant and
+  some MLA paths do not. See `vllm/v1/attention/backends/*` `supported_kv_cache_layouts()`.
+- **vLLM 0.29 or later** for `BLHNC`: earlier versions used other layout names and had no
+  block-outermost layout.
+- **`VLLM_KV_CACHE_LAYOUT`** (vLLM's) takes precedence over the request.
 
-The connector log shows the result: `KV cache layout (vLLM 0.30+): BLHNC` and `KV 1 region(s)`.
+The connector log shows the result: `KV cache layout (vLLM 0.30+): LBHNC` and `KV 32 region(s)`.
 
 ## Tests
 

@@ -225,7 +225,7 @@ in 32 different allocations, and certus-server copies each piece separately.
 layout, which the Certus connector did not; see
 `knowledge/inference_workload_mapping.md`, "Layout history".) The
 default, 1, is one contiguous region per block, as under vLLM 0.20/0.22 and under
-the block-outermost `BLHNC` layout that `CertusConnector` requests. It is a count
+the block-outermost `BLHNC` layout (`CertusConnector` with `CERTUS_KV_CACHE_LAYOUT=BLHNC`). It is a count
 of pieces, not of model layers: the same 32-layer model gives 32 pieces under
 `LBHNC` and 1 under `BLHNC`. `--block-bytes` must be divisible by N.
 
