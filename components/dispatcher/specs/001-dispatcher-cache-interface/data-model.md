@@ -52,63 +52,85 @@
 Dispatch-map states are `MemoryTier { pointer, size, ssd_offset }` and `BlockDevice { offset }` (`components/interfaces/src/idispatch_map.rs:10-27`; `ssd_offset` is internal to the dispatch map). `offset` / `ssd_offset` hold the encoded SSD location `(drive << 56) | extent_offset` (FR-039 step (4)).
 
 ```
- STORE
- [Not Exists]
-   --reserve_memory--> [Reserved slot]
-       (a memory-tier slot only; no dispatch-map entry yet)
- [Reserved slot]
-   --copy_gpu_to_memory_async--> (slot filled)
-   --release_memory, or a copy/sync failure--> [Not Exists]
- (slot filled)
-   --copy_gpu_to_memory_completed--> [MemoryTier, ssd_offset = None]
-       + WriteJob enqueued
- populate / batch_populate do reserve + copy + sync + completed in one call.
-
- WRITE-THROUGH
- [MemoryTier, ssd_offset = None]
-   --background write lands, convert_to_storage-->
-       [MemoryTier, ssd_offset = Some(loc)]
-   --write fails--> unchanged (failure reported by flush_to_ssd)
-
- EVICTION (memory tier full, or the memory-tier evictor above its watermark)
- [MemoryTier, ssd_offset = Some(loc)]
-   --try_evict_to_block (unpinned), slot freed--> [BlockDevice { loc }]
- [MemoryTier, ssd_offset = None]
-   not evictable: skipped, never dropped
- [BlockDevice]
-   --SSD evictor (SSD above threshold): dm.remove, extent freed-->
-       [Not Exists]
-
- COLD PROMOTION (lookup, lookup_async, batch_lookup, promote_to_memory_tier)
- [BlockDevice { loc }]
-   --slot reserved, SSD read, promote_block_to_memory_tier-->
-       [MemoryTier, ssd_offset = Some(loc)]
-   --tier full: staged serve (FR-053), or a read/delivery failure-->
-       unchanged (slot released)
-
- REMOVE / CLEAR
- [MemoryTier | BlockDevice]
-   --remove (no reader/client pin)--> [Not Exists]
-       (slot and SSD extent freed)
- [MemoryTier]
-   --clear_memory_tier--> [BlockDevice] if persisted, else [Not Exists]
- [any]
-   --clear_all--> [Not Exists]
-
- RECOVERY (initialize with format_on_init = false)
- extent listed by drive i
-   --recover_extent(key, encode_loc(i, offset), size)--> [BlockDevice]
+                      reserve_memory
+ +------------+                                     +-----------------+
+ | Not Exists | ----------------------------------> | Reserved slot   |
+ +------------+                                     | (in the memory  |
+   ^  ^  ^      <---------------------------------- |  tier; no map   |
+   |  |  |        release_memory, or a              |  entry yet)     |
+   |  |  |        copy or sync failure              +-----------------+
+   |  |  |                                                   |
+   |  |  |                 copy_gpu_to_memory_async,         |
+   |  |  |             then copy_gpu_to_memory_completed     |
+   |  |  |                           (enqueues a WriteJob)   |
+   |  |  |                                                   v
+   |  |  |                                          +-----------------+
+   |  |  |                                          | MemoryTier      |
+   |  |  +------------------------------------------| not on SSD      |
+   |  |     remove, clear_all,                      | (ssd_offset     |
+   |  |     clear_memory_tier                       |  = None)        |
+   |  |                                             +-----------------+
+   |  |                                                      |
+   |  |                 background write lands               |
+   |  |                   (convert_to_storage)               |
+   |  |                                                      v
+   |  |                                             +-----------------+
+   |  |                                             | MemoryTier      |
+   |  +---------------------------------------------| on SSD          |
+   |     remove, clear_all                          | (ssd_offset     |
+   |                                                |  = Some(loc))   |
+   |                                                +-----------------+
+   |                                                     |       ^
+   |                  try_evict_to_block (unpinned),     |       | cold
+   |                  clear_memory_tier                  |       | promotion
+   |                                                     v       |
+   |                                                +-----------------+
+   |                                                | BlockDevice     |
+   +------------------------------------------------| (offset = loc)  |
+      SSD evictor, remove, clear_all                +-----------------+
+                                                             ^
+                                                             | recover_extent
+                                                             | (initialize,
+                                                             |  no format)
 ```
+
+How to read it, and the cases the picture leaves out:
+
+- **Store.** `populate` / `batch_populate` (and shm-queue CommitStore) run reserve, copy,
+  sync and `copy_gpu_to_memory_completed` in one call. The reserved slot has no
+  dispatch-map entry until `copy_gpu_to_memory_completed` registers it.
+- **Write-through.** If the background write fails, the entry stays "not on SSD"; the
+  failure is reported by `flush_to_ssd` (FR-017).
+- **Eviction** (memory tier full, or the memory-tier evictor above its watermark) only
+  demotes entries that are on SSD and unpinned. An entry not yet on SSD is skipped, never
+  dropped.
+- **Cold promotion** (`lookup`, `lookup_async`, `batch_lookup`, `promote_to_memory_tier`):
+  slot reserved, SSD read, `promote_block_to_memory_tier`. If the tier is full the read is
+  served through a staging buffer instead (FR-053) and the entry stays `BlockDevice`, as it
+  does when the read or delivery fails (the slot is released).
+- **Removal.** `remove` needs no reader or client pin and frees both the slot and the SSD
+  extent. `clear_memory_tier` sends an entry that is on SSD to `BlockDevice` and drops one
+  that isn't. `clear_all` drops everything. The SSD evictor (SSD above its threshold) drops
+  `BlockDevice` entries and frees their extents.
+- **Recovery** (`initialize` with `format_on_init = false`): each extent a drive's extent
+  manager lists becomes a `BlockDevice` entry via `recover_extent(key, encode_loc(i,
+  offset), size)`.
 
 Read pins (`take_read` / `release_read`, `pin` / `unpin`, a lookup's own pin, the write-through pin) block demotion, SSD eviction and `remove`; they do not change the state.
 
 ### Dispatcher Lifecycle
 
 ```
-[Created] --bind receptacles--> [Configured] --initialize()--> [Operational]
-[Operational] --shutdown()--> [Stopped]
++---------+   bind receptacles   +------------+   initialize()   +-------------+
+| Created | -------------------> | Configured | ---------------> | Operational |
++---------+                      +------------+                  +-------------+
+                                                                        |
+                                              shutdown()                |
+                                 +------------+                         |
+                                 |  Stopped   | <-----------------------+
+                                 +------------+
 
-[Operational] serves:
+Operational serves:
   lookup, lookup_async, batch_lookup, check, remove,
   populate, batch_populate,
   reserve_memory, copy_gpu_to_memory_async, copy_gpu_to_memory_completed,
