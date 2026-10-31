@@ -1,9 +1,9 @@
 ---
 spec_sync_component: gpu-services
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-29T23:35:11Z
-spec_sync_git_commit: 1de9052f9
-spec_sync_inputs_sha256: d87cdeed44bde272c69e6397be3321d300b6220565c830dc6a1e151149d4da0a
+spec_sync_synced_at: 2026-10-31T06:35:50Z
+spec_sync_git_commit: 50a0f2bf
+spec_sync_inputs_sha256: 20ab7a1be693339cca533b48e7ade4695593ca674e2159ffe5464b22cb76ae51
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Sync 2026-10-31 (branch `specsync-b`: optimizer session `s20261029-094947` merged onto unstable, `7b2b8b04`, `55a4ddd4` clippy) — delta, drift resolved by backfill. Not stamped here: the final pass stamps every component.** Base `a0292be6`, HEAD `0a71990e`. Changed inputs: `src/lib.rs`, `src/cuda_ffi.rs` (and `build.rs`, not hashed), plus `components/interfaces`.

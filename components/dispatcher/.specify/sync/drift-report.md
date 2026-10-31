@@ -1,9 +1,9 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-29T23:34:02Z
-spec_sync_git_commit: 1de9052f9
-spec_sync_inputs_sha256: ec76034b7f1f27f3d399cbd483ac107cc07f52edbdcff514957092598dfcda4c
+spec_sync_synced_at: 2026-10-31T06:35:50Z
+spec_sync_git_commit: 50a0f2bf
+spec_sync_inputs_sha256: 45db9195588dab6cf51b709ef3fd8d2ce5ef5adb3f39855e0663f331973e936e
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Sync 2026-10-31 (branch `specsync-b`: optimizer session `s20261029-094947` merged onto unstable, plus `55a4ddd4` clippy) — delta, drift resolved by backfill. Not stamped here: the final pass stamps every component on the merged tree.** Base `a0292be6` (`origin/unstable`, fresh stamp), HEAD `0a71990e`. Inputs changed by `4941320a` (batched piece copies), `615d9d0d` (in-loop multi-region cold delivery, checked final sync), the merge `6a917346`, `633d5026` (the 2026-10-30 spec entry) and `55a4ddd4` (rustfmt only in `src/lib.rs` and one test). `cargo test -p dispatcher --lib`: 145 passed.

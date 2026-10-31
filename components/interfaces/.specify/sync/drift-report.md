@@ -1,9 +1,9 @@
 ---
 spec_sync_component: interfaces
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-29T23:35:11Z
-spec_sync_git_commit: 1de9052f9
-spec_sync_inputs_sha256: 3b3b24fbc1e65f43f0144868d70b118b0db689de158493f98f39cdefc5dd001e
+spec_sync_synced_at: 2026-10-31T06:35:50Z
+spec_sync_git_commit: 50a0f2bf
+spec_sync_inputs_sha256: 961dca7002f71f03b281f87f75dd1daec95211257a4f792d3c60e3d72cd46029
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Sync 2026-10-30 (branch `specsync-a`: optimizer session `s20261029-094947` merged onto unstable, plus `55a4ddd4` clippy) — delta, drift resolved by backfill. Not stamped here** (the final pass stamps every component on the merged tree; the frontmatter above is the previous stamp and is stale). Base `a0292be6` (`origin/unstable`, fresh stamp). `git diff a0292be6 HEAD -- components/interfaces` touches only `src/` (10 files, +189/-51), from three commits: `4941320a` (new method), `6a917346` (merge, no own change here) and `55a4ddd4` (clippy). Every changed hunk was read and each spec statement it could affect was checked against the code.

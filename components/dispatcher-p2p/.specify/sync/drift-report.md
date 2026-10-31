@@ -1,9 +1,9 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-29T23:34:02Z
-spec_sync_git_commit: 1de9052f9
-spec_sync_inputs_sha256: 9a0723c338cfe793513472f59693d1cb0ad2a35409e51648e06f5f9e8721aaca
+spec_sync_synced_at: 2026-10-31T06:35:50Z
+spec_sync_git_commit: 50a0f2bf
+spec_sync_inputs_sha256: bde3368fb95ee4c6b340a59d3fd656b1ad071f3915e940b321f98eb4446c8acb
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Sync 2026-10-31 (branch `specsync-b`: optimizer session `s20261029-094947` merged onto unstable, plus `55a4ddd4` clippy) — transitive plus a test-only change. Not stamped here: the final pass stamps every component.** Base `a0292be6`, HEAD `0a71990e`. This component's only change is in its `#[cfg(test)]` mock (`src/lib.rs:3033` `mod tests`): `memcpy_batch_async` (`src/lib.rs:3809-3820`), added because the method is now required by `IGpuServices` (`components/interfaces/src/igpu_services.rs:765`); it loops `memcpy_h2d_async`. The production code does not call it (`grep memcpy_batch_async src/` hits only the mock), keeps its own `pipeline.rs` with the old `ColdReadJob` (`src/pipeline.rs:415`), and still rejects multi-region (N>1) blocks (`src/lib.rs:1779-1784`, spec FR-015 / dispatcher spec 002 FR-015), so neither the batched piece copies nor the in-loop cold delivery apply here. `specs/` unchanged. The interfaces changes (`memcpy_batch_async`; doc backticks, `#[must_use]`, `SAFETY` comments, `GpuDmaBuffer`'s `Debug` now `finish_non_exhaustive()`) change no type or behaviour this component's spec describes; no spec here quotes `Debug` output. `research.md:72` lists the `IGpuServices` methods the cold path uses; still true. `cargo check -p dispatcher-p2p --tests` passes; the test binary cannot link here (no `libgdrapi`). No analysis below changes.
