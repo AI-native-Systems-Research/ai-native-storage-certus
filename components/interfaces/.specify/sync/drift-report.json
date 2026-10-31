@@ -175,5 +175,85 @@
     "interfaces IDispatcher contract (remove/clear_memory_tier/flush_to_ssd) vs dispatcher-p2p implementation (components/dispatcher-p2p/src/lib.rs:2357-2386, 2833-2864, 2889-2902)",
     "interfaces clear_memory_tier doc (src/idispatcher.rs:808-809) vs dispatcher spec 001 FR-038 (approved 2026-10-20)",
     "FR-018a 'store_already_resident MUST be counted' vs dispatcher-p2p leaving it at 0 by design (components/dispatcher-p2p/src/lib.rs:2932) - recorded, scope decision for dispatcher-p2p spec"
-  ]
+  ],
+  "sync_2026_10_30": {
+    "generated": "2026-10-31T05:08:52Z",
+    "branch": "specsync-a",
+    "base": "a0292be6 (origin/unstable)",
+    "head": "0a71990e",
+    "method": "delta: every hunk of git diff a0292be6 HEAD -- components/interfaces read; affected FR/NFR/SC re-checked with file:line; method counts recounted over every define_interface! block at base and HEAD",
+    "commits": [
+      "4941320a memcpy_batch_async",
+      "6a917346 merge (no own interfaces change)",
+      "55a4ddd4 clippy (docs, must_use, SAFETY, finish_non_exhaustive, # Errors/# Panics)"
+    ],
+    "checked": [
+      "FR-011",
+      "FR-021",
+      "FR-022",
+      "FR-029",
+      "FR-032",
+      "FR-018a (op_reserve wire)",
+      "NFR-003",
+      "NFR-004",
+      "NFR-005",
+      "NFR-006",
+      "SC-2",
+      "SC-3",
+      "SC-4",
+      "SC-7",
+      "Implementation Notes",
+      "plan.md interface counts"
+    ],
+    "aligned": [
+      "FR-021 WriteHandle publish/abort (src/iextent_manager.rs:137-168)",
+      "FR-022 GpuDmaBuffer (Debug output not quoted anywhere; src/igpu_services.rs:222)",
+      "FR-029 IZyreNode errors vs components/zyre/src/node.rs:78-83,144-269",
+      "FR-032 ZyreError 7 variants",
+      "NFR-003 Send+Sync set unchanged; SAFETY comments only",
+      "NFR-005",
+      "NFR-006",
+      "FR-018a op_reserve 0 on Err (lib/shmq-dispatcher/src/translate.rs:904)",
+      "SC-2/SC-7 cargo test -p interfaces: 35 unit + 54 doctests pass"
+    ],
+    "drifted": [
+      {
+        "requirement": "FR-011",
+        "spec_text": "24 IGpuServices methods; no memcpy_batch_async",
+        "actual": "memcpy_batch_async added behind spdk (4941320a)",
+        "location": "components/interfaces/src/igpu_services.rs:745-768; components/gpu-services/src/lib.rs:973-1038",
+        "severity": "moderate",
+        "resolution": "BACKFILL P-1 applied"
+      },
+      {
+        "requirement": "plan.md Interface Count",
+        "spec_text": "IGpuServices 24 (10 spdk), IDispatcher 24, total 178",
+        "actual": "IGpuServices 25 (11 spdk), IDispatcher 25 (clear_all, 266ed975), total 180",
+        "location": "components/interfaces/specs/001-interfaces/plan.md:8,25,28,52,55,65",
+        "severity": "minor",
+        "resolution": "BACKFILL P-2 applied"
+      },
+      {
+        "requirement": "Implementation Notes citation",
+        "spec_text": "src/igpu_services.rs:231-246",
+        "actual": "src/igpu_services.rs:250-265",
+        "location": "components/interfaces/src/igpu_services.rs:250-265",
+        "severity": "cosmetic",
+        "resolution": "BACKFILL P-3 applied"
+      },
+      {
+        "requirement": "SC-4",
+        "spec_text": "cargo doc --no-deps is warning-free",
+        "actual": "3 unresolved-link warnings, all present at base a0292be6",
+        "location": "components/interfaces/src/idispatcher.rs:339; src/igpu_services.rs:587,607",
+        "severity": "minor",
+        "resolution": "P-4 not approved (ALIGN, src/ doc edit; pre-existing)"
+      }
+    ],
+    "not_reverified": [
+      "SC-3 (no deps/spdk in this worktree)"
+    ],
+    "would_stamp": "clean",
+    "would_stamp_reason": "all drift introduced by this branch backfilled; P-4 is pre-existing, interfaces-7/14 tracked since 2026-10-21"
+  }
 }

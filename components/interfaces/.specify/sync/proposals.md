@@ -1,5 +1,15 @@
 # Drift Resolution Proposals — interfaces
 
+> **Proposals 2026-10-30 (branch `specsync-a`; delta over base `a0292be6`).** No human in the loop: BACKFILL is approved and applied; ALIGN and judgment calls are not. Source: `drift-report.md` top note, `drift-report.json` key `sync_2026_10_30`.
+>
+> | # | Requirement | Direction | Confidence | Approved |
+> |---|---|---|---|---|
+> | P-1 | FR-011: add `IGpuServices::memcpy_batch_async` (signature, `spdk` gate, no order among entries, entries must not overlap, pointers valid until sync, host pointers pinned, legacy NULL stream not accepted, errors, empty batch `Ok`) | BACKFILL | HIGH | yes, applied |
+> | P-2 | `plan.md` counts: total 178 → 180; `IGpuServices` 24 → 25 (spdk-gated 10 → 11); `IDispatcher` 24 → 25 (`clear_all`, missed on unstable) | BACKFILL | HIGH | yes, applied |
+> | P-3 | Implementation Notes: `src/igpu_services.rs:231-246` → `:250-265` | BACKFILL | HIGH | yes, applied |
+> | P-4 | SC-4: fix 3 pre-existing rustdoc unresolved links in `src/` (`idispatcher.rs:339` `IDispatcher::tier_event_stats`, the trait being spdk-gated; `igpu_services.rs:587,607` `create_stream`/`stream_synchronize`, need `Self::`) | ALIGN (doc, `src/`) | HIGH | **no**: needs a `src/` edit; pre-existing at `a0292be6`. Recorded in `align-tasks.md` |
+
+
 Generated: 2026-10-21
 Based on: drift-report from 2026-10-21 (branch `fix/dispatcher-remove-clear-mt`, full re-analysis)
 Mode: batch. **Every proposal is `approved: false`. Nothing has been applied.**

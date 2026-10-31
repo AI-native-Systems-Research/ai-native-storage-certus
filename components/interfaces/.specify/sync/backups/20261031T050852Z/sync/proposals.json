@@ -1,0 +1,314 @@
+{
+  "generated": "2026-10-21T00:00:00Z",
+  "project": "interfaces",
+  "spec": "001-interfaces",
+  "branch": "fix/dispatcher-remove-clear-mt",
+  "based_on": "drift-report 2026-10-21",
+  "mode": "batch",
+  "summary": {
+    "proposals": 14,
+    "backfill": 10,
+    "align": 4,
+    "human_decision": 0,
+    "new_spec": 0,
+    "remove_from_spec": 0,
+    "approved": 0
+  },
+  "proposals": [
+    {
+      "id": 1,
+      "requirement": "FR-017 Command/Completion variant counts; ReadWriteStats histograms",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "spec_location": "components/interfaces/specs/001-interfaces/spec.md:312-315",
+      "code_location": "components/interfaces/src/iblock_device.rs:139-260, 408-414, 500-506",
+      "current_spec": "Command: 12-variant enum ... ControllerReset). | Completion: 11-variant enum ... ResetDone, Error); | ReadWriteStats: byte, op, latency-sum counters with total_ops/total_bytes/mean_* helpers",
+      "current_code": "Command 13 variants (+FlushSync{ns_id}); Completion 12 (+FlushDone{handle,result}); ReadWriteStats adds read/write_size_buckets, IO_SIZE_BUCKETS=25, size_bucket, bucket_lower_bound, merge_from",
+      "edits": [
+        {
+          "old": "- `Command`: 12-variant enum for all NVMe operations (ReadSync, WriteSync, ReadAsync, WriteAsync, WriteZeros, BatchSubmit, AbortOp, NsProbe, NsCreate, NsFormat, NsDelete, ControllerReset).",
+          "new": "- `Command`: 13-variant enum for all NVMe operations (ReadSync, WriteSync, ReadAsync, WriteAsync, WriteZeros, BatchSubmit, AbortOp, NsProbe, NsCreate, NsFormat, NsDelete, ControllerReset, FlushSync). *(Sync 2026-10-21 — backfilled: `FlushSync { ns_id }` forces the namespace's volatile write cache to media, added in `e56a8b4e6` for the extent-manager `volatile_write_cache` feature; behaviour in block-device-spdk-nvme FR-031.)*"
+        },
+        {
+          "old": "- `Completion`: 11-variant enum for operation results (ReadDone, WriteDone, WriteZerosDone, AbortAck, Timeout, NsProbeResult, NsCreated, NsFormatted, NsDeleted, ResetDone, Error);",
+          "new": "- `Completion`: 12-variant enum for operation results (ReadDone, WriteDone, WriteZerosDone, AbortAck, Timeout, NsProbeResult, NsCreated, NsFormatted, NsDeleted, ResetDone, FlushDone, Error);"
+        },
+        {
+          "old": "- `ReadWriteStats`: Cumulative per-direction (read/write) byte, op, and latency-sum counters with `total_ops`/`total_bytes`/`mean_read_latency_ns`/`mean_write_latency_ns` helpers; returned by `IBlockDevice::read_write_stats` and `IDispatcher::read_write_stats` (see FR-004/FR-008).",
+          "new": "- `ReadWriteStats`: Cumulative per-direction (read/write) byte, op, and latency-sum counters plus per-direction power-of-two IO-size histograms (`read_size_buckets`/`write_size_buckets`, `IO_SIZE_BUCKETS` = 25 buckets; `size_bucket`/`bucket_lower_bound` map sizes to buckets), with `total_ops`/`total_bytes`/`mean_read_latency_ns`/`mean_write_latency_ns` helpers and `merge_from` for aggregating across drives; returned by `IBlockDevice::read_write_stats` and `IDispatcher::read_write_stats` (see FR-004/FR-008)."
+        }
+      ],
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-10-21 (groups 1, 3, 4)."
+    },
+    {
+      "id": 2,
+      "requirement": "FR-018 DispatcherConfig field count; TierEventStats",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "spec_location": "components/interfaces/specs/001-interfaces/spec.md:318, 322",
+      "code_location": "components/interfaces/src/idispatcher.rs:26-101, 116, 319-463; components/interfaces/src/lib.rs:37",
+      "current_spec": "DispatcherConfig: 18-field configuration (omits store_backpressure_ms); TierEventStats not listed in FR-018",
+      "current_code": "19 fields incl. store_backpressure_ms (default 5000); TierEventStats 16-field Copy+Default snapshot",
+      "edits": [
+        {
+          "old": "- `DispatcherConfig`: 18-field configuration — `data_pci_addrs`, `max_cache_entries`, `format_on_init`, SSD eviction params (`ssd_eviction_threshold`, `ssd_eviction_low_watermark`, `ssd_eviction_batch_size`, `ssd_eviction_interval_secs`), `poller_base_cpu`, `max_eviction_attempts`, `backfill_delay_ms`,",
+          "new": "- `DispatcherConfig`: 19-field configuration — `data_pci_addrs`, `max_cache_entries`, `format_on_init`, SSD eviction params (`ssd_eviction_threshold`, `ssd_eviction_low_watermark`, `ssd_eviction_batch_size`, `ssd_eviction_interval_secs`), `poller_base_cpu`, `max_eviction_attempts`, `store_backpressure_ms` (store-path backpressure budget, default 5000 ms, 0 = fail fast; see `reserve_memory` in FR-008), `backfill_delay_ms`,"
+        },
+        {
+          "insert_after": "spec.md:322 (LookupResult bullet)",
+          "old": "",
+          "new": "- `TierEventStats` *(Sync 2026-10-21 — backfilled)*: `Copy + Default` 16-field snapshot returned by `IDispatcher::tier_event_stats` — promotions (`promotions_to_memory`, `promotions_to_gpu`), the route partition (`lookup_hits_dram`, `lookup_hits_ssd`, `remote_lookup_hits`, `remote_lookup_misses`), evictions (`evictions_from_memory`, `evictions_from_ssd`), store refusals (`store_backpressure_events`, `store_drops_on_full`, `store_already_resident`; see FR-018a), clean-eviction diagnostics (`evictions_blocked_by_pin`, `eviction_scans_exhausted`, `evictions_blocked_unpersisted`) and the two **gauges** `oldest_sampled`/`oldest_persisted`. All other fields are monotonic since process start."
+        }
+      ],
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-10-21 (groups 1, 3, 4)."
+    },
+    {
+      "id": 3,
+      "requirement": "FR-008 / User Story 2 IDispatcher method inventory; copy_gpu_to_memory_async signature",
+      "direction": "BACKFILL",
+      "severity": "moderate",
+      "spec_location": "components/interfaces/specs/001-interfaces/spec.md:49, 171-189",
+      "code_location": "components/interfaces/src/idispatcher.rs:679-688, 717-732, 877-883; components/dispatcher/src/lib.rs:3324, 4080; components/dispatcher-p2p/src/lib.rs:2430, 2915",
+      "current_spec": "copy_gpu_to_memory_async(&self, key, ipc_handle: IpcHandle, stream); no batch_populate / tier_event_stats; US2 lists 16 methods",
+      "current_code": "copy_gpu_to_memory_async(&self, key, regions: &[IpcHandle], stream); batch_populate and tier_event_stats exist; 22 methods",
+      "edits": [
+        {
+          "old": "- **Method**: `copy_gpu_to_memory_async(&self, key: CacheKey, ipc_handle: IpcHandle, stream: GpuStream) -> Result<(), DispatcherError>` - DMA copy into reserved slot.",
+          "new": "- **Method**: `copy_gpu_to_memory_async(&self, key: CacheKey, regions: &[IpcHandle], stream: GpuStream) -> Result<(), DispatcherError>` - DMA copy into reserved slot. The N regions are gathered contiguously into the one slot (region L lands at `slot + sum of preceding region sizes`), so a block split into N per-layer GPU allocations (vLLM 0.23+) is stored as one unit; `regions.len() == 1` is the legacy single-allocation path."
+        },
+        {
+          "insert_after": "spec.md:178 (populate)",
+          "old": "",
+          "new": "- **Method**: `batch_populate(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>>` - Semantically `populate` per entry, but all D2H copies are submitted asynchronously and a single `stream_synchronize` covers the batch. Returns one `Result` per entry, in order."
+        },
+        {
+          "insert_after": "spec.md:189 (read_write_stats)",
+          "old": "",
+          "new": "- **Method**: `tier_event_stats(&self) -> TierEventStats` - Cumulative KV-cache tier-movement counters (see FR-018, FR-018a); always populated (not telemetry-gated); implementations that do no tiering return zeroes.\n- **Method**: `schedule_write_through(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>` - Non-blocking, best-effort background write-through; contract in FR-031a."
+        },
+        {
+          "old": "- `IDispatcher` provides `initialize`, `shutdown`, `lookup`, `lookup_async`, `batch_lookup`, `check`, `remove`, `populate`, `reserve_memory`, `copy_gpu_to_memory_async`, `copy_gpu_to_memory_completed`, `release_memory`, `touch`, `promote_to_memory_tier`, `clear_memory_tier`, and `flush_to_ssd` methods.",
+          "new": "- `IDispatcher` provides `initialize`, `shutdown`, `lookup`, `lookup_async`, `batch_lookup`, `check`, `remove`, `populate`, `batch_populate`, `reserve_memory`, `copy_gpu_to_memory_async`, `copy_gpu_to_memory_completed`, `release_memory`, `pin`, `unpin`, `touch`, `promote_to_memory_tier`, `clear_memory_tier`, `flush_to_ssd`, `schedule_write_through`, `read_write_stats`, and `tier_event_stats` methods."
+        }
+      ],
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-10-21 (groups 1, 3, 4)."
+    },
+    {
+      "id": 4,
+      "requirement": "FR-008 clear_memory_tier / flush_to_ssd result contracts",
+      "direction": "BACKFILL",
+      "severity": "moderate",
+      "spec_location": "components/interfaces/specs/001-interfaces/spec.md:185-186",
+      "code_location": "components/dispatcher/src/lib.rs:3940-4004, 4006-4035; components/interfaces/src/idispatcher.rs:831-837",
+      "current_spec": "clear_memory_tier - Evict all memory-tier entries. | flush_to_ssd - Flush pending writes to SSD.",
+      "current_code": "clear_memory_tier keeps pinned entries' slots, retries, Timeout after 5 s, counts only cleared; flush_to_ssd returns IoError on a failed write-through, else the count of entries with an SSD offset (repairs cccfb328e, 9bd231d85)",
+      "edits": [
+        {
+          "old": "- **Method**: `clear_memory_tier(&self) -> Result<usize, DispatcherError>` - Evict all memory-tier entries.",
+          "new": "- **Method**: `clear_memory_tier(&self) -> Result<usize, DispatcherError>` - Empty the memory tier: entries with an SSD copy are demoted to BlockDevice, entries without one are removed. A **pinned** entry (a lookup, a client `pin`, or the pending write-through's own reference) keeps its slot and is retried; if pinned entries remain when the implementation's bounded wait expires, returns `Timeout` and leaves them resident. `Ok(n)` means the tier was emptied, and `n` counts only entries actually demoted or removed. *(Sync 2026-10-21 — CODE CHANGE, repair `cccfb328e`; behaviour in dispatcher spec 001 FR-038.)*"
+        },
+        {
+          "old": "- **Method**: `flush_to_ssd(&self) -> Result<usize, DispatcherError>` - Flush pending writes to SSD.",
+          "new": "- **Method**: `flush_to_ssd(&self) -> Result<usize, DispatcherError>` - Block until every queued write-through has run. Returns `IoError` if a write-through failed for an entry that is still in the memory tier (that entry has no SSD copy, so a later `clear_memory_tier` would drop its only copy); otherwise returns the number of memory-tier entries that now have a valid SSD offset. *(Sync 2026-10-21 — CODE CHANGE, repair `9bd231d85` / DIS-FLUSH-REPORTS-FAILED-WRITE; behaviour in dispatcher spec 001 FR-056.)*"
+        }
+      ],
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-10-21 (groups 1, 3, 4)."
+    },
+    {
+      "id": 5,
+      "requirement": "FR-008 clear_memory_tier interface doc comment",
+      "direction": "ALIGN",
+      "kind": "doc comment, components/interfaces/src/idispatcher.rs",
+      "severity": "moderate",
+      "spec_location": "components/dispatcher/specs/001-dispatcher-cache-interface/spec.md:319 (FR-038, approved); components/interfaces/specs/001-interfaces/spec.md:185",
+      "code_location": "components/interfaces/src/idispatcher.rs:806-810; components/dispatcher/src/lib.rs:3963-3998",
+      "current_spec": "A pinned entry MUST keep its slot and is retried ... Timeout ... n counts only the entries actually demoted or removed (dispatcher FR-038)",
+      "current_code": "Interface doc: 'Entries still being written are removed entirely. Returns the number of entries cleared.' No # Errors.",
+      "proposed": "Replace doc lines 806-810 with: demote where possible, remove entries with no SSD copy, keep and retry pinned entries (incl. pending write-through); Ok means the tier was emptied, count = entries actually demoted or removed; # Errors: Timeout if pinned entries remain when the bounded wait expires.",
+      "task": "Doc-only edit to components/interfaces/src/idispatcher.rs; run cargo doc -p interfaces --no-deps --features spdk.",
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-10-21 (groups 1, 3, 4)."
+    },
+    {
+      "id": 6,
+      "requirement": "FR-008 batch_lookup interface doc comment",
+      "direction": "ALIGN",
+      "kind": "doc comment, components/interfaces/src/idispatcher.rs",
+      "severity": "minor",
+      "spec_location": "components/interfaces/specs/001-interfaces/spec.md:175",
+      "code_location": "components/interfaces/src/idispatcher.rs:591, 599-602",
+      "current_spec": "Returns one `LookupOutcome` per requested entry, in order",
+      "current_code": "Doc: 'Returns one `Result` per input entry, in the same order.'",
+      "proposed": "Replace line 591 with: 'Returns one [`LookupOutcome`] per input entry, in the same order: the result together with how the key was served (`served_by`).'",
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-10-21 (groups 1, 3, 4)."
+    },
+    {
+      "id": 7,
+      "requirement": "FR-008 IDispatcher remove / clear_memory_tier / flush_to_ssd contract in dispatcher-p2p",
+      "direction": "ALIGN",
+      "kind": "code change in another component (components/dispatcher-p2p)",
+      "severity": "major",
+      "spec_location": "components/interfaces/src/idispatcher.rs:627-628, 806-810, 835-837",
+      "code_location": "components/dispatcher-p2p/src/lib.rs:2380-2381 (pin from :2609), 2833-2864, 2889-2902",
+      "current_spec": "remove does not wait for write-through; flush_to_ssd returns IoError on a failed write-through; clear_memory_tier must not free a pinned entry's slot",
+      "current_code": "remove maps the write-through pin's ActiveReferences to KeyNotFound; clear_memory_tier frees slots of ActiveReferences entries and counts every candidate; flush_to_ssd returns pre-flush in_flight() and never IoError",
+      "proposed": "Separate dispatcher-p2p repair porting dispatcher's WriteThroughPins ledger (dispatcher/src/background.rs:250-389), pin-preserving clear_memory_tier with bounded Timeout (dispatcher/src/lib.rs:3940-4004), and failed-write-aware flush_to_ssd (dispatcher/src/lib.rs:4006-4035); reuse the three repair_test_*.rs Loom tests as failing twins.",
+      "confidence": "HIGH",
+      "approved": false,
+      "approval_note": "TRACK (Cornel 2026-10-21): port the 3 dispatcher repairs to dispatcher-p2p in a separate PR with its own Loom tests and spec sync."
+    },
+    {
+      "id": 8,
+      "requirement": "FR-023 LookupConfig field count",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "spec_location": "components/interfaces/specs/001-interfaces/spec.md:382",
+      "code_location": "components/interfaces/src/iremote_lookup.rs:29-79, 82-97",
+      "current_spec": "LookupConfig: 10-field configuration",
+      "current_code": "12 fields; + caller_wait: Option<Duration> (None), connection_teardown_timeout: Duration (1000 ms)",
+      "edits": [
+        {
+          "old": "- `LookupConfig`: 10-field configuration for `IRemoteLookup::initialize` — `group`, `quorum_pct`, `phase1_timeout`, `op_deadline`, `max_retry_rounds`, `max_keys_per_query`, `bind_ip`, `actor_cpu`, `discovery` (optional `GossipConfig`, see FR-032), `node_endpoint`. Implements `Default`.",
+          "new": "- `LookupConfig`: 12-field configuration for `IRemoteLookup::initialize` — `group`, `quorum_pct`, `phase1_timeout`, `op_deadline`, `caller_wait` (optional; how long `batch_lookup` blocks the caller, `None` = until `op_deadline`), `connection_teardown_timeout` (grace before an orphaned landing slot's peer QP is torn down and the slot reclaimed; default 1000 ms), `max_retry_rounds`, `max_keys_per_query`, `bind_ip`, `actor_cpu`, `discovery` (optional `GossipConfig`, see FR-032), `node_endpoint`. Implements `Default`. Semantics of `caller_wait` and `connection_teardown_timeout` are specified in remote-lookup spec 002."
+        }
+      ],
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-10-21 (groups 1, 3, 4)."
+    },
+    {
+      "id": 9,
+      "requirement": "FR-021 FormatParams field count",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "spec_location": "components/interfaces/specs/001-interfaces/spec.md:350",
+      "code_location": "components/interfaces/src/iextent_manager.rs:42-67, 79-92",
+      "current_spec": "FormatParams: 10-field format configuration with defaults.",
+      "current_code": "9 fields",
+      "edits": [
+        {
+          "old": "- `FormatParams`: 10-field format configuration with defaults.",
+          "new": "- `FormatParams`: 9-field format configuration with defaults (`data_disk_size`, `slab_size`, `max_extent_size`, `sector_size`, `region_count`, `metadata_alignment`, `instance_id`, `metadata_disk_ns_id`, `metadata_region_size`); `FormatParams::new(data_disk_size, instance_id)` fills the rest from `Default`."
+        }
+      ],
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-10-21 (groups 1, 3, 4)."
+    },
+    {
+      "id": 10,
+      "requirement": "Overview + FR-009 IMemoryTier gating; feature count",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "spec_location": "components/interfaces/specs/001-interfaces/spec.md:28-29, 191",
+      "code_location": "components/interfaces/src/imemory_tier.rs:53; components/interfaces/src/lib.rs:51; components/interfaces/Cargo.toml:13-19",
+      "current_spec": "two Cargo features; spdk gates IMemoryTier; FR-009 (feature: spdk)",
+      "current_code": "three features; IMemoryTier ungated",
+      "edits": [
+        {
+          "old": "The crate has two Cargo features:",
+          "new": "The crate has three Cargo features:"
+        },
+        {
+          "old": "(`IBlockDevice`, `IBlockDeviceAdmin`, `ISPDKEnv`, `IDispatcher`, `IDispatchMap`, `IMemoryTier`, `IExtentManager`, `IPartitionTable`)",
+          "new": "(`IBlockDevice`, `IBlockDeviceAdmin`, `ISPDKEnv`, `IDispatcher`, `IDispatchMap`, `IExtentManager`, `IPartitionTable`; `IMemoryTier` is deliberately **not** gated, since its signatures use only raw pointers and crate-local types)"
+        },
+        {
+          "old": "#### FR-009: IMemoryTier Interface (feature: spdk)",
+          "new": "#### FR-009: IMemoryTier Interface"
+        }
+      ],
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-10-21 (groups 1, 3, 4)."
+    },
+    {
+      "id": 11,
+      "requirement": "NFR-002 gpu feature gating",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "spec_location": "components/interfaces/specs/001-interfaces/spec.md:483",
+      "code_location": "components/interfaces/Cargo.toml:19; components/interfaces/src/igpu_services.rs:430-770",
+      "current_spec": "GPU-specific code is gated behind `--features gpu`.",
+      "current_code": "No cfg(feature = \"gpu\") in src/**; IGpuServices ungated, its DmaBuffer methods gated on spdk",
+      "edits": [
+        {
+          "old": "- GPU-specific code is gated behind `--features gpu`.",
+          "new": "- The `gpu` feature is declared but currently gates nothing (reserved, see Overview). `IGpuServices` and its types compile in every build; its methods that take SPDK `DmaBuffer`s are gated behind `spdk`."
+        }
+      ],
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-10-21 (groups 1, 3, 4)."
+    },
+    {
+      "id": 12,
+      "requirement": "Implementation Notes: formally verified properties in comments",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "spec_location": "components/interfaces/specs/001-interfaces/spec.md:545",
+      "code_location": "components/interfaces/src/igpu_services.rs:231-246 (only remaining block); removed in a93b5620f",
+      "current_spec": "IDispatchMap: 10 props, IDispatcher: 10 props, IExtentManager: 10 props, IGpuServices: 10 props, IMemoryTier: 10 props",
+      "current_code": "Only IGpuServices retains a verified-properties comment",
+      "edits": [
+        {
+          "old": "- Several interfaces have formally verified properties documented in comments (IDispatchMap: 10 props, IDispatcher: 10 props, IExtentManager: 10 props, IGpuServices: 10 props, IMemoryTier: 10 props).",
+          "new": "- Verification status is not recorded in the interface definitions: per-property proof claims were removed from `IDispatchMap`, `IDispatcher`, `IExtentManager` and `IMemoryTier` in `a93b5620f` (2026-08-20) and live with each component's verification artifacts. `IGpuServices` still carries a comment summarising `components/gpu-services/verif/` (`src/igpu_services.rs:231-246`)."
+        }
+      ],
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-10-21 (groups 1, 3, 4)."
+    },
+    {
+      "id": 13,
+      "requirement": "Backfill banner: FR-014/FR-025 deferred orphaned module",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "spec_location": "components/interfaces/specs/001-interfaces/spec.md:17-22",
+      "code_location": "components/interfaces/src/lib.rs:83, 105",
+      "current_spec": "IExtendedMetadataStore remains an orphaned module ... never declared/re-exported from lib.rs",
+      "current_code": "declared and re-exported, ungated",
+      "edits": [
+        {
+          "old": "> label corrected to 4-variant. **Deferred (not applied):** FR-014/FR-025\n> `IExtendedMetadataStore` remains an orphaned module — it is defined in\n> `src/iextended_metadata_store.rs` but never declared/re-exported from `lib.rs`,\n> so it is not part of the compiled crate. A real consumer\n> (`extended-metadata-store`) implements it and would fail to build; this latent\n> break is masked only because that crate is excluded from the workspace.",
+          "new": "> label corrected to 4-variant. FR-014/FR-025 `IExtendedMetadataStore` was then\n> an orphaned module (deferred). *(Resolved 2026-08-20: now declared and\n> re-exported, ungated, at `src/lib.rs:83,105`; see `.specify/sync/align-tasks.md`.)*"
+        }
+      ],
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-10-21 (groups 1, 3, 4)."
+    },
+    {
+      "id": 14,
+      "requirement": "NFR-004 doc comments with runnable examples",
+      "direction": "ALIGN",
+      "kind": "documentation task in components/interfaces/src/**",
+      "severity": "moderate",
+      "spec_location": "components/interfaces/specs/001-interfaces/spec.md:492",
+      "code_location": "components/interfaces/src/{idispatch_map,imemory_tier,ieviction_policy,iextent_manager,ipartition_table}.rs; components/interfaces/src/imemory_tier.rs:13-15; components/interfaces/src/iextent_manager.rs:12-14, 20-24, 70, 95-146",
+      "current_spec": "All public types and methods have doc comments with runnable examples.",
+      "current_code": "0 doc examples in 5 modules; several public items undocumented; missing_docs not enforced",
+      "proposed": "Add doc comments to the listed items and an example per trait (no_run for hardware-bound methods); optionally #![warn(missing_docs)] in src/lib.rs.",
+      "alternative": {
+        "direction": "BACKFILL",
+        "old": "- All public types and methods have doc comments with runnable examples.",
+        "new": "- All public types have doc comments; examples are provided for value types and for at least one method per trait (`no_run` where hardware is required)."
+      },
+      "confidence": "MEDIUM",
+      "approved": false,
+      "approval_note": "TRACK (Cornel 2026-10-21): runnable doc examples, later doc task."
+    }
+  ]
+}

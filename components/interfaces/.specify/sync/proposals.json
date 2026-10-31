@@ -310,5 +310,49 @@
       "approved": false,
       "approval_note": "TRACK (Cornel 2026-10-21): runnable doc examples, later doc task."
     }
-  ]
+  ],
+  "sync_2026_10_30": {
+    "generated": "2026-10-31T05:08:52Z",
+    "branch": "specsync-a",
+    "based_on": "drift-report.json sync_2026_10_30",
+    "mode": "no human in loop; BACKFILL approved, ALIGN/judgment not approved (per brief)",
+    "proposals": [
+      {
+        "id": "P-1",
+        "requirement": "FR-011 memcpy_batch_async",
+        "direction": "BACKFILL",
+        "confidence": "HIGH",
+        "approved": true,
+        "edit": "spec.md FR-011: new Method entry after memcpy_d2h_async with signature, spdk gate, no-order/no-overlap contract, pointer validity, pinned host memory, NULL stream not accepted (callers fall back to per-copy memcpy), error conditions, empty batch Ok",
+        "rationale": "code reviewed and tested (dispatcher mock-GPU tests; gpu-services impl); interface doc is the contract"
+      },
+      {
+        "id": "P-2",
+        "requirement": "plan.md method counts",
+        "direction": "BACKFILL",
+        "confidence": "HIGH",
+        "approved": true,
+        "edit": "178->180 total; IGpuServices 24->25 (10->11 spdk-gated); IDispatcher 24->25; recount note",
+        "rationale": "mechanical recount"
+      },
+      {
+        "id": "P-3",
+        "requirement": "Implementation Notes citation",
+        "direction": "BACKFILL",
+        "confidence": "HIGH",
+        "approved": true,
+        "edit": "src/igpu_services.rs:231-246 -> :250-265",
+        "rationale": "lines moved by SAFETY comments"
+      },
+      {
+        "id": "P-4",
+        "requirement": "SC-4 / NFR-004 rustdoc warnings",
+        "direction": "ALIGN",
+        "confidence": "HIGH",
+        "approved": false,
+        "edit": "fix 3 intra-doc links in src/: [`IDispatcher::tier_event_stats`] (idispatcher.rs:339, IDispatcher is spdk-gated so the link fails without spdk), [`create_stream`] and [`stream_synchronize`] (igpu_services.rs:587,607, need Self::)",
+        "rationale": "needs a src/ edit, which this sync may not make; pre-existing at a0292be6, not introduced by this branch"
+      }
+    ]
+  }
 }

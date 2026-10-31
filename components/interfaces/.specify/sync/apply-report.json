@@ -85,5 +85,48 @@
   ],
   "source_files_modified": [],
   "not_run": ["cargo doc -p interfaces --no-deps --features spdk", "SC-2/3/4/7 build/doc/test runs"],
-  "summary": {"applied": [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13], "tasks": [7, 14], "open": [7, 14]}
+  "summary": {"applied": [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13], "tasks": [7, 14], "open": [7, 14]},
+  "apply_2026_10_30": {
+    "applied": "2026-10-31T05:08:52Z",
+    "branch": "specsync-a",
+    "backup": ".specify/sync/backups/20261031T050852Z/",
+    "changes": [
+      {
+        "spec": "001",
+        "file": "specs/001-interfaces/spec.md",
+        "requirement": "FR-011",
+        "change": "Added memcpy_batch_async entry",
+        "proposal": "P-1"
+      },
+      {
+        "spec": "001",
+        "file": "specs/001-interfaces/spec.md",
+        "requirement": "Implementation Notes",
+        "change": "citation 231-246 -> 250-265",
+        "proposal": "P-3"
+      },
+      {
+        "spec": "001",
+        "file": "specs/001-interfaces/spec.md",
+        "requirement": "Banner",
+        "change": "Last Synced 2026-10-30 entry",
+        "proposal": "metadata"
+      },
+      {
+        "spec": "001",
+        "file": "specs/001-interfaces/plan.md",
+        "requirement": "Interface Count",
+        "change": "178->180, IGpuServices 25/11, IDispatcher 25",
+        "proposal": "P-2"
+      }
+    ],
+    "not_applied": [
+      {
+        "proposal": "P-4",
+        "reason": "ALIGN (src/ doc edit), not approved"
+      }
+    ],
+    "source_files_modified": [],
+    "stamp": "not written (final pass stamps the merged tree)"
+  }
 }

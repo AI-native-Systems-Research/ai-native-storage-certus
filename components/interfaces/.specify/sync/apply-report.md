@@ -1,5 +1,8 @@
 # Sync Apply Report — interfaces
 
+> **Apply 2026-10-31T05:08:52Z (branch `specsync-a`).** Backup: `.specify/sync/backups/20261031T050852Z/` (`specs/001-interfaces/{spec,plan}.md` and the previous `sync/*`). Applied P-1 (FR-011 `memcpy_batch_async` entry), P-3 (Implementation Notes citation), the `Last Synced 2026-10-30` banner in `spec.md`, and P-2 (`plan.md` method counts and a recount note). Not applied: P-4 (ALIGN, not approved; task in `align-tasks.md`). No `src/` file edited. Stamp not written (the final pass stamps the merged tree). JSON: `apply-report.json` key `apply_2026_10_30`.
+
+
 Applied: 2026-10-21T22:58:04Z (analysis run 2026-10-21) · Branch: `fix/dispatcher-remove-clear-mt` (HEAD `efd502331`) · Mode: batch, no questions
 Approved by: Cornel, 2026-10-21 ("Approved by Cornel 2026-10-21 (groups 1, 3, 4)")
 Backup: `.specify/sync/backups/20261021T225804Z/`. It holds `specs/001-interfaces/spec.md` and the previous `sync/{align-tasks.md, apply-report.md, apply-report.json, drift-report.md}`.

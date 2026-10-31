@@ -1,0 +1,89 @@
+{
+  "applied": "2026-10-21T22:58:04Z",
+  "sync_date": "2026-10-21",
+  "project": "interfaces",
+  "spec": "001-interfaces",
+  "branch": "fix/dispatcher-remove-clear-mt",
+  "head": "efd502331",
+  "mode": "batch",
+  "approved_by": "Cornel, 2026-10-21 (\"Approved by Cornel 2026-10-21 (groups 1, 3, 4)\")",
+  "backup": ".specify/sync/backups/20261021T225804Z/",
+  "backed_up_files": [
+    "specs/001-interfaces/spec.md",
+    ".specify/sync/align-tasks.md",
+    ".specify/sync/apply-report.md (2026-10-05)",
+    ".specify/sync/apply-report.json (2026-10-05)",
+    ".specify/sync/drift-report.md"
+  ],
+  "applied_proposals": [
+    {"id": 1, "type": "BACKFILL", "file": "specs/001-interfaces/spec.md", "requirement": "FR-017 Command/Completion/ReadWriteStats", "edits": 3,
+     "changes": [
+       {"before": "`Command`: 12-variant enum ... ControllerReset).", "after": "`Command`: 13-variant enum ... ControllerReset, FlushSync). *(Sync 2026-10-21 — backfilled ...)*"},
+       {"before": "`Completion`: 11-variant enum ... ResetDone, Error);", "after": "`Completion`: 12-variant enum ... ResetDone, FlushDone, Error);"},
+       {"before": "`ReadWriteStats`: ... latency-sum counters with `total_ops`/...", "after": "`ReadWriteStats`: ... latency-sum counters plus per-direction power-of-two IO-size histograms ... and `merge_from` ..."}
+     ]},
+    {"id": 2, "type": "BACKFILL", "file": "specs/001-interfaces/spec.md", "requirement": "FR-018 DispatcherConfig; TierEventStats", "edits": 2,
+     "changes": [
+       {"before": "`DispatcherConfig`: 18-field configuration — ... `max_eviction_attempts`, `backfill_delay_ms`,", "after": "`DispatcherConfig`: 19-field configuration — ... `max_eviction_attempts`, `store_backpressure_ms` (...), `backfill_delay_ms`,"},
+       {"before": "", "after": "`TierEventStats` *(Sync 2026-10-21 — backfilled)*: `Copy + Default` 16-field snapshot ...", "inserted_after": "LookupResult bullet"}
+     ]},
+    {"id": 3, "type": "BACKFILL", "file": "specs/001-interfaces/spec.md", "requirement": "FR-008 / User Story 2 IDispatcher method inventory", "edits": 4,
+     "changes": [
+       {"before": "`copy_gpu_to_memory_async(&self, key: CacheKey, ipc_handle: IpcHandle, stream: GpuStream)` - DMA copy into reserved slot.", "after": "`copy_gpu_to_memory_async(&self, key: CacheKey, regions: &[IpcHandle], stream: GpuStream)` - DMA copy into reserved slot. The N regions are gathered contiguously ..."},
+       {"before": "", "after": "`batch_populate(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>>` ...", "inserted_after": "populate"},
+       {"before": "", "after": "`tier_event_stats(&self) -> TierEventStats` ...; `schedule_write_through(&self, key: CacheKey, size: u32)` ...", "inserted_after": "read_write_stats"},
+       {"before": "`IDispatcher` provides `initialize`, ... (16 methods)", "after": "`IDispatcher` provides `initialize`, ... `batch_populate`, ... `pin`, `unpin`, ... `schedule_write_through`, `read_write_stats`, and `tier_event_stats` methods. (22 methods)"}
+     ]},
+    {"id": 4, "type": "BACKFILL", "file": "specs/001-interfaces/spec.md", "requirement": "FR-008 clear_memory_tier / flush_to_ssd result contracts", "edits": 2,
+     "changes": [
+       {"before": "`clear_memory_tier(&self) -> Result<usize, DispatcherError>` - Evict all memory-tier entries.", "after": "... - Empty the memory tier: ... A **pinned** entry ... keeps its slot and is retried; ... returns `Timeout` ... *(Sync 2026-10-21 — CODE CHANGE, repair `cccfb328e`; ... FR-038.)*"},
+       {"before": "`flush_to_ssd(&self) -> Result<usize, DispatcherError>` - Flush pending writes to SSD.", "after": "... - Block until every queued write-through has run. Returns `IoError` if a write-through failed ... *(Sync 2026-10-21 — CODE CHANGE, repair `9bd231d85` / DIS-FLUSH-REPORTS-FAILED-WRITE; ... FR-056.)*"}
+     ]},
+    {"id": 8, "type": "BACKFILL", "file": "specs/001-interfaces/spec.md", "requirement": "FR-023 LookupConfig", "edits": 1,
+     "changes": [{"before": "`LookupConfig`: 10-field configuration ...", "after": "`LookupConfig`: 12-field configuration ... `caller_wait` ..., `connection_teardown_timeout` ... remote-lookup spec 002."}]},
+    {"id": 9, "type": "BACKFILL", "file": "specs/001-interfaces/spec.md", "requirement": "FR-021 FormatParams", "edits": 1,
+     "changes": [{"before": "`FormatParams`: 10-field format configuration with defaults.", "after": "`FormatParams`: 9-field format configuration with defaults (`data_disk_size`, ..., `metadata_region_size`); `FormatParams::new(data_disk_size, instance_id)` fills the rest from `Default`."}]},
+    {"id": 10, "type": "BACKFILL", "file": "specs/001-interfaces/spec.md", "requirement": "Overview + FR-009 IMemoryTier gating; feature count", "edits": 3,
+     "changes": [
+       {"before": "The crate has two Cargo features:", "after": "The crate has three Cargo features:"},
+       {"before": "(`IBlockDevice`, ..., `IDispatchMap`, `IMemoryTier`, `IExtentManager`, `IPartitionTable`)", "after": "(`IBlockDevice`, ..., `IDispatchMap`, `IExtentManager`, `IPartitionTable`; `IMemoryTier` is deliberately **not** gated, ...)"},
+       {"before": "#### FR-009: IMemoryTier Interface (feature: spdk)", "after": "#### FR-009: IMemoryTier Interface"}
+     ]},
+    {"id": 11, "type": "BACKFILL", "file": "specs/001-interfaces/spec.md", "requirement": "NFR-002 gpu feature", "edits": 1,
+     "changes": [{"before": "GPU-specific code is gated behind `--features gpu`.", "after": "The `gpu` feature is declared but currently gates nothing (reserved, see Overview). ..."}]},
+    {"id": 12, "type": "BACKFILL", "file": "specs/001-interfaces/spec.md", "requirement": "Implementation Notes: verified properties", "edits": 1,
+     "changes": [{"before": "Several interfaces have formally verified properties documented in comments (...).", "after": "Verification status is not recorded in the interface definitions: ... removed ... in `a93b5620f` (2026-08-20) ... `IGpuServices` still carries a comment ..."}]},
+    {"id": 13, "type": "BACKFILL", "file": "specs/001-interfaces/spec.md", "requirement": "Backfill banner: FR-014/FR-025 deferred", "edits": 1,
+     "changes": [{"before": "> label corrected to 4-variant. **Deferred (not applied):** FR-014/FR-025 ... excluded from the workspace.", "after": "> label corrected to 4-variant. FR-014/FR-025 `IExtendedMetadataStore` was then an orphaned module (deferred). *(Resolved 2026-08-20: ...)*"}]}
+  ],
+  "metadata_update": {"file": "specs/001-interfaces/spec.md", "change": "Added '> **Last Synced 2026-10-21**' banner line summarising this apply"},
+  "applied_by_hand_before_this_run": [
+    {"id": 5, "type": "ALIGN (doc comment)", "file": "components/interfaces/src/idispatcher.rs", "requirement": "FR-008 clear_memory_tier doc", "status": "APPLIED", "note": "approved; applied by hand in the working tree; matches the proposed text; not edited by this apply"},
+    {"id": 6, "type": "ALIGN (doc comment)", "file": "components/interfaces/src/idispatcher.rs", "requirement": "FR-008 batch_lookup doc", "status": "APPLIED", "note": "approved; applied by hand in the working tree; matches the proposed text; not edited by this apply"}
+  ],
+  "align_tasks": {
+    "file": ".specify/sync/align-tasks.md",
+    "new_tasks_for_approved_align": 0,
+    "done_recorded": [5, 6],
+    "open_recorded": [
+      {"id": 7, "component": "dispatcher-p2p", "severity": "major", "approval_note": "TRACK (Cornel 2026-10-21): port the 3 dispatcher repairs to dispatcher-p2p in a separate PR with its own Loom tests and spec sync.", "note": "task belongs to component dispatcher-p2p; recorded in interfaces' align-tasks.md (entered by the dispatcher apply of this run, confirmed here)"},
+      {"id": 14, "component": "interfaces", "severity": "moderate", "approval_note": "TRACK (Cornel 2026-10-21): runnable doc examples, later doc task.", "note": "BACKFILL alternative not chosen; NFR-004 unchanged"}
+    ]
+  },
+  "not_applied": [
+    {"id": 7, "reason": "not approved (TRACK)"},
+    {"id": 14, "reason": "not approved (TRACK); BACKFILL alternative not chosen"}
+  ],
+  "new_specs": [],
+  "supersede": [],
+  "files_modified": [
+    "specs/001-interfaces/spec.md",
+    ".specify/sync/align-tasks.md",
+    ".specify/sync/apply-report.md",
+    ".specify/sync/apply-report.json",
+    ".specify/sync/drift-report.md"
+  ],
+  "source_files_modified": [],
+  "not_run": ["cargo doc -p interfaces --no-deps --features spdk", "SC-2/3/4/7 build/doc/test runs"],
+  "summary": {"applied": [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13], "tasks": [7, 14], "open": [7, 14]}
+}

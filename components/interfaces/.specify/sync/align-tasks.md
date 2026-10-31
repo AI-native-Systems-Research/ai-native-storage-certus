@@ -86,3 +86,18 @@ as written in the spec.
 - [ ] Every public item in the five modules has a doc comment.
 - [ ] Each trait in the five modules has at least one example. `cargo test --doc -p interfaces` passes, with and without `--features spdk`.
 - [ ] `cargo doc -p interfaces --no-deps --features spdk` is warning-free.
+
+---
+
+## Open item from the 2026-10-30 run (branch `specsync-a`)
+
+### OPEN interfaces-P4 — SC-4 rustdoc warnings (minor, pre-existing, not approved)
+
+**Spec Requirement**: SC-4 / NFR-004, `cargo doc --no-deps` is warning-free.
+**Current Code**: `cargo doc -p interfaces --no-deps` (default features) reports 3 unresolved intra-doc links: [`IDispatcher::tier_event_stats`] at `src/idispatcher.rs:339` (the `IDispatcher` trait is `spdk`-gated, so the link does not resolve in a default build), [`create_stream`] at `src/igpu_services.rs:587` and [`stream_synchronize`] at `:607` (inside the trait; need `Self::`). All three exist at `a0292be6`; this branch did not introduce them.
+**Required Change**: qualify the two `IGpuServices` links as `Self::…`; for the `IDispatcher` link, use plain code text or a `cfg_attr`-conditional link.
+**Files to Modify**: `components/interfaces/src/idispatcher.rs`, `components/interfaces/src/igpu_services.rs`
+**Estimated Effort**: small
+
+#### Acceptance Criteria
+- [ ] `cargo doc -p interfaces --no-deps` and `--features spdk` are warning-free.
