@@ -156,3 +156,30 @@ pub struct GpuDeviceInfo {
 - **Errors**: "size exceeds source buffer length",
   "Not initialized", "cudaMemcpy H2D failed: {cuda_error}"
 - **Performance**: Depends on transfer size; <1ms for 4 KiB
+
+## Methods added after this contract *(Sync 2026-10-31)*
+
+The trait listing above is the original target. `IGpuServices` has since grown
+(`components/interfaces/src/igpu_services.rs`); those methods are specified in
+`spec.md`: `register_host_memory` / `unregister_host_memory` (FR-015/016), the
+stream methods `create_stream` / `destroy_stream` / `stream_synchronize`
+(FR-017) and `stream_query` (FR-023), `dma_copy_to_device_async` (FR-018),
+`memcpy_h2d_async` (FR-019), `allocate_pinned_dma_buffer` (FR-020),
+`set_device` / `device_of_ptr` (FR-021/022), `dma_copy_to_host_async` (FR-024),
+`memcpy_d2h_async` (FR-025), `memcpy_batch_async` (FR-026), and
+`prepare_memory_for_spdk` (FR-013, spec 002).
+
+### memcpy_batch_async(dsts, srcs, sizes, stream)
+
+- **Feature gate**: `spdk` (returns "GPU support not compiled" without `gpu`)
+- **Preconditions**: `initialize()` called; `dsts`, `srcs`, `sizes` have equal
+  length; entries do not overlap or depend on each other; every pointer valid
+  for its size until `stream` is synchronized; host pointers CUDA-pinned;
+  `stream` is a created stream, not the legacy NULL stream
+- **Postconditions**: one `cudaMemcpyBatchAsync` (CUDA 13.x signature) queued on
+  `stream`, all entries with `srcAccessOrder = Stream`; an empty batch returns
+  `Ok(())` without a CUDA call. Completion is observed by synchronizing `stream`
+- **Errors**: "Not initialized: call initialize() first",
+  "memcpy_batch_async: slice lengths differ (...)",
+  "cudaMemcpyBatchAsync failed: {cuda_error}"
+- **Source**: `src/lib.rs:973-1038`, `src/cuda_ffi.rs:87-106`, `:157-167`

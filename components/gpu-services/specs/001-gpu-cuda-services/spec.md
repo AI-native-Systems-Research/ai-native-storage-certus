@@ -4,6 +4,7 @@
 **Created**: 2026-04-29
 **Status**: Draft
 **Last-Synced**: 2026-09-03 (spec-sync: FR-017 ALIGN — `destroy_stream` and `stream_synchronize` now enforce the "require prior initialization" guard the FR promises, matching their sibling stream/device methods; FR-008 exception extended to document `pub mod cuda_ffi` and the `dma`-module cleanup free-functions as deliberate public surface.)
+**Last-Synced**: 2026-10-31 (spec-sync, branch `specsync-b`: BACKFILL new FR-026 `memcpy_batch_async` (`cudaMemcpyBatchAsync`, CUDA 13.x signature, `srcAccessOrder` STREAM), which the optimizer branch added with no requirement; Assumptions feature-flag line extended. The `not_unsafe_ptr_arg_deref` attribute change and `build.rs` `expect`s are behaviour-identical and touch no requirement. No source changes.)
 **Input**: User description: "GPU Services component providing CUDA library initialization, GPU hardware scanning, IPC handle deserialization, memory pinning, and DMA buffer creation for SSD-to-GPU data transfer"
 
 ## Clarifications
@@ -408,6 +409,29 @@ by a verification read-back.
   operation fails.
   *(Backfilled 2026-07-22 from `src/lib.rs:853-895`,
   `interfaces/src/igpu_services.rs:716-735`.)*
+- **FR-026**: Component MUST provide `memcpy_batch_async(dsts, srcs, sizes,
+  stream)` (gated behind `spdk` feature) that submits `dsts.len()`
+  pointer-to-pointer copies (entry `i` copies `sizes[i]` bytes from
+  `srcs[i]` to `dsts[i]`) in ONE `cudaMemcpyBatchAsync` call on the given
+  `GpuStream`. The direction of each copy comes from its pointers. All
+  copies share one `cudaMemcpyAttributes` entry with
+  `srcAccessOrder = cudaMemcpySrcAccessOrderStream` (the source is read in
+  stream order), so the batch as a whole runs in stream order; there is no
+  order among its copies. An empty batch MUST return `Ok(())` without a CUDA
+  call. MUST return an error if GPU support is not compiled, the component is
+  not initialized, the three slices differ in length, or the CUDA call fails.
+  Caller contract (from the interface): entries do not overlap or depend on
+  each other, every pointer stays valid until the stream is synchronized,
+  host pointers are CUDA-pinned, and `stream` is a created stream, not the
+  legacy NULL stream (the runtime rejects it). The FFI binding uses the
+  CUDA 13.x signature (no `failIdx` argument), so the component MUST be
+  built and run against a CUDA 13.x runtime for this method; the CUDA 12.8
+  runtime exports the same symbol with an extra `failIdx` parameter.
+  *(Backfilled 2026-10-31 from `src/lib.rs:973-1038`,
+  `src/cuda_ffi.rs:87-106`, `:157-167`,
+  `interfaces/src/igpu_services.rs:745-768`; added by optimizer session
+  `s20261029-094947`, commit `4941320a`. Used by the dispatcher's
+  `PieceBatch` for per-block warm scatter and store gather.)*
 
 ### Key Entities
 
@@ -467,7 +491,8 @@ by a verification read-back.
 - Two feature flags control compilation: `--features gpu` gates all
   CUDA-dependent code; `--features spdk` additionally gates
   `dma_copy_to_host`, `dma_copy_to_device`, and
-  `prepare_memory_for_spdk` methods.
+  `prepare_memory_for_spdk` methods (and the other `spdk`-gated methods
+  of FR-015..FR-026, among them `memcpy_batch_async`).
 - IPC handle serialization format from Python uses standard base64
   encoding of the raw CUDA IPC handle bytes concatenated with the
   buffer size as a little-endian 64-bit integer.
