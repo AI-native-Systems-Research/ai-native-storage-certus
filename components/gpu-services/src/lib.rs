@@ -297,7 +297,14 @@ impl IGpuServices for GpuServicesComponent {
     }
 
     #[cfg(feature = "spdk")]
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    // The dereference is compiled only with `gpu`, so the lint fires only there.
+    #[cfg_attr(
+        feature = "gpu",
+        expect(
+            clippy::not_unsafe_ptr_arg_deref,
+            reason = "IGpuServices takes device/host addresses as raw pointers; the caller guarantees each is valid for `size` bytes"
+        )
+    )]
     fn dma_copy_to_host(
         &self,
         src: *const std::ffi::c_void,
@@ -507,7 +514,14 @@ impl IGpuServices for GpuServicesComponent {
     }
 
     #[cfg(feature = "spdk")]
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    // The dereference is compiled only with `gpu`, so the lint fires only there.
+    #[cfg_attr(
+        feature = "gpu",
+        expect(
+            clippy::not_unsafe_ptr_arg_deref,
+            reason = "IGpuServices takes device/host addresses as raw pointers; the caller guarantees each is valid for `size` bytes"
+        )
+    )]
     fn dma_copy_to_device(
         &self,
         src: &interfaces::DmaBuffer,
@@ -733,7 +747,14 @@ impl IGpuServices for GpuServicesComponent {
     }
 
     #[cfg(feature = "spdk")]
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    // The dereference is compiled only with `gpu`, so the lint fires only there.
+    #[cfg_attr(
+        feature = "gpu",
+        expect(
+            clippy::not_unsafe_ptr_arg_deref,
+            reason = "IGpuServices takes device/host addresses as raw pointers; the caller guarantees each is valid for `size` bytes"
+        )
+    )]
     fn dma_copy_to_device_async(
         &self,
         src: &interfaces::DmaBuffer,
@@ -787,7 +808,14 @@ impl IGpuServices for GpuServicesComponent {
     }
 
     #[cfg(feature = "spdk")]
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    // The dereference is compiled only with `gpu`, so the lint fires only there.
+    #[cfg_attr(
+        feature = "gpu",
+        expect(
+            clippy::not_unsafe_ptr_arg_deref,
+            reason = "IGpuServices takes device/host addresses as raw pointers; the caller guarantees each is valid for `size` bytes"
+        )
+    )]
     fn memcpy_h2d_async(
         &self,
         src: *const std::ffi::c_void,
@@ -831,7 +859,14 @@ impl IGpuServices for GpuServicesComponent {
     }
 
     #[cfg(feature = "spdk")]
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    // The dereference is compiled only with `gpu`, so the lint fires only there.
+    #[cfg_attr(
+        feature = "gpu",
+        expect(
+            clippy::not_unsafe_ptr_arg_deref,
+            reason = "IGpuServices takes device/host addresses as raw pointers; the caller guarantees each is valid for `size` bytes"
+        )
+    )]
     fn dma_copy_to_host_async(
         &self,
         src: *const std::ffi::c_void,
@@ -885,7 +920,14 @@ impl IGpuServices for GpuServicesComponent {
     }
 
     #[cfg(feature = "spdk")]
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    // The dereference is compiled only with `gpu`, so the lint fires only there.
+    #[cfg_attr(
+        feature = "gpu",
+        expect(
+            clippy::not_unsafe_ptr_arg_deref,
+            reason = "IGpuServices takes device/host addresses as raw pointers; the caller guarantees each is valid for `size` bytes"
+        )
+    )]
     fn memcpy_d2h_async(
         &self,
         src: *const std::ffi::c_void,
@@ -929,7 +971,6 @@ impl IGpuServices for GpuServicesComponent {
     }
 
     #[cfg(feature = "spdk")]
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     fn memcpy_batch_async(
         &self,
         dsts: &[*mut std::ffi::c_void],
