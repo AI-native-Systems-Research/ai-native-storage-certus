@@ -91,6 +91,7 @@ impl<T: Send + 'static> SpscChannel<T> {
             receiver_parked: std::sync::atomic::AtomicBool::new(false),
             sender_parked: std::sync::atomic::AtomicBool::new(false),
             force_closed: std::sync::atomic::AtomicBool::new(false),
+            receiver_closed: std::sync::atomic::AtomicBool::new(false),
         });
 
         let interface_info = vec![
@@ -327,6 +328,35 @@ mod tests {
     use super::*;
     use crate::iunknown::query;
     use std::thread;
+
+    #[test]
+    fn send_returns_closed_when_the_receiver_is_gone_and_the_queue_is_full() {
+        // Used to spin/park forever: nothing drains the queue once the receiver drops.
+        let ch = SpscChannel::<u32>::new(2);
+        let (tx, rx) = ch.split().unwrap();
+        tx.send(1).unwrap();
+        tx.send(2).unwrap();
+        drop(rx);
+        assert_eq!(tx.send(3).unwrap_err(), ChannelError::Closed);
+    }
+
+    #[test]
+    fn send_buffers_before_any_receiver_and_reopens_for_a_new_one() {
+        let ch = SpscChannel::<u32>::new(2);
+        let tx = ch.sender().unwrap();
+        tx.send(1).unwrap(); // no receiver yet: buffered, not Closed
+        let rx = ch.receiver().unwrap();
+        assert_eq!(rx.recv().unwrap(), 1);
+        drop(rx);
+        tx.send(2).unwrap();
+        tx.send(3).unwrap();
+        assert_eq!(tx.send(4).unwrap_err(), ChannelError::Closed);
+        let rx = ch.receiver().unwrap(); // a new receiver reopens the channel
+        assert_eq!(rx.recv().unwrap(), 2);
+        tx.send(4).unwrap();
+        assert_eq!(rx.recv().unwrap(), 3);
+        assert_eq!(rx.recv().unwrap(), 4);
+    }
 
     #[test]
     fn new_creates_channel() {

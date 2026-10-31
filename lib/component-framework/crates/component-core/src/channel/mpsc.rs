@@ -26,6 +26,11 @@ pub(crate) struct MpscState<T> {
     /// Force-close flag set by actor deactivation to ensure the receiver
     /// exits even when other senders (from `IUnknown` queries) are still alive.
     pub(crate) force_closed: AtomicBool,
+    /// Set when a receiver is dropped and cleared when one is created, so a
+    /// blocked `send` can return `Closed` instead of waiting forever. Before any
+    /// receiver exists it stays clear: sends may fill the queue for a receiver
+    /// bound later.
+    pub(crate) receiver_closed: AtomicBool,
 }
 
 /// MPSC channel component.
@@ -100,6 +105,10 @@ impl<T: Send + 'static> MpscSender<T> {
                     return Ok(());
                 }
                 Err(returned) => {
+                    // Full, and nobody will ever drain it.
+                    if self.state.receiver_closed.load(Ordering::Acquire) {
+                        return Err(ChannelError::Closed);
+                    }
                     val = returned;
                     // Park briefly and retry
                     {
@@ -219,6 +228,7 @@ impl<T: Send + 'static> std::fmt::Debug for MpscReceiver<T> {
 
 impl<T: Send + 'static> MpscReceiver<T> {
     pub(crate) fn new(state: Arc<MpscState<T>>, bound_flag: Option<Arc<AtomicBool>>) -> Self {
+        state.receiver_closed.store(false, Ordering::Release);
         Self { state, bound_flag }
     }
 
@@ -348,6 +358,7 @@ impl<T: Send + 'static> IReceiver<T> for MpscReceiver<T> {
 
 impl<T: Send + 'static> Drop for MpscReceiver<T> {
     fn drop(&mut self) {
+        self.state.receiver_closed.store(true, Ordering::Release);
         if let Some(ref flag) = self.bound_flag {
             flag.store(false, Ordering::Release);
         }
@@ -389,6 +400,7 @@ impl<T: Send + 'static> MpscChannel<T> {
             receiver_thread: Mutex::new(None),
             sender_thread: Mutex::new(None),
             force_closed: AtomicBool::new(false),
+            receiver_closed: AtomicBool::new(false),
         });
 
         let interface_info = vec![
@@ -626,6 +638,16 @@ mod tests {
     use super::*;
     use crate::iunknown::query;
     use std::thread;
+
+    #[test]
+    fn send_returns_closed_when_the_receiver_is_gone_and_the_queue_is_full() {
+        let ch = MpscChannel::<u32>::new(2);
+        let (tx, rx) = ch.split().unwrap();
+        tx.send(1).unwrap();
+        tx.send(2).unwrap();
+        drop(rx);
+        assert_eq!(tx.send(3).unwrap_err(), ChannelError::Closed);
+    }
 
     #[test]
     fn new_creates_channel() {

@@ -203,6 +203,11 @@ pub(crate) struct ChannelState<T> {
     /// Force-close flag set by actor deactivation to ensure the receiver
     /// exits even when other senders (from `IUnknown` queries) are still alive.
     pub(crate) force_closed: AtomicBool,
+    /// Set when a receiver is dropped and cleared when one is created, so a
+    /// blocked `send` can return `Closed` instead of waiting forever. Before any
+    /// receiver exists it stays clear: sends may fill the queue for a receiver
+    /// bound later.
+    pub(crate) receiver_closed: AtomicBool,
 }
 
 /// Sender endpoint for typed message passing.
@@ -279,6 +284,10 @@ impl<T: Send + 'static> Sender<T> {
                     return Ok(());
                 }
                 Err(returned) => {
+                    // Full, and nobody will ever drain it.
+                    if self.state.receiver_closed.load(Ordering::Acquire) {
+                        return Err(ChannelError::Closed);
+                    }
                     val = returned;
                     spins = escalate(spins);
                     if spins < SPIN_LIMIT {
@@ -407,6 +416,7 @@ impl<T: Send + 'static> fmt::Debug for Receiver<T> {
 
 impl<T: Send + 'static> Receiver<T> {
     pub(crate) fn new(state: Arc<ChannelState<T>>, bound_flag: Option<Arc<AtomicBool>>) -> Self {
+        state.receiver_closed.store(false, Ordering::Release);
         Self { state, bound_flag }
     }
 
@@ -539,6 +549,7 @@ impl<T: Send + 'static> IReceiver<T> for Receiver<T> {
 
 impl<T: Send + 'static> Drop for Receiver<T> {
     fn drop(&mut self) {
+        self.state.receiver_closed.store(true, Ordering::Release);
         if let Some(ref flag) = self.bound_flag {
             flag.store(false, Ordering::Release);
         }
