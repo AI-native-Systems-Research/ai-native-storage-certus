@@ -91,7 +91,9 @@ as written in the spec.
 
 ## Open item from the 2026-10-30 run (branch `specsync-a`)
 
-### OPEN interfaces-P4 — SC-4 rustdoc warnings (minor, pre-existing, not approved)
+### CLOSED interfaces-P4 — SC-4 rustdoc warnings (minor, pre-existing)
+
+**Closed 2026-10-31** by commit `26e7a9cc` on this branch: `create_stream` / `stream_synchronize` links take a `Self::` path, and the spdk-gated `IDispatcher::tier_event_stats` reference is code text. `cargo doc -p interfaces --no-deps` is warning-free.
 
 **Spec Requirement**: SC-4 / NFR-004, `cargo doc --no-deps` is warning-free.
 **Current Code**: `cargo doc -p interfaces --no-deps` (default features) reports 3 unresolved intra-doc links: [`IDispatcher::tier_event_stats`] at `src/idispatcher.rs:339` (the `IDispatcher` trait is `spdk`-gated, so the link does not resolve in a default build), [`create_stream`] at `src/igpu_services.rs:587` and [`stream_synchronize`] at `:607` (inside the trait; need `Self::`). All three exist at `a0292be6`; this branch did not introduce them.
