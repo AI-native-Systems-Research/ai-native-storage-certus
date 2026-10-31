@@ -1,57 +1,98 @@
 {
-  "generated": "pending",
+  "generated": "2026-10-31T04:54:40Z",
   "project": "eviction-policy-session-lists",
+  "branch": "specsync-c",
+  "base": "a0292be6",
+  "head": "0a71990e",
+  "scope": "55a4ddd4 (clippy) only; components/interfaces analysed by its own sync",
   "summary": {
     "specs_analyzed": 1,
-    "requirements_checked": 24,
-    "aligned": 23,
-    "drifted": 1,
+    "requirements_checked": 12,
+    "aligned": 12,
+    "drifted": 0,
+    "stale_citations_backfilled": 1,
     "not_implemented": 0,
     "unspecced_features": 0
   },
   "specs": [
     {
-      "id": "001-session-list-eviction",
-      "title": "Session-Lineage Eviction Policy",
-      "aligned": [
-        "FR-001",
-        "FR-002",
-        "FR-003",
-        "FR-004",
-        "FR-005",
-        "FR-006",
-        "FR-007",
-        "FR-008",
-        "FR-009",
-        "FR-010",
-        "FR-011",
-        "FR-012",
-        "FR-013",
-        "FR-014",
-        "FR-015",
-        "FR-016",
-        "FR-017",
-        "FR-018",
-        "SC-002",
-        "SC-003",
-        "SC-004",
-        "SC-005",
-        "SC-006"
-      ],
-      "drifted": [
+      "id": "specs/001-session-list-eviction/spec.md",
+      "items": [
         {
-          "requirement": "SC-001",
-          "spec_text": "On multi-turn traces, retain session-prefix blocks longer than LRU, reducing reloads by >=15%.",
-          "actual": "No comparative trace-replay harness exists; benches/session_list_benchmark.rs measures only hot-path throughput. Spec itself downgrades this to an unverified design goal (spec.md:114).",
-          "location": "components/eviction-policy-session-lists/specs/001-session-list-eviction/spec.md:114",
-          "severity": "minor"
+          "id": "FR-009",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-010",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-011",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-013",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-014",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-015",
+          "status": "aligned",
+          "location": "src/lib.rs:165-240 (InvalidPool / InvalidHandle returns unchanged)"
+        },
+        {
+          "id": "FR-016",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-017",
+          "status": "aligned",
+          "location": "src/session_list.rs:95"
+        },
+        {
+          "id": "SC-002",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "SC-004",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "SC-006",
+          "status": "aligned",
+          "location": "src/session_list.rs:238-243 (check_invariants, lint attribute only); tests/lineage_properties.rs (expect messages only)"
+        },
+        {
+          "id": "Observability (startup announcement)",
+          "status": "aligned",
+          "location": "src/lib.rs:83-87,149-162"
         }
       ],
-      "not_implemented": []
+      "citation_drift": [
+        {
+          "where": "Observability",
+          "before": "`src/lib.rs:83-87,107-120`",
+          "after": "`src/lib.rs:83-87,149-162` (the `announced` field did not move; the announcement in `create_pool` moved by +42)"
+        }
+      ]
     }
+  ],
+  "notes": [
+    "Lock poisoning panics (unchanged by 55a4ddd4); not stated in the spec; recorded, not proposed."
   ],
   "unspecced": [],
   "conflicts": [],
-  "inputs_sha256": "22f355fbe0ab2ce528f24239a145c9d3598ec01925fa03d7e2e05fe0ab4ac34a",
-  "git_commit": "72c7182b"
+  "drift_status": "clean",
+  "previous_report": "backups/20261031T045440Z/drift-report.json.prev"
 }

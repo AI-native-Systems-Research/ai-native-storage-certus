@@ -137,7 +137,7 @@ When the cache reports that a block was accessed, the policy refreshes that bloc
 
 - On first selection as the active eviction policy, the component emits a
   one-time informational log line (guarded by an internal `announced` flag;
-  `src/lib.rs:83-87,107-120`) via the optional `ILogger` receptacle. This is a
+  `src/lib.rs:83-87,149-162`) via the optional `ILogger` receptacle. This is a
   startup-announcement diagnostic only — it is operationally useful for
   confirming which policy is bound, is not a functional requirement, and has no
   effect on eviction behaviour. A missing logger does not turn any operation

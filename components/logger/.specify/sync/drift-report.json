@@ -1,54 +1,72 @@
 {
-  "generated": "pending",
+  "generated": "2026-10-31T04:54:40Z",
   "project": "logger",
+  "branch": "specsync-c",
+  "base": "a0292be6",
+  "head": "0a71990e",
+  "scope": "55a4ddd4 (clippy) only; components/interfaces analysed by its own sync",
   "summary": {
     "specs_analyzed": 1,
-    "requirements_checked": 21,
-    "aligned": 20,
-    "drifted": 1,
+    "requirements_checked": 8,
+    "aligned": 8,
+    "drifted": 0,
+    "stale_citations_backfilled": 0,
     "not_implemented": 0,
     "unspecced_features": 0
   },
   "specs": [
     {
-      "id": "001-logger-component",
-      "title": "Logger Component",
-      "aligned": [
-        "FR-001",
-        "FR-002",
-        "FR-003",
-        "FR-004",
-        "FR-005",
-        "FR-007",
-        "FR-008",
-        "FR-009",
-        "FR-010",
-        "FR-011",
-        "FR-012",
-        "FR-013",
-        "FR-014",
-        "SC-001",
-        "SC-002",
-        "SC-003",
-        "SC-004",
-        "SC-005",
-        "SC-006",
-        "SC-007"
-      ],
-      "drifted": [
+      "id": "specs/001-logger-component/spec.md",
+      "items": [
         {
-          "requirement": "FR-006",
-          "spec_text": "Console output includes ANSI color codes to distinguish levels, e.g. yellow for warn.",
-          "actual": "warn uses a 256-color orange escape \\x1b[38;5;208m, not yellow \\x1b[33m; test test_all_levels_colored asserts the orange code. Cosmetic spec/impl mismatch.",
-          "location": "src/lib.rs:87",
-          "severity": "minor"
+          "id": "FR-004",
+          "status": "aligned",
+          "location": "src/lib.rs:58-66"
+        },
+        {
+          "id": "FR-011",
+          "status": "aligned",
+          "location": "src/lib.rs:58-66,68-73"
+        },
+        {
+          "id": "FR-012",
+          "status": "aligned",
+          "location": "src/lib.rs:196-206"
+        },
+        {
+          "id": "FR-014",
+          "status": "aligned",
+          "location": "src/lib.rs:43-66,94-100"
+        },
+        {
+          "id": "Key Entities LogLevel (parsing)",
+          "status": "aligned",
+          "location": "src/lib.rs:58-66; test test_log_level_from_env_str src/lib.rs:290"
+        },
+        {
+          "id": "Edge cases invalid RUST_LOG / trace",
+          "status": "aligned",
+          "location": "src/lib.rs:62-65"
+        },
+        {
+          "id": "FR-010 / SC-005 thread safety",
+          "status": "aligned",
+          "location": "src/lib.rs:231 (writer Mutex, unchanged)"
+        },
+        {
+          "id": "SC-007",
+          "status": "aligned",
+          "location": "benches/log_throughput.rs (lint attributes only)"
         }
       ],
-      "not_implemented": []
+      "citation_drift": []
     }
+  ],
+  "notes": [
+    "Lock poisoning panics (unchanged by 55a4ddd4); not stated in the spec; recorded, not proposed."
   ],
   "unspecced": [],
   "conflicts": [],
-  "inputs_sha256": "0623f6615ef3bfb6c1ed4750336b3a16ae716b05aae87e9513df1053ff1341e7",
-  "git_commit": "72c7182b"
+  "drift_status": "clean",
+  "previous_report": "backups/20261031T045440Z/drift-report.json.prev"
 }

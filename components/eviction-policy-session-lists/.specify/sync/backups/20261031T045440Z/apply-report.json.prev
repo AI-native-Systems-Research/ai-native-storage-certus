@@ -1,0 +1,48 @@
+{
+  "applied": "2026-08-20",
+  "component": "eviction-policy-session-lists",
+  "policy": ".specify/sync/PHASE_B_POLICY.md",
+  "source": "drift-report.{json,md} (2026-08-20)",
+  "counts": {
+    "backfill_applied": 1,
+    "backfill_unspecced": 0,
+    "align_tasks": 0,
+    "resolved": 0,
+    "human_decision": 0
+  },
+  "specs_updated": [
+    {
+      "spec": "001-session-list-eviction",
+      "requirement": "SC-001",
+      "change_type": "BACKFILL",
+      "detail": "Re-verified against benches/session_list_benchmark.rs; sharpened wording (named four benches, explicit non-measured design goal, pointer to align-tasks.md Task 1)."
+    },
+    {
+      "spec": "001-session-list-eviction",
+      "requirement": "(metadata)",
+      "change_type": "BACKFILL",
+      "detail": "Added Last-Synced: 2026-08-20 line under Status."
+    }
+  ],
+  "align_tasks_generated": [],
+  "align_tasks_carried_forward": [
+    "align-tasks.md Task 1 — build comparative prefix-reload trace-replay harness (verify/retire SC-001 >=15% target)"
+  ],
+  "unspecced_backfilled": [],
+  "resolved": [],
+  "backups": [
+    {
+      "spec": "specs/001-session-list-eviction/spec.md",
+      "backup": ".specify/sync/backups/specs/001-session-list-eviction/spec.md.bak"
+    }
+  ],
+  "verification": {
+    "edits_confined_to": ["specs/001-session-list-eviction/spec.md", ".specify/sync/"],
+    "rs_source_modified": false,
+    "cargo_run": false
+  },
+  "history": [
+    { "date": "2026-08-07", "note": "First apply pass; SC-001 downgraded (maintainer fork), startup-log backfilled, harness queued. See proposals-20260807.json." },
+    { "date": "2026-08-20", "note": "Re-sync; reaffirmed+sharpened SC-001 BACKFILL, added Last-Synced metadata." }
+  ]
+}

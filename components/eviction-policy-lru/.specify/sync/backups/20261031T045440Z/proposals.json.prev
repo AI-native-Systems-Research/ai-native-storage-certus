@@ -1,0 +1,53 @@
+{
+  "generated": "2026-06-19T00:00:00Z",
+  "based_on": "drift-report 2026-06-19",
+  "summary": {
+    "backfill": 3,
+    "align": 1,
+    "human_decision": 0,
+    "new_specs": 0,
+    "remove": 0
+  },
+  "proposals": [
+    {
+      "id": "P1",
+      "spec_id": "001-lru-eviction-policy",
+      "requirement": "FR-009",
+      "direction": "backfill",
+      "status": "approved",
+      "current_spec_text": "Operations on an invalid PoolId MUST return EvictionPolicyError::InvalidPool",
+      "proposed_text": "Methods returning Result (track, touch, remove) MUST return EvictionPolicyError::InvalidPool when given a non-existent pool. Methods returning Option or scalar (pop_oldest, peek_oldest, len, clear_pool) MUST gracefully degrade: returning None, empty collection, 0, or no-op respectively.",
+      "confidence": "high"
+    },
+    {
+      "id": "P2",
+      "spec_id": "001-lru-eviction-policy",
+      "requirement": "FR-010",
+      "direction": "backfill",
+      "status": "approved",
+      "current_spec_text": "remove and move_to_back on an already-removed entry MUST be idempotent (no panic, no effect)",
+      "proposed_text": "touch and remove on an already-removed handle MUST be idempotent (no panic, no effect).",
+      "confidence": "high"
+    },
+    {
+      "id": "P3",
+      "spec_id": "001-lru-eviction-policy",
+      "requirement": "NFR-004",
+      "direction": "align",
+      "status": "approved",
+      "current_spec_text": "Component MUST conform to Certus component model with receptacle for ILogger",
+      "proposed_action": "Add trace-level logging for create_pool and error paths",
+      "confidence": "high"
+    },
+    {
+      "id": "P4",
+      "spec_id": "001-lru-eviction-policy",
+      "requirement": "SC-001",
+      "direction": "backfill",
+      "status": "approved",
+      "current_spec_text": "All 8 unit tests in lib.rs and 12 unit tests in lru_list.rs pass",
+      "proposed_text": "All tests in lib.rs and lru_list.rs pass (cargo test -p eviction-policy-lru).",
+      "confidence": "high"
+    }
+  ]
+}
