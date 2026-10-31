@@ -1,25 +1,25 @@
-(* #"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 648 0 648 46 *)
+(* #"/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 666 0 666 46 *)
 
-let%span swell_founded = "/home/cornel/repair-j33-rc22/components/dispatcher/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
-let%span sbatch = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 647 10 647 11
-let%span sbatch'0 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 645 11 645 51
-let%span sbatch'1 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 646 10 646 63
-let%span sbatch'2 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 653 11 653 100
-let%span sbatch'3 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 654 10 654 46
-let%span sbatch'4 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 340 10 340 11
-let%span sbatch'5 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 342 16 342 92
-let%span sbatch'6 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 655 10 655 11
-let%span sbatch'7 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 657 16 657 63
+let%span swell_founded = "/home/cornel/repair-j33-rc17/components/dispatcher/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span sbatch = "/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 665 10 665 11
+let%span sbatch'0 = "/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 663 11 663 51
+let%span sbatch'1 = "/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 664 10 664 63
+let%span sbatch'2 = "/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 671 11 671 100
+let%span sbatch'3 = "/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 672 10 672 46
+let%span sbatch'4 = "/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 358 10 358 11
+let%span sbatch'5 = "/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 360 16 360 92
+let%span sbatch'6 = "/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 673 10 673 11
+let%span sbatch'7 = "/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 675 16 675 63
 
 use seq.Seq
 use int.Int
 
-function count_true [#"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 341 0 341 46] (s: Seq.seq bool) (n: int) : int
+function count_true [#"/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 359 0 359 46] (s: Seq.seq bool) (n: int) : int
 
 axiom count_true_def: forall s: Seq.seq bool, n: int [count_true s n]. count_true s n
     = ([%#sbatch'5] if n <= 0 then 0 else count_true s (n - 1) + (if Seq.get s (n - 1) then 1 else 0))
 
-function count_eq [#"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 656 0 656 51] (a: Seq.seq bool) (b: Seq.seq bool) (n: int) : ()
+function count_eq [#"/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 674 0 674 51] (a: Seq.seq bool) (b: Seq.seq bool) (n: int) : ()
 
 axiom count_eq_def: forall a: Seq.seq bool, b: Seq.seq bool, n: int [count_eq a b n]. ([%#sbatch'2] 0 <= n
       /\ n <= Seq.length a /\ n <= Seq.length b /\ (forall i: int. 0 <= i /\ i < n -> Seq.get a i = Seq.get b i))
@@ -44,7 +44,7 @@ constant q : int
 
 constant n : int
 
-function count_set [#"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 648 0 648 46] (s: Seq.seq bool) (q: int) (n: int) : ()
+function count_set [#"/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 666 0 666 46] (s: Seq.seq bool) (q: int) (n: int) : ()
 
 goal vc_count_set: ([%#sbatch'0] 0 <= q /\ q < n /\ n <= Seq.length s /\ not Seq.get s q)
   -> (if n <= q + 1 then

@@ -533,6 +533,22 @@ VR('DIS-BATCH-LOOKUP-SERVEDBY-SSD-ROUTE', 's: &mut S, entries: &[Be]', BLR, BLQ,
    BL, (0, bl_all('(match result.1.cls[i] { Cls::Cold { .. } => true, _ => false }) && result.0@[i].result == Ok(()) ==> result.0@[i].served_by == ServedBy::Dram')),
    'batch_lookup mirror: an entry classified BlockDevice is attributed SSD (set once at classification) whichever cold sub-path served it - pooled read with promotion, memory-tier-only path, staging post-pass, or concurrent-promotion recovery.' + BLN, assumes=[A_039])
 O('DIS-BATCH-LOOKUP-SINGLE-COLD-POOLED', 'OPEN: bl_cold_prep proves a lone cold key under tier saturation (evict_and_insert AllocationFailed) is queued for the staging post-pass when a drive and the staging pool exist (kind Staged, not a failure); the batch-level "served uncached" outcome needs the staged serve result exposed through batch_lookup, not completed.')
+VA('DIS-BATCH-LOOKUP-TRANSIENT-RETRY', 's: &mut S, entries: &[Be], k: u64',
+   BLQ,
+   '''    let (lr, n) = lookup_retry(s, k);
+    proof_assert!(n@ <= 5);
+    proof_assert!(match lr { Err(_) => has(*s.g, k) && (ent(*s.g, k).wr@ > 0 || ent(*s.g, k).rr@ == u32::MAX@), Ok(_) => true });
+    let (out, bg) = batch_lookup(s, entries);
+    proof_assert!(bg.ready ==> forall<i: Int> 0 <= i && i < entries@.len() ==>
+        ((match bg.cls[i] { Cls::Retry { .. } => true, _ => false }) ==>
+            out@[i].served_by == ServedBy::Error
+            && match out@[i].result { Err(DE::KeyNotFound(_)) => false, _ => true }
+            && (forall<t: Int> 0 <= t && t < bg.rem.nf.len() ==> bg.rem.nf[t]@ != i)));''',
+   '''    let (out, bg) = batch_lookup(s, entries);
+    proof_assert!(bg.ready ==> forall<i: Int> 0 <= i && i < entries@.len() ==>
+        ((match bg.cls[i] { Cls::Retry { .. } => true, _ => false }) ==>
+            match out@[i].result { Err(DE::KeyNotFound(_)) => true, _ => false }));''',
+   'lookup_retry + batch_lookup mirrors: a dispatch-map lookup error means a writer holds the entry (dm.lookup Err => the key exists with write_ref > 0, or a saturated read count), so the classification retries the lookup at most five more times (ghost retry count <= 5) and, when every retry fails, reports the map\'s own error - Timeout as DE::Timeout, anything else as Io(Dm) - with attribution Error. Such an entry is never reported KeyNotFound (so never attributed Miss) and never forwarded to remote lookup (every forwarded position is classified Miss). The direction "a writer that settles within the budget is then served warm" needs a racing-lookup oracle (the mirror\'s dm_lookup is deterministic: a held write_ref never clears inside one call) and is covered by the repair test repair_test_transient_map_error.rs.' + BLN, assumes=[A_039])
 VR('DIS-BATCH-LOOKUP-TOUCH-WARM', 's: &mut S, entries: &[Be]', BLR, BLQ,
    ['result.1.ready && (exists<i: Int> 0 <= i && i < entries@.len() && is_warm(result.1.cls[i])) ==> %s.log.len() <= result.1.touch_at && result.1.touch_at < result.1.cold_from && %s.log[result.1.touch_at] == Ev::MtBatchTouch' % (G, F)],
    BL, (0, 'result.1.ready ==> result.1.touch_at > result.1.cold_from'),

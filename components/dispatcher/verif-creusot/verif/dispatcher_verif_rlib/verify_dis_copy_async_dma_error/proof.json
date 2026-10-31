@@ -5,7 +5,7 @@
       "vc_copy_gpu_to_memory_async": { "prover": "alt-ergo", "time": 0.025 },
       "vc_verify_dis_copy_async_dma_error": {
         "prover": "alt-ergo",
-        "time": 0.049
+        "time": 0.066
       }
     }
   }

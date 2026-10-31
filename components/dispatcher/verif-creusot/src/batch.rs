@@ -37,8 +37,13 @@ pub fn total_u32(r: &Vec<Ipc>) -> u32 {
 /// How the classification pass disposed of entry i (ghost).
 #[derive(::core::clone::Clone, ::core::marker::Copy)]
 pub enum Cls {
-    /// NotExist, or a dispatch-map lookup error after the retries: KeyNotFound
+    /// NotExist: KeyNotFound (a miss, eligible for remote forwarding)
     Miss,
+    /// A dispatch-map lookup error that survived the retries: the entry is live
+    /// (a writer holds it), so the map's own error is reported — Timeout maps
+    /// to DE::Timeout, anything else to Io(Dm) — never KeyNotFound, and the
+    /// entry is never forwarded to remote lookup (FR-039 step 1).
+    Retry { e: DmE },
     /// MemoryTier hit: H2D queued (not synchronized), pin adopted
     Warm { ptr: u64, size: u32 },
     /// BlockDevice: pin released, queued for the cold path
@@ -74,17 +79,20 @@ pub fn is_kn(r: Res) -> bool {
     pearlite! { match r { Some(Err(DE::KeyNotFound(_))) => true, _ => false } }
 }
 
-/// Retry wrapper (lib.rs:2377-2386): up to LOOKUP_RETRIES = 5 extra lookups while Err. In a
-/// single-threaded run the dispatch map answers the same way each time.
+/// Retry wrapper (lib.rs:2377-2386): up to LOOKUP_RETRIES = 5 extra lookups while Err, then the
+/// map's own error is returned — never a synthesized KeyNotFound. In a single-threaded run the
+/// dispatch map answers the same way each time. The second component is the retry count (ghost:
+/// how many extra lookups the retries issued, at most LOOKUP_RETRIES).
 #[ensures((^s).p == s.p)]
-#[ensures(match result {
+#[ensures(result.1@ <= 5)]
+#[ensures(match result.0 {
     Ok(Lr::NotExist) => !has(*s.g, k) && *(^s).g == *s.g,
     Ok(Lr::Mismatch) => false,
     Ok(r) => has(*s.g, k) && ent(*s.g, k).wr@ == 0 && ent(*s.g, k).rr@ < u32::MAX@ && r == lr_of(ent(*s.g, k).loc)
              && ent_rr(*s.g, *(^s).g, k, 1) && only_dm(*s.g, *(^s).g),
     Err(_) => has(*s.g, k) && (ent(*s.g, k).wr@ > 0 || ent(*s.g, k).rr@ == u32::MAX@) && *(^s).g == *s.g,
 })]
-pub fn lookup_retry(s: &mut S, k: u64) -> Result<Lr, DmE> {
+pub fn lookup_retry(s: &mut S, k: u64) -> (Result<Lr, DmE>, Snapshot<u32>) {
     let g0 = snapshot!(*s.g);
     let p0 = snapshot!(s.p);
     let mut lk = dm_lookup(s, k);
@@ -99,7 +107,7 @@ pub fn lookup_retry(s: &mut S, k: u64) -> Result<Lr, DmE> {
         retries += 1;
         lk = dm_lookup(s, k);
     }
-    lk
+    (lk, snapshot!(retries))
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +132,9 @@ pub struct ClsG {
         && ent(*(^s).g, k).rr@ == ent(*s.g, k).rr@ + count_k(result.0.warm_keys@, k)))]
 #[ensures(forall<i: Int> 0 <= i && i < entries@.len() ==> match result.1.cls[i] {
     Cls::Miss => result.0.results@[i] == Some(Err(DE::KeyNotFound(entries@[i].key))) && result.0.tier@[i] == None,
+    Cls::Retry { e } => has(*s.g, entries@[i].key)
+                 && result.0.results@[i] == Some(Err(match e { DmE::Timeout => DE::Timeout, _ => DE::Io(IoK::Dm) }))
+                 && result.0.tier@[i] == None,
     Cls::Warm { ptr, size } => has(*s.g, entries@[i].key) && ent(*s.g, entries@[i].key).loc == Loc::Mem { ptr, size, ssd: ssd_of(ent(*s.g, entries@[i].key).loc) }
                  && result.0.tier@[i] == Some(ServedBy::Dram)
                  && (match result.0.results@[i] { Some(Ok(())) => result.1.sv[i].gpu_ok, Some(Err(DE::Io(_))) => !result.1.sv[i].gpu_ok, _ => false })
@@ -161,6 +172,8 @@ pub fn bl_classify(s: &mut S, entries: &[Be], warm_raw: u64) -> (Bl, Snapshot<Cl
             && ent(*s.g, k).rr@ == ent(*g0, k).rr@ + count_k(warm_keys@, k)))]
     #[invariant(forall<j: Int> 0 <= j && j < i@ ==> match cls[j] {
         Cls::Miss => results@[j] == Some(Err(DE::KeyNotFound(entries@[j].key))) && tier@[j] == None,
+        Cls::Retry { e } => has(*g0, entries@[j].key)
+                     && results@[j] == Some(Err(match e { DmE::Timeout => DE::Timeout, _ => DE::Io(IoK::Dm) })) && tier@[j] == None,
         Cls::Warm { ptr, size } => has(*g0, entries@[j].key) && ent(*g0, entries@[j].key).loc == Loc::Mem { ptr, size, ssd: ssd_of(ent(*g0, entries@[j].key).loc) }
                      && tier@[j] == Some(ServedBy::Dram)
                      && (match results@[j] { Some(Ok(())) => svs[j].gpu_ok, Some(Err(DE::Io(_))) => !svs[j].gpu_ok, _ => false })
@@ -182,7 +195,7 @@ pub fn bl_classify(s: &mut S, entries: &[Be], warm_raw: u64) -> (Bl, Snapshot<Cl
         let total_size = total_u32(&entries[i].regions);
         let gi = snapshot!(*s.g);
         let dsv = snapshot!(ServeG { base: 0, m: 0, gpu_ok: false });
-        match lookup_retry(s, key) {
+        match lookup_retry(s, key).0 {
             Ok(Lr::NotExist) => {
                 results.push(Some(Err(DE::KeyNotFound(key))));
                 tier.push(None);
@@ -219,10 +232,15 @@ pub fn bl_classify(s: &mut S, entries: &[Be], warm_raw: u64) -> (Bl, Snapshot<Cl
                 cls = snapshot!(cls.push_back(Cls::Cold { off }));
                 svs = snapshot!(svs.push_back(*dsv));
             }
-            Err(_) => {
-                results.push(Some(Err(DE::KeyNotFound(key))));
+            Err(e) => {
+                // Every retry timed out behind a writer: the key is live, so the
+                // map's own error is what this entry reports — never KeyNotFound
+                // (FR-039 step 1), which would attribute it a Miss and forward
+                // it to remote lookup.
+                let de = match e { DmE::Timeout => DE::Timeout, _ => DE::Io(IoK::Dm) };
+                results.push(Some(Err(de)));
                 tier.push(None);
-                cls = snapshot!(cls.push_back(Cls::Miss));
+                cls = snapshot!(cls.push_back(Cls::Retry { e }));
                 svs = snapshot!(svs.push_back(*dsv));
                 cpos = snapshot!(cpos.push_back(0));
             }
@@ -1084,6 +1102,9 @@ pub fn first_addr(entries: &[Be]) -> u64 {
         && (is_warm(result.1.cls[i]) ==> result.1.tier[i] == Some(ServedBy::Dram))
         && ((match result.1.cls[i] { Cls::Cold { .. } => true, _ => false }) ==> result.1.tier[i] == Some(ServedBy::Ssd))
         && (result.1.tier[i] == Some(ServedBy::Remote) ==> result.1.cls[i] == Cls::Miss)
+        && ((match result.1.cls[i] { Cls::Retry { .. } => true, _ => false }) ==> result.1.tier[i] == None
+            && match result.0@[i].result { Err(DE::Timeout) => true, Err(DE::Io(IoK::Dm)) => true, _ => false })
+        && (match result.1.cls[i] { Cls::Retry { e } => match e { DmE::Timeout => result.0@[i].result == Err(DE::Timeout), _ => result.0@[i].result == Err(DE::Io(IoK::Dm)) }, _ => true })
         && (match result.0@[i].result { Err(DE::AlreadyExists(_)) => false, _ => true })))]
 #[ensures(result.1.ready ==> (*(^s).g).c.promo_gpu == (*s.g).c.promo_gpu + count_ok(result.0@, entries@.len())
     && (*(^s).g).c.hit_dram == (*s.g).c.hit_dram + count_sb(result.0@, entries@.len(), ServedBy::Dram)

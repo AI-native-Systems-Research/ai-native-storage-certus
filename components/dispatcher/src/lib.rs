@@ -2632,6 +2632,13 @@ impl IDispatcher for DispatcherComponent {
             // loads no longer take the no-staging inline fast path). This guards
             // the one remaining fatal classification — Err(Timeout) misread as
             // KeyNotFound — should lock contention ever widen that window.
+            //
+            // And when every retry DOES time out, the map's own error is what
+            // this entry reports (FR-039 step 1): the key is live — held by a
+            // writer — so an exhausted retry is a `Timeout` to surface (as
+            // `check` does, FR-008), never a `KeyNotFound`, which would both
+            // attribute the live key a Miss and forward it to remote lookup
+            // (the remote pass below collects exactly the KeyNotFound results).
             const LOOKUP_RETRIES: u32 = 5;
             let lookup = {
                 let mut lk = dm.lookup(key);
@@ -2706,8 +2713,18 @@ impl IDispatcher for DispatcherComponent {
                         });
                     }
                 },
-                Err(_) => {
-                    results[i] = Some(Err(DispatcherError::KeyNotFound(key)));
+                // Every retry timed out behind a writer (or the read count
+                // overflowed): the key's presence could not be determined,
+                // but the entry is live. That is a wait to report — the
+                // map's own error, never an absent key (see the comment
+                // above the retry loop).
+                Err(interfaces::DispatchMapError::Timeout(k)) => {
+                    results[i] = Some(Err(DispatcherError::Timeout(format!(
+                        "timeout waiting on key: {k}"
+                    ))));
+                }
+                Err(other) => {
+                    results[i] = Some(Err(DispatcherError::IoError(other.to_string())));
                 }
             }
         }
@@ -8705,3 +8722,5 @@ mod repair_test_failed_initialize_changes_config;
 mod repair_test_register_host_memory;
 #[path = "repair_test_rw_stats_after_shutdown.rs"]
 mod repair_test_rw_stats_after_shutdown;
+#[path = "repair_test_transient_map_error.rs"]
+mod repair_test_transient_map_error;

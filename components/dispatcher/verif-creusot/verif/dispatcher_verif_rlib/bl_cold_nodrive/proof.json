@@ -6,18 +6,18 @@
         "tactic": "compute_specified",
         "children": [ { "prover": "z3", "time": 7.6 } ]
       },
-      "vc_dm_promote": { "prover": "alt-ergo", "time": 0.032 },
-      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.035 },
-      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.035 },
-      "vc_evict_for_space": { "prover": "alt-ergo", "time": 0.035 },
-      "vc_index_Vec_ColdE_Global": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_dm_promote": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_evict_for_space": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_index_Vec_ColdE_Global": { "prover": "alt-ergo", "time": 0.02 },
       "vc_index_mut_Vec_Option_Result_unit_DE_Global": {
         "prover": "alt-ergo",
-        "time": 0.034
+        "time": 0.023
       },
-      "vc_len_ColdE": { "prover": "alt-ergo", "time": 0.032 },
-      "vc_mt_insert": { "prover": "alt-ergo", "time": 0.035 },
-      "vc_rec_promotion_to_memory": { "prover": "alt-ergo", "time": 0.032 }
+      "vc_len_ColdE": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_mt_insert": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_rec_promotion_to_memory": { "prover": "alt-ergo", "time": 0.018 }
     }
   }
 }

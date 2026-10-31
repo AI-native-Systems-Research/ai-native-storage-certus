@@ -5,7 +5,7 @@
       "vc_ssd_evictor_pass": { "prover": "alt-ergo", "time": 0.023 },
       "vc_verify_dis_inv_ssd_evictor_skips_memory_tier": {
         "prover": "alt-ergo",
-        "time": 0.053
+        "time": 0.052
       }
     }
   }

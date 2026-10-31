@@ -1,7 +1,7 @@
-(* #"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/bg.rs" 251 0 251 41 *)
+(* #"/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/bg.rs" 251 0 251 41 *)
 
-let%span swell_founded = "/home/cornel/repair-j33-rc22/components/dispatcher/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
-let%span sbg = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/bg.rs" 250 10 250 11
+let%span swell_founded = "/home/cornel/repair-j33-rc17/components/dispatcher/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span sbg = "/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/bg.rs" 250 10 250 11
 
 use creusot.int.UInt64
 use seq.Seq
@@ -20,6 +20,6 @@ constant s : Seq.seq UInt64.t
 
 constant n : int
 
-function qsum [#"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/bg.rs" 251 0 251 41] (s: Seq.seq UInt64.t) (n: int) : int
+function qsum [#"/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/bg.rs" 251 0 251 41] (s: Seq.seq UInt64.t) (n: int) : int
 
 goal vc_qsum: if n <= 0 then true else [@expl:variant decreases] well_founded_relation_Int ([%#sbg] n) ([%#sbg] n - 1)

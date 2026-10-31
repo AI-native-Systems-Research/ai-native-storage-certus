@@ -1186,6 +1186,29 @@ pub fn verify_dis_batch_lookup_servedby_ssd_route__mutant(s: &mut S, entries: &[
 
 #[requires(pinv(s.p))]
 #[requires(a_fr039(entries@))]
+pub fn verify_dis_batch_lookup_transient_retry(s: &mut S, entries: &[Be], k: u64) {
+    let (lr, n) = lookup_retry(s, k);
+    proof_assert!(n@ <= 5);
+    proof_assert!(match lr { Err(_) => has(*s.g, k) && (ent(*s.g, k).wr@ > 0 || ent(*s.g, k).rr@ == u32::MAX@), Ok(_) => true });
+    let (out, bg) = batch_lookup(s, entries);
+    proof_assert!(bg.ready ==> forall<i: Int> 0 <= i && i < entries@.len() ==>
+        ((match bg.cls[i] { Cls::Retry { .. } => true, _ => false }) ==>
+            out@[i].served_by == ServedBy::Error
+            && match out@[i].result { Err(DE::KeyNotFound(_)) => false, _ => true }
+            && (forall<t: Int> 0 <= t && t < bg.rem.nf.len() ==> bg.rem.nf[t]@ != i)));
+}
+
+#[requires(pinv(s.p))]
+#[requires(a_fr039(entries@))]
+pub fn verify_dis_batch_lookup_transient_retry__mutant(s: &mut S, entries: &[Be], k: u64) {
+    let (out, bg) = batch_lookup(s, entries);
+    proof_assert!(bg.ready ==> forall<i: Int> 0 <= i && i < entries@.len() ==>
+        ((match bg.cls[i] { Cls::Retry { .. } => true, _ => false }) ==>
+            match out@[i].result { Err(DE::KeyNotFound(_)) => true, _ => false }));
+}
+
+#[requires(pinv(s.p))]
+#[requires(a_fr039(entries@))]
 #[ensures(result.1.ready && (exists<i: Int> 0 <= i && i < entries@.len() && is_warm(result.1.cls[i])) ==> (*s.g).log.len() <= result.1.touch_at && result.1.touch_at < result.1.cold_from && (*(^s).g).log[result.1.touch_at] == Ev::MtBatchTouch)]
 pub fn verify_dis_batch_lookup_touch_warm(s: &mut S, entries: &[Be]) -> (Vec<Outcome>, Snapshot<BlG>) {
     batch_lookup(s, entries)

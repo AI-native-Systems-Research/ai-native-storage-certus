@@ -1,6 +1,6 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_rec_scan_exhausted": { "prover": "z3", "time": 0.011 } }
+    "Coma": { "vc_rec_scan_exhausted": { "prover": "z3", "time": 0.009 } }
   }
 }

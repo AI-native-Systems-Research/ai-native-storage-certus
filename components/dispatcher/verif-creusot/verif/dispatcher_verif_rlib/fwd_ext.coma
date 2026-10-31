@@ -1,9 +1,9 @@
-(* #"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 1222 0 1222 59 *)
+(* #"/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 1243 0 1243 59 *)
 
-let%span score = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/core.rs" 423 16 423 111
-let%span sbatch = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 1220 11 1220 85
-let%span sbatch'0 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 1221 10 1221 37
-let%span sbatch'1 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 995 16 996 98
+let%span score = "/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/core.rs" 423 16 423 111
+let%span sbatch = "/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 1241 11 1241 85
+let%span sbatch'0 = "/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 1242 10 1242 37
+let%span sbatch'1 = "/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 1013 16 1014 98
 
 use creusot.int.UInt64
 use creusot.int.UInt32
@@ -95,7 +95,7 @@ type t_W = {
   cfree: Map.map int int;
   wf: Map.map UInt64.t bool }
 
-predicate fwd_logged [#"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 994 0 994 58] (a: t_W) (b: t_W) (key'1: UInt64.t) (size'1: int) =
+predicate fwd_logged [#"/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 1012 0 1012 58] (a: t_W) (b: t_W) (key'1: UInt64.t) (size'1: int) =
   [%#sbatch'1] exists i: int. Seq.length a.log <= i
     /\ i < Seq.length b.log
     /\ match Seq.get b.log i with
@@ -103,7 +103,7 @@ predicate fwd_logged [#"/home/cornel/repair-j33-rc22/components/dispatcher/verif
       | _ -> false
       end
 
-predicate log_ext [#"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/core.rs" 422 0 422 34] (a: t_W) (b: t_W) =
+predicate log_ext [#"/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/core.rs" 422 0 422 34] (a: t_W) (b: t_W) =
   [%#score] Seq.length a.log <= Seq.length b.log
   /\ (forall i: int. 0 <= i /\ i < Seq.length a.log -> Seq.get b.log i = Seq.get a.log i)
 
@@ -123,7 +123,7 @@ constant key'1 : UInt64.t
 
 constant size'1 : int
 
-function fwd_ext [#"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 1222 0 1222 59] (g: t_W) (a: t_W) (b: t_W) (c'0: t_W) (key'1: UInt64.t) (size'1: int) : ()
+function fwd_ext [#"/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 1243 0 1243 59] (g: t_W) (a: t_W) (b: t_W) (c'0: t_W) (key'1: UInt64.t) (size'1: int) : ()
 
 goal vc_fwd_ext: ([%#sbatch] fwd_logged a b key'1 size'1 /\ log_ext b c'0 /\ Seq.length g.log <= Seq.length a.log)
   -> ([@stop_split] [@expl:fwd_ext ensures] [%#sbatch'0] fwd_logged g c'0 key'1 size'1)

@@ -5,7 +5,7 @@
       "vc_lookup_async": { "prover": "alt-ergo", "time": 0.025 },
       "vc_verify_dis_lookup_async_miss": {
         "prover": "alt-ergo",
-        "time": 0.098
+        "time": 0.101
       }
     }
   }

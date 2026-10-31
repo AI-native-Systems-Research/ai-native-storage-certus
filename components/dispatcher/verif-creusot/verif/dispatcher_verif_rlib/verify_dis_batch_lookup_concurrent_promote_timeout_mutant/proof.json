@@ -4,7 +4,7 @@
     "Coma": {
       "vc_serve_concurrently_promoted": {
         "prover": "alt-ergo",
-        "time": 0.018
+        "time": 0.023
       },
       "vc_verify_dis_batch_lookup_concurrent_promote_timeout__mutant": null
     }

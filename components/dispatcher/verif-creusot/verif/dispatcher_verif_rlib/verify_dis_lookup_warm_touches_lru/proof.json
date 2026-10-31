@@ -5,7 +5,7 @@
       "vc_lookup_async": { "prover": "alt-ergo", "time": 0.025 },
       "vc_verify_dis_lookup_warm_touches_lru": {
         "prover": "z3",
-        "time": 0.039
+        "time": 0.043
       }
     }
   }

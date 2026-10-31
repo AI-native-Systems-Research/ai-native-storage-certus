@@ -1,14 +1,14 @@
-(* #"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 240 0 240 46 *)
+(* #"/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 258 0 258 46 *)
 
-let%span sbatch = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 239 10 239 82
-let%span sbatch'0 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 257 10 257 17
-let%span sbatch'1 = "/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 259 16 259 130
+let%span sbatch = "/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 257 10 257 82
+let%span sbatch'0 = "/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 275 10 275 17
+let%span sbatch'1 = "/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 277 16 277 130
 
 use creusot.int.UInt64
 use seq.Seq
 use int.Int
 
-function count_k [#"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 258 0 258 42] (s: Seq.seq UInt64.t) (k: UInt64.t) : int
+function count_k [#"/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 276 0 276 42] (s: Seq.seq UInt64.t) (k: UInt64.t) : int
 
 axiom count_k_def: forall s: Seq.seq UInt64.t, k: UInt64.t [count_k s k]. count_k s k
     = ([%#sbatch'1] if Seq.length s = 0 then
@@ -27,7 +27,7 @@ constant x : UInt64.t
 
 constant k : UInt64.t
 
-function count_push [#"/home/cornel/repair-j33-rc22/components/dispatcher/verif-creusot/src/batch.rs" 240 0 240 46] (s: Seq.seq UInt64.t) (x: UInt64.t) (k: UInt64.t) : ()
+function count_push [#"/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 258 0 258 46] (s: Seq.seq UInt64.t) (x: UInt64.t) (k: UInt64.t) : ()
 
 goal vc_count_push: Seq.([..]) (Seq.snoc s x) 0 (Seq.length s) = s
   && ([@stop_split] [@expl:count_push ensures] [%#sbatch] count_k (Seq.snoc s x) k

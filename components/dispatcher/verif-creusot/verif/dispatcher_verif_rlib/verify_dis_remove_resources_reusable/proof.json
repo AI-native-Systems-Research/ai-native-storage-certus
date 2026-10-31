@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_remove": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_remove": { "prover": "alt-ergo", "time": 0.028 },
       "vc_verify_dis_remove_resources_reusable": {
-        "prover": "alt-ergo",
-        "time": 0.137
+        "prover": "z3",
+        "time": 0.021
       }
     }
   }

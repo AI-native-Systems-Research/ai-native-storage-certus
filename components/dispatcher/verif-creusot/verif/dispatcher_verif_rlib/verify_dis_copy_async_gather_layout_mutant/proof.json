@@ -20,7 +20,7 @@
                       null,
                       null,
                       null,
-                      { "prover": "alt-ergo", "time": 0.61 },
+                      { "prover": "alt-ergo", "time": 0.647 },
                       null,
                       null,
                       null,
@@ -39,14 +39,14 @@
                       null,
                       null,
                       null,
+                      { "prover": "alt-ergo", "time": 0.659 },
+                      { "prover": "alt-ergo", "time": 0.679 },
                       { "prover": "alt-ergo", "time": 0.625 },
-                      { "prover": "alt-ergo", "time": 0.689 },
-                      { "prover": "alt-ergo", "time": 0.656 },
-                      { "prover": "alt-ergo", "time": 0.685 },
+                      { "prover": "alt-ergo", "time": 0.632 },
                       null,
                       null,
                       null,
-                      { "prover": "alt-ergo", "time": 0.638 },
+                      { "prover": "alt-ergo", "time": 0.657 },
                       null
                     ]
                   }
