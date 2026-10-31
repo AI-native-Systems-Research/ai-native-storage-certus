@@ -67,6 +67,12 @@ pub const CUDA_IPC_MEM_LAZY_ENABLE_PEER_ACCESS: c_int = 1;
 pub const CUDA_MEMCPY_HOST_TO_DEVICE: c_int = 1;
 pub const CUDA_MEMCPY_DEVICE_TO_HOST: c_int = 2;
 pub const CUDA_MEMCPY_DEVICE_TO_DEVICE: c_int = 3;
+/// `cudaMemcpyDefault`: the runtime infers the direction from the pointers
+/// (unified virtual addressing).
+pub const CUDA_MEMCPY_DEFAULT: c_int = 4;
+/// First runtime whose `cudaMemcpyBatchAsync` has the signature declared below:
+/// CUDA 12.8-12.9 take an extra `failIdx` argument.
+pub const CUDA_MEMCPY_BATCH_MIN_RUNTIME: c_int = 13_000;
 
 /// cudaHostAlloc flags.
 pub const CUDA_HOST_ALLOC_DEFAULT: c_int = 0;
@@ -107,6 +113,7 @@ pub struct cudaMemcpyAttributes {
 
 extern "C" {
     pub fn cudaGetDeviceCount(count: *mut c_int) -> cudaError_t;
+    pub fn cudaRuntimeGetVersion(runtime_version: *mut c_int) -> cudaError_t;
     pub fn cudaGetDeviceProperties(prop: *mut cudaDeviceProp, device: c_int) -> cudaError_t;
     pub fn cudaGetDevice(device: *mut c_int) -> cudaError_t;
     pub fn cudaSetDevice(device: c_int) -> cudaError_t;
