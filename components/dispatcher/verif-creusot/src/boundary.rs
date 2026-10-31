@@ -424,9 +424,12 @@ pub fn gpu_unregister(s: &mut S) {
     unimplemented!()
 }
 
+/// `register_host_memory` on the memory-tier pool: the attempt is always logged
+/// (`Ev::Register`); a failure (the `o1` oracle answering false) is reported as a
+/// warning — `Ev::RegWarn` follows the attempt (FR-034) — and is not fatal.
 #[trusted]
-#[ensures((^s).p == s.p && *(^s).g == lg(nx(*s.g), Ev::Register))]
-#[ensures(result == o1(*s.g))]
+#[ensures((^s).p == s.p && result == o1(*s.g))]
+#[ensures(if o1(*s.g) { *(^s).g == lg(nx(*s.g), Ev::Register) } else { *(^s).g == lg(lg(nx(*s.g), Ev::Register), Ev::RegWarn) })]
 pub fn gpu_register(s: &mut S) -> bool {
     unimplemented!()
 }

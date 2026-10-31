@@ -1,7 +1,7 @@
-(* #"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/core.rs" 471 0 471 36 *)
+(* #"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 474 0 474 36 *)
 
-let%span score = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/core.rs" 470 10 470 17
-let%span swell_founded = "/home/cornel/repair-j33-rc26/components/dispatcher/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span score = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 473 10 473 17
+let%span swell_founded = "/home/cornel/repair-j33-rc29/components/dispatcher/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
 
 use creusot.int.UInt64
 use creusot.int.UInt32
@@ -38,6 +38,7 @@ type t_Ev =
   | DevShutdown UInt64.t
   | DevDetach UInt64.t
   | Register
+  | RegWarn
   | Unregister
   | Join
   | Leave
@@ -60,7 +61,7 @@ constant s : Seq.seq t_Ev
 
 constant e : t_Ev
 
-function cnt [#"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/core.rs" 471 0 471 36] (s: Seq.seq t_Ev) (e: t_Ev) : int
+function cnt [#"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 474 0 474 36] (s: Seq.seq t_Ev) (e: t_Ev) : int
 
 goal vc_cnt: if Seq.length s = 0 then
     true

@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_bd_signal_stop": { "prover": "alt-ergo", "time": 0.013 },
-      "vc_signal_all": { "prover": "alt-ergo", "time": 0.64 }
+      "vc_bd_signal_stop": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_signal_all": { "prover": "alt-ergo", "time": 0.514 }
     }
   }
 }

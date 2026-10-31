@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_remove": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_remove": { "prover": "alt-ergo", "time": 0.029 },
       "vc_verify_dis_remove_resources_reusable__mutant": {
         "tactic": "compute_specified",
         "children": [
@@ -12,12 +12,12 @@
               {
                 "tactic": "split_vc",
                 "children": [
-                  { "prover": "alt-ergo", "time": 0.074 },
-                  { "prover": "alt-ergo", "time": 0.072 },
-                  { "prover": "alt-ergo", "time": 0.075 },
+                  { "prover": "alt-ergo", "time": 0.083 },
+                  { "prover": "alt-ergo", "time": 0.096 },
+                  { "prover": "alt-ergo", "time": 0.09 },
                   null,
-                  { "prover": "alt-ergo", "time": 0.124 },
-                  { "prover": "alt-ergo", "time": 0.124 }
+                  { "prover": "alt-ergo", "time": 0.15 },
+                  { "prover": "alt-ergo", "time": 0.152 }
                 ]
               }
             ]

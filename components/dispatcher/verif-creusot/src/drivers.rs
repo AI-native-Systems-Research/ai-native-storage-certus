@@ -261,6 +261,31 @@ pub fn verify_dis_initialize_joins_cluster__mutant(s: &mut S, cfg: ICfg) -> (Res
     initialize(s, cfg)
 }
 
+/// DIS-INITIALIZE-REGISTER-HOST-MEMORY (FR-034): once the GPU and the memory tier
+/// are ready, `initialize` registers the memory-tier pool with the GPU services
+/// (`Ev::Register`) — in every deployment mode, not only under SPDK — and a
+/// registration failure is reported as a warning (`Ev::RegWarn`, the entry-tick
+/// oracle answering false) rather than failing initialization.
+#[requires(pinv(s.p))]
+#[requires(s.p.has_dm && s.p.has_mt && cfg.n_addrs@ > 0)]
+#[requires(s.p.has_gpu && (*s.g).pool)]
+#[ensures(!(s.p.has_spdk || s.p.has_factory) ==> result.0 == Ok(()))]
+#[ensures(result.0 == Ok(()) ==> logged(*s.g, *(^s).g, Ev::Register))]
+#[ensures(!(s.p.has_spdk || s.p.has_factory) && !(*s.g).ob[(*s.g).tick] ==> logged(*s.g, *(^s).g, Ev::RegWarn))]
+pub fn verify_dis_initialize_register_host_memory(s: &mut S, cfg: ICfg) -> (Result<(), DE>, DFail) {
+    initialize(s, cfg)
+}
+
+#[requires(pinv(s.p))]
+#[requires(s.p.has_dm && s.p.has_mt && cfg.n_addrs@ > 0)]
+#[requires(s.p.has_gpu && (*s.g).pool)]
+#[ensures(!(s.p.has_spdk || s.p.has_factory) ==> result.0 == Ok(()))]
+#[ensures(result.0 == Ok(()) ==> !logged(*s.g, *(^s).g, Ev::Register))]
+#[ensures(!(s.p.has_spdk || s.p.has_factory) && !(*s.g).ob[(*s.g).tick] ==> logged(*s.g, *(^s).g, Ev::RegWarn))]
+pub fn verify_dis_initialize_register_host_memory__mutant(s: &mut S, cfg: ICfg) -> (Result<(), DE>, DFail) {
+    initialize(s, cfg)
+}
+
 #[requires(a_us5_q(s.p, (*s.g).wq))]
 #[requires(s.p.writer)]
 #[ensures((*(^s).g).wq.len() == 0)]

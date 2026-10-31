@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_initialize": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_initialize": { "prover": "alt-ergo", "time": 0.025 },
       "vc_verify_dis_initialize_requires_memory_tier__mutant": {
         "tactic": "compute_specified",
         "children": [
@@ -12,7 +12,7 @@
               { "prover": "alt-ergo", "time": 0.041 },
               {
                 "tactic": "split_vc",
-                "children": [ null, { "prover": "alt-ergo", "time": 0.174 } ]
+                "children": [ null, { "prover": "alt-ergo", "time": 0.162 } ]
               }
             ]
           }

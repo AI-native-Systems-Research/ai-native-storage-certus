@@ -1,13 +1,13 @@
-(* #"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/drivers.rs" 1987 0 1987 99 *)
+(* #"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/drivers.rs" 1996 0 1996 99 *)
 
-let%span score = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/core.rs" 607 16 607 102
-let%span score'0 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/core.rs" 301 16 301 50
-let%span smethods = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/methods.rs" 424 11 424 20
-let%span smethods'0 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/methods.rs" 425 10 425 23
-let%span smethods'1 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/methods.rs" 426 10 426 85
-let%span smethods'2 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/methods.rs" 427 10 429 120
-let%span sdrivers = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/drivers.rs" 1988 4 1988 40
-let%span sdrivers'0 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/drivers.rs" 1986 10 1986 64
+let%span score = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 610 16 610 102
+let%span score'0 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 304 16 304 50
+let%span smethods = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/methods.rs" 424 11 424 20
+let%span smethods'0 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/methods.rs" 425 10 425 23
+let%span smethods'1 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/methods.rs" 426 10 426 85
+let%span smethods'2 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/methods.rs" 427 10 429 120
+let%span sdrivers = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/drivers.rs" 1997 4 1997 40
+let%span sdrivers'0 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/drivers.rs" 1995 10 1995 64
 
 use creusot.prelude.MutBorrow
 use creusot.int.UInt64
@@ -87,6 +87,7 @@ type t_Ev =
   | DevShutdown UInt64.t
   | DevDetach UInt64.t
   | Register
+  | RegWarn
   | Unregister
   | Join
   | Leave
@@ -142,10 +143,10 @@ type t_DE = NotInit t_Ni | InvalidParam | KeyNotFound UInt64.t | AlreadyExists U
 
 type t_Result_unit_DE = Ok () | Err t_DE
 
-predicate pinv [#"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/core.rs" 606 0 606 25] (p'0: t_P) =
+predicate pinv [#"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 609 0 609 25] (p'0: t_P) =
   [%#score] (p'0.init -> p'0.has_dm /\ p'0.has_mt /\ p'0.writer) /\ (not p'0.init -> not p'0.ssd_ev /\ not p'0.mt_ev)
 
-function lg [#"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/core.rs" 300 0 300 27] (w: t_W) (e: t_Ev) : t_W
+function lg [#"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 303 0 303 27] (w: t_W) (e: t_Ev) : t_W
  = [%#score'0] { dm = w.dm;
                  mt = w.mt;
                  used = w.used;
@@ -168,7 +169,7 @@ function lg [#"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/
                  cfree = w.cfree;
                  wf = w.wf }
 
-function di [#"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/core.rs" 624 0 624 36] (k: UInt64.t) (n: UInt64.t) : UInt64.t
+function di [#"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 627 0 627 36] (k: UInt64.t) (n: UInt64.t) : UInt64.t
 
 let schedule_write_through (s: MutBorrow.t t_S) (key'1: UInt64.t) (size'1: UInt32.t) (return (x: t_Result_unit_DE)) =
 {[@stop_split] [@expl:schedule_write_through requires] [%#smethods] pinv s.current.p}
@@ -224,7 +225,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let verify_dis_schedule_wt_failure_keeps_entry [#"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/drivers.rs" 1987 0 1987 99]
+let verify_dis_schedule_wt_failure_keeps_entry [#"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/drivers.rs" 1996 0 1996 99]
   (s: MutBorrow.t t_S) (key'1: UInt64.t) (size'1: UInt32.t) (return (x: t_Result_unit_DE)) = (! bb0
   [ bb0 = s0
     [ s0 = MutBorrow.borrow_final <t_S> {s.current} {MutBorrow.get_id s}

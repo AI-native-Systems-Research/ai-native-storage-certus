@@ -1,6 +1,6 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_scatter_ok_ext": { "prover": "alt-ergo", "time": 0.134 } }
+    "Coma": { "vc_scatter_ok_ext": { "prover": "alt-ergo", "time": 0.185 } }
   }
 }

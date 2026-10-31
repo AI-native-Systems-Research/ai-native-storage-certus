@@ -2130,7 +2130,7 @@ impl IDispatcher for DispatcherComponent {
                 ));
             }
 
-            // Pre-allocate pipeline ring and register memory with SPDK.
+            // Pre-allocate the pipeline ring's SPDK DMA buffers.
             // Only when SPDK is available — spdk_mem_register segfaults otherwise.
             if let Ok(gpu) = self.gpu_services.get() {
                 // Dedicated CUDA stream for warm-path DMA (avoids pipeline_ring lock).
@@ -2173,27 +2173,31 @@ impl IDispatcher for DispatcherComponent {
                             ));
                         }
                     }
+                }
+            }
+        }
 
-                    // Register memory-tier pool as CUDA-pinned + SPDK DMA-capable
-                    // for zero-copy NVMe reads and async GPU transfers.
-                    if let Ok(mt) = self.memory_tier.get() {
-                        if let Some((pool_ptr, pool_size)) = mt.pool_info() {
-                            match gpu
-                                .register_host_memory(pool_ptr as *mut std::ffi::c_void, pool_size)
-                            {
-                                Ok(()) => {
-                                    self.log_info(&format!(
-                                        "dispatcher: registered memory-tier pool ({} MiB) for zero-copy DMA",
-                                        pool_size / (1024 * 1024)
-                                    ));
-                                }
-                                Err(e) => {
-                                    self.log_info(&format!(
-                                        "memory-tier pool registration failed (non-fatal): {e}"
-                                    ));
-                                }
-                            }
-                        }
+        // Register the memory-tier pool with the GPU services as CUDA-pinned +
+        // SPDK DMA-capable for zero-copy NVMe reads and async GPU transfers
+        // (FR-034). This runs whenever the GPU and the memory tier are ready —
+        // not only when an SPDK environment is connected: factory-mode and
+        // memory-tier-only deployments have a GPU and a pool too. A failure is
+        // a warning, never an initialization failure (the DRAM path does not
+        // need the pinning; the zero-copy pipelines do). Mirrors `shutdown`'s
+        // unregister, which FR-035 gates the same way.
+        if let (Ok(gpu), Ok(mt)) = (self.gpu_services.get(), self.memory_tier.get()) {
+            if let Some((pool_ptr, pool_size)) = mt.pool_info() {
+                match gpu.register_host_memory(pool_ptr as *mut std::ffi::c_void, pool_size) {
+                    Ok(()) => {
+                        self.log_info(&format!(
+                            "dispatcher: registered memory-tier pool ({} MiB) for zero-copy DMA",
+                            pool_size / (1024 * 1024)
+                        ));
+                    }
+                    Err(e) => {
+                        self.log_warn(&format!(
+                            "dispatcher: memory-tier pool registration failed (non-fatal): {e}"
+                        ));
                     }
                 }
             }
@@ -8627,3 +8631,5 @@ mod repair_test_check_present_map_timeout;
 #[cfg(test)]
 #[path = "repair_test_failed_initialize_changes_config.rs"]
 mod repair_test_failed_initialize_changes_config;
+#[path = "repair_test_register_host_memory.rs"]
+mod repair_test_register_host_memory;

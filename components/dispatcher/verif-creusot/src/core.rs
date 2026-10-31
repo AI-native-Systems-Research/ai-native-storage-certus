@@ -188,6 +188,9 @@ pub enum Ev {
     DevShutdown { drive: usize },
     DevDetach { drive: usize },
     Register,
+    /// `log_warn` of a failed memory-tier pool registration (FR-034: the failure is a
+    /// warning, never an initialization failure).
+    RegWarn,
     Unregister,
     Join,
     Leave,

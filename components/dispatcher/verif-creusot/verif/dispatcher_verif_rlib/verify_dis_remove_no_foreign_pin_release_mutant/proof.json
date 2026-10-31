@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_remove": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_remove": { "prover": "alt-ergo", "time": 0.029 },
       "vc_verify_dis_remove_no_foreign_pin_release__mutant": null
     }
   }

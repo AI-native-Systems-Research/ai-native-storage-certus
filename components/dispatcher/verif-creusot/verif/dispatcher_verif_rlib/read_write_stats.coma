@@ -1,21 +1,21 @@
-(* #"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/misc.rs" 293 0 293 41 *)
+(* #"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/misc.rs" 293 0 293 41 *)
 
-let%span score = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/core.rs" 660 10 660 11
-let%span score'0 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/core.rs" 662 16 662 68
-let%span score'1 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/core.rs" 511 10 511 52
-let%span smapping = "/home/cornel/repair-j33-rc26/components/dispatcher/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
-let%span sboundary = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/boundary.rs" 558 10 558 73
-let%span smisc = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/misc.rs" 294 23 294 24
-let%span smisc'0 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/misc.rs" 295 23 295 24
-let%span smisc'1 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/misc.rs" 296 23 296 27
-let%span smisc'2 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/misc.rs" 297 23 297 26
-let%span smisc'3 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/misc.rs" 298 16 298 86
-let%span smisc'4 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/misc.rs" 300 16 300 33
-let%span smisc'5 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/misc.rs" 301 14 301 28
-let%span smisc'6 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/misc.rs" 302 13 302 14
-let%span smisc'7 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/misc.rs" 302 8 302 14
-let%span smisc'8 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/misc.rs" 291 10 291 42
-let%span smisc'9 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/misc.rs" 292 10 292 46
+let%span score = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 663 10 663 11
+let%span score'0 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 665 16 665 68
+let%span score'1 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 514 10 514 52
+let%span smapping = "/home/cornel/repair-j33-rc29/components/dispatcher/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
+let%span sboundary = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/boundary.rs" 561 10 561 73
+let%span smisc = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/misc.rs" 294 23 294 24
+let%span smisc'0 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/misc.rs" 295 23 295 24
+let%span smisc'1 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/misc.rs" 296 23 296 27
+let%span smisc'2 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/misc.rs" 297 23 297 26
+let%span smisc'3 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/misc.rs" 298 16 298 86
+let%span smisc'4 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/misc.rs" 300 16 300 33
+let%span smisc'5 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/misc.rs" 301 14 301 28
+let%span smisc'6 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/misc.rs" 302 13 302 14
+let%span smisc'7 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/misc.rs" 302 8 302 14
+let%span smisc'8 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/misc.rs" 291 10 291 42
+let%span smisc'9 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/misc.rs" 292 10 292 46
 
 use creusot.int.UInt64
 use creusot.prelude.MutBorrow
@@ -96,6 +96,7 @@ type t_Ev =
   | DevShutdown UInt64.t
   | DevDetach UInt64.t
   | Register
+  | RegWarn
   | Unregister
   | Join
   | Leave
@@ -137,7 +138,7 @@ function index_Mapping_Int_u64 [@inline:trivial] (self: Map.map int UInt64.t) (a
 
 meta "rewrite_def" function index_Mapping_Int_u64
 
-function rwsum [#"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/core.rs" 661 0 661 49] (m: Map.map int UInt64.t) (n: int) : int
+function rwsum [#"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 664 0 664 49] (m: Map.map int UInt64.t) (n: int) : int
 
 axiom rwsum_def: forall m: Map.map int UInt64.t, n: int [rwsum m n]. rwsum m n
     = ([%#score'0] if n <= 0 then 0 else rwsum m (n - 1) + UInt64.t'int (index_Mapping_Int_u64 m (n - 1)))
@@ -163,7 +164,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let read_write_stats [#"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/misc.rs" 293 0 293 41]
+let read_write_stats [#"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/misc.rs" 293 0 293 41]
   (s: MutBorrow.t t_S) (return (x: UInt64.t)) = (! bb0
   [ bb0 = s0
     [ s0 = [ &agg <- [%#smisc] (0: UInt64.t) ] s1

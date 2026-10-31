@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_reserve_memory": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_reserve_memory": { "prover": "alt-ergo", "time": 0.027 },
       "vc_verify_dis_reserve_memory_no_dispatch_entry__mutant": {
         "tactic": "compute_specified",
         "children": [
@@ -11,7 +11,7 @@
             "children": [
               {
                 "tactic": "split_vc",
-                "children": [ null, { "prover": "alt-ergo", "time": 0.109 } ]
+                "children": [ null, { "prover": "alt-ergo", "time": 0.12 } ]
               }
             ]
           }

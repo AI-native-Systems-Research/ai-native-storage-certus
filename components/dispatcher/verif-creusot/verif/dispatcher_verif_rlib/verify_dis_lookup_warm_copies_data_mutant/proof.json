@@ -2,23 +2,23 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lookup_async": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_lookup_async": { "prover": "alt-ergo", "time": 0.027 },
       "vc_verify_dis_lookup_warm_copies_data__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.047 },
+              { "prover": "alt-ergo", "time": 0.049 },
               {
                 "tactic": "split_vc",
                 "children": [
                   {
                     "tactic": "split_vc",
                     "children": [
-                      { "prover": "z3", "time": 0.044 },
+                      { "prover": "z3", "time": 0.042 },
                       null,
-                      { "prover": "z3", "time": 0.037 }
+                      { "prover": "z3", "time": 0.041 }
                     ]
                   },
                   null

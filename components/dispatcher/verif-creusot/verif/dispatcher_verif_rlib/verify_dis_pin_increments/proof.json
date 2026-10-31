@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pin": { "prover": "alt-ergo", "time": 0.019 },
-      "vc_verify_dis_pin_increments": { "prover": "alt-ergo", "time": 0.098 }
+      "vc_pin": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_verify_dis_pin_increments": { "prover": "alt-ergo", "time": 0.132 }
     }
   }
 }

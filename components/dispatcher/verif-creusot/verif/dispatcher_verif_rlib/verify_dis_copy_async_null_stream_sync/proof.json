@@ -4,8 +4,8 @@
     "Coma": {
       "vc_copy_gpu_to_memory_async": { "prover": "alt-ergo", "time": 0.022 },
       "vc_verify_dis_copy_async_null_stream_sync": {
-        "prover": "alt-ergo",
-        "time": 0.181
+        "prover": "z3",
+        "time": 0.027
       }
     }
   }

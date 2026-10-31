@@ -2,12 +2,12 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_p_zero": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_p_zero": { "prover": "alt-ergo", "time": 0.019 },
       "vc_refute_dis_reserve_memory_already_exists": {
         "prover": "alt-ergo",
-        "time": 0.044
+        "time": 0.084
       },
-      "vc_reserve_memory": { "prover": "alt-ergo", "time": 0.03 }
+      "vc_reserve_memory": { "prover": "alt-ergo", "time": 0.055 }
     }
   }
 }

@@ -1,49 +1,49 @@
-(* #"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 211 0 211 64 *)
+(* #"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 211 0 211 64 *)
 
-let%span score = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/core.rs" 504 10 504 54
-let%span svec = "/home/cornel/repair-j33-rc26/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
-let%span svec'0 = "/home/cornel/repair-j33-rc26/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
-let%span svec'1 = "/home/cornel/repair-j33-rc26/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
-let%span svec'2 = "/home/cornel/repair-j33-rc26/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
-let%span svec'3 = "/home/cornel/repair-j33-rc26/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
-let%span svec'4 = "/home/cornel/repair-j33-rc26/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
-let%span sslice = "/home/cornel/repair-j33-rc26/components/dispatcher/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
-let%span sslice'0 = "/home/cornel/repair-j33-rc26/components/dispatcher/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
-let%span slookup = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/lookup.rs" 6 16 6 42
-let%span sbg = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 212 27 212 28
-let%span sbg'0 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 213 23 213 24
-let%span sbg'1 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 215 14 215 24
-let%span sbg'2 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 214 16 214 90
-let%span sbg'3 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 216 32 216 35
-let%span sbg'4 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 216 16 216 36
-let%span sbg'5 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 217 13 217 14
-let%span sbg'6 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 217 8 217 14
-let%span sbg'7 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 219 18 219 103
-let%span sbg'8 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 220 29 220 39
-let%span sbg'9 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 221 23 221 24
-let%span sbg'10 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 225 14 225 24
-let%span sbg'11 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 223 16 224 119
-let%span sbg'12 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 222 16 222 105
-let%span sbg'13 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 227 45 227 48
-let%span sbg'14 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 227 19 227 56
-let%span sbg'15 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 228 20 228 43
-let%span sbg'16 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 229 31 229 32
-let%span sbg'17 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 229 50 229 51
-let%span sbg'18 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 230 35 230 38
-let%span sbg'19 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 230 60 230 63
-let%span sbg'20 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 231 8 231 22
-let%span sbg'21 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 232 13 232 14
-let%span sbg'22 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 232 8 232 14
-let%span sbg'23 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 206 11 206 89
-let%span sbg'24 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 207 10 207 38
-let%span sbg'25 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 208 10 209 155
-let%span sbg'26 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 210 10 210 89
-let%span sbg'27 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 250 10 250 11
-let%span sbg'28 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 252 16 252 67
-let%span sbg'29 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 245 11 245 26
-let%span sbg'30 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 246 10 246 26
-let%span sbg'31 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 247 31 247 33
-let%span sbg'32 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 239 10 239 52
+let%span score = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 507 10 507 54
+let%span svec = "/home/cornel/repair-j33-rc29/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/repair-j33-rc29/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'1 = "/home/cornel/repair-j33-rc29/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'2 = "/home/cornel/repair-j33-rc29/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span svec'3 = "/home/cornel/repair-j33-rc29/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'4 = "/home/cornel/repair-j33-rc29/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span sslice = "/home/cornel/repair-j33-rc29/components/dispatcher/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/repair-j33-rc29/components/dispatcher/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+let%span slookup = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/lookup.rs" 6 16 6 42
+let%span sbg = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 212 27 212 28
+let%span sbg'0 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 213 23 213 24
+let%span sbg'1 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 215 14 215 24
+let%span sbg'2 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 214 16 214 90
+let%span sbg'3 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 216 32 216 35
+let%span sbg'4 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 216 16 216 36
+let%span sbg'5 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 217 13 217 14
+let%span sbg'6 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 217 8 217 14
+let%span sbg'7 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 219 18 219 103
+let%span sbg'8 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 220 29 220 39
+let%span sbg'9 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 221 23 221 24
+let%span sbg'10 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 225 14 225 24
+let%span sbg'11 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 223 16 224 119
+let%span sbg'12 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 222 16 222 105
+let%span sbg'13 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 227 45 227 48
+let%span sbg'14 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 227 19 227 56
+let%span sbg'15 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 228 20 228 43
+let%span sbg'16 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 229 31 229 32
+let%span sbg'17 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 229 50 229 51
+let%span sbg'18 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 230 35 230 38
+let%span sbg'19 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 230 60 230 63
+let%span sbg'20 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 231 8 231 22
+let%span sbg'21 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 232 13 232 14
+let%span sbg'22 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 232 8 232 14
+let%span sbg'23 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 206 11 206 89
+let%span sbg'24 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 207 10 207 38
+let%span sbg'25 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 208 10 209 155
+let%span sbg'26 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 210 10 210 89
+let%span sbg'27 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 250 10 250 11
+let%span sbg'28 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 252 16 252 67
+let%span sbg'29 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 245 11 245 26
+let%span sbg'30 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 246 10 246 26
+let%span sbg'31 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 247 31 247 33
+let%span sbg'32 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 239 10 239 52
 
 use creusot.int.UInt64
 use seq.Seq
@@ -67,7 +67,7 @@ let len_usize (self_: t_Vec_usize_Global) (return (x: UInt64.t)) = any
     = Seq.length (view_Vec_usize_Global self_)}
     (! return {result}) ]
 
-function qsum [#"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 251 0 251 41] (s: Seq.seq UInt64.t) (n: int) : int
+function qsum [#"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 251 0 251 41] (s: Seq.seq UInt64.t) (n: int) : int
 
 axiom qsum_def: forall s: Seq.seq UInt64.t, n: int [qsum s n]. qsum s n
     = ([%#sbg'28] if n <= 0 then 0 else qsum s (n - 1) + UInt64.t'int (Seq.get s (n - 1)))
@@ -95,7 +95,7 @@ let padd (a: UInt64.t) (b: UInt64.t) (return (x: UInt64.t)) = any
     /\ UInt64.t'int result = UInt64.t'int a + UInt64.t'int b}
     (! return {result}) ]
 
-function div_mul [#"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 247 0 247 30] (a: int) (b: int) : ()
+function div_mul [#"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 247 0 247 30] (a: int) (b: int) : ()
  = [%#sbg'31] ()
 
 axiom div_mul_spec: forall a: int, b: int. ([%#sbg'29] b > 0 /\ a >= 0)
@@ -106,7 +106,7 @@ let new_usize (return (x: t_Vec_usize_Global)) = any
   {[@stop_split] [@expl:new ensures] [%#svec'3] Seq.length (view_Vec_usize_Global result) = 0}
     (! return {result}) ]
 
-function min_int [#"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/lookup.rs" 5 0 5 37] (a: int) (b: int) : int
+function min_int [#"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/lookup.rs" 5 0 5 37] (a: int) (b: int) : int
  = [%#slookup] if a <= b then a else b
 
 constant const_MAX'0: UInt64.t = (18446744073709551615: UInt64.t)
@@ -126,7 +126,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let qd_shares [#"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 211 0 211 64]
+let qd_shares [#"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 211 0 211 64]
   (segs: t_Vec_usize_Global) (max_qd: UInt64.t) (return (x: t_Vec_usize_Global)) =
 {[@stop_split] [@expl:qd_shares requires] [%#sbg'23] Seq.length (view_Vec_usize_Global segs) > 0
   /\ (forall d: int. 0 <= d /\ d < Seq.length (view_Vec_usize_Global segs)

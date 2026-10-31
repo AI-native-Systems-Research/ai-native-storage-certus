@@ -177,11 +177,19 @@ pub fn recover_all(s: &mut S, n: usize) {
 #[ensures(s.p.has_dm && s.p.has_mt && cfg.n_addrs@ >= 1 && (s.p.has_spdk || s.p.has_factory) && !cfg.format_on_init && s.p.has_logger
     && all_from((*s.g).ob, (*s.g).tick) && all_from((*s.g).ob2, (*s.g).tick) && (forall<i: Int> i >= (*s.g).tick ==> (*s.g).ov[i]@ >= 3) ==>
     logged(*s.g, *(^s).g, Ev::EmFormat { drive: 0usize }))]
+// FR-034: once the GPU and the memory tier are ready (has_gpu + a pool), the pool is
+// registered with the GPU services — in every deployment mode, not only under SPDK —
+// and a registration failure is a warning (Ev::RegWarn), never an init failure.
+#[ensures(s.p.has_dm && s.p.has_mt && cfg.n_addrs@ > 0 && s.p.has_gpu && (*s.g).pool && result.0 == Ok(())
+    ==> logged(*s.g, *(^s).g, Ev::Register))]
+#[ensures(s.p.has_dm && s.p.has_mt && cfg.n_addrs@ > 0 && s.p.has_gpu && (*s.g).pool && !(s.p.has_spdk || s.p.has_factory)
+    ==> (!(*s.g).ob[(*s.g).tick] ==> logged(*s.g, *(^s).g, Ev::RegWarn)))]
 pub fn initialize(s: &mut S, cfg: ICfg) -> (Result<(), DE>, DFail) {
     let g0 = snapshot!(*s.g);
     let mut gfmt: Snapshot<W> = snapshot!(*s.g);
     let mut grec1: Snapshot<W> = snapshot!(*s.g);
     let mut grec2: Snapshot<W> = snapshot!(*s.g);
+    let mut greg: Snapshot<W> = snapshot!(*s.g);
     if !s.p.has_dm {
         return (Err(DE::NotInit(Ni::DispatchMap)), DFail::None);
     }
@@ -216,13 +224,23 @@ pub fn initialize(s: &mut S, cfg: ICfg) -> (Result<(), DE>, DFail) {
                     s.p.stg = cfg.stg_slots > 0;
                     s.p.stg_bytes = cfg.stg_bytes;
                 }
-                if mt_pool_info(s) {
-                    let _ = gpu_register(s);
-                }
             }
         }
         proof_assert!(forall<i: Int> 0 <= i && i < cfg.n_addrs@ ==> s.g.cfree[i] == g1.cfree[i]);
     }
+    proof_assert!((*s.g).pool == (*g0).pool);
+    // Register the memory-tier pool with the GPU services (FR-034, lib.rs:2192):
+    // gated on the GPU and the memory tier being ready — has_gpu + pool_info —
+    // not on SPDK, so factory-mode and memory-tier-only deployments register too.
+    // A failure is a warning (Ev::RegWarn), never an initialization failure.
+    if s.p.has_gpu && mt_pool_info(s) {
+        let ok = gpu_register(s);
+        proof_assert!(logged(*g0, *s.g, Ev::Register));
+        if !ok {
+            proof_assert!(logged(*g0, *s.g, Ev::RegWarn));
+        }
+    }
+    greg = snapshot!(*s.g);
     // ParallelBackgroundWriter::start(max(nd, 1), ..)
     s.p.writer = true;
     if cfg.ssd_thr_pos {
@@ -246,6 +264,11 @@ pub fn initialize(s: &mut S, cfg: ICfg) -> (Result<(), DE>, DFail) {
     }
     proof_assert!((s.p.has_spdk || s.p.has_factory) && logged(*g0, *gfmt, Ev::EmFormat { drive: 0usize }) ==>
         logged_ext(*g0, *g0, *gfmt, *s.g, Ev::EmFormat { drive: 0usize }) == ());
+    // FR-034: the registration (and, on failure, its warning) happened at `greg`;
+    // the tail of initialize only appends to the log, so both stay logged.
+    proof_assert!(s.p.has_gpu && (*g0).pool ==> logged(*g0, *greg, Ev::Register) && log_ext(*greg, *s.g));
+    proof_assert!(s.p.has_gpu && (*g0).pool && !(s.p.has_spdk || s.p.has_factory) && !(*g0).ob[(*g0).tick]
+        ==> logged(*g0, *greg, Ev::RegWarn));
     proof_assert!((s.p.has_spdk || s.p.has_factory) && !cfg.format_on_init ==> grec1.ext == g0.ext && g0.log.len() <= grec1.log.len() && log_ext(*grec2, *s.g));
     proof_assert!((s.p.has_spdk || s.p.has_factory) && !cfg.format_on_init ==>
         forall<d: Int, e: Int> 0 <= d && d < cfg.n_addrs@ && 0 <= e && e < g0.ext[d].len() ==>

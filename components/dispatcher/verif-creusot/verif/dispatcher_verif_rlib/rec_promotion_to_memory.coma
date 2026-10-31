@@ -1,7 +1,7 @@
-(* #"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/evict.rs" 52 0 52 41 *)
+(* #"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/evict.rs" 52 0 52 41 *)
 
-let%span sevict = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/evict.rs" 53 20 53 84
-let%span sevict'0 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/evict.rs" 51 10 51 108
+let%span sevict = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/evict.rs" 53 20 53 84
+let%span sevict'0 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/evict.rs" 51 10 51 108
 
 use creusot.prelude.MutBorrow
 use creusot.int.UInt64
@@ -82,6 +82,7 @@ type t_Ev =
   | DevShutdown UInt64.t
   | DevDetach UInt64.t
   | Register
+  | RegWarn
   | Unregister
   | Join
   | Leave
@@ -126,7 +127,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let rec_promotion_to_memory [#"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/evict.rs" 52 0 52 41]
+let rec_promotion_to_memory [#"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/evict.rs" 52 0 52 41]
   (s: MutBorrow.t t_S) (return (x: ())) = (! bb0
   [ bb0 = s0
     [ s0 = [ &s <- { s with current = { s.current with g = ([%#sevict] { dm = s.current.g.dm;
