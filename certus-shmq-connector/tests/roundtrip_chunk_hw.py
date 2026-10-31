@@ -181,7 +181,8 @@ def main() -> int:
     if "ssd" in run_cases:
         case("ssd", a.keys, True, starts=(0, bpc - 1))
     if a.pressure and "pressure" in run_cases:
-        case("pressure", a.pressure, False, starts=(0, 1))
+        # A start is inside the first key, so 1 needs keys of 2+ blocks.
+        case("pressure", a.pressure, False, starts=(0, 1) if bpc > 1 else (0,))
     pool.shutdown(wait=True)
     print("RESULT", "PASS" if ok else "FAIL")
     return 0 if ok else 1
