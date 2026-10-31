@@ -2,17 +2,17 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lookup_async": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_lookup_async": { "prover": "alt-ergo", "time": 0.021 },
       "vc_verify_dis_lookup_warm_releases_pin__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.039 },
+              { "prover": "alt-ergo", "time": 0.047 },
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "z3", "time": 0.039 }, null ]
+                "children": [ { "prover": "z3", "time": 0.047 }, null ]
               }
             ]
           }

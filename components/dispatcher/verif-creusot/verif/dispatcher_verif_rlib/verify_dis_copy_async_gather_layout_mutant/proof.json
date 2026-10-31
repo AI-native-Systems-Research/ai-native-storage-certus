@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_copy_gpu_to_memory_async": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_copy_gpu_to_memory_async": { "prover": "alt-ergo", "time": 0.023 },
       "vc_verify_dis_copy_async_gather_layout__mutant": {
         "tactic": "compute_specified",
         "children": [
@@ -20,7 +20,7 @@
                       null,
                       null,
                       null,
-                      { "prover": "alt-ergo", "time": 0.662 },
+                      { "prover": "alt-ergo", "time": 0.678 },
                       null,
                       null,
                       null,
@@ -39,15 +39,14 @@
                       null,
                       null,
                       null,
-                      { "prover": "alt-ergo", "time": 0.654 },
-                      { "prover": "alt-ergo", "time": 0.653 },
-                      { "prover": "alt-ergo", "time": 0.663 },
-                      { "prover": "alt-ergo", "time": 0.506 },
-                      { "prover": "alt-ergo", "time": 0.63 },
+                      { "prover": "alt-ergo", "time": 0.694 },
+                      { "prover": "alt-ergo", "time": 0.706 },
+                      { "prover": "alt-ergo", "time": 0.767 },
+                      { "prover": "alt-ergo", "time": 0.711 },
                       null,
                       null,
                       null,
-                      { "prover": "alt-ergo", "time": 0.682 },
+                      { "prover": "alt-ergo", "time": 0.661 },
                       null
                     ]
                   }

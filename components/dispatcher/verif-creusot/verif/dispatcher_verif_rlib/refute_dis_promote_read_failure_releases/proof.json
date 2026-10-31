@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_p_zero": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_promote_to_memory_tier": { "prover": "alt-ergo", "time": 0.053 },
+      "vc_p_zero": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_promote_to_memory_tier": { "prover": "alt-ergo", "time": 0.04 },
       "vc_refute_dis_promote_read_failure_releases": {
         "prover": "z3",
-        "time": 0.014
+        "time": 0.02
       }
     }
   }

@@ -1,41 +1,19 @@
-(* #"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/drivers.rs" 2016 0 2016 56 *)
+(* #"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/drivers.rs" 1991 0 1991 56 *)
 
-let%span score = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 663 10 663 11
-let%span score'0 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 665 16 665 68
-let%span smapping = "/home/cornel/repair-j33-rc29/components/dispatcher/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
-let%span smisc = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/misc.rs" 291 10 291 42
-let%span smisc'0 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/misc.rs" 292 10 292 46
-let%span sdrivers = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/drivers.rs" 2017 4 2017 23
-let%span sdrivers'0 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/drivers.rs" 2015 10 2015 81
+let%span score = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/core.rs" 690 10 690 37
+let%span score'0 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/core.rs" 691 27 691 29
+let%span smisc = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/misc.rs" 291 10 291 42
+let%span smisc'0 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/misc.rs" 292 10 292 44
+let%span sdrivers = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/drivers.rs" 1992 18 1992 43
+let%span sdrivers'0 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/drivers.rs" 1993 4 1993 23
+let%span sdrivers'1 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/drivers.rs" 1990 10 1990 102
 
-use creusot.prelude.MutBorrow
 use creusot.int.UInt64
 use creusot.int.UInt32
 use seq.Seq
 use map.Map
+use creusot.prelude.MutBorrow
 use creusot.prelude.Any
-use int.Int
-
-type t_P = {
-  init: bool;
-  has_dm: bool;
-  has_mt: bool;
-  has_gpu: bool;
-  has_spdk: bool;
-  has_factory: bool;
-  has_rl: bool;
-  has_logger: bool;
-  max_att: UInt64.t;
-  bp_ms: UInt64.t;
-  nd: UInt64.t;
-  writer: bool;
-  ssd_ev: bool;
-  mt_ev: bool;
-  ring: bool;
-  chunk: UInt64.t;
-  stg: bool;
-  stg_bytes: UInt64.t;
-  warm: UInt64.t }
 
 type t_FMap_u64_Ent
 
@@ -87,7 +65,6 @@ type t_Ev =
   | DevShutdown UInt64.t
   | DevDetach UInt64.t
   | Register
-  | RegWarn
   | Unregister
   | Join
   | Leave
@@ -119,20 +96,39 @@ type t_W = {
   cluster: bool;
   threads: int;
   rw: Map.map int UInt64.t;
+  rw_base: int;
   cfree: Map.map int int;
   wf: Map.map UInt64.t bool }
 
+function rw_total [#"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/core.rs" 677 0 677 36] (w: t_W) (n: int) : int
+
+function rw_total_zero [#"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/core.rs" 691 0 691 26] (w: t_W) : ()
+ = [%#score'0] ()
+
+axiom rw_total_zero_spec: forall w: t_W. [%#score] rw_total w 0 = w.rw_base
+
+type t_P = {
+  init: bool;
+  has_dm: bool;
+  has_mt: bool;
+  has_gpu: bool;
+  has_spdk: bool;
+  has_factory: bool;
+  has_rl: bool;
+  has_logger: bool;
+  max_att: UInt64.t;
+  bp_ms: UInt64.t;
+  nd: UInt64.t;
+  writer: bool;
+  ssd_ev: bool;
+  mt_ev: bool;
+  ring: bool;
+  chunk: UInt64.t;
+  stg: bool;
+  stg_bytes: UInt64.t;
+  warm: UInt64.t }
+
 type t_S = { p: t_P; g: t_W }
-
-function index_Mapping_Int_u64 [@inline:trivial] (self: Map.map int UInt64.t) (a: int) : UInt64.t =
-  [%#smapping] Map.get self a
-
-meta "rewrite_def" function index_Mapping_Int_u64
-
-function rwsum [#"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 664 0 664 49] (m: Map.map int UInt64.t) (n: int) : int
-
-axiom rwsum_def: forall m: Map.map int UInt64.t, n: int [rwsum m n]. rwsum m n
-    = ([%#score'0] if n <= 0 then 0 else rwsum m (n - 1) + UInt64.t'int (index_Mapping_Int_u64 m (n - 1)))
 
 let read_write_stats (s: MutBorrow.t t_S) (return (x: UInt64.t)) = any
   [ return (result: UInt64.t) ->
@@ -140,7 +136,7 @@ let read_write_stats (s: MutBorrow.t t_S) (return (x: UInt64.t)) = any
         = s.current.p
       /\ s.final.g = s.current.g)
     /\ ([@stop_split] [@expl:read_write_stats ensures #1] [%#smisc'0] UInt64.t'int result
-    = rwsum s.current.g.rw (UInt64.t'int s.current.p.nd))}
+    = rw_total s.current.g (UInt64.t'int s.current.p.nd))}
     (! return {result}) ]
 
 predicate resolve_refmut_S [@inline:trivial] (_1: MutBorrow.t t_S) = _1.final = _1.current
@@ -151,17 +147,18 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let verify_dis_read_write_stats_sum [#"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/drivers.rs" 2016 0 2016 56]
+let verify_dis_read_write_stats_sum [#"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/drivers.rs" 1991 0 1991 56]
   (s: MutBorrow.t t_S) (return (x: UInt64.t)) = (! bb0
   [ bb0 = s0
-    [ s0 = MutBorrow.borrow_final <t_S> {s.current} {MutBorrow.get_id s}
-        (fun (_bor: MutBorrow.t t_S) -> [ &_5 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
-    | s1 = read_write_stats [%#sdrivers] {_5} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s2)
-    | s2 = -{resolve_refmut_S s}- s3
-    | s3 = return {_ret} ] ]
-  [ & _ret: UInt64.t = Any.any_l () | & s: MutBorrow.t t_S = s | & _5: MutBorrow.t t_S = Any.any_l () ])
+    [ s0 = {[@expl:assertion] [%#sdrivers] rw_total_zero s.current.g = ()} s1
+    | s1 = MutBorrow.borrow_final <t_S> {s.current} {MutBorrow.get_id s}
+        (fun (_bor: MutBorrow.t t_S) -> [ &_8 <- _bor ] [ &s <- { s with current = _bor.final } ] s2)
+    | s2 = read_write_stats [%#sdrivers'0] {_8} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s3)
+    | s3 = -{resolve_refmut_S s}- s4
+    | s4 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l () | & s: MutBorrow.t t_S = s | & _8: MutBorrow.t t_S = Any.any_l () ])
   [ return (result: UInt64.t) ->
-  {[@stop_split] [@expl:verify_dis_read_write_stats_sum ensures] [%#sdrivers'0] UInt64.t'int result
-      = rwsum s.current.g.rw (UInt64.t'int s.current.p.nd)
-    /\ (UInt64.t'int s.current.p.nd = 0 -> UInt64.t'int result = 0)}
+  {[@stop_split] [@expl:verify_dis_read_write_stats_sum ensures] [%#sdrivers'1] UInt64.t'int result
+      = rw_total s.current.g (UInt64.t'int s.current.p.nd)
+    /\ (UInt64.t'int s.current.p.nd = 0 /\ s.current.g.rw_base = 0 -> UInt64.t'int result = 0)}
     (! return {result}) ]

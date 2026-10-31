@@ -37,6 +37,7 @@ pub fn drives_ok(w: W, t: Int) -> bool {
 #[ensures((*(^s).g).dm == (*s.g).dm && (*(^s).g).mt == (*s.g).mt && (*(^s).g).wq == (*s.g).wq && (*(^s).g).pool == (*s.g).pool
     && (*(^s).g).cluster == (*s.g).cluster && (*(^s).g).ob == (*s.g).ob && (*(^s).g).ob2 == (*s.g).ob2 && (*(^s).g).ov == (*s.g).ov
     && (*(^s).g).ext == (*s.g).ext && (*(^s).g).tick >= (*s.g).tick)]
+#[ensures((*(^s).g).rw == (*s.g).rw && (*(^s).g).rw_base == (*s.g).rw_base)]
 #[ensures(match result.0 {
     Ok(()) => s.p.has_logger && result.1 == DFail::None && forall<i: Int> 0 <= i && i < cfg.n_addrs@ ==> (*(^s).g).cfree[i] == 0,
     Err(DE::NotInit(Ni::Logger)) => !s.p.has_logger && result.1 == DFail::None,
@@ -68,7 +69,8 @@ pub fn create_data_drives(s: &mut S, cfg: ICfg) -> (Result<(), DE>, DFail) {
     let mut fmt0: Snapshot<Int> = snapshot!(-1);
     #[invariant(s.p == *p0 && i@ <= cfg.n_addrs@ && log_ext(*g0, *s.g) && same_ctr(g0.c, s.g.c))]
     #[invariant(s.g.dm == g0.dm && s.g.mt == g0.mt && s.g.wq == g0.wq && s.g.pool == g0.pool && s.g.cluster == g0.cluster
-        && s.g.ob == g0.ob && s.g.ob2 == g0.ob2 && s.g.ov == g0.ov && s.g.ext == g0.ext && s.g.tick >= g0.tick)]
+        && s.g.ob == g0.ob && s.g.ob2 == g0.ob2 && s.g.ov == g0.ov && s.g.ext == g0.ext && s.g.tick >= g0.tick
+        && s.g.rw == g0.rw && s.g.rw_base == g0.rw_base)]
     #[invariant(forall<j: Int> 0 <= j && j < i@ ==> s.g.cfree[j] == 0)]
     #[invariant(forall<q: Int> g0.log.len() <= q && q < s.g.log.len() ==> match s.g.log[q] { Ev::EmFormat { .. } => true, Ev::EmInit { .. } => true, _ => false })]
     #[invariant(drives_ok(*g0, g0.tick) ==> drives_ok(*s.g, s.g.tick))]
@@ -184,8 +186,15 @@ pub fn recover_all(s: &mut S, n: usize) {
     ==> logged(*s.g, *(^s).g, Ev::Register))]
 #[ensures(s.p.has_dm && s.p.has_mt && cfg.n_addrs@ > 0 && s.p.has_gpu && (*s.g).pool && !(s.p.has_spdk || s.p.has_factory)
     ==> (!(*s.g).ob[(*s.g).tick] ==> logged(*s.g, *(^s).g, Ev::RegWarn)))]
+// Replacing the drive list folds the outgoing drives' counters into the
+// baseline (absorb_drive_rw_stats), so read_write_stats never decreases
+// across a re-initialize either; on every other path the baseline is untouched.
+#[ensures(match result.0 {
+    Ok(()) => (s.p.has_spdk || s.p.has_factory) ==> (*(^s).g).rw_base == rw_total(*s.g, s.p.nd@),
+    Err(_) => (*(^s).g).rw_base == (*s.g).rw_base })]
 pub fn initialize(s: &mut S, cfg: ICfg) -> (Result<(), DE>, DFail) {
     let g0 = snapshot!(*s.g);
+    let n0 = s.p.nd;
     let mut gfmt: Snapshot<W> = snapshot!(*s.g);
     let mut grec1: Snapshot<W> = snapshot!(*s.g);
     let mut grec2: Snapshot<W> = snapshot!(*s.g);
@@ -207,6 +216,16 @@ pub fn initialize(s: &mut S, cfg: ICfg) -> (Result<(), DE>, DFail) {
         }
         let g1 = snapshot!(*s.g);
         gfmt = g1;
+        // The drive list is about to be replaced: fold the outgoing drives'
+        // counters into the baseline so the aggregate never decreases.
+        absorb_drive_rw_stats(s);
+        // `rw_total` is opaque: connect the fold to the entry state by
+        // congruence on the (rw_base, rw, nd) triple — create_data_drives
+        // preserves rw/rw_base and p.nd is still the entry value here.
+        proof_assert!(rw_total_congr(*g0, *g1, n0@, s.p.nd@) == ());
+        // The fold touches no log entry: state it directly so the EmFormat /
+        // Recover position obligations keep their pre-fix proof shape.
+        proof_assert!(s.g.log == (*g1).log);
         s.p.nd = cfg.n_addrs;
         if !cfg.format_on_init {
             recover_all(s, cfg.n_addrs);

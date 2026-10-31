@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_initialize": { "prover": "alt-ergo", "time": 0.053 },
-      "vc_p_zero": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_initialize": { "prover": "alt-ergo", "time": 0.04 },
+      "vc_p_zero": { "prover": "alt-ergo", "time": 0.019 },
       "vc_refute_dis_initialize_failure_no_config_change": {
         "prover": "alt-ergo",
-        "time": 0.139
+        "time": 0.106
       }
     }
   }

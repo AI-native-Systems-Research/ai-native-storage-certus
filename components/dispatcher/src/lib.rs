@@ -428,6 +428,12 @@ define_component! {
             bg_evictor: Mutex<Option<BackgroundEvictor>>,
             bg_mt_evictor: Mutex<Option<MemoryTierEvictor>>,
             data_drives: RwLock<Vec<DataDrive>>,
+            // Cumulative read/write counters of data drives already torn down
+            // (shutdown) or replaced (re-initialize). `read_write_stats`
+            // starts from this baseline and merges the live drives on top, so
+            // the dispatcher-wide total never decreases over the lifetime of
+            // the component (FR-056 monotonicity). See absorb_drive_rw_stats.
+            rw_stats_baseline: RwLock<interfaces::ReadWriteStats>,
             pipeline_ring: RwLock<Option<pipeline::PipelineRing>>,
             warm_stream: AtomicU64,
             block_device_factory: Mutex<Option<BlockDeviceFactory>>,
@@ -1773,6 +1779,21 @@ impl DispatcherComponent {
         }
     }
 
+    /// Fold the live data drives' read/write counters into
+    /// `rw_stats_baseline`.
+    ///
+    /// Called before the drive list is cleared (`shutdown`) or replaced
+    /// (`initialize`): the baseline is what `read_write_stats` aggregates
+    /// from, so the counters of drives that are about to be dropped stay
+    /// part of the cumulative total and the aggregate never decreases.
+    fn absorb_drive_rw_stats(&self) {
+        let drives = self.data_drives.read();
+        let mut baseline = self.rw_stats_baseline.write();
+        for drive in drives.iter() {
+            baseline.merge_from(&drive.block_dev_iface.read_write_stats());
+        }
+    }
+
     fn create_data_drives(
         &self,
         config: &DispatcherConfig,
@@ -2102,6 +2123,9 @@ impl IDispatcher for DispatcherComponent {
         let has_bd_factory = self.block_device_factory.lock().unwrap().is_some();
         if self.spdk_env.is_connected() || has_bd_factory {
             let drives = self.create_data_drives(&config)?;
+            // Replacing the drive list must not lower the cumulative counters:
+            // fold the outgoing drives' totals into the baseline first.
+            self.absorb_drive_rw_stats();
             *self.data_drives.write() = drives;
 
             // Rebuild dispatch-map from recovered extents when not formatting.
@@ -2369,6 +2393,9 @@ impl IDispatcher for DispatcherComponent {
         // Two-phase block device shutdown: signal all actors to stop first,
         // then join threads. This prevents crashes from SPDK transport teardown
         // invalidating memory that other actors are still actively polling.
+        // The drives are about to be dropped; keep their read/write counters
+        // in the baseline so read_write_stats stays monotonic after shutdown.
+        self.absorb_drive_rw_stats();
         let drives = {
             let mut g = self.data_drives.write();
             std::mem::take(&mut *g)
@@ -4462,7 +4489,10 @@ impl IDispatcher for DispatcherComponent {
         // Aggregate per-direction counters across every data drive. Each drive's
         // block device tracks its own SSD read/write bytes+ops (zeroed unless
         // built with the telemetry feature); sum for the dispatcher-wide total.
-        let mut agg = interfaces::ReadWriteStats::default();
+        // The baseline carries the counters of drives already torn down, so the
+        // cumulative total keeps holding (and never drops below) what the
+        // removed drives had accumulated.
+        let mut agg = self.rw_stats_baseline.read().clone();
         for drive in self.data_drives.read().iter() {
             // merge_from sums every counter and both size histograms.
             agg.merge_from(&drive.block_dev_iface.read_write_stats());
@@ -5585,6 +5615,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -5751,6 +5782,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -5800,6 +5832,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -5822,6 +5855,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -5846,6 +5880,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -5875,6 +5910,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -5905,6 +5941,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -5935,6 +5972,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -5960,6 +5998,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -5985,6 +6024,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -6015,6 +6055,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -6048,6 +6089,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -6072,6 +6114,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -6097,6 +6140,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -6153,6 +6197,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -6188,6 +6233,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -6267,6 +6313,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -7162,6 +7209,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -7199,6 +7247,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -7271,6 +7320,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -7333,6 +7383,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -7433,6 +7484,7 @@ mod tests {
                 Mutex::new(None),
                 Mutex::new(None),
                 RwLock::new(Vec::new()),
+                RwLock::new(interfaces::ReadWriteStats::default()),
                 RwLock::new(None),
                 AtomicU64::new(0),
                 Mutex::new(None),
@@ -7518,6 +7570,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -7575,6 +7628,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -7645,6 +7699,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -8633,3 +8688,5 @@ mod repair_test_check_present_map_timeout;
 mod repair_test_failed_initialize_changes_config;
 #[path = "repair_test_register_host_memory.rs"]
 mod repair_test_register_host_memory;
+#[path = "repair_test_rw_stats_after_shutdown.rs"]
+mod repair_test_rw_stats_after_shutdown;

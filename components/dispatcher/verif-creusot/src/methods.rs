@@ -563,6 +563,7 @@ pub struct ShutPos {
 #[requires(a_us5_q(s.p, (*s.g).wq))]
 #[ensures(result.0 == Ok(()))]
 #[ensures(!(^s).p.init && !(^s).p.writer && !(^s).p.ssd_ev && !(^s).p.mt_ev && (^s).p.nd@ == 0)]
+#[ensures((*(^s).g).rw_base == rw_total(*s.g, s.p.nd@))]
 #[ensures((^s).p.has_dm == s.p.has_dm && (^s).p.has_mt == s.p.has_mt && (^s).p.has_gpu == s.p.has_gpu
           && (^s).p.has_spdk == s.p.has_spdk && (^s).p.has_factory == s.p.has_factory && (^s).p.has_rl == s.p.has_rl
           && (^s).p.has_logger == s.p.has_logger && (^s).p.max_att == s.p.max_att && (^s).p.bp_ms == s.p.bp_ms)]
@@ -615,6 +616,18 @@ pub fn shutdown(s: &mut S) -> (Result<(), DE>, Snapshot<ShutPos>) {
         s.p.stg = false;
     }
     let devs = snapshot!(s.g.log.len());
+    // The drives are about to be dropped: fold their read/write counters into
+    // the baseline first, so `read_write_stats` stays monotonic after shutdown.
+    let gabs = snapshot!(*s.g);
+    absorb_drive_rw_stats(s);
+    // `rw_total` is opaque: connect the fold to the entry state by congruence
+    // on the (rw_base, rw, nd) triple, which drain (same_env),
+    // checkpoint_all / mt_pool_info / gpu_unregister all preserve.
+    proof_assert!(rw_total_congr(*g_in, *gabs, n@, n@) == ());
+    // The fold touches no log entry: state the preservation directly so the
+    // log-position obligations below do not have to re-derive it through the
+    // record update (one more projection link than at the pre-fix model).
+    proof_assert!(s.g.log == (*gabs).log);
     // `std::mem::take(&mut *self.data_drives.write())`
     s.p.nd = 0;
     signal_all(s, n);

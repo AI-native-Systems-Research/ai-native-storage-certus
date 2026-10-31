@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lookup_async": { "prover": "alt-ergo", "time": 0.057 },
-      "vc_p_zero": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_lookup_async": { "prover": "alt-ergo", "time": 0.054 },
+      "vc_p_zero": { "prover": "alt-ergo", "time": 0.017 },
       "vc_refute_dis_inv_eviction_demoted_still_readable": {
         "tactic": "compute_specified",
         "children": [
@@ -13,7 +13,7 @@
               { "prover": "alt-ergo", "time": 0.073 },
               {
                 "tactic": "split_vc",
-                "children": [ { "prover": "z3", "time": 0.058 }, null ]
+                "children": [ { "prover": "z3", "time": 0.046 }, null ]
               },
               null
             ]

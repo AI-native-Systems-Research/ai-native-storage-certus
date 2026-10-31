@@ -26,7 +26,7 @@ pub fn w0() -> W {
         wq: Seq::empty(), log: Seq::empty(), tick: 0,
         ob: |i: Int| true, ob2: |i: Int| true, og: |i: Int| true, os: |i: Int| true,
         ov: |i: Int| 0u64, ok: |i: Int| Seq::empty(), ext: |i: Int| Seq::empty(),
-        pool: false, cluster: false, threads: 0, rw: |i: Int| 0u64, cfree: |i: Int| 0,
+        pool: false, cluster: false, threads: 0, rw: |i: Int| 0u64, rw_base: 0, cfree: |i: Int| 0,
         wf: |k: u64| false,
     } }
 }
@@ -2028,14 +2028,47 @@ pub fn refute_dis_schedule_wt_pin_neutral() {
     proof_assert!(ent(*s.g, 7u64).rr@ == 0);
 }
 
-#[ensures(result@ == rwsum((*s.g).rw, s.p.nd@) && (s.p.nd@ == 0 ==> result@ == 0))]
+#[ensures(result@ == rw_total(*s.g, s.p.nd@) && (s.p.nd@ == 0 && (*s.g).rw_base == 0 ==> result@ == 0))]
 pub fn verify_dis_read_write_stats_sum(s: &mut S) -> u64 {
+    proof_assert!(rw_total_zero(*s.g) == ());
     read_write_stats(s)
 }
 
-#[ensures(result@ == rwsum((*s.g).rw, s.p.nd@) + 1)]
+#[ensures(result@ == rw_total(*s.g, s.p.nd@) + 1)]
 pub fn verify_dis_read_write_stats_sum__mutant(s: &mut S) -> u64 {
+    proof_assert!(rw_total_zero(*s.g) == ());
     read_write_stats(s)
+}
+
+#[requires(a_us5_q(s.p, (*s.g).wq))]
+#[ensures(result.1@ >= result.0@)]
+#[ensures(s.p.nd@ == 0 && (*s.g).rw_base == 0 ==> result.0@ == 0 && result.1@ == 0)]
+pub fn verify_dis_read_write_stats_monotonic(s: &mut S) -> (u64, u64) {
+    let a = read_write_stats(s);
+    let b = read_write_stats(s);
+    let (_r, _p) = shutdown(s);
+    proof_assert!(rw_total_zero(*s.g) == ());
+    let c = read_write_stats(s);
+    let d = read_write_stats(s);
+    proof_assert!(b@ >= a@);
+    proof_assert!(c@ >= b@);
+    proof_assert!(d@ >= c@);
+    (a, d)
+}
+
+#[requires(a_us5_q(s.p, (*s.g).wq))]
+#[ensures(result.1@ > result.0@)]
+pub fn verify_dis_read_write_stats_monotonic__mutant(s: &mut S) -> (u64, u64) {
+    let a = read_write_stats(s);
+    let b = read_write_stats(s);
+    let (_r, _p) = shutdown(s);
+    proof_assert!(rw_total_zero(*s.g) == ());
+    let c = read_write_stats(s);
+    let d = read_write_stats(s);
+    proof_assert!(b@ >= a@);
+    proof_assert!(c@ >= b@);
+    proof_assert!(d@ >= c@);
+    (a, d)
 }
 
 #[ensures(result.oldest_persisted <= result.oldest_sampled && (s.p.has_dm && s.p.has_mt ==> result.oldest_persisted == n_evictable((*s.g), (*s.g).ok[(*s.g).tick], result.oldest_sampled)))]

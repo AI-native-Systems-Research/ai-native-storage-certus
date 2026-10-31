@@ -1,19 +1,19 @@
-(* #"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 182 0 182 46 *)
+(* #"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 182 0 182 46 *)
 
-let%span score = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 522 10 522 27
-let%span svec = "/home/cornel/repair-j33-rc29/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
-let%span svec'0 = "/home/cornel/repair-j33-rc29/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 120 18 125 9
-let%span svec'1 = "/home/cornel/repair-j33-rc29/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
-let%span sbg = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 183 23 183 25
-let%span sbg'0 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 185 10 185 22
-let%span sbg'1 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 185 26 185 27
-let%span sbg'2 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 184 16 184 25
-let%span sbg'3 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 186 30 186 42
-let%span sbg'4 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 186 14 186 43
-let%span sbg'5 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 187 25 187 38
-let%span sbg'6 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 180 11 180 22
-let%span sbg'7 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 181 10 181 104
-let%span sbg'8 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 162 16 163 80
+let%span score = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/core.rs" 525 10 525 27
+let%span svec = "/home/cornel/repair-j33-rc21/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/repair-j33-rc21/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 120 18 125 9
+let%span svec'1 = "/home/cornel/repair-j33-rc21/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sbg = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 183 23 183 25
+let%span sbg'0 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 185 10 185 22
+let%span sbg'1 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 185 26 185 27
+let%span sbg'2 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 184 16 184 25
+let%span sbg'3 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 186 30 186 42
+let%span sbg'4 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 186 14 186 43
+let%span sbg'5 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 187 25 187 38
+let%span sbg'6 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 180 11 180 22
+let%span sbg'7 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 181 10 181 104
+let%span sbg'8 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 162 16 163 80
 
 use creusot.prelude.MutBorrow
 use creusot.int.UInt64
@@ -57,7 +57,7 @@ predicate resolve_refmut_Stg [@inline:trivial] (_1: MutBorrow.t t_Stg) = _1.fina
 
 meta "rewrite_def" predicate resolve_refmut_Stg
 
-predicate stg_inv [#"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 161 0 161 30] (p: t_Stg) =
+predicate stg_inv [#"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 161 0 161 30] (p: t_Stg) =
   [%#sbg'8] p.leased >= 0
   /\ p.leased + Seq.length (view_Vec_usize_Global p.free) = UInt64.t'int p.slots
   /\ (forall i: int. 0 <= i /\ i < Seq.length (view_Vec_usize_Global p.free)
@@ -67,7 +67,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let stg_pool_checkout [#"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/bg.rs" 182 0 182 46]
+let stg_pool_checkout [#"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/bg.rs" 182 0 182 46]
   (p: MutBorrow.t t_Stg) (return (x: UInt64.t)) =
 {[@stop_split] [@expl:stg_pool_checkout requires] [%#sbg'6] stg_inv p.current}
   (! bb0

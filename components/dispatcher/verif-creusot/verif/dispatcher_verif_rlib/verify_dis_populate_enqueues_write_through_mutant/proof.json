@@ -2,13 +2,13 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_populate": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_populate": { "prover": "alt-ergo", "time": 0.027 },
       "vc_verify_dis_populate_enqueues_write_through__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.035 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.037 }, null ]
           }
         ]
       }

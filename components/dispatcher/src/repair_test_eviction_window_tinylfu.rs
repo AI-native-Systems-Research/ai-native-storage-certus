@@ -164,6 +164,7 @@ fn dispatcher(counters: Arc<TierEventCounters>) -> Arc<DispatcherComponent> {
         Mutex::new(None),
         Mutex::new(None),
         RwLock::new(Vec::new()),
+        RwLock::new(interfaces::ReadWriteStats::default()),
         RwLock::new(None),
         AtomicU64::new(0),
         Mutex::new(None),

@@ -2,14 +2,14 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_dm_is_evictable": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_dm_is_evictable": { "prover": "alt-ergo", "time": 0.022 },
       "vc_drain": { "prover": "alt-ergo", "time": 0.018 },
       "vc_elim_Err": { "prover": "alt-ergo", "time": 0.014 },
-      "vc_ensure_initialized": { "prover": "alt-ergo", "time": 0.018 },
-      "vc_flush_to_ssd": { "prover": "z3", "time": 0.089 },
-      "vc_index_Vec_u64_Global": { "prover": "alt-ergo", "time": 0.014 },
-      "vc_len_u64'0": { "prover": "alt-ergo", "time": 0.024 },
-      "vc_mt_oldest": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_ensure_initialized": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_flush_to_ssd": { "prover": "z3", "time": 0.134 },
+      "vc_index_Vec_u64_Global": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_len_u64'0": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_mt_oldest": { "prover": "alt-ergo", "time": 0.017 },
       "vc_pins_failed_writes": { "prover": "alt-ergo", "time": 0.021 }
     }
   }

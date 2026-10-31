@@ -248,6 +248,12 @@ pub struct W {
     pub threads: Int,
     /// one per-drive read/write counter (`IBlockDevice::read_write_stats`, every field alike).
     pub rw: Mapping<Int, u64>,
+    /// `DispatcherComponent::rw_stats_baseline` (lib.rs): cumulative counters of
+    /// data drives already torn down (shutdown) or replaced (re-initialize),
+    /// folded in by `absorb_drive_rw_stats` before the drive list changes.
+    /// Ghost `Int` (the u64 wrap the real field could do is not modelled,
+    /// like every other counter here).
+    pub rw_base: Int,
     /// pooled (free) client channels of drive i's ChannelPool
     pub cfree: Mapping<Int, Int>,
     /// `WriteThroughPins::failed`: keys whose latest write-through did not land.
@@ -494,7 +500,7 @@ pub fn evict_frame(a: W, b: W) -> bool {
         && b.cap == a.cap && b.wq == a.wq && b.pool == a.pool && b.cluster == a.cluster
         && b.threads == a.threads && log_ext(a, b) && demote_before_free(a, b) && no_dma(a, b) && no_reg(a, b) && no_ssd(a, b)
         && own_writes(a, b) && own_reads(a, b) && b.tick >= a.tick && b.ob == a.ob && b.ob2 == a.ob2 && b.og == a.og && b.os == a.os && b.ov == a.ov && b.ok == a.ok
-        && b.ext == a.ext && b.rw == a.rw && b.cfree == a.cfree }
+        && b.ext == a.ext && b.rw == a.rw && b.rw_base == a.rw_base && b.cfree == a.cfree }
 }
 
 // ===========================================================================
@@ -665,6 +671,38 @@ pub fn rwsum(m: Mapping<Int, u64>, n: Int) -> Int {
     pearlite! { if n <= 0 { 0 } else { rwsum(m, n - 1) + m[n - 1]@ } }
 }
 
+/// The dispatcher-wide cumulative read/write total (the value `read_write_stats`
+/// reports) of world `w` with `n` live drives: the baseline of drives already
+/// dropped plus every live drive's counter. Kept OPAQUE (like `di`): the big
+/// method proofs reason about it through `rw_total_def` / `rw_total_zero` /
+/// `rw_total_congr` instead of unfolding `rwsum` inside every goal.
+#[logic(opaque)]
+pub fn rw_total(w: W, n: Int) -> Int {
+    dead
+}
+
+/// `rw_total` unfolds to the baseline plus the `rwsum` of the live drives.
+#[trusted]
+#[logic]
+#[ensures(rw_total(w, n) == w.rw_base + rwsum(w.rw, n))]
+pub fn rw_total_def(w: W, n: Int) {}
+
+/// With no live drives the total is just the baseline.
+#[trusted]
+#[logic]
+#[ensures(rw_total(w, 0) == w.rw_base)]
+pub fn rw_total_zero(w: W) {}
+
+/// `rw_total` only depends on the baseline, the live-drive counters and the
+/// drive count: two worlds that agree on that triple report the same total.
+/// This is the shape the big method proofs (shutdown, initialize) need — it
+/// lets them relate the fold to the entry state WITHOUT pulling `rwsum`'s
+/// recursive axiom into their goal context.
+#[trusted]
+#[logic]
+#[ensures(a.rw == b.rw && a.rw_base == b.rw_base && n1 == n2 ==> rw_total(a, n1) == rw_total(b, n2))]
+pub fn rw_total_congr(a: W, b: W, n1: Int, n2: Int) {}
+
 /// No checkpoint or device-stop event was logged between `a` and `b`.
 #[logic(open)]
 pub fn no_cpdev(a: W, b: W) -> bool {
@@ -675,7 +713,7 @@ pub fn no_cpdev(a: W, b: W) -> bool {
 #[logic(open)]
 pub fn same_env(a: W, b: W) -> bool {
     pearlite! { b.pool == a.pool && b.cluster == a.cluster && b.cap == a.cap && b.ext == a.ext
-        && b.rw == a.rw && b.ob == a.ob && b.ob2 == a.ob2 && b.og == a.og && b.os == a.os && b.ov == a.ov && b.ok == a.ok && b.threads == a.threads && b.cfree == a.cfree }
+        && b.rw == a.rw && b.rw_base == a.rw_base && b.ob == a.ob && b.ob2 == a.ob2 && b.og == a.og && b.os == a.os && b.ov == a.ov && b.ok == a.ok && b.threads == a.threads && b.cfree == a.cfree }
 }
 
 /// No registration (dispatch-map create) and no write-through enqueue was logged between a and b.

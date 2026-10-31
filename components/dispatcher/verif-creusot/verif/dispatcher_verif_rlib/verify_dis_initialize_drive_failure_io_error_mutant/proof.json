@@ -2,14 +2,14 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_initialize": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_initialize": { "prover": "alt-ergo", "time": 0.02 },
       "vc_verify_dis_initialize_drive_failure_io_error__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.043 },
+              { "prover": "alt-ergo", "time": 0.032 },
               {
                 "tactic": "split_vc",
                 "children": [
@@ -24,10 +24,10 @@
                         "children": [
                           null,
                           null,
-                          { "prover": "z3", "time": 0.025 },
+                          { "prover": "z3", "time": 0.019 },
                           { "prover": "z3", "time": 0.021 },
-                          { "prover": "alt-ergo", "time": 0.077 },
-                          { "prover": "alt-ergo", "time": 0.083 }
+                          { "prover": "alt-ergo", "time": 0.066 },
+                          { "prover": "alt-ergo", "time": 0.069 }
                         ]
                       },
                       null

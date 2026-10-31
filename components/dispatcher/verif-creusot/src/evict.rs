@@ -182,7 +182,7 @@ pub fn eai_frame(a: W, b: W, key: u64, ptr: u64, size: u32) -> bool {
         && (forall<k: u64> k != key ==> (b.dm.get(k) == a.dm.get(k) && b.mt.get(k) == a.mt.get(k)) || demoted_k(a, b, k))
         && b.cap == a.cap && b.wq == a.wq && b.pool == a.pool && b.cluster == a.cluster
         && b.threads == a.threads && log_ext(a, b) && demote_before_free(a, b) && no_dma(a, b) && no_reg(a, b) && no_ssd(a, b)
-        && own_writes(a, b) && own_reads(a, b) && b.tick >= a.tick && b.ob == a.ob && b.ob2 == a.ob2 && b.og == a.og && b.os == a.os && b.ov == a.ov && b.ok == a.ok && b.ext == a.ext && b.rw == a.rw && b.cfree == a.cfree }
+        && own_writes(a, b) && own_reads(a, b) && b.tick >= a.tick && b.ob == a.ob && b.ob2 == a.ob2 && b.og == a.og && b.os == a.os && b.ov == a.ov && b.ok == a.ok && b.ext == a.ext && b.rw == a.rw && b.rw_base == a.rw_base && b.cfree == a.cfree }
 }
 
 #[ensures((^s).p == s.p)]

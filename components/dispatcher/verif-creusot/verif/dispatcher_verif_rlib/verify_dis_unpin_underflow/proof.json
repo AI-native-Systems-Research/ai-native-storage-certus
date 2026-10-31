@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_unpin": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_unpin": { "prover": "alt-ergo", "time": 0.017 },
       "vc_verify_dis_unpin_underflow": {
         "prover": "alt-ergo",
-        "time": 0.098
+        "time": 0.089
       }
     }
   }

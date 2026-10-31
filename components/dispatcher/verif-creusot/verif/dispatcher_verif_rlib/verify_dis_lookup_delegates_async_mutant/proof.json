@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lookup": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_lookup": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_dis_lookup_delegates_async__mutant": {
         "tactic": "compute_specified",
         "children": [

@@ -2,13 +2,13 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lookup_async": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_lookup_async": { "prover": "alt-ergo", "time": 0.021 },
       "vc_verify_dis_lookup_async_miss__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.039 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.043 }, null ]
           }
         ]
       }

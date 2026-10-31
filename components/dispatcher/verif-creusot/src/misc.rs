@@ -285,12 +285,13 @@ pub fn clear_memory_tier(s: &mut S) -> Result<usize, DE> {
 }
 
 // ---------------------------------------------------------------------------
-// read_write_stats (lib.rs:3866)
+// read_write_stats (lib.rs) / absorb_drive_rw_stats (lib.rs)
 // ---------------------------------------------------------------------------
 
 #[ensures((^s).p == s.p && *(^s).g == *s.g)]
-#[ensures(result@ == rwsum((*s.g).rw, s.p.nd@))]
+#[ensures(result@ == rw_total(*s.g, s.p.nd@))]
 pub fn read_write_stats(s: &mut S) -> u64 {
+    let base = bd_rw_base(s);
     let mut agg: u64 = 0;
     let mut i: usize = 0;
     let g0 = snapshot!(*s.g);
@@ -301,7 +302,30 @@ pub fn read_write_stats(s: &mut S) -> u64 {
         agg = padd64(agg, v);
         i += 1;
     }
-    agg
+    // the baseline (counters of drives already dropped) plus every live drive
+    proof_assert!(rw_total_def(*g0, s.p.nd@) == ());
+    padd64(base, agg)
+}
+
+/// `DispatcherComponent::absorb_drive_rw_stats` (lib.rs): fold every live data
+/// drive's read/write counters into `rw_stats_baseline`. Called before the
+/// drive list is cleared (`shutdown`) or replaced (`initialize`), so that
+/// dropping the drives never lowers the cumulative `read_write_stats` total.
+#[ensures((^s).p == s.p)]
+#[ensures(*(^s).g == W { rw_base: rw_total(*s.g, s.p.nd@), ..*s.g })]
+pub fn absorb_drive_rw_stats(s: &mut S) {
+    let g0 = snapshot!(*s.g);
+    let p0 = snapshot!(s.p);
+    let mut base: u64 = bd_rw_base(s);
+    let mut i: usize = 0;
+    #[invariant(s.p == *p0 && *s.g == *g0 && i@ <= s.p.nd@ && base@ == g0.rw_base + rwsum(g0.rw, i@))]
+    while i < s.p.nd {
+        let v = bd_rw_stats(s, i);
+        base = padd64(base, v);
+        i += 1;
+    }
+    proof_assert!(rw_total_def(*g0, s.p.nd@) == ());
+    s.g = snapshot!(W { rw_base: base@, ..*s.g });
 }
 
 // ---------------------------------------------------------------------------

@@ -563,6 +563,15 @@ pub fn bd_rw_stats(s: &mut S, drive: usize) -> u64 {
     unimplemented!()
 }
 
+/// `self.rw_stats_baseline.read().clone()` (lib.rs): the dispatcher's baseline
+/// read/write counter — the cumulative total of the drives already dropped
+/// (one representative field, like `bd_rw_stats`; trusted to fit the u64).
+#[trusted]
+#[ensures((^s).p == s.p && *(^s).g == *s.g && result@ == (*s.g).rw_base)]
+pub fn bd_rw_base(s: &mut S) -> u64 {
+    unimplemented!()
+}
+
 /// One job of `scatter_gather_multi_drive_zero_copy` (pipeline.rs:771): its NVMe segments, and
 /// for a single-region object (`dst != 0`) the one coalesced H2D of the whole slot.
 #[trusted]

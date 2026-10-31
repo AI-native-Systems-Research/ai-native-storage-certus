@@ -1,9 +1,9 @@
-(* #"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 562 0 562 28 *)
+(* #"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/core.rs" 565 0 565 28 *)
 
-let%span score = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 561 10 561 24
-let%span score'0 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 544 16 544 43
-let%span score'1 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 529 10 529 17
-let%span score'2 = "/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 531 16 531 107
+let%span score = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/core.rs" 564 10 564 24
+let%span score'0 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/core.rs" 547 16 547 43
+let%span score'1 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/core.rs" 532 10 532 17
+let%span score'2 = "/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/core.rs" 534 16 534 107
 
 use creusot.int.UInt64
 use creusot.int.UInt32
@@ -12,7 +12,7 @@ use int.Int
 
 type t_Ipc = { addr: UInt64.t; size: UInt32.t }
 
-function sum_sz [#"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 530 0 530 33] (r: Seq.seq t_Ipc) : int
+function sum_sz [#"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/core.rs" 533 0 533 33] (r: Seq.seq t_Ipc) : int
 
 axiom sum_sz_def: forall r: Seq.seq t_Ipc [sum_sz r]. sum_sz r
     = ([%#score'2] if Seq.length r = 0 then
@@ -21,7 +21,7 @@ axiom sum_sz_def: forall r: Seq.seq t_Ipc [sum_sz r]. sum_sz r
       sum_sz (Seq.([..]) r 0 (Seq.length r - 1)) + UInt32.t'int (Seq.get r (Seq.length r - 1)).size
     )
 
-function pre [#"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 543 0 543 38] (r: Seq.seq t_Ipc) (i: int) : int
+function pre [#"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/core.rs" 546 0 546 38] (r: Seq.seq t_Ipc) (i: int) : int
  = [%#score'0] sum_sz (Seq.([..]) r 0 i)
 
 meta "compute_max_steps" 1000000
@@ -30,6 +30,6 @@ meta "select_lsinst" "all"
 
 constant r : Seq.seq t_Ipc
 
-function pre_zero [#"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/core.rs" 562 0 562 28] (r: Seq.seq t_Ipc) : ()
+function pre_zero [#"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/core.rs" 565 0 565 28] (r: Seq.seq t_Ipc) : ()
 
 goal vc_pre_zero: Seq.length (Seq.([..]) r 0 0) = 0 && ([@stop_split] [@expl:pre_zero ensures] [%#score] pre r 0 = 0)

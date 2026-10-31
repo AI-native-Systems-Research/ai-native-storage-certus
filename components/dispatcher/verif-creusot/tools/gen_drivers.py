@@ -850,8 +850,23 @@ R('DIS-SCHEDULE-WT-PIN-NEUTRAL', '''    let e = Ent { loc: Loc::Mem { ptr: 4096u
     proof_assert!(ent(*s.g, 7u64).rr@ == 0);''',
   'REFUTED: processing a job queued by schedule_write_through is not pin-neutral: process_write_job ends with convert_to_storage, which decrements read_ref when it is > 0 (dispatch-map lib.rs:184), and its failure paths call release_read - both written for the populate path, where the job owns the downgraded read reference. schedule_write_through takes none, so a reader\'s pin is consumed. Counterexample (memory-tier-only mode): entry pinned once (read_ref 1), schedule + process -> read_ref 0.', assumes=[A_US5])
 VR('DIS-READ-WRITE-STATS-SUM', 's: &mut S', 'u64', [],
-   ['result@ == rwsum(%s.rw, s.p.nd@) && (s.p.nd@ == 0 ==> result@ == 0)' % G], '    read_write_stats(s)', (0, 'result@ == rwsum(%s.rw, s.p.nd@) + 1' % G),
-   'read_write_stats mirror: the dispatcher-wide counters are the sum (ReadWriteStats::merge_from, field-wise +=) of every data drive\'s read_write_stats - all zero with no drives. One representative u64 field is modelled; every field (and histogram bucket) is merged identically.', fid='trusted-boundary')
+   ['result@ == rw_total(%s, s.p.nd@) && (s.p.nd@ == 0 && %s.rw_base == 0 ==> result@ == 0)' % (G, G)], '    proof_assert!(rw_total_zero(*s.g) == ());\n    read_write_stats(s)', (0, 'result@ == rw_total(%s, s.p.nd@) + 1' % G),
+   'read_write_stats mirror: the dispatcher-wide counters are the sum (ReadWriteStats::merge_from, field-wise +=) of the baseline (counters of drives already dropped, rw_stats_baseline) and every live data drive\'s read_write_stats - all zero with no drives and an empty baseline. One representative u64 field is modelled; every field (and histogram bucket) is merged identically.', fid='trusted-boundary')
+VR('DIS-READ-WRITE-STATS-MONOTONIC', 's: &mut S', '(u64, u64)', SHREQ,
+   ['result.1@ >= result.0@',
+    's.p.nd@ == 0 && %s.rw_base == 0 ==> result.0@ == 0 && result.1@ == 0' % G],
+   '''    let a = read_write_stats(s);
+    let b = read_write_stats(s);
+    let (_r, _p) = shutdown(s);
+    proof_assert!(rw_total_zero(*s.g) == ());
+    let c = read_write_stats(s);
+    let d = read_write_stats(s);
+    proof_assert!(b@ >= a@);
+    proof_assert!(c@ >= b@);
+    proof_assert!(d@ >= c@);
+    (a, d)''',
+   (0, 'result.1@ > result.0@'),
+   'read_write_stats mirror: the counters are cumulative - baseline (drives already dropped) plus every live drive - so they never decrease between two successive calls, not even across shutdown (which folds the live drives into the baseline before dropping them, rw-stats-decrease-after-shutdown); a fresh telemetry-free state (no drives, empty baseline) reports zero.' + SHNOTE, fid='trusted-boundary', assumes=[A_US5])
 O('DIS-TIER-STATS-MONOTONIC', 'OPEN: counters only ever change through the TierEventCounters::record_* bumps (+n, n >= 0), and most method mirrors carry a no-counter-decreases clause, but the one-driver-per-operation inductive proof over every IDispatcher operation (populate/batch_populate/remove/pin/unpin/touch lack the clause) was not completed. Counter wrap-around after 2^64 events (fetch_add on u64) is not modelled.')
 VR('DIS-TIER-STATS-OLDEST-GAUGES', 's: &mut S', 'Snapshot<Stats>', [],
    ['result.oldest_persisted <= result.oldest_sampled && (s.p.has_dm && s.p.has_mt ==> result.oldest_persisted == n_evictable(%s, %s.ok[%s.tick], result.oldest_sampled))' % (G, G, G)],
@@ -987,7 +1002,7 @@ pub fn w0() -> W {
         wq: Seq::empty(), log: Seq::empty(), tick: 0,
         ob: |i: Int| true, ob2: |i: Int| true, og: |i: Int| true, os: |i: Int| true,
         ov: |i: Int| 0u64, ok: |i: Int| Seq::empty(), ext: |i: Int| Seq::empty(),
-        pool: false, cluster: false, threads: 0, rw: |i: Int| 0u64, cfree: |i: Int| 0,
+        pool: false, cluster: false, threads: 0, rw: |i: Int| 0u64, rw_base: 0, cfree: |i: Int| 0,
         wf: |k: u64| false,
     } }
 }

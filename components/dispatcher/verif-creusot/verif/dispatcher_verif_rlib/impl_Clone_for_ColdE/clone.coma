@@ -1,4 +1,4 @@
-(* #"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/batch.rs" 48 9 48 29 *)
+(* #"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/batch.rs" 48 9 48 29 *)
 
 (* <ColdE as std::clone::Clone> *)
 
@@ -12,7 +12,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_ColdE [#"/home/cornel/repair-j33-rc29/components/dispatcher/verif-creusot/src/batch.rs" 48 9 48 29]
+let clone_ColdE [#"/home/cornel/repair-j33-rc21/components/dispatcher/verif-creusot/src/batch.rs" 48 9 48 29]
   (self: t_ColdE) (return (x: t_ColdE)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_ColdE = Any.any_l () | & self: t_ColdE = self ]) [ return (result: t_ColdE) -> (! return {result}) ]
