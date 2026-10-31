@@ -1302,6 +1302,11 @@ def bench_prefix_miss(
 # ── mode: contention ─────────────────────────────────────────────────────────
 
 
+# Contention mode: the load thread reads only the batch committed most recently (a one-entry
+# mailbox); a batch replaced before the load reached it is skipped and counted.
+CONTENTION_QUEUE_MAX = 1
+
+
 def bench_contention(
     manager_store: ShmqCertusOffloadingManager,
     manager_load: ShmqCertusOffloadingManager,
@@ -1318,15 +1323,25 @@ def bench_contention(
 ) -> list[BenchResult]:
     """Concurrent store + load streams on the same ring.
 
-    Thread A stores new keys continuously.  Thread B loads keys that
-    thread A has committed, received via a shared deque, calling lookup()
-    and touch() in ``lookup_order``.  Both threads use separate
-    manager/worker instances on the same Ring (thread-safe via per-thread
-    channel assignment).
+    Thread A stores new keys continuously.  Thread B loads the batch thread A
+    committed most recently, received via a shared deque, calling lookup() and
+    touch() in ``lookup_order``.  Both threads use separate manager/worker
+    instances on the same Ring (thread-safe via per-thread channel assignment).
+
+    The load reads the batch committed most recently, not the oldest: with
+    oldest-first a store faster than the load let the queue grow without bound,
+    the load fell ever further behind, and once the tier was full every batch it
+    reached had been demoted, so the load thread measured SSD reads of its own lag
+    instead of contention with the store (s20261031-092234 iteration 2: 100%
+    SSD-served 2.0-3.7 s into the window). The mailbox holds
+    ``CONTENTION_QUEUE_MAX`` (1) batch; one replaced before the load took it is
+    reported as skipped. A slow load still shows as fewer blocks per second; what
+    the mode no longer does is make the load consume every store generation.
     """
     touch_first = lookup_order == TOUCH_FIRST
     stop_event = threading.Event()
-    committed_queue: collections.deque = collections.deque()
+    committed_queue: collections.deque = collections.deque(maxlen=CONTENTION_QUEUE_MAX)
+    mailbox_lock = threading.Lock()   # the skipped count and the pop see one state
     barrier = threading.Barrier(2)
 
     store_phases = {
@@ -1346,7 +1361,7 @@ def bench_contention(
     }
 
     store_state = {"total_blocks": 0, "drops": 0}
-    load_state = {"total_blocks": 0, "misses": 0}
+    load_state = {"total_blocks": 0, "misses": 0, "skipped_batches": 0}
 
     base_seed = random.randint(10_000_000, 99_000_000)
 
@@ -1395,7 +1410,10 @@ def bench_contention(
             store_phases["complete_store"].record(time.perf_counter() - t0)
 
             store_state["total_blocks"] += len(stored)
-            committed_queue.append(batch_keys)
+            with mailbox_lock:
+                if len(committed_queue) == committed_queue.maxlen:
+                    load_state["skipped_batches"] += 1   # replaced before the load took it
+                committed_queue.append(batch_keys)
 
     def _load_thread():
         barrier.wait()
@@ -1403,7 +1421,8 @@ def bench_contention(
         job_id = 900_000
         while not stop_event.is_set():
             try:
-                batch_keys = committed_queue.popleft()
+                with mailbox_lock:
+                    batch_keys = committed_queue.pop()  # the newest committed batch
             except IndexError:
                 time.sleep(0.001)
                 continue
@@ -1486,7 +1505,8 @@ def bench_contention(
     store_result.print_report()
     print(f"  Store drops: {store_state['drops']}")
     load_result.print_report()
-    print(f"  Load misses: {load_state['misses']}  Evictions: {total_evictions}")
+    print(f"  Load misses: {load_state['misses']}  Evictions: {total_evictions}  "
+          f"Skipped store batches: {load_state['skipped_batches']}")
 
     return [store_result, load_result]
 

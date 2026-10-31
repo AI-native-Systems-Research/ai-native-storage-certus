@@ -106,7 +106,7 @@ Reports the latency of lookups answering hit and miss separately (`lookup_hit`, 
 
 #### Contention mode (`--mode contention`)
 
-Runs store and load streams from separate threads against the same ring. Reveals server-side contention (reserve vs pin, copy_to_store vs lookup, write-through vs promote).
+Runs store and load streams from separate threads against the same ring. Reveals server-side contention (reserve vs pin, copy_to_store vs lookup, write-through vs promote). The load thread reads only the batch the store thread committed most recently (a one-entry mailbox; batches replaced before it got to them are reported as `Skipped store batches`), so it does not fall behind the store: with the earlier oldest-first queue a faster store let the backlog grow until every batch the load reached had been demoted to SSD. A batch can still be demoted while the load is reading it, under eviction pressure; a slow load still shows as lower load throughput.
 
 ```bash
 python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
