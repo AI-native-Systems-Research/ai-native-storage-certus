@@ -567,6 +567,30 @@ pub(crate) fn select_drive<T>(items: &[T], loc: u64) -> Option<(&T, u64)> {
 /// Seeds each thread's store-drive cursor, so threads start on different drives.
 static STORE_DRIVE_SEED: AtomicUsize = AtomicUsize::new(0);
 
+/// Count of `batch_lookup` calls in flight, process-wide. A store request
+/// (`copy_gpu_to_memory_batch`) syncs per key while it is non-zero, so the
+/// store does not take D2H bandwidth from a load.
+static LOADS_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+
+/// Set once the first store gives way to a load (one-shot log).
+static STORE_YIELD_LOGGED: AtomicBool = AtomicBool::new(false);
+
+/// Holds one `LOADS_IN_FLIGHT` count for the life of a `batch_lookup` call.
+struct LoadInFlight;
+
+impl LoadInFlight {
+    fn enter() -> Self {
+        LOADS_IN_FLIGHT.fetch_add(1, Ordering::Relaxed);
+        LoadInFlight
+    }
+}
+
+impl Drop for LoadInFlight {
+    fn drop(&mut self) {
+        LOADS_IN_FLIGHT.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 thread_local! {
     /// This thread's round-robin store-drive cursor (see `next_store_drive`).
     static STORE_DRIVE_CURSOR: std::cell::Cell<Option<usize>> =
@@ -574,6 +598,65 @@ thread_local! {
 }
 
 impl DispatcherComponent {
+    /// Queue one key's D2H gather into its reserved slot on `stream`, without
+    /// syncing: region L lands at `slot + sum(sizes[0..L])`. A single-region
+    /// block (legacy / populate) is the L==0 case. Rejects a region set that
+    /// overflows the slot rather than corrupt neighbouring DRAM. A copy failure
+    /// is `IoError`; the slot is left for the caller to free.
+    fn queue_store_copy(
+        &self,
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        gpu: &dyn IGpuServices,
+        key: CacheKey,
+        regions: &[IpcHandle],
+        stream: GpuStream,
+    ) -> Result<(), DispatcherError> {
+        let (mem_ptr, slot_size) = mt.get(key).ok_or(DispatcherError::KeyNotFound(key))?;
+
+        let total: usize = regions.iter().map(|r| r.size as usize).sum();
+        if total > slot_size as usize {
+            return Err(DispatcherError::InvalidParameter(format!(
+                "regions total {total} bytes exceeds reserved slot {slot_size} for key {key}"
+            )));
+        }
+
+        let map_err =
+            |e: String| DispatcherError::IoError(format!("GPU async DMA copy failed: {e}"));
+        let mut off: usize = 0;
+        if stream.0.is_null() {
+            // No created stream for this device: the batch API rejects the
+            // legacy NULL stream, so keep one async memcpy per region.
+            for region in regions {
+                gpu.memcpy_d2h_async(
+                    region.address as *const std::ffi::c_void,
+                    (mem_ptr as usize + off) as *mut std::ffi::c_void,
+                    region.size as usize,
+                    stream,
+                )
+                .map_err(map_err)?;
+                off += region.size as usize;
+            }
+        } else {
+            let single = |dst, src, len| gpu.memcpy_d2h_async(src, dst, len, stream);
+            let mut batch = pipeline::PieceBatch::new();
+            for region in regions {
+                batch
+                    .push(
+                        gpu,
+                        stream,
+                        &single,
+                        (mem_ptr as usize + off) as *mut std::ffi::c_void,
+                        region.address as *const std::ffi::c_void,
+                        region.size as usize,
+                    )
+                    .map_err(map_err)?;
+                off += region.size as usize;
+            }
+            batch.flush(gpu, stream, &single).map_err(map_err)?;
+        }
+        Ok(())
+    }
+
     fn log_info(&self, msg: &str) {
         if let Ok(logger) = self.logger.get() {
             logger.info(msg);
@@ -2426,6 +2509,8 @@ impl IDispatcher for DispatcherComponent {
         if entries.is_empty() {
             return Vec::new();
         }
+        // Counts this load for the stores' load gate until it returns.
+        let _load = LoadInFlight::enter();
 
         let init_check = self.ensure_initialized();
         if let Err(e) = init_check {
@@ -3836,28 +3921,15 @@ impl IDispatcher for DispatcherComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
-        let (mem_ptr, slot_size) = mt.get(key).ok_or(DispatcherError::KeyNotFound(key))?;
-
-        // Gather the client's N GPU regions contiguously into the one reserved
-        // slot: region L lands at `slot + sum(sizes[0..L])`. A single-region
-        // block (legacy / populate) is the L==0 case. Reject a region set that
-        // overflows the slot rather than corrupt neighbouring DRAM.
-        let total: usize = regions.iter().map(|r| r.size as usize).sum();
-        if total > slot_size as usize {
-            return Err(DispatcherError::InvalidParameter(format!(
-                "regions total {total} bytes exceeds reserved slot {slot_size} for key {key}"
-            )));
-        }
-
         let gpu = self
             .gpu_services
             .get()
             .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
 
-        // Null-stream callers (e.g. the shm-queue CopyToStore handler) need the
-        // copy to be complete on return — they have no stream handle to sync on.
-        // Resolve the device's `store` stream so the copy runs on a real stream,
-        // then synchronize before returning.
+        // Null-stream callers (e.g. populate) need the copy to be complete on
+        // return — they have no stream handle to sync on. Resolve the device's
+        // `store` stream so the copy runs on a real stream, then synchronize
+        // before returning.
         let (effective_stream, needs_sync) = if stream.0.is_null() {
             let device = regions
                 .first()
@@ -3868,43 +3940,13 @@ impl IDispatcher for DispatcherComponent {
             (stream, false)
         };
 
-        let map_err = |e: String| {
-            let _ = mt.remove(key);
-            DispatcherError::IoError(format!("GPU async DMA copy failed: {e}"))
-        };
-        let mut off: usize = 0;
-        if effective_stream.0.is_null() {
-            // No created stream for this device: the batch API rejects the
-            // legacy NULL stream, so keep one async memcpy per region.
-            for region in regions {
-                gpu.memcpy_d2h_async(
-                    region.address as *const std::ffi::c_void,
-                    (mem_ptr as usize + off) as *mut std::ffi::c_void,
-                    region.size as usize,
-                    effective_stream,
-                )
-                .map_err(map_err)?;
-                off += region.size as usize;
+        match self.queue_store_copy(&mt, &*gpu, key, regions, effective_stream) {
+            Ok(()) => {}
+            Err(e @ DispatcherError::IoError(_)) => {
+                let _ = mt.remove(key);
+                return Err(e);
             }
-        } else {
-            let single = |dst, src, len| gpu.memcpy_d2h_async(src, dst, len, effective_stream);
-            let mut batch = pipeline::PieceBatch::new();
-            for region in regions {
-                batch
-                    .push(
-                        &*gpu,
-                        effective_stream,
-                        &single,
-                        (mem_ptr as usize + off) as *mut std::ffi::c_void,
-                        region.address as *const std::ffi::c_void,
-                        region.size as usize,
-                    )
-                    .map_err(map_err)?;
-                off += region.size as usize;
-            }
-            batch
-                .flush(&*gpu, effective_stream, &single)
-                .map_err(map_err)?;
+            Err(e) => return Err(e),
         }
         if needs_sync {
             gpu.stream_synchronize(effective_stream).map_err(|e| {
@@ -3912,6 +3954,108 @@ impl IDispatcher for DispatcherComponent {
             })?;
         }
         Ok(())
+    }
+
+    fn copy_gpu_to_memory_batch(
+        &self,
+        entries: &[(CacheKey, Vec<IpcHandle>)],
+    ) -> Vec<Result<(), DispatcherError>> {
+        if entries.is_empty() {
+            return Vec::new();
+        }
+        if let Err(e) = self.ensure_initialized() {
+            return entries.iter().map(|_| Err(e.clone())).collect();
+        }
+        let (mt, gpu) = match (self.memory_tier.get(), self.gpu_services.get()) {
+            (Ok(mt), Ok(gpu)) => (mt, gpu),
+            (Err(_), _) => {
+                let e = DispatcherError::NotInitialized("memory_tier not bound".into());
+                return entries.iter().map(|_| Err(e.clone())).collect();
+            }
+            (_, Err(_)) => {
+                let e = DispatcherError::NotInitialized("gpu_services not bound".into());
+                return entries.iter().map(|_| Err(e.clone())).collect();
+            }
+        };
+
+        // Resolve the batch device and its store stream once. All entries in
+        // one RPC come from a single rank → a single device.
+        let device = entries
+            .iter()
+            .flat_map(|(_, regions)| regions.iter().map(|r| r.address))
+            .find(|a| !a.is_null())
+            .map_or(-1, |addr| set_batch_device(&*gpu, addr));
+        let store_raw = device_streams_for(&*gpu, device).map_or(0, |s| s.store);
+        if store_raw == 0 {
+            // No store stream: per-key copies, each synced before it returns.
+            return entries
+                .iter()
+                .map(|(key, regions)| {
+                    self.copy_gpu_to_memory_async(*key, regions, GpuStream(std::ptr::null_mut()))
+                })
+                .collect();
+        }
+        let stream = GpuStream(store_raw as *mut std::ffi::c_void);
+
+        let mut results: Vec<Result<(), DispatcherError>> = Vec::with_capacity(entries.len());
+        // Entries queued since the last sync, and whether the stream holds work
+        // (a failed submission may have queued some of its pieces).
+        let mut unsynced: Vec<usize> = Vec::with_capacity(entries.len());
+        let mut dirty = false;
+        let mut last_sync_ok = true;
+        // Keys whose submission failed. Their slots are freed only after the
+        // sync that covers any pieces they queued (no free under an in-flight DMA).
+        let mut failed: Vec<CacheKey> = Vec::new();
+
+        let sync = |results: &mut Vec<Result<(), DispatcherError>>, unsynced: &mut Vec<usize>| {
+            let ok = match gpu.stream_synchronize(stream) {
+                Ok(()) => true,
+                Err(e) => {
+                    for &i in unsynced.iter() {
+                        results[i] = Err(DispatcherError::IoError(format!(
+                            "store stream_synchronize failed: {e}"
+                        )));
+                    }
+                    false
+                }
+            };
+            unsynced.clear();
+            ok
+        };
+
+        for (i, (key, regions)) in entries.iter().enumerate() {
+            match self.queue_store_copy(&mt, &*gpu, *key, regions, stream) {
+                Ok(()) => {
+                    results.push(Ok(()));
+                    unsynced.push(i);
+                    dirty = true;
+                }
+                Err(e @ DispatcherError::IoError(_)) => {
+                    results.push(Err(e));
+                    failed.push(*key);
+                    dirty = true;
+                }
+                Err(e) => results.push(Err(e)),
+            }
+            // A load is in flight: give it the D2H engine back by syncing per
+            // key, as the per-key store path does.
+            if dirty && LOADS_IN_FLIGHT.load(Ordering::Relaxed) > 0 {
+                if !STORE_YIELD_LOGGED.swap(true, Ordering::Relaxed) {
+                    self.log_info("store yields to in-flight load: syncing the store per key");
+                }
+                last_sync_ok = sync(&mut results, &mut unsynced);
+                dirty = false;
+            }
+        }
+        if dirty {
+            last_sync_ok = sync(&mut results, &mut unsynced);
+        }
+        if last_sync_ok {
+            for key in failed {
+                let _ = mt.remove(key);
+            }
+        }
+        results
     }
 
     fn copy_gpu_to_memory_completed(

@@ -760,6 +760,51 @@ component_macros::define_interface! {
         /// Returns [`DispatcherError::IoError`] if the DMA copy fails.
         fn copy_gpu_to_memory_async(&self, key: CacheKey, regions: &[IpcHandle], stream: GpuStream) -> Result<(), DispatcherError>;
 
+        /// DMA-copy a request's blocks from GPU into their reserved memory-tier slots.
+        ///
+        /// Each entry is a key with a slot from a prior `reserve_memory` and the
+        /// GPU regions gathered into it, as in `copy_gpu_to_memory_async`. All
+        /// entries come from one rank, so they are on one device. The copies run
+        /// on that device's store stream with one `stream_synchronize` per call,
+        /// so each entry's host work overlaps the previous entry's copy. While a
+        /// load (`batch_lookup`) is in flight the call syncs after each entry
+        /// instead, so a store does not take D2H bandwidth from a load.
+        ///
+        /// Returns one `Result` per entry, in the same order as `entries`. Every
+        /// `Ok` entry's slot is fully populated on return, as with the
+        /// null-stream `copy_gpu_to_memory_async`; the caller then commits it
+        /// with `copy_gpu_to_memory_completed`.
+        ///
+        /// # Errors
+        ///
+        /// An entry whose own submission fails is `Err` alone
+        /// ([`DispatcherError::KeyNotFound`], [`DispatcherError::InvalidParameter`]
+        /// or [`DispatcherError::IoError`]). If a sync fails, every entry queued
+        /// since the previous successful sync is [`DispatcherError::IoError`].
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # use interfaces::{IDispatcher, IpcHandle, DispatcherError, CacheKey};
+        /// # fn example(dispatcher: &dyn IDispatcher) -> Result<(), DispatcherError> {
+        /// let mut gpu_a = vec![0xABu8; 4096];
+        /// let mut gpu_b = vec![0xCDu8; 4096];
+        /// for key in [1u64, 2] {
+        ///     dispatcher.reserve_memory(key, 4096, 0, None)?;
+        /// }
+        /// let entries = vec![
+        ///     (1, vec![IpcHandle { address: gpu_a.as_mut_ptr(), size: 4096 }]),
+        ///     (2, vec![IpcHandle { address: gpu_b.as_mut_ptr(), size: 4096 }]),
+        /// ];
+        /// for ((key, _), result) in entries.iter().zip(dispatcher.copy_gpu_to_memory_batch(&entries)) {
+        ///     result?;
+        ///     dispatcher.copy_gpu_to_memory_completed(*key, 4096)?;
+        /// }
+        /// # Ok(())
+        /// # }
+        /// ```
+        fn copy_gpu_to_memory_batch(&self, entries: &[(CacheKey, Vec<IpcHandle>)]) -> Vec<Result<(), DispatcherError>>;
+
         /// Finalize a populated memory-tier slot: register in the dispatch-map
         /// and enqueue background write-through to SSD.
         ///

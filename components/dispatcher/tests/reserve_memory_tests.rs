@@ -1,11 +1,11 @@
 //! Unit tests for `reserve_memory`, `copy_gpu_to_memory_async`,
-//! `copy_gpu_to_memory_completed`, and `release_memory`.
+//! `copy_gpu_to_memory_batch`, `copy_gpu_to_memory_completed`, and `release_memory`.
 //!
-//! These four methods implement the memory-reservation phase of the KV-cache
+//! These methods implement the memory-reservation phase of the KV-cache
 //! GPU offloading path (backpressure hotpath).  They are tested here with an
 //! all-mock component setup — no SPDK hardware required.
 //!
-//! # Test inventory (11 tests)
+//! # Test inventory (12 tests)
 //!
 //! | Test | Verifies |
 //! |------|---------|
@@ -18,6 +18,7 @@
 //! | `copy_gpu_to_memory_completed_makes_key_visible` | Key visible via `check()` after full lifecycle |
 //! | `copy_gpu_to_memory_completed_without_reserve_returns_error` | No prior reserve → KeyNotFound |
 //! | `copy_gpu_to_memory_async_copies_data_to_dram_slot` | Data appears in reserved DRAM slot |
+//! | `copy_gpu_to_memory_batch_gathers_each_entry_into_its_slot` | Batch copy fills each slot in region order; unreserved key is Err alone |
 //! | `full_three_phase_store_lifecycle` | reserve → copy_async → completed → check() |
 //! | `reserve_release_re_reserve_sequence` | Slot reuse across multiple release cycles |
 
@@ -963,6 +964,65 @@ fn copy_gpu_to_memory_async_copies_data_to_dram_slot() {
         src_data.as_slice(),
         "copy_gpu_to_memory_async must write source bytes into the reserved DRAM slot"
     );
+
+    d.shutdown().unwrap();
+}
+
+#[test]
+fn copy_gpu_to_memory_batch_gathers_each_entry_into_its_slot() {
+    let (c, _dm) = setup_initialized();
+    let d = query_interface!(c, IDispatcher).unwrap();
+    let region: u32 = 256;
+    let regions_per_key = 3usize;
+    let slot = region * regions_per_key as u32;
+
+    // Keys 1, 3 and 4 are reserved; key 2 (in the middle) is not.
+    let reserved: Vec<CacheKey> = vec![1, 3, 4];
+    let ptrs: Vec<*mut u8> = reserved
+        .iter()
+        .map(|&k| d.reserve_memory(k, slot, 0, None).unwrap())
+        .collect();
+
+    let keys: Vec<CacheKey> = vec![1, 2, 3, 4];
+    let mut srcs: Vec<Vec<Vec<u8>>> = keys
+        .iter()
+        .map(|&k| {
+            (0..regions_per_key)
+                .map(|r| vec![(k as u8) * 16 + r as u8; region as usize])
+                .collect()
+        })
+        .collect();
+    let entries: Vec<(CacheKey, Vec<IpcHandle>)> = keys
+        .iter()
+        .zip(srcs.iter_mut())
+        .map(|(&k, bufs)| (k, bufs.iter_mut().map(|b| make_handle(b)).collect()))
+        .collect();
+
+    let results = d.copy_gpu_to_memory_batch(&entries);
+    assert_eq!(results.len(), entries.len());
+    assert!(results[0].is_ok(), "key 1: {:?}", results[0]);
+    assert!(
+        matches!(results[1], Err(DispatcherError::KeyNotFound(2))),
+        "unreserved key 2 must be KeyNotFound, got {:?}",
+        results[1]
+    );
+    assert!(results[2].is_ok(), "key 3: {:?}", results[2]);
+    assert!(results[3].is_ok(), "key 4: {:?}", results[3]);
+
+    for (&k, &ptr) in reserved.iter().zip(ptrs.iter()) {
+        let expected: Vec<u8> = (0..regions_per_key)
+            .flat_map(|r| vec![(k as u8) * 16 + r as u8; region as usize])
+            .collect();
+        // SAFETY: ptr is valid for `slot` bytes; the pool is kept alive by the component Arc.
+        let written = unsafe { std::slice::from_raw_parts(ptr, slot as usize) };
+        assert_eq!(
+            written,
+            expected.as_slice(),
+            "key {k}: slot must hold its regions' bytes in order"
+        );
+        d.copy_gpu_to_memory_completed(k, slot).unwrap();
+        assert!(d.check(k).unwrap());
+    }
 
     d.shutdown().unwrap();
 }

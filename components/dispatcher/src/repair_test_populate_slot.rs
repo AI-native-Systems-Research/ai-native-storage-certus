@@ -580,3 +580,55 @@ fn populate_null_stream_sync_failure_releases_the_slot() {
 
     d.shutdown().unwrap();
 }
+
+#[test]
+fn copy_batch_sync_failure_fails_every_entry_and_allows_retry() {
+    let gpu = Arc::new(HostGpu::default());
+    let (_c, d, dm, _mt) = setup(Some(Arc::clone(&gpu)));
+    let mut srcs: Vec<Vec<u8>> = (0..3u8).map(|i| vec![0x10 + i; 4096]).collect();
+    let entries: Vec<(CacheKey, Vec<IpcHandle>)> = srcs
+        .iter_mut()
+        .enumerate()
+        .map(|(i, s)| {
+            (
+                20 + i as CacheKey,
+                vec![IpcHandle {
+                    address: s.as_mut_ptr(),
+                    size: s.len() as u32,
+                }],
+            )
+        })
+        .collect();
+    for (key, _) in &entries {
+        d.reserve_memory(*key, 4096, 0, None).unwrap();
+    }
+
+    gpu.fail_sync.store(true, Ordering::Relaxed);
+    let results = d.copy_gpu_to_memory_batch(&entries);
+    assert_eq!(results.len(), entries.len());
+    for (i, r) in results.iter().enumerate() {
+        assert!(
+            r.is_err(),
+            "entry {i}: a failed sync must fail it, got {r:?}"
+        );
+    }
+    for (key, _) in &entries {
+        assert!(
+            !dm.entries.lock().unwrap().contains_key(key),
+            "a failed batch copy must not cache key {key}"
+        );
+    }
+
+    // Once the GPU recovers, copying the same reserved keys again must work.
+    gpu.fail_sync.store(false, Ordering::Relaxed);
+    let results = d.copy_gpu_to_memory_batch(&entries);
+    for (i, r) in results.iter().enumerate() {
+        assert!(r.is_ok(), "entry {i}: retry must succeed, got {r:?}");
+    }
+    for (key, _) in &entries {
+        d.copy_gpu_to_memory_completed(*key, 4096).unwrap();
+        assert!(dm.entries.lock().unwrap().contains_key(key));
+    }
+
+    d.shutdown().unwrap();
+}

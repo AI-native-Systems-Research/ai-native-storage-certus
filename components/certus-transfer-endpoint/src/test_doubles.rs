@@ -545,6 +545,12 @@ impl interfaces::IDispatcher for DiskDispatcher {
     ) -> Result<(), interfaces::DispatcherError> {
         unimplemented!()
     }
+    fn copy_gpu_to_memory_batch(
+        &self,
+        _: &[(CacheKey, Vec<interfaces::IpcHandle>)],
+    ) -> Vec<Result<(), interfaces::DispatcherError>> {
+        unimplemented!()
+    }
     fn copy_gpu_to_memory_completed(
         &self,
         _: CacheKey,

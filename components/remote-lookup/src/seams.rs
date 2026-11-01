@@ -756,6 +756,15 @@ impl IDispatcher for MockDispatcher {
         )
     }
 
+    fn copy_gpu_to_memory_batch(
+        &self,
+        _entries: &[(CacheKey, Vec<IpcHandle>)],
+    ) -> Vec<Result<(), DispatcherError>> {
+        unimplemented!(
+            "mock: IDispatcher::copy_gpu_to_memory_batch not needed by remote-lookup tests"
+        )
+    }
+
     fn copy_gpu_to_memory_completed(
         &self,
         _key: CacheKey,

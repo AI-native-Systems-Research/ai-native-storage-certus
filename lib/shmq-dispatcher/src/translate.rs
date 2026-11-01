@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use gpu_services::cuda_ffi;
-use interfaces::{GpuStream, IDispatcher, IpcHandle};
+use interfaces::{IDispatcher, IpcHandle};
 
 use crate::wire::{self, op, Reader, Writer};
 
@@ -1061,16 +1061,25 @@ impl Translator {
 
         let (resolved, opened_keys) = self.open_handle_table(&batch.handles);
 
+        // Entries whose handles failed to open are held back and reply 0. The
+        // rest are copied in one call, which syncs before it returns; the
+        // handles stay open until then.
+        let mut ok_flags = vec![0u8; batch.entries.len()];
+        let mut valid_indices = Vec::with_capacity(batch.entries.len());
+        let mut valid_batch: Vec<(u64, Vec<IpcHandle>)> = Vec::with_capacity(batch.entries.len());
+        for (i, (key, entry_regions)) in batch.entries.iter().enumerate() {
+            if let Some(regions) = Self::regions_of(entry_regions, &resolved) {
+                valid_indices.push(i);
+                valid_batch.push((*key, regions));
+            }
+        }
+        let results = self.dispatcher.copy_gpu_to_memory_batch(&valid_batch);
+        for (slot, res) in valid_indices.iter().zip(results.iter()) {
+            ok_flags[*slot] = res.is_ok() as u8;
+        }
         let mut w = Writer::with_capacity(batch.entries.len());
-        for (key, entry_regions) in &batch.entries {
-            let ok = match Self::regions_of(entry_regions, &resolved) {
-                None => false,
-                Some(regions) => self
-                    .dispatcher
-                    .copy_gpu_to_memory_async(*key, &regions, GpuStream(std::ptr::null_mut()))
-                    .is_ok(),
-            };
-            w.u8(ok as u8);
+        for ok in ok_flags {
+            w.u8(ok);
         }
 
         for key in &opened_keys {
@@ -1398,7 +1407,7 @@ mod tests {
         /// (resident keys only), unpin takes one and underflows to an error.
         read_refs: Mutex<HashMap<u64, u32>>,
         /// `(key, [(address, size)])` of every entry that reached
-        /// `batch_lookup` / `copy_gpu_to_memory_async`, in call order.
+        /// `batch_lookup` / `copy_gpu_to_memory_batch`, in call order.
         regions_seen: Mutex<Vec<(u64, Vec<(usize, u32)>)>>,
     }
 
@@ -1510,6 +1519,18 @@ mod tests {
         ) -> Result<(), DispatcherError> {
             self.record(key, regions);
             Ok(())
+        }
+        fn copy_gpu_to_memory_batch(
+            &self,
+            entries: &[(CacheKey, Vec<IpcHandle>)],
+        ) -> Vec<Result<(), DispatcherError>> {
+            entries
+                .iter()
+                .map(|(key, regions)| {
+                    self.record(*key, regions);
+                    Ok(())
+                })
+                .collect()
         }
         fn copy_gpu_to_memory_completed(
             &self,
