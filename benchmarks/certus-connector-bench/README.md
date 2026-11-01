@@ -113,7 +113,7 @@ python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --mode contention --min-duration 10 --working-set 1024
 ```
 
-Reports per-thread throughput and latency. Compare against `--mode default` to see the contention penalty.
+Reports per-thread throughput and latency, and `Contention: Load Alone`: before the concurrent window the load thread loads freshly stored batches on its own for 3 s (`CONTENTION_ALONE_SECONDS`), with the same managers, worker and keys, and only the load timed. Compare the load thread against that, not against `--mode default`: the warm load there runs on the manager that stored its keys, whose commit-group record answers most of a batch's lookups from one Check, which the contention load's own manager cannot do.
 
 #### Scheduler-step mode (`--mode scheduler-step`)
 

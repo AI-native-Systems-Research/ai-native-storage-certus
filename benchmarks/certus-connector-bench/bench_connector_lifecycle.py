@@ -1305,6 +1305,13 @@ def bench_prefix_miss(
 # Contention mode: the load thread reads only the batch committed most recently (a one-entry
 # mailbox); a batch replaced before the load reached it is skipped and counted.
 CONTENTION_QUEUE_MAX = 1
+# Before the concurrent window, the load thread runs alone for this long on the same manager,
+# worker and newest-batch keys ("Contention: Load Alone"), so the concurrent load is compared
+# with a load set up the same way. The warm-load mode is not that reference: it loads on the
+# manager that stored the keys, whose commit-group record answers 15 of a batch's 16 lookups
+# from one Check, while the contention load's manager has none (workbench s20261031-164608
+# iteration 3 review: lookup 830 us in contention against 139 us warm, mostly this).
+CONTENTION_ALONE_SECONDS = 3.0
 
 
 def bench_contention(
@@ -1362,6 +1369,8 @@ def bench_contention(
 
     store_state = {"total_blocks": 0, "drops": 0}
     load_state = {"total_blocks": 0, "misses": 0, "skipped_batches": 0}
+    alone_phases = {name: PhaseTiming(name) for name in load_phases}
+    alone_state = {"total_blocks": 0, "misses": 0}
 
     base_seed = random.randint(10_000_000, 99_000_000)
 
@@ -1415,6 +1424,48 @@ def bench_contention(
                     load_state["skipped_batches"] += 1   # replaced before the load took it
                 committed_queue.append(batch_keys)
 
+    def _load_batch(batch_keys, job_id, phases, state):
+        """One batch through the load lifecycle on manager_load / worker_load."""
+        if touch_first:
+            t0 = time.perf_counter()
+            manager_load.touch(batch_keys)
+            phases["touch"].record(time.perf_counter() - t0)
+
+        t0 = time.perf_counter()
+        hits = [k for k in batch_keys if manager_load.lookup(k)]
+        phases["lookup"].record(time.perf_counter() - t0)
+
+        if not touch_first:
+            t0 = time.perf_counter()
+            manager_load.touch(batch_keys)
+            phases["touch"].record(time.perf_counter() - t0)
+
+        if not hits:
+            state["misses"] += len(batch_keys)
+            return
+        state["misses"] += len(batch_keys) - len(hits)
+
+        t0 = time.perf_counter()
+        load_spec = manager_load.prepare_load(hits)
+        phases["prepare_load"].record(time.perf_counter() - t0)
+
+        gpu_ids = list(range(len(hits)))
+
+        t0 = time.perf_counter()
+        worker_load.submit_load(job_id, load_spec, _FakeGPUSpec(gpu_ids))
+        phases["submit_load"].record(time.perf_counter() - t0)
+
+        t0 = time.perf_counter()
+        while not worker_load.get_finished():
+            time.sleep(0.0001)
+        phases["get_finished"].record(time.perf_counter() - t0)
+
+        t0 = time.perf_counter()
+        manager_load.complete_load(hits)
+        phases["complete_load"].record(time.perf_counter() - t0)
+
+        state["total_blocks"] += len(hits)
+
     def _load_thread():
         barrier.wait()
         time.sleep(0.5)  # let stores seed some keys
@@ -1426,47 +1477,40 @@ def bench_contention(
             except IndexError:
                 time.sleep(0.001)
                 continue
-
-            if touch_first:
-                t0 = time.perf_counter()
-                manager_load.touch(batch_keys)
-                load_phases["touch"].record(time.perf_counter() - t0)
-
-            t0 = time.perf_counter()
-            hits = [k for k in batch_keys if manager_load.lookup(k)]
-            load_phases["lookup"].record(time.perf_counter() - t0)
-
-            if not touch_first:
-                t0 = time.perf_counter()
-                manager_load.touch(batch_keys)
-                load_phases["touch"].record(time.perf_counter() - t0)
-
-            if not hits:
-                load_state["misses"] += len(batch_keys)
-                continue
-            load_state["misses"] += len(batch_keys) - len(hits)
-
-            t0 = time.perf_counter()
-            load_spec = manager_load.prepare_load(hits)
-            load_phases["prepare_load"].record(time.perf_counter() - t0)
-
-            gpu_ids = list(range(len(hits)))
             job_id += 1
+            _load_batch(batch_keys, job_id, load_phases, load_state)
 
+    def _store_batch(generation, job_id):
+        """Store one new batch through manager_store / worker_store; its stored keys."""
+        keys = make_content_keys(batch_size, seed=base_seed + 1_000_000 * generation)
+        result = manager_store.prepare_store(keys)
+        if result is None or not result.keys_to_store:
+            return []
+        worker_store.submit_store(job_id, _FakeGPUSpec(list(range(len(result.keys_to_store)))),
+                                  result.store_spec)
+        while not worker_store.get_finished():
+            time.sleep(0.0001)
+        manager_store.complete_store(result.keys_to_store, success=True)
+        return list(result.keys_to_store)
+
+    def _load_alone():
+        """The reference: a batch stored, then loaded, in turn, with nothing running beside
+        it: the same managers, worker and fresh keys per batch as the concurrent load, so
+        only the concurrent store is missing. Only the load is timed. Its own generations
+        are negative, apart from the concurrent window's."""
+        job_id, generation, loaded = 700_000, 0, 0.0
+        while loaded < CONTENTION_ALONE_SECONDS:
+            generation -= 1
+            job_id += 2
+            stored = _store_batch(generation, job_id)
+            if not stored:
+                continue
             t0 = time.perf_counter()
-            worker_load.submit_load(job_id, load_spec, _FakeGPUSpec(gpu_ids))
-            load_phases["submit_load"].record(time.perf_counter() - t0)
+            _load_batch(stored, job_id + 1, alone_phases, alone_state)
+            loaded += time.perf_counter() - t0
+        return loaded
 
-            t0 = time.perf_counter()
-            while not worker_load.get_finished():
-                time.sleep(0.0001)
-            load_phases["get_finished"].record(time.perf_counter() - t0)
-
-            t0 = time.perf_counter()
-            manager_load.complete_load(hits)
-            load_phases["complete_load"].record(time.perf_counter() - t0)
-
-            load_state["total_blocks"] += len(hits)
+    alone_wall = _load_alone()
 
     t_store = threading.Thread(target=_store_thread, name="contention-store")
     t_load = threading.Thread(target=_load_thread, name="contention-load")
@@ -1502,11 +1546,22 @@ def bench_contention(
         phases=load_phases,
     )
 
+    alone_result = BenchResult(
+        label="Contention: Load Alone",
+        total_blocks=alone_state["total_blocks"],
+        total_bytes=alone_state["total_blocks"] * block_bytes,
+        wall_seconds=alone_wall or 1e-9,
+        phases=alone_phases,
+    )
+
     store_result.print_report()
     print(f"  Store drops: {store_state['drops']}")
     load_result.print_report()
     print(f"  Load misses: {load_state['misses']}  Evictions: {total_evictions}  "
           f"Skipped store batches: {load_state['skipped_batches']}")
+    alone_result.print_report()
+    print(f"  Load-alone misses: {alone_state['misses']}  (same manager and worker as the load "
+          f"thread, no store running)")
 
     return [store_result, load_result]
 
