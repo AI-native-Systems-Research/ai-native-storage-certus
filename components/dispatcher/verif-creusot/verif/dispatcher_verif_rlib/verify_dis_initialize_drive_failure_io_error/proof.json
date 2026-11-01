@@ -9,7 +9,7 @@
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.038 },
+              { "prover": "alt-ergo", "time": 0.04 },
               {
                 "tactic": "split_vc",
                 "children": [
@@ -24,16 +24,16 @@
                         "children": [
                           null,
                           null,
-                          { "prover": "z3", "time": 0.016 },
+                          { "prover": "z3", "time": 0.019 },
                           { "prover": "z3", "time": 0.018 },
-                          { "prover": "alt-ergo", "time": 0.071 },
-                          { "prover": "alt-ergo", "time": 0.068 }
+                          { "prover": "alt-ergo", "time": 0.063 },
+                          { "prover": "alt-ergo", "time": 0.064 }
                         ]
                       },
                       null
                     ]
                   },
-                  { "prover": "z3", "time": 0.021 }
+                  { "prover": "z3", "time": 0.016 }
                 ]
               }
             ]

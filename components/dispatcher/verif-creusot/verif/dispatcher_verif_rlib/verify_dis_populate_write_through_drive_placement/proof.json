@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_populate": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_populate": { "prover": "alt-ergo", "time": 0.027 },
       "vc_verify_dis_populate_write_through_drive_placement": {
         "prover": "alt-ergo",
-        "time": 0.13
+        "time": 0.131
       }
     }
   }

@@ -1,4 +1,4 @@
-(* #"/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 38 9 38 29 *)
+(* #"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 38 9 38 29 *)
 
 (* <Cls as std::clone::Clone> *)
 
@@ -6,25 +6,13 @@ use creusot.int.UInt64
 use creusot.int.UInt32
 use creusot.prelude.Any
 
-type t_DmE =
-  | KeyNotFound
-  | AlreadyExists
-  | ActiveRefs
-  | Timeout
-  | InvalidSize
-  | Underflow
-  | Overflow
-  | NoWrite
-  | InvalidState
-  | Other
-
-type t_Cls = Miss | Retry t_DmE | Warm UInt64.t UInt32.t | Cold UInt64.t
+type t_Cls = Miss | Warm UInt64.t UInt32.t | Cold UInt64.t
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_Cls [#"/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 38 9 38 29]
-  (self: t_Cls) (return (x: t_Cls)) = (! bb0
+let clone_Cls [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 38 9 38 29] (self: t_Cls)
+  (return (x: t_Cls)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_Cls = Any.any_l () | & self: t_Cls = self ]) [ return (result: t_Cls) -> (! return {result}) ]

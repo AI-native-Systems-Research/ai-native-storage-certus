@@ -872,29 +872,50 @@ impl DispatcherComponent {
         // Read from SSD into memory-tier using pipelined reader.
         let drives = self.data_drives.read();
         if drives.is_empty() {
-            // No hardware: just copy zeros to GPU (test/staging-only mode).
+            // No hardware (test/staging-only mode): the fresh memory-tier slot
+            // stands in for the SSD read. Run the same serve-then-promote
+            // sequence as the with-drives path below, so a memory-tier-only
+            // promotion lands the same end state: deliver the slot to the GPU
+            // destination, then re-register the entry in place. The flip must
+            // be `promote_block_to_memory_tier` — `create_memory_tier_entry`
+            // refuses existing keys, and this key's entry exists (BlockDevice)
+            // by construction, so it could only ever answer AlreadyExists and
+            // leave the entry unregistered and the slot stranded.
             let aligned = total_bytes.next_multiple_of(4096).max(4096);
             let temp_buf = unsafe {
                 DmaBuffer::from_raw(mem_ptr as *mut std::ffi::c_void, aligned, noop_free, -1)
             }
             .map_err(|e| DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}")))?;
-            let result = gpu.dma_copy_to_device(
+            let copy = gpu.dma_copy_to_device(
                 &temp_buf,
                 ipc_handle.address as *mut std::ffi::c_void,
                 total_bytes,
             );
             std::mem::forget(temp_buf);
-            // Register promoted entry in dispatch-map.
-            if dm
-                .create_memory_tier_entry(key, mem_ptr, ipc_handle.size)
-                .is_ok()
-            {
-                self.tier_counters.record_promotion_to_memory();
+            if let Err(e) = copy {
+                // The GPU delivery failed: release the reserved slot — the
+                // dispatch map still points the key at the SSD, so keeping it
+                // would strand dead tier capacity.
+                if !staged {
+                    let _ = mt.remove(key);
+                }
+                return Err(DispatcherError::IoError(format!(
+                    "GPU DMA copy (promote) failed: {e}"
+                )));
             }
-            let _ = dm.release_write(key);
-            return result.map_err(|e| {
-                DispatcherError::IoError(format!("GPU DMA copy (promote) failed: {e}"))
-            });
+            // In-place BlockDevice->MemoryTier transition, as the with-drives
+            // path (retains the SSD offset, preserves the pin the lookup
+            // holds, no remove/recreate).
+            if let Err(e) = dm.promote_block_to_memory_tier(key, mem_ptr, ipc_handle.size) {
+                if !staged {
+                    let _ = mt.remove(key);
+                }
+                return Err(DispatcherError::IoError(format!(
+                    "promote transition failed: {e}"
+                )));
+            }
+            self.tier_counters.record_promotion_to_memory();
+            return Ok(());
         }
 
         let (idx, raw_offset) = decode_loc(offset);
@@ -2766,20 +2787,6 @@ impl IDispatcher for DispatcherComponent {
                         .ok();
                     let res = mt
                         .insert(entry.key, entry.total_size)
-                        .map(|mem_ptr| {
-                            // In-place, pin-safe promote (no remove/recreate).
-                            if dm
-                                .promote_block_to_memory_tier(entry.key, mem_ptr, entry.total_size)
-                                .is_ok()
-                            {
-                                self.tier_counters.record_promotion_to_memory();
-                            } else {
-                                // The promotion did not land: release the
-                                // slot — the dispatch map still points the
-                                // key at the SSD.
-                                let _ = mt.remove(entry.key);
-                            }
-                        })
                         .map_err(|e| match e {
                             // Preserve AlreadyExists so the recovery pass below
                             // can re-serve the block warm (concurrent promotion).
@@ -2789,6 +2796,46 @@ impl IDispatcher for DispatcherComponent {
                             other => DispatcherError::AllocationFailed(format!(
                                 "promote insert failed: {other}"
                             )),
+                        })
+                        .and_then(|mem_ptr| {
+                            // No hardware: the fresh slot stands in for the SSD
+                            // read. Run the same serve-then-promote sequence as
+                            // the with-drives cold path: deliver the slot to the
+                            // entry's GPU destination, then re-register the
+                            // entry in place. The synchronous DmaBuffer copy
+                            // (no warm stream) has completed when this returns,
+                            // and it leaves the deferred warm-stream sync below
+                            // covering only the warm hits' queued copies.
+                            if let Err(e) = self.serve_memory_tier_to_gpu(
+                                &gpu,
+                                mem_ptr,
+                                entry.total_size,
+                                &entry.regions,
+                                0,
+                                true,
+                            ) {
+                                // The GPU delivery failed: release the reserved
+                                // slot — the dispatch map still points the key
+                                // at the SSD.
+                                let _ = mt.remove(entry.key);
+                                return Err(e);
+                            }
+                            // In-place, pin-safe promote (no remove/recreate).
+                            if let Err(e) = dm.promote_block_to_memory_tier(
+                                entry.key,
+                                mem_ptr,
+                                entry.total_size,
+                            ) {
+                                // The promotion did not land: release the
+                                // slot — the dispatch map still points the
+                                // key at the SSD.
+                                let _ = mt.remove(entry.key);
+                                return Err(DispatcherError::IoError(format!(
+                                    "promote transition failed: {e}"
+                                )));
+                            }
+                            self.tier_counters.record_promotion_to_memory();
+                            Ok(())
                         });
                     results[entry.idx] = Some(res);
                 }
@@ -8724,3 +8771,5 @@ mod repair_test_register_host_memory;
 mod repair_test_rw_stats_after_shutdown;
 #[path = "repair_test_transient_map_error.rs"]
 mod repair_test_transient_map_error;
+#[path = "repair_test_no_drives_promote_without_read.rs"]
+mod repair_test_no_drives_promote_without_read;

@@ -1,4 +1,4 @@
-(* #"/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 339 9 339 29 *)
+(* #"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 321 9 321 29 *)
 
 (* <CK as std::clone::Clone> *)
 
@@ -10,7 +10,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_CK [#"/home/cornel/repair-j33-rc17/components/dispatcher/verif-creusot/src/batch.rs" 339 9 339 29]
-  (self: t_CK) (return (x: t_CK)) = (! bb0
+let clone_CK [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 321 9 321 29] (self: t_CK)
+  (return (x: t_CK)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ] [ & _ret: t_CK = Any.any_l () | & self: t_CK = self ])
   [ return (result: t_CK) -> (! return {result}) ]

@@ -4,19 +4,8 @@
     "Coma": {
       "vc_lookup_async": { "prover": "alt-ergo", "time": 0.025 },
       "vc_verify_dis_lookup_async_dma_error": {
-        "tactic": "compute_specified",
-        "children": [
-          {
-            "tactic": "split_vc",
-            "children": [
-              { "prover": "alt-ergo", "time": 0.04 },
-              {
-                "tactic": "split_vc",
-                "children": [ { "prover": "z3", "time": 0.044 }, null ]
-              }
-            ]
-          }
-        ]
+        "prover": "z3",
+        "time": 0.05
       }
     }
   }

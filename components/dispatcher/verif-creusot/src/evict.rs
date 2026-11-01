@@ -242,6 +242,8 @@ pub fn eai_frame(a: W, b: W, key: u64, ptr: u64, size: u32) -> bool {
 #[ensures(ev_ctr_a((*s.g).c, (*(^s).g).c))]
 #[ensures(all_from((*s.g).ob, (*s.g).tick) && (*s.g).used + size@ <= (*s.g).cap && !mt_has(*s.g, key) ==>
     match result { Ok(_) => (*(^s).g).dm == (*s.g).dm, _ => false })]
+#[ensures(all_from((*s.g).ob, (*s.g).tick) && (*s.g).used + size@ <= (*s.g).cap && !mt_has(*s.g, key) ==>
+    match result { Ok(_) => true, _ => false })]
 #[ensures(max_attempts@ == 0 && (*s.g).used + size@ > (*s.g).cap ==> result == Err(DE::Alloc) && *(^s).g == *s.g)]
 #[ensures(match result { Err(DE::AlreadyExists(_)) => (*(^s).g).c.already == (*s.g).c.already + 1, _ => (*(^s).g).c.already == (*s.g).c.already })]
 pub fn evict_and_insert(s: &mut S, key: u64, size: u32, max_attempts: usize) -> Result<u64, DE> {

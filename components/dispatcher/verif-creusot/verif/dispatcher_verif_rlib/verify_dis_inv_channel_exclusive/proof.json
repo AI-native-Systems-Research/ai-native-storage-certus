@@ -7,7 +7,7 @@
       "vc_elim_Some": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_dis_inv_channel_exclusive": {
         "prover": "alt-ergo",
-        "time": 0.059
+        "time": 0.051
       }
     }
   }

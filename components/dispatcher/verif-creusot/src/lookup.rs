@@ -50,6 +50,7 @@ pub struct ServeG {
 }
 
 #[ensures((^s).p == s.p && *(^s).g == W { log: (*(^s).g).log, tick: (*(^s).g).tick, ..*s.g } && log_ext(*s.g, *(^s).g))]
+#[ensures((*(^s).g).tick >= (*s.g).tick)]
 #[ensures(result.1.base == (*s.g).log.len() && 0 <= result.1.m && result.1.m <= regions@.len())]
 #[ensures(scattered(*(^s).g, result.1.base, regions@, result.1.m, pointer, size, warm_raw))]
 #[ensures(result.1.m < regions@.len() && result.0 == Ok(()) ==> chunk_of(regions@, result.1.m, size@) == 0)]
@@ -144,10 +145,7 @@ pub struct PsG {
 
 #[ensures((^s).p == s.p)]
 #[ensures(rd_ctr((*s.g).c, (*(^s).g).c) && (*(^s).g).c.promo_gpu == (*s.g).c.promo_gpu)]
-#[ensures(log_ext(*s.g, *(^s).g) && same_env(*s.g, *(^s).g) && (*(^s).g).wq == (*s.g).wq && own_reads(*s.g, *(^s).g))]
-#[ensures(match result.1.path {
-    Path::NoDrives => logged(result.1.mid, *(^s).g, Ev::RelWrite { key, own: if result.1.promoted { 1 } else { 0 } }),
-    _ => own_writes(*s.g, *(^s).g) })]
+#[ensures(log_ext(*s.g, *(^s).g) && same_env(*s.g, *(^s).g) && (*(^s).g).wq == (*s.g).wq && own_reads(*s.g, *(^s).g) && own_writes(*s.g, *(^s).g))]
 #[ensures((*(^s).g).c.promo_mem == (*s.g).c.promo_mem + (if result.1.promoted { 1 } else { 0 }))]
 #[ensures(match result.1.path {
     Path::NoSlot => (match result.0 { Err(DE::Alloc) => true, Err(DE::AlreadyExists(k)) => k == key, _ => false })
@@ -155,7 +153,19 @@ pub struct PsG {
     Path::Staged => s.p.nd@ > 0 && s.p.ring && s.p.stg && h.size@ <= s.p.stg_bytes@ && evict_frame(*s.g, result.1.mid)
                     && !result.1.promoted && (*(^s).g).dm == result.1.mid.dm && (*(^s).g).mt == result.1.mid.mt
                     && (result.0 == Ok(()) ==> result.1.read_ok),
-    Path::NoDrives => s.p.nd@ == 0 && eai_frame(*s.g, result.1.mid, key, result.1.ptr, h.size),
+    Path::NoDrives => s.p.nd@ == 0 && eai_frame(*s.g, result.1.mid, key, result.1.ptr, h.size)
+                      && (result.0 == Ok(()) ==> result.1.read_ok && result.1.promoted)
+                      && (result.1.promoted ==> has(*(^s).g, key) && mt_has(*(^s).g, key)
+                            && ent(*(^s).g, key).loc == Loc::Mem { ptr: result.1.ptr, size: h.size,
+                                ssd: match ent(result.1.mid, key).loc { Loc::Blk { off } => Some(off), _ => None } }
+                            && (*(^s).g).log.len() == result.1.mid.log.len() + 2
+                            && (match (*(^s).g).log[result.1.mid.log.len()] { Ev::H2D { src, dst, len, .. } => src == result.1.ptr && dst == h.addr && len@ == h.size@, _ => false })
+                            && (*(^s).g).log[result.1.mid.log.len() + 1] == Ev::DmPromote { key })
+                      && (!result.1.promoted ==> (*(^s).g).dm == result.1.mid.dm)
+                      && no_ssd(*s.g, *(^s).g)
+                      && (!result.1.read_ok ==> result.0 == Err(DE::Io(IoK::Gpu)))
+                      && (result.1.read_ok && !result.1.promoted ==> result.0 == Err(DE::Io(IoK::Promote)))
+                      && (all_from((*s.g).og, (*s.g).tick) ==> result.1.read_ok),
     Path::Slot => s.p.nd@ > 0 && eai_frame(*s.g, result.1.mid, key, result.1.ptr, h.size)
                   && (result.0 == Ok(()) ==> result.1.read_ok && result.1.promoted)
                   && (result.1.promoted ==> has(*(^s).g, key) && ent(*(^s).g, key).loc == Loc::Mem { ptr: result.1.ptr, size: h.size,
@@ -164,14 +174,15 @@ pub struct PsG {
 })]
 #[ensures(s.p.nd@ > 0 && result.0 == Ok(()) && match result.1.path { Path::Slot => true, Path::Staged => true, _ => false } ==>
     logged(result.1.mid, *(^s).g, Ev::SsdRead { drive: di(key, s.p.nd), key }))]
-#[ensures(result.1.read_ok && s.p.nd@ > 0 ==> h2d_logged(result.1.mid, *(^s).g, result.1.ptr, h.addr, h.size@))]
-#[ensures(match result.1.path { Path::NoDrives => (result.1.promoted ==> !has(result.1.mid, key))
-        && (!result.1.promoted && has(result.1.mid, key) && ent(result.1.mid, key).wr@ == 0 ==> (*(^s).g).dm.get(key) == result.1.mid.dm.get(key))
-        && no_ssd(*s.g, *(^s).g) && (all_from((*s.g).og, (*s.g).tick) ==> result.0 == Ok(())), _ => true })]
+#[ensures(result.1.read_ok ==> h2d_logged(result.1.mid, *(^s).g, result.1.ptr, h.addr, h.size@))]
+// Memory-tier-only mode (the with-drives cold path can still fail on the SSD read, which this
+// precondition says nothing about — there the SSD oracle, not the GPU one, decides).
+#[ensures(s.p.nd@ == 0 && all_from((*s.g).ob, (*s.g).tick) && all_from((*s.g).og, (*s.g).tick) && (*s.g).used + h.size@ <= (*s.g).cap
+    && !mt_has(*s.g, key) && has(*s.g, key) && is_blk(ent(*s.g, key).loc) && h.size@ > 0
+    ==> result.0 == Ok(()) && result.1.promoted && result.1.read_ok)]
 #[ensures(all_from((*s.g).ob, (*s.g).tick) && (*s.g).used + h.size@ <= (*s.g).cap && !mt_has(*s.g, key) ==>
     match result.1.path { Path::NoDrives => s.p.nd@ == 0, Path::Slot => s.p.nd@ > 0 && (*s.g).dm == result.1.mid.dm, _ => false })]
 #[ensures(match result.1.path { Path::NoSlot => result.0 == Err(DE::Alloc) ==> !(s.p.nd@ > 0 && s.p.ring && s.p.stg && h.size@ <= s.p.stg_bytes@), _ => true })]
-#[ensures(match result.1.path { Path::NoDrives => (result.0 == Ok(())) == result.1.read_ok && (!result.1.read_ok ==> result.0 == Err(DE::Io(IoK::Gpu))), _ => true })]
 #[ensures(match result.1.path { Path::Slot => s.p.ring && all_from((*s.g).ob, (*s.g).tick) && (forall<t: Int> !(*s.g).os[t]) ==>
         !result.1.read_ok && match result.0 { Err(_) => true, _ => false }, _ => true })]
 pub fn promote_and_serve(s: &mut S, key: u64, offset: u64, h: Ipc, device: i32) -> (Result<(), DE>, Snapshot<PsG>) {
@@ -193,27 +204,31 @@ pub fn promote_and_serve(s: &mut S, key: u64, offset: u64, h: Ipc, device: i32) 
     };
     let mid = snapshot!(*s.g);
     if s.p.nd == 0 {
-        // No hardware: copy the slot to the GPU, then register the promoted entry.
-        let result = gpu_dma_to_device(s, mem_ptr, h.addr, total_bytes);
-        let created = dm_create(s, key, mem_ptr, h.size);
-        let mut promoted = false;
-        match created {
-            Ok(()) => {
-                rec_promotion_to_memory(s);
-                promoted = true;
+        // No hardware: the fresh memory-tier slot stands in for the SSD read. Run the same
+        // serve-then-promote sequence as the with-drives path below: deliver the slot to
+        // the GPU destination first, then re-register the entry in place. The flip must be
+        // promote_block_to_memory_tier — create_memory_tier_entry refuses existing keys,
+        // and this key's entry exists (BlockDevice) by construction, so it could only ever
+        // answer AlreadyExists and leave the entry unregistered and the slot stranded.
+        if !gpu_dma_to_device(s, mem_ptr, h.addr, total_bytes) {
+            // The GPU delivery failed: release the reserved slot — the dispatch map still
+            // points the key at the SSD, so keeping it would strand dead tier capacity.
+            let _ = mt_remove(s, key);
+            return (Err(DE::Io(IoK::Gpu)), snapshot!(PsG { path: Path::NoDrives, ptr: mem_ptr, read_ok: false, promoted: false, mid: *mid }));
+        }
+        proof_assert!(s.g.log.len() == mid.log.len() + 1 && s.g.log[mid.log.len()] == Ev::H2D { src: mem_ptr, dst: h.addr, len: total_bytes, stream: 0u64 });
+        // In-place BlockDevice->MemoryTier transition, as the with-drives path (retains
+        // the SSD offset, preserves the pin the lookup holds, no remove/recreate).
+        match dm_promote(s, key, mem_ptr, h.size) {
+            Ok(()) => {}
+            Err(_) => {
+                let _ = mt_remove(s, key);
+                return (Err(DE::Io(IoK::Promote)), snapshot!(PsG { path: Path::NoDrives, ptr: mem_ptr, read_ok: true, promoted: false, mid: *mid }));
             }
-            Err(_) => {}
         }
-        let own = snapshot!(if promoted { 1 } else { 0 });
-        let rw_at = snapshot!(s.g.log.len());
-        let _ = dm_release_write(s, key, own);
-        proof_assert!(s.g.log[*rw_at] == Ev::RelWrite { key, own: *own });
-        let path = Path::NoDrives;
-        if result {
-            return (Ok(()), snapshot!(PsG { path, ptr: mem_ptr, read_ok: true, promoted, mid: *mid }));
-        } else {
-            return (Err(DE::Io(IoK::Gpu)), snapshot!(PsG { path, ptr: mem_ptr, read_ok: false, promoted, mid: *mid }));
-        }
+        proof_assert!(s.g.log.len() == mid.log.len() + 2 && s.g.log[mid.log.len() + 1] == Ev::DmPromote { key });
+        rec_promotion_to_memory(s);
+        return (Ok(()), snapshot!(PsG { path: Path::NoDrives, ptr: mem_ptr, read_ok: true, promoted: true, mid: *mid }));
     }
     let path = if staged { Path::Staged } else { Path::Slot };
     let idx = drive_index(key, s.p.nd);
@@ -303,6 +318,16 @@ pub struct LaG {
         && (*(^s).g).c.promo_mem == (*s.g).c.promo_mem + (if result.1.ps.promoted { 1 } else { 0 }),
 })]
 #[ensures(s.p.init && s.p.has_gpu ==> match result.1.path { LPath::Cold => promote_post(*s.g, result.1.after_lookup, *(^s).g, s.p, key, h, result.0, result.1.ps), _ => true })]
+#[ensures(s.p.init && s.p.has_gpu && s.p.nd@ == 0 && has(*s.g, key) && is_blk(ent(*s.g, key).loc)
+    && ent(*s.g, key).wr@ == 0 && ent(*s.g, key).rr@ < u32::MAX@ && !mt_has(*s.g, key) && h.size@ > 0
+    && (*s.g).used + h.size@ <= (*s.g).cap && all_from((*s.g).ob, (*s.g).tick) && all_from((*s.g).og, (*s.g).tick) ==>
+    result.0 == Ok(0u64) && result.1.path == LPath::Cold && result.1.ps.path == Path::NoDrives
+    && result.1.ps.promoted && result.1.ps.read_ok
+    && has(*(^s).g, key) && mt_has(*(^s).g, key)
+    && (match ent(*(^s).g, key).loc { Loc::Mem { ptr, size, .. } => ptr == result.1.ps.ptr && size == h.size, _ => false })
+    && (*(^s).g).log.len() == result.1.ps.mid.log.len() + 2
+    && (match (*(^s).g).log[result.1.ps.mid.log.len()] { Ev::H2D { src, dst, len, .. } => src == result.1.ps.ptr && dst == h.addr && len@ == h.size@, _ => false })
+    && (*(^s).g).log[result.1.ps.mid.log.len() + 1] == Ev::DmPromote { key })]
 pub fn lookup_async(s: &mut S, key: u64, h: Ipc) -> (Result<u64, DE>, Snapshot<LaG>) {
     let g0 = snapshot!(*s.g);
     let dsv = snapshot!(ServeG { base: 0, m: 0, gpu_ok: false });
@@ -389,7 +414,19 @@ pub fn promote_post(g: W, a: W, b: W, p: P, key: u64, h: Ipc, r: Result<u64, DE>
             Path::Staged => p.nd@ > 0 && p.ring && p.stg && h.size@ <= p.stg_bytes@ && evict_frame(a, ps.mid)
                             && !ps.promoted && b.dm == ps.mid.dm && b.mt == ps.mid.mt && (r == Ok(0u64) ==> ps.read_ok),
             Path::NoDrives => p.nd@ == 0 && eai_frame(a, ps.mid, key, ps.ptr, h.size)
-                              && logged(ps.mid, b, Ev::RelWrite { key, own: if ps.promoted { 1 } else { 0 } }),
+                              && (r == Ok(0u64) ==> ps.read_ok && ps.promoted)
+                              && (ps.promoted ==> has(b, key) && mt_has(b, key)
+                                    && ent(b, key).loc == Loc::Mem { ptr: ps.ptr, size: h.size,
+                                        ssd: match ent(ps.mid, key).loc { Loc::Blk { off } => Some(off), _ => None } }
+                                    && b.log.len() == ps.mid.log.len() + 2
+                                    && (match b.log[ps.mid.log.len()] { Ev::H2D { src, dst, len, .. } => src == ps.ptr && dst == h.addr && len@ == h.size@, _ => false })
+                                    && b.log[ps.mid.log.len() + 1] == Ev::DmPromote { key })
+                              && (!ps.promoted ==> b.dm == ps.mid.dm)
+                              && (ps.read_ok ==> h2d_logged(ps.mid, b, ps.ptr, h.addr, h.size@))
+                              && (!ps.read_ok ==> match r { Err(DE::Io(IoK::Gpu)) => true, _ => false })
+                              && (ps.read_ok && !ps.promoted ==> match r { Err(DE::Io(IoK::Promote)) => true, _ => false })
+                              && no_ssd(a, b)
+                              && (all_from(a.og, a.tick) ==> ps.read_ok),
             Path::Slot => p.nd@ > 0 && eai_frame(a, ps.mid, key, ps.ptr, h.size)
                           && (r == Ok(0u64) ==> ps.read_ok && ps.promoted)
                           && (ps.promoted ==> has(b, key) && ent(b, key).loc == Loc::Mem { ptr: ps.ptr, size: h.size,
@@ -398,8 +435,8 @@ pub fn promote_post(g: W, a: W, b: W, p: P, key: u64, h: Ipc, r: Result<u64, DE>
         }
         && (p.nd@ > 0 && r == Ok(0u64) && match ps.path { Path::Slot => true, Path::Staged => true, _ => false } ==>
               logged(ps.mid, b, Ev::SsdRead { drive: di(key, p.nd), key }))
-        && (ps.read_ok && p.nd@ > 0 ==> h2d_logged(ps.mid, b, ps.ptr, h.addr, h.size@))
-        && (match ps.path { Path::NoDrives => true, _ => own_writes(a, b) })
+        && (ps.read_ok ==> h2d_logged(ps.mid, b, ps.ptr, h.addr, h.size@))
+        && own_writes(a, b)
     }
 }
 

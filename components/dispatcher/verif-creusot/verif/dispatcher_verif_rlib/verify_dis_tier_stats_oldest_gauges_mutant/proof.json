@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_tier_event_stats": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_tier_event_stats": { "prover": "alt-ergo", "time": 0.038 },
       "vc_verify_dis_tier_stats_oldest_gauges__mutant": null
     }
   }

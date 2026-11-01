@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_batch_populate": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_batch_populate": { "prover": "alt-ergo", "time": 0.03 },
       "vc_verify_dis_batch_populate_copy_failure_releases": {
         "prover": "alt-ergo",
-        "time": 0.15
+        "time": 0.145
       }
     }
   }

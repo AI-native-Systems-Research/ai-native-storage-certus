@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_release_memory": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_release_memory": { "prover": "alt-ergo", "time": 0.028 },
       "vc_verify_dis_release_memory_idempotent": {
         "prover": "alt-ergo",
-        "time": 0.091
+        "time": 0.093
       }
     }
   }

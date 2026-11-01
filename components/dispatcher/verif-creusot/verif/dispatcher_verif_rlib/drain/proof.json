@@ -2,9 +2,9 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_drain": { "prover": "z3", "time": 0.043 },
-      "vc_writer_idle": { "prover": "alt-ergo", "time": 0.013 },
-      "vc_writer_step": { "prover": "alt-ergo", "time": 0.018 }
+      "vc_drain": { "prover": "z3", "time": 0.029 },
+      "vc_writer_idle": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_writer_step": { "prover": "alt-ergo", "time": 0.021 }
     }
   }
 }

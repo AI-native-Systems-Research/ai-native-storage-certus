@@ -836,6 +836,36 @@ pub fn verify_dis_lookup_async_miss__mutant(s: &mut S, key: u64, h: Ipc) -> (Res
     lookup_async(s, key, h)
 }
 
+// DIS-LOOKUP-NO-HW-PROMOTE (finding no-drives-promote-without-read): in memory-tier-only mode
+// a cold promotion creates a memory-tier slot, copies it to the GPU, and re-registers the
+// entry in place as a memory-tier entry.
+
+#[requires(pinv(s.p) && s.p.init)]
+#[requires(s.p.has_gpu && s.p.nd@ == 0)]
+#[requires(has((*s.g), key) && is_blk(ent((*s.g), key).loc) && ent((*s.g), key).wr@ == 0 && ent((*s.g), key).rr@ < u32::MAX@)]
+#[requires(h.size@ > 0 && (*s.g).used + h.size@ <= (*s.g).cap && !mt_has((*s.g), key))]
+#[requires(all_from((*s.g).ob, (*s.g).tick) && all_from((*s.g).og, (*s.g).tick))]
+#[ensures(result.0 == Ok(0u64) && result.1.path == LPath::Cold)]
+#[ensures(result.1.ps.path == Path::NoDrives && result.1.ps.promoted && result.1.ps.read_ok)]
+#[ensures(has(*(^s).g, key) && mt_has(*(^s).g, key))]
+#[ensures(match ent(*(^s).g, key).loc { Loc::Mem { ptr, size, .. } => ptr == result.1.ps.ptr && size == h.size, _ => false })]
+#[ensures((*(^s).g).log.len() == result.1.ps.mid.log.len() + 2)]
+#[ensures(match (*(^s).g).log[result.1.ps.mid.log.len()] { Ev::H2D { src, dst, len, .. } => src == result.1.ps.ptr && dst == h.addr && len@ == h.size@, _ => false })]
+#[ensures((*(^s).g).log[result.1.ps.mid.log.len() + 1] == Ev::DmPromote { key })]
+pub fn verify_dis_lookup_no_hw_promote(s: &mut S, key: u64, h: Ipc) -> (Result<u64, DE>, Snapshot<LaG>) {
+    lookup_async(s, key, h)
+}
+
+#[requires(pinv(s.p) && s.p.init)]
+#[requires(s.p.has_gpu && s.p.nd@ == 0)]
+#[requires(has((*s.g), key) && is_blk(ent((*s.g), key).loc) && ent((*s.g), key).wr@ == 0 && ent((*s.g), key).rr@ < u32::MAX@)]
+#[requires(h.size@ > 0 && (*s.g).used + h.size@ <= (*s.g).cap && !mt_has((*s.g), key))]
+#[requires(all_from((*s.g).ob, (*s.g).tick) && all_from((*s.g).og, (*s.g).tick))]
+#[ensures(result.0 == Ok(0u64) ==> is_blk(ent(*(^s).g, key).loc))]
+pub fn verify_dis_lookup_no_hw_promote__mutant(s: &mut S, key: u64, h: Ipc) -> (Result<u64, DE>, Snapshot<LaG>) {
+    lookup_async(s, key, h)
+}
+
 #[requires(pinv(s.p) && s.p.init)]
 #[requires(s.p.has_gpu)]
 #[ensures(result.1.path == LPath::Warm && !result.1.sv.gpu_ok ==> match result.0 { Err(DE::Io(_)) => true, _ => false })]
@@ -993,6 +1023,41 @@ pub fn verify_dis_batch_lookup_concurrent_promote_timeout(s: &mut S, key: u64, r
 pub fn verify_dis_batch_lookup_concurrent_promote_timeout__mutant(s: &mut S, key: u64, regions: &Vec<Ipc>, warm: u64) {
     let (r, saw_mem) = serve_concurrently_promoted(s, key, regions, warm);
     proof_assert!(!saw_mem ==> r == Ok(()));
+}
+
+// DIS-BATCH-LOOKUP-COLD-PROMOTES (finding no-drives-promote-without-read): each successfully
+// served block-device entry of a batch is delivered to its GPU destination and afterwards
+// registered as a memory-tier entry (memory-tier-only mode; the staging fallback needs drives).
+// "Block-device entry served by the batch" is the cold classification in the model: an entry
+// can only escape it through lookup contention (Miss), in which case it is not served at all.
+
+#[requires(pinv(s.p) && a_fr039(entries@))]
+#[requires(s.p.init && s.p.has_dm && s.p.has_mt && s.p.has_gpu && s.p.nd@ == 0)]
+#[requires(entries@.len() == 1 && entries@[0].regions@.len() == 1 && entries@[0].regions@[0].size@ > 0)]
+#[requires(has((*s.g), entries@[0].key) && is_blk(ent((*s.g), entries@[0].key).loc))]
+#[requires(!mt_has((*s.g), entries@[0].key) && (*s.g).used + sum_sz(entries@[0].regions@) <= (*s.g).cap)]
+#[requires(all_from((*s.g).ob, (*s.g).tick) && all_from((*s.g).og, (*s.g).tick))]
+#[ensures(match result.1.cls[0] { Cls::Cold { .. } => true, _ => false } ==>
+    result.0@[0].result == Ok(()) && result.0@[0].served_by == ServedBy::Ssd
+    && result.1.cold.nd.prom.len() == 1 && result.1.cold.nd_idx[0] == 0 && result.1.cold.nd.prom[0]
+    && nd_served(*(^s).g, (*s.g).log.len(), entries@[0].regions@, entries@[0].key, sum_sz(entries@[0].regions@), result.1.cold.nd, 0)
+    && (match (*(^s).g).log[result.1.cold.nd.sv[0].base] { Ev::H2D { dst, len, .. } => dst == entries@[0].regions@[0].addr && len@ == entries@[0].regions@[0].size@, _ => false })
+    && (*(^s).g).log[result.1.cold.nd.pr_at[0]] == Ev::DmPromote { key: entries@[0].key })]
+pub fn verify_dis_batch_lookup_cold_promotes(s: &mut S, entries: &[Be]) -> (Vec<Outcome>, Snapshot<BlG>) {
+    batch_lookup(s, entries)
+}
+
+#[requires(pinv(s.p) && a_fr039(entries@))]
+#[requires(s.p.init && s.p.has_dm && s.p.has_mt && s.p.has_gpu && s.p.nd@ == 0)]
+#[requires(entries@.len() == 1 && entries@[0].regions@.len() == 1 && entries@[0].regions@[0].size@ > 0)]
+#[requires(has((*s.g), entries@[0].key) && is_blk(ent((*s.g), entries@[0].key).loc))]
+#[requires(!mt_has((*s.g), entries@[0].key) && (*s.g).used + sum_sz(entries@[0].regions@) <= (*s.g).cap)]
+#[requires(all_from((*s.g).ob, (*s.g).tick) && all_from((*s.g).og, (*s.g).tick))]
+#[ensures(match result.1.cls[0] { Cls::Cold { .. } => true, _ => false } && result.0@[0].result == Ok(())
+    ==> forall<i: Int> (*s.g).log.len() <= i && i < (*(^s).g).log.len() ==>
+        match (*(^s).g).log[i] { Ev::H2D { dst, .. } => dst != entries@[0].regions@[0].addr, _ => true })]
+pub fn verify_dis_batch_lookup_cold_promotes__mutant(s: &mut S, entries: &[Be]) -> (Vec<Outcome>, Snapshot<BlG>) {
+    batch_lookup(s, entries)
 }
 
 #[requires(pinv(s.p))]

@@ -8,7 +8,7 @@
       },
       "vc_verify_dis_copy_completed_register_failure_releases": {
         "prover": "alt-ergo",
-        "time": 0.065
+        "time": 0.066
       }
     }
   }

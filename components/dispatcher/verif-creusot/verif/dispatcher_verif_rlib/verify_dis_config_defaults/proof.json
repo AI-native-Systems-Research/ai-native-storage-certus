@@ -5,7 +5,7 @@
       "vc_config_default": { "prover": "alt-ergo", "time": 0.022 },
       "vc_verify_dis_config_defaults": {
         "prover": "alt-ergo",
-        "time": 0.028
+        "time": 0.021
       }
     }
   }

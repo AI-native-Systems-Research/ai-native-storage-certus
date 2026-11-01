@@ -123,8 +123,8 @@ pub struct ClsG {
 }
 
 #[requires(a_fr039(entries@))]
-#[ensures((^s).p == s.p && log_ext(*s.g, *(^s).g) && same_env(*s.g, *(^s).g) && (*(^s).g).wq == (*s.g).wq)]
-#[ensures((*(^s).g).mt == (*s.g).mt && same_ctr((*s.g).c, (*(^s).g).c) && no_reg(*s.g, *(^s).g) && no_ssd(*s.g, *(^s).g))]
+#[ensures((^s).p == s.p && log_ext(*s.g, *(^s).g) && same_env(*s.g, *(^s).g) && (*(^s).g).wq == (*s.g).wq && (*(^s).g).tick >= (*s.g).tick)]
+#[ensures((*(^s).g).mt == (*s.g).mt && same_ctr((*s.g).c, (*(^s).g).c) && no_reg(*s.g, *(^s).g) && no_ssd(*s.g, *(^s).g) && (*(^s).g).used == (*s.g).used)]
 #[ensures(result.0.results@.len() == entries@.len() && result.0.tier@.len() == entries@.len() && result.1.cls.len() == entries@.len()
     && result.1.sv.len() == entries@.len())]
 #[ensures(forall<k: u64> has(*s.g, k) == has(*(^s).g, k)
@@ -164,8 +164,8 @@ pub fn bl_classify(s: &mut S, entries: &[Be], warm_raw: u64) -> (Bl, Snapshot<Cl
     let mut svs: Snapshot<Seq<ServeG>> = snapshot!(Seq::empty());
     let mut cpos: Snapshot<Seq<Int>> = snapshot!(Seq::empty());
     let mut i: usize = 0;
-    #[invariant(s.p == *p0 && i@ <= n@ && log_ext(*g0, *s.g) && same_env(*g0, *s.g) && s.g.wq == g0.wq)]
-    #[invariant(s.g.mt == g0.mt && same_ctr(g0.c, s.g.c) && no_reg(*g0, *s.g) && no_ssd(*g0, *s.g))]
+    #[invariant(s.p == *p0 && i@ <= n@ && log_ext(*g0, *s.g) && same_env(*g0, *s.g) && s.g.wq == g0.wq && s.g.tick >= g0.tick)]
+    #[invariant(s.g.mt == g0.mt && same_ctr(g0.c, s.g.c) && no_reg(*g0, *s.g) && no_ssd(*g0, *s.g) && s.g.used == g0.used)]
     #[invariant(results@.len() == i@ && tier@.len() == i@ && cls.len() == i@ && svs.len() == i@ && cpos.len() == i@)]
     #[invariant(forall<k: u64> has(*g0, k) == has(*s.g, k)
         && (has(*g0, k) ==> ent(*s.g, k).loc == ent(*g0, k).loc && ent(*s.g, k).wr == ent(*g0, k).wr && ent(*s.g, k).es == ent(*g0, k).es
@@ -352,6 +352,66 @@ pub struct ColdG {
     pub kind: Seq<CK>,
     /// dm.promote_block_to_memory_tier succeeded for this cold entry
     pub prom: Seq<bool>,
+    /// the no-drives cold path's per-entry record (empty seqs unless kind[q] == NoDrive)
+    pub nd: NdG,
+    /// nd record q belongs to entries@[nd_idx[q]] (= cold@[q].idx)
+    pub nd_idx: Seq<Int>,
+}
+
+/// The no-drives cold path's per-entry record: whether the entry was promoted, and the log
+/// positions of its slot reservation (MtInsert), its GPU delivery and its in-place
+/// re-registration (DmPromote).
+pub struct NdG {
+    pub prom: Seq<bool>,
+    /// log position of the entry's MtInsert (-1 when no slot was reserved)
+    pub ins_at: Seq<Int>,
+    /// the serve record of its slot -> GPU delivery
+    pub sv: Seq<ServeG>,
+    /// the slot the delivery read from (0 when none)
+    pub ptr: Seq<u64>,
+    /// log position of its DmPromote (-1 when not promoted)
+    pub pr_at: Seq<Int>,
+}
+
+/// `h2d_scatter_ok` with the slot size as an `Int` (callers that only have `sum_sz`).
+#[logic(open)]
+pub fn h2d_scatter_ok_i(w: W, sv: ServeG, r: Seq<Ipc>, ptr: u64, size: Int) -> bool {
+    pearlite! { 0 <= sv.base && 0 <= sv.m && sv.m <= r.len() && sv.base + sv.m <= w.log.len()
+        && forall<l: Int> 0 <= l && l < sv.m ==>
+            match w.log[sv.base + l] { Ev::H2D { src, dst, len, .. } =>
+                src@ == ptr@ + pre(r, l) && dst == r[l].addr && len@ == chunk_of(r, l, size) && len@ > 0
+                && ptr@ <= src@ && src@ + len@ <= ptr@ + size, _ => false } }
+}
+
+/// `scatter_ok_ext` for the Int-size variant.
+#[logic]
+#[requires(h2d_scatter_ok_i(a, sv, r, ptr, size))]
+#[requires(a.log.len() <= b.log.len() && forall<q: Int> 0 <= q && q < a.log.len() ==> b.log[q] == a.log[q])]
+#[ensures(h2d_scatter_ok_i(b, sv, r, ptr, size))]
+pub fn scatter_ok_i_ext(a: W, b: W, sv: ServeG, r: Seq<Ipc>, ptr: u64, size: Int) {}
+
+/// `nd_served` only reads the log at fixed positions, so it transfers to any world
+/// whose log extends `a`'s log.
+#[logic]
+#[requires(nd_served(a, from, r, key, total, nd, q))]
+#[requires(a.log.len() <= b.log.len() && forall<t: Int> 0 <= t && t < a.log.len() ==> b.log[t] == a.log[t])]
+#[ensures(nd_served(b, from, r, key, total, nd, q))]
+pub fn nd_served_ext(a: W, b: W, from: Int, r: Seq<Ipc>, key: u64, total: Int, nd: NdG, q: Int) {}
+
+/// Cold entry q of the no-drives path was served and promoted, as log positions in `w`:
+/// a slot was reserved for its key (MtInsert at ins_at[q]), the slot was scattered over the
+/// entry's GPU regions (the H2D events of sv[q]), and only afterwards was the entry
+/// re-registered in place (DmPromote at pr_at[q]) — the serve-then-promote order.
+#[logic(open)]
+pub fn nd_served(w: W, from: Int, r: Seq<Ipc>, key: u64, total: Int, nd: NdG, q: Int) -> bool {
+    pearlite! {
+        from <= nd.ins_at[q] && 0 <= nd.ins_at[q] && nd.ins_at[q] < w.log.len() && w.log[nd.ins_at[q]] == Ev::MtInsert { key }
+        && nd.ins_at[q] < nd.sv[q].base
+        && h2d_scatter_ok_i(w, nd.sv[q], r, nd.ptr[q], total)
+        && nd.sv[q].base + nd.sv[q].m <= nd.pr_at[q]
+        && 0 <= nd.pr_at[q] && nd.pr_at[q] < w.log.len() && w.log[nd.pr_at[q]] == Ev::DmPromote { key }
+        && (nd.sv[q].m < r.len() ==> chunk_of(r, nd.sv[q].m, total) == 0)
+    }
 }
 
 #[logic]
@@ -463,43 +523,104 @@ pub fn bl_cold_prep(s: &mut S, cold: &Vec<ColdE>, results: &mut Vec<Res>) -> (Ve
     (jobs, staged, kind)
 }
 
-/// memory-tier-only cold path (lib.rs:2481-2508).
-#[requires(forall<q: Int> 0 <= q && q < cold@.len() ==> cold@[q].idx@ < results@.len())]
+/// memory-tier-only cold path (lib.rs:2481-2508): reserve a slot, deliver it to the entry's
+/// GPU destination, then re-register the entry in place — the same serve-then-promote
+/// sequence the with-drives cold path runs.
+#[requires(forall<q: Int> 0 <= q && q < cold@.len() ==> cold@[q].idx@ < results@.len() && cold@[q].idx@ < entries@.len())]
+#[requires(forall<q: Int, r: Int> 0 <= q && q < r && r < cold@.len() ==> cold@[q].idx@ < cold@[r].idx@)]
 #[ensures((^s).p == s.p && log_ext(*s.g, *(^s).g) && same_env(*s.g, *(^s).g) && (*(^s).g).wq == (*s.g).wq)]
 #[ensures((^results)@.len() == results@.len())]
 #[ensures(forall<i: Int> 0 <= i && i < results@.len() && (forall<q: Int> 0 <= q && q < cold@.len() ==> cold@[q].idx@ != i) ==> (^results)@[i] == results@[i])]
-#[ensures(result.len() == cold@.len())]
-#[ensures((*(^s).g).c.promo_mem == (*s.g).c.promo_mem + count_true(*result, cold@.len()))]
+#[ensures(result.prom.len() == cold@.len() && result.ins_at.len() == cold@.len() && result.sv.len() == cold@.len()
+    && result.ptr.len() == cold@.len() && result.pr_at.len() == cold@.len())]
+#[ensures((*(^s).g).c.promo_mem == (*s.g).c.promo_mem + count_true(result.prom, cold@.len()))]
 #[ensures(rd_ctr((*s.g).c, (*(^s).g).c) && (*(^s).g).c.promo_gpu == (*s.g).c.promo_gpu)]
 #[ensures(no_reg(*s.g, *(^s).g) && own_reads(*s.g, *(^s).g) && own_writes(*s.g, *(^s).g) && no_ssd(*s.g, *(^s).g))]
 #[ensures(no_new_kn(results@, (^results)@))]
-pub fn bl_cold_nodrive(s: &mut S, cold: &Vec<ColdE>, results: &mut Vec<Res>) -> Snapshot<Seq<bool>> {
+#[ensures(forall<q: Int> 0 <= q && q < cold@.len() ==>
+    (match (^results)@[cold@[q].idx@] { Some(Ok(())) => true, _ => false }) == result.prom[q]
+    && (!result.prom[q] ==> result.pr_at[q] == -1)
+    && (result.prom[q] ==> nd_served(*(^s).g, (*s.g).log.len(), entries@[cold@[q].idx@].regions@, cold@[q].key, cold@[q].total@, *result, q)))]
+#[ensures(cold@.len() == 1 && all_from((*s.g).ob, (*s.g).tick) && all_from((*s.g).og, (*s.g).tick)
+    && (*s.g).used + cold@[0].total@ <= (*s.g).cap && !mt_has(*s.g, cold@[0].key)
+    && has(*s.g, cold@[0].key) && is_blk(ent(*s.g, cold@[0].key).loc) && cold@[0].total@ > 0
+    ==> result.prom[0] && match (^results)@[cold@[0].idx@] { Some(Ok(())) => true, _ => false })]
+pub fn bl_cold_nodrive(s: &mut S, cold: &Vec<ColdE>, results: &mut Vec<Res>, entries: &[Be]) -> Snapshot<NdG> {
     let g0 = snapshot!(*s.g);
     let p0 = snapshot!(s.p);
     let r0 = snapshot!(results@);
     let max_attempts = s.p.max_att;
     let mut prom: Snapshot<Seq<bool>> = snapshot!(Seq::empty());
+    let mut ins: Snapshot<Seq<Int>> = snapshot!(Seq::empty());
+    let mut svs: Snapshot<Seq<ServeG>> = snapshot!(Seq::empty());
+    let mut ptrs: Snapshot<Seq<u64>> = snapshot!(Seq::empty());
+    let mut prs: Snapshot<Seq<Int>> = snapshot!(Seq::empty());
     let mut q: usize = 0;
     #[invariant(s.p == *p0 && q@ <= cold@.len() && log_ext(*g0, *s.g) && same_env(*g0, *s.g) && s.g.wq == g0.wq && results@.len() == r0.len())]
+    #[invariant(q@ == 0 ==> *s.g == *g0)]
     #[invariant(no_new_kn(*r0, results@))]
     #[invariant(forall<i: Int> 0 <= i && i < r0.len() && (forall<q2: Int> 0 <= q2 && q2 < cold@.len() ==> cold@[q2].idx@ != i) ==> results@[i] == r0[i])]
-    #[invariant(prom.len() == q@ && s.g.c.promo_mem == g0.c.promo_mem + count_true(*prom, q@))]
+    #[invariant(prom.len() == q@ && ins.len() == q@ && svs.len() == q@ && ptrs.len() == q@ && prs.len() == q@
+        && s.g.c.promo_mem == g0.c.promo_mem + count_true(*prom, q@))]
     #[invariant(rd_ctr(g0.c, s.g.c) && s.g.c.promo_gpu == g0.c.promo_gpu)]
     #[invariant(no_reg(*g0, *s.g) && own_reads(*g0, *s.g) && own_writes(*g0, *s.g) && no_ssd(*g0, *s.g))]
+    #[invariant(forall<j: Int> 0 <= j && j < q@ ==>
+        (match results@[cold@[j].idx@] { Some(Ok(())) => true, _ => false }) == prom[j]
+        && (!prom[j] ==> prs[j] == -1)
+        && (prom[j] ==> nd_served(*s.g, g0.log.len(), entries@[cold@[j].idx@].regions@, cold@[j].key, cold@[j].total@,
+              NdG { prom: *prom, ins_at: *ins, sv: *svs, ptr: *ptrs, pr_at: *prs }, j)))]
+    #[invariant(cold@.len() == 1 && all_from(g0.ob, g0.tick) && all_from(g0.og, g0.tick) && g0.used + cold@[0].total@ <= g0.cap
+        && !mt_has(*g0, cold@[0].key) && has(*g0, cold@[0].key) && is_blk(ent(*g0, cold@[0].key).loc) && cold@[0].total@ > 0
+        ==> (q@ >= 1 ==> prom[0]))]
     while q < cold.len() {
         let e = cold[q];
+        let gi = snapshot!(*s.g);
         let _ = evict_for_space(s, e.total, max_attempts);
+        proof_assert!(own_writes(*gi, *s.g) && own_reads(*gi, *s.g) && no_reg(*gi, *s.g) && no_ssd(*gi, *s.g));
         let mut promoted = false;
+        let mut ins_q: Snapshot<Int> = snapshot!(-1);
+        let mut sv_q: Snapshot<ServeG> = snapshot!(ServeG { base: 0, m: 0, gpu_ok: false });
+        let mut ptr_q: Snapshot<u64> = snapshot!(0u64);
+        let mut pr_q: Snapshot<Int> = snapshot!(-1);
+        let mut gsve = snapshot!(*s.g);
         let res = match mt_insert(s, e.key, e.total) {
             Ok(mem_ptr) => {
-                match dm_promote(s, e.key, mem_ptr, e.total) {
-                    Ok(()) => {
-                        rec_promotion_to_memory(s);
-                        promoted = true;
+                let ins_pos = snapshot!(s.g.log.len() - 1);
+                proof_assert!(s.g.log[*ins_pos] == Ev::MtInsert { key: e.key });
+                proof_assert!(g0.log.len() <= *ins_pos);
+                ins_q = ins_pos;
+                ptr_q = snapshot!(mem_ptr);
+                // Deliver the slot to the entry's GPU destination (synchronous copies:
+                // completed when the call returns).
+                let (r, sv2) = serve_memory_tier_to_gpu(s, mem_ptr, e.total, &entries[e.idx].regions, 0u64, true);
+                sv_q = sv2;
+                gsve = snapshot!(*s.g);
+                proof_assert!(own_writes(*gi, *gsve) && own_reads(*gi, *gsve) && no_reg(*gi, *gsve) && no_ssd(*gi, *gsve));
+                match r {
+                    Err(e2) => {
+                        // The delivery failed: release the reserved slot.
+                        let _ = mt_remove(s, e.key);
+                        Err(e2)
                     }
-                    Err(_) => {}
+                    Ok(()) => {
+                        proof_assert!(s.g.log.len() == sv_q.base + sv_q.m);
+                        let pr_pos = snapshot!(s.g.log.len());
+                        // In-place BlockDevice->MemoryTier re-registration.
+                        match dm_promote(s, e.key, mem_ptr, e.total) {
+                            Ok(()) => {
+                                proof_assert!(s.g.log.len() == *pr_pos + 1 && s.g.log[*pr_pos] == Ev::DmPromote { key: e.key });
+                                pr_q = pr_pos;
+                                rec_promotion_to_memory(s);
+                                promoted = true;
+                                Ok(())
+                            }
+                            Err(_) => {
+                                let _ = mt_remove(s, e.key);
+                                Err(DE::Io(IoK::Promote))
+                            }
+                        }
+                    }
                 }
-                Ok(())
             }
             Err(MtE::AlreadyExists) => Err(DE::AlreadyExists(e.key)),
             Err(_) => Err(DE::Alloc),
@@ -507,10 +628,20 @@ pub fn bl_cold_nodrive(s: &mut S, cold: &Vec<ColdE>, results: &mut Vec<Res>) -> 
         results[e.idx] = Some(res);
         proof_assert!(count_eq(prom.push_back(promoted), *prom, q@) == ());
         proof_assert!(count_true(prom.push_back(promoted), q@ + 1) == count_true(*prom, q@) + if promoted { 1 } else { 0 });
+        proof_assert!(forall<t: Int> 0 <= t && t < gi.log.len() ==> s.g.log[t] == gi.log[t]);
+        proof_assert!(forall<j: Int> 0 <= j && j < q@ ==>
+            scatter_ok_i_ext(*gi, *s.g, svs[j], entries@[cold@[j].idx@].regions@, ptrs[j], cold@[j].total@) == ());
+        proof_assert!(forall<t: Int> 0 <= t && t < gsve.log.len() ==> s.g.log[t] == gsve.log[t]);
+        proof_assert!(scatter_ok_i_ext(*gsve, *s.g, *sv_q, entries@[e.idx@].regions@, *ptr_q, e.total@) == ());
+        proof_assert!(own_writes(*gi, *s.g) && own_reads(*gi, *s.g) && no_reg(*gi, *s.g) && no_ssd(*gi, *s.g));
         prom = snapshot!(prom.push_back(promoted));
+        ins = snapshot!(ins.push_back(*ins_q));
+        svs = snapshot!(svs.push_back(*sv_q));
+        ptrs = snapshot!(ptrs.push_back(*ptr_q));
+        prs = snapshot!(prs.push_back(*pr_q));
         q += 1;
     }
-    prom
+    snapshot!(NdG { prom: *prom, ins_at: *ins, sv: *svs, ptr: *ptrs, pr_at: *prs })
 }
 
 /// Pooled cold jobs (lib.rs:2600-2718): streams, one channel checkout per active drive, the
@@ -677,6 +808,7 @@ pub fn count_eq(a: Seq<bool>, b: Seq<bool>, n: Int) {
 
 /// The cold path of batch_lookup. `cold` is the classification's cold list (indices < n).
 #[requires(forall<q: Int> 0 <= q && q < cold@.len() ==> cold@[q].idx@ < results@.len() && cold@[q].idx@ < entries@.len())]
+#[requires(forall<q: Int, r: Int> 0 <= q && q < r && r < cold@.len() ==> cold@[q].idx@ < cold@[r].idx@)]
 #[ensures((^s).p == s.p && log_ext(*s.g, *(^s).g) && same_env(*s.g, *(^s).g) && (*(^s).g).wq == (*s.g).wq)]
 #[ensures((^results)@.len() == results@.len())]
 #[ensures(forall<i: Int> 0 <= i && i < results@.len() && (forall<q: Int> 0 <= q && q < cold@.len() ==> cold@[q].idx@ != i) ==> (^results)@[i] == results@[i])]
@@ -690,6 +822,16 @@ pub fn count_eq(a: Seq<bool>, b: Seq<bool>, n: Int) {
     (s.p.nd@ == 0) == (result.kind[q] == CK::NoDrive)
     && (result.kind[q] == CK::Staged ==> s.p.nd@ > 0 && s.p.ring && s.p.stg)
     && (result.prom[q] ==> result.kind[q] == CK::Pooled || result.kind[q] == CK::NoDrive))]
+#[ensures(s.p.nd@ == 0 ==> result.nd.prom.len() == cold@.len() && result.nd.ins_at.len() == cold@.len() && result.nd.sv.len() == cold@.len()
+    && result.nd.ptr.len() == cold@.len() && result.nd.pr_at.len() == cold@.len() && result.nd_idx.len() == cold@.len())]
+#[ensures(s.p.nd@ == 0 ==> forall<q: Int> 0 <= q && q < cold@.len() ==> result.nd_idx[q] == cold@[q].idx@
+    && (match (^results)@[cold@[q].idx@] { Some(Ok(())) => true, _ => false }) == result.nd.prom[q]
+    && (!result.nd.prom[q] ==> result.nd.pr_at[q] == -1)
+    && (result.nd.prom[q] ==> nd_served(*(^s).g, (*s.g).log.len(), entries@[cold@[q].idx@].regions@, cold@[q].key, cold@[q].total@, result.nd, q)))]
+#[ensures(s.p.nd@ == 0 && cold@.len() == 1 && all_from((*s.g).ob, (*s.g).tick) && all_from((*s.g).og, (*s.g).tick)
+    && (*s.g).used + cold@[0].total@ <= (*s.g).cap && !mt_has(*s.g, cold@[0].key)
+    && has(*s.g, cold@[0].key) && is_blk(ent(*s.g, cold@[0].key).loc) && cold@[0].total@ > 0
+    ==> result.nd.prom[0] && match (^results)@[cold@[0].idx@] { Some(Ok(())) => true, _ => false })]
 #[ensures(cold@.len() == 1 && s.p.nd@ > 0 && s.p.ring && s.p.stg && (*s.g).used + cold@[0].total@ > (*s.g).cap && s.p.max_att@ == 0
     ==> result.kind[0] == CK::Staged)]
 #[ensures(cold@.len() == 1 && s.p.nd@ > 0 && has_streams && all_from((*s.g).ob, (*s.g).tick) && (forall<t: Int> !(*s.g).os[t])
@@ -698,9 +840,17 @@ pub fn count_eq(a: Seq<bool>, b: Seq<bool>, n: Int) {
         && (*(^s).g).dm.get(cold@[0].key) == (*s.g).dm.get(cold@[0].key)
         && match (^results)@[cold@[0].idx@] { Some(Err(_)) => true, _ => false })]
 pub fn bl_cold(s: &mut S, cold: &Vec<ColdE>, results: &mut Vec<Res>, entries: &[Be], has_streams: bool, batch_device: i32, warm_raw: u64) -> Snapshot<ColdG> {
+    let mut ndidx: Snapshot<Seq<Int>> = snapshot!(Seq::empty());
+    let mut q0: usize = 0;
+    #[invariant(q0@ <= cold@.len() && ndidx.len() == q0@ && forall<j: Int> 0 <= j && j < q0@ ==> ndidx[j] == cold@[j].idx@)]
+    while q0 < cold.len() {
+        ndidx = snapshot!(ndidx.push_back(cold[q0].idx@));
+        q0 += 1;
+    }
     if s.p.nd == 0 {
-        let prom = bl_cold_nodrive(s, cold, results);
-        return snapshot!(ColdG { kind: Seq::create(cold@.len(), |q: Int| CK::NoDrive), prom: *prom });
+        let ndg = bl_cold_nodrive(s, cold, results, entries);
+        let promv = snapshot!(ndg.prom);
+        return snapshot!(ColdG { kind: Seq::create(cold@.len(), |q: Int| CK::NoDrive), prom: *promv, nd: *ndg, nd_idx: *ndidx });
     }
     let g0 = snapshot!(*s.g);
     let p0 = snapshot!(s.p);
@@ -725,7 +875,7 @@ pub fn bl_cold(s: &mut S, cold: &Vec<ColdE>, results: &mut Vec<Res>, entries: &[
         results[e.idx] = Some(r);
         j += 1;
     }
-    snapshot!(ColdG { kind: *kind, prom: *prom })
+    snapshot!(ColdG { kind: *kind, prom: *prom, nd: NdG { prom: Seq::empty(), ins_at: Seq::empty(), sv: Seq::empty(), ptr: Seq::empty(), pr_at: Seq::empty() }, nd_idx: *ndidx })
 }
 
 
@@ -1094,6 +1244,7 @@ pub fn first_addr(entries: &[Be]) -> u64 {
 #[ensures(entries@.len() > 0 && !(s.p.init && s.p.has_dm && s.p.has_mt && s.p.has_gpu) ==> *(^s).g == *s.g && !result.1.ready
     && forall<i: Int> 0 <= i && i < entries@.len() ==> result.0@[i].served_by == ServedBy::Error
         && match result.0@[i].result { Err(DE::NotInit(_)) => true, _ => false })]
+#[ensures(entries@.len() > 0 && s.p.init && s.p.has_dm && s.p.has_mt && s.p.has_gpu ==> result.1.ready)]
 #[ensures(result.1.ready ==> result.1.cls.len() == entries@.len() && result.1.tier.len() == entries@.len()
     && (forall<i: Int> 0 <= i && i < entries@.len() ==>
         result.0@[i].served_by == attr(result.0@[i].result, result.1.tier[i])
@@ -1124,11 +1275,24 @@ pub fn first_addr(entries: &[Be]) -> u64 {
 #[ensures(result.1.ready ==> (*(^s).g).c.promo_mem == (*s.g).c.promo_mem + count_true(result.1.cold.prom, result.1.cold.prom.len()))]
 #[ensures(result.1.ready && (exists<i: Int> 0 <= i && i < entries@.len() && is_warm(result.1.cls[i])) ==>
     (*s.g).log.len() <= result.1.touch_at && result.1.touch_at < result.1.cold_from && (*(^s).g).log[result.1.touch_at] == Ev::MtBatchTouch)]
+#[ensures(result.1.ready && s.p.nd@ == 0 && entries@.len() == 1
+    && (match result.1.cls[0] { Cls::Cold { .. } => true, _ => false })
+    && has(*s.g, entries@[0].key) && is_blk(ent(*s.g, entries@[0].key).loc)
+    && !mt_has(*s.g, entries@[0].key) && sum_sz(entries@[0].regions@) > 0
+    && (*s.g).used + sum_sz(entries@[0].regions@) <= (*s.g).cap
+    && all_from((*s.g).ob, (*s.g).tick) && all_from((*s.g).og, (*s.g).tick) ==>
+    result.0@[0].result == Ok(()) && result.0@[0].served_by == ServedBy::Ssd
+    && result.1.cold.nd.prom.len() == 1 && result.1.cold.nd.ins_at.len() == 1 && result.1.cold.nd.sv.len() == 1
+    && result.1.cold.nd.ptr.len() == 1 && result.1.cold.nd.pr_at.len() == 1
+    && result.1.cold.nd_idx.len() == 1 && result.1.cold.nd_idx[0] == 0
+    && result.1.cold.nd.prom[0]
+    && nd_served(*(^s).g, (*s.g).log.len(), entries@[0].regions@, entries@[0].key, sum_sz(entries@[0].regions@), result.1.cold.nd, 0))]
 pub fn batch_lookup(s: &mut S, entries: &[Be]) -> (Vec<Outcome>, Snapshot<BlG>) {
     let g0 = snapshot!(*s.g);
     let p0 = snapshot!(s.p);
     let n = entries.len();
-    let dummy = snapshot!(BlG { cls: Seq::empty(), tier: Seq::empty(), cold: ColdG { kind: Seq::empty(), prom: Seq::empty() },
+    let dummy = snapshot!(BlG { cls: Seq::empty(), tier: Seq::empty(), cold: ColdG { kind: Seq::empty(), prom: Seq::empty(),
+        nd: NdG { prom: Seq::empty(), ins_at: Seq::empty(), sv: Seq::empty(), ptr: Seq::empty(), pr_at: Seq::empty() }, nd_idx: Seq::empty() },
         rem: RemG { nf: Seq::empty(), ans: Seq::empty(), sync_at: -1, rel_from: 0 }, touch_at: 0, cold_from: 0,
         wsync_at: -1, wrel_from: 0, wrel_to: 0, warm: 0u64, ready: false });
     if n == 0 {
@@ -1155,6 +1319,7 @@ pub fn batch_lookup(s: &mut S, entries: &[Be]) -> (Vec<Outcome>, Snapshot<BlG>) 
     let g1 = snapshot!(*s.g);
     let (mut bl, cg) = bl_classify(s, entries, warm_raw);
     let g2 = snapshot!(*s.g);
+    proof_assert!(forall<q2: Int, r2: Int> 0 <= q2 && q2 < r2 && r2 < bl.cold@.len() ==> bl.cold@[q2].idx@ < bl.cold@[r2].idx@);
     let t_cls = snapshot!(bl.tier@);
     let r_cls = snapshot!(bl.results@);
     // Refresh warm-hit recency before cold prep.
@@ -1165,13 +1330,28 @@ pub fn batch_lookup(s: &mut S, entries: &[Be]) -> (Vec<Outcome>, Snapshot<BlG>) 
     let cold_from = snapshot!(s.g.log.len());
     proof_assert!(bl.warm_keys@.len() > 0 ==> s.g.log[*touch_at] == Ev::MtBatchTouch && *touch_at < *cold_from);
     let g3 = snapshot!(*s.g);
+    proof_assert!(forall<k: u64> has(*g3, k) == has(*g0, k) && (has(*g3, k) ==> ent(*g3, k).loc == ent(*g0, k).loc)
+        && g3.mt == g0.mt && g3.used == g0.used && g3.ob == g0.ob && g3.og == g0.og && g3.tick >= g0.tick && g0.log.len() <= g3.log.len());
     let cgh = if bl.cold.len() > 0 {
         bl_cold(s, &bl.cold, &mut bl.results, entries, has_streams, batch_device, warm_raw)
     } else {
-        snapshot!(ColdG { kind: Seq::empty(), prom: Seq::empty() })
+        snapshot!(ColdG { kind: Seq::empty(), prom: Seq::empty(),
+            nd: NdG { prom: Seq::empty(), ins_at: Seq::empty(), sv: Seq::empty(), ptr: Seq::empty(), pr_at: Seq::empty() }, nd_idx: Seq::empty() })
     };
     let g4 = snapshot!(*s.g);
     let r_cold = snapshot!(bl.results@);
+    proof_assert!(n@ == 1 && (match cg.cls[0] { Cls::Cold { .. } => true, _ => false })
+        ==> bl.cold@.len() >= 1 && bl.warm_keys@.len() == 0
+            && (forall<q2: Int> 0 <= q2 && q2 < bl.cold@.len() ==> bl.cold@[q2].idx@ == 0));
+    proof_assert!(n@ == 1 && (match cg.cls[0] { Cls::Cold { .. } => true, _ => false }) ==> bl.cold@.len() == 1 && cg.cpos[0] == 0);
+    proof_assert!(s.p.nd@ == 0 && n@ == 1 && (match cg.cls[0] { Cls::Cold { .. } => true, _ => false })
+        && has(*g0, entries@[0].key) && is_blk(ent(*g0, entries@[0].key).loc) && !mt_has(*g0, entries@[0].key)
+        && sum_sz(entries@[0].regions@) > 0 && g0.used + sum_sz(entries@[0].regions@) <= g0.cap
+        && all_from(g0.ob, g0.tick) && all_from(g0.og, g0.tick)
+        ==> bl.cold@.len() == 1 && bl.cold@[0].key == entries@[0].key && bl.cold@[0].total@ == sum_sz(entries@[0].regions@)
+            && cgh.nd.prom.len() == 1 && cgh.nd_idx.len() == 1 && cgh.nd_idx[0] == 0 && cgh.nd.prom[0]
+            && nd_served(*g4, g0.log.len(), entries@[0].regions@, entries@[0].key, sum_sz(entries@[0].regions@), cgh.nd, 0)
+            && r_cold[0] == Some(Ok(())) && bl.tier@[0] == Some(ServedBy::Ssd));
     proof_assert!(bl.warm_keys@.len() > 0 ==> s.g.log[*touch_at] == Ev::MtBatchTouch);
     // Deferred batched warm-stream sync, then release the warm pins.
     let mut wsync_at: Snapshot<Int> = snapshot!(-1);
@@ -1195,6 +1375,9 @@ pub fn batch_lookup(s: &mut S, entries: &[Be]) -> (Vec<Outcome>, Snapshot<BlG>) 
     let rem = bl_remote(s, entries, &mut bl.results, &mut bl.tier, warm_raw);
     let g7 = snapshot!(*s.g);
     let r_rem = snapshot!(bl.results@);
+    proof_assert!((match cg.cls[0] { Cls::Cold { .. } => true, _ => false }) && r_cold[0] == Some(Ok(()))
+        ==> r_rem[0] == Some(Ok(())) && bl.tier@[0] == Some(ServedBy::Ssd));
+    proof_assert!(r_cold[0] == Some(Ok(())) ==> forall<t: Int> 0 <= t && t < g4.log.len() ==> s.g.log[t] == g4.log[t]);
     proof_assert!(bl.warm_keys@.len() > 0 ==> s.g.log[*touch_at] == Ev::MtBatchTouch);
     // Recover concurrent-promotion losers.
     let mut i: usize = 0;
@@ -1214,6 +1397,22 @@ pub fn batch_lookup(s: &mut S, entries: &[Be]) -> (Vec<Outcome>, Snapshot<BlG>) 
     }
     let tier_end = snapshot!(bl.tier@);
     let r_end = snapshot!(bl.results@);
+    proof_assert!((match cg.cls[0] { Cls::Cold { .. } => true, _ => false }) && r_cold[0] == Some(Ok(()))
+        ==> r_end[0] == Some(Ok(())) && tier_end[0] == Some(ServedBy::Ssd));
+    proof_assert!(r_cold[0] == Some(Ok(())) ==> forall<t: Int> 0 <= t && t < g4.log.len() ==> s.g.log[t] == g4.log[t]);
+    proof_assert!(s.p.nd@ == 0 && n@ == 1 && (match cg.cls[0] { Cls::Cold { .. } => true, _ => false })
+        && has(*g0, entries@[0].key) && is_blk(ent(*g0, entries@[0].key).loc) && !mt_has(*g0, entries@[0].key)
+        && sum_sz(entries@[0].regions@) > 0 && g0.used + sum_sz(entries@[0].regions@) <= g0.cap
+        && all_from(g0.ob, g0.tick) && all_from(g0.og, g0.tick)
+        ==> nd_served_ext(*g4, *s.g, g0.log.len(), entries@[0].regions@, entries@[0].key, sum_sz(entries@[0].regions@), cgh.nd, 0) == ());
+    proof_assert!(s.p.nd@ == 0 && n@ == 1 && (match cg.cls[0] { Cls::Cold { .. } => true, _ => false })
+        && has(*g0, entries@[0].key) && is_blk(ent(*g0, entries@[0].key).loc) && !mt_has(*g0, entries@[0].key)
+        && sum_sz(entries@[0].regions@) > 0 && g0.used + sum_sz(entries@[0].regions@) <= g0.cap
+        && all_from(g0.ob, g0.tick) && all_from(g0.og, g0.tick)
+        ==> bl.cold@.len() == 1 && cgh.nd.prom.len() == 1 && cgh.nd.ins_at.len() == 1 && cgh.nd.sv.len() == 1
+            && cgh.nd.ptr.len() == 1 && cgh.nd.pr_at.len() == 1 && cgh.nd_idx.len() == 1 && cgh.nd_idx[0] == 0
+            && cgh.nd.prom[0] && nd_served(*s.g, g0.log.len(), entries@[0].regions@, entries@[0].key, sum_sz(entries@[0].regions@), cgh.nd, 0)
+            && r_end[0] == Some(Ok(())) && tier_end[0] == Some(ServedBy::Ssd));
     let out = attribute(bl.results, bl.tier);
     let (served, dram, ssd) = tallies(&out);
     if served > 0 {

@@ -5,7 +5,7 @@
       "vc_initialize": { "prover": "alt-ergo", "time": 0.025 },
       "vc_verify_dis_initialize_recovery_rebuilds_map": {
         "prover": "alt-ergo",
-        "time": 0.116
+        "time": 0.114
       }
     }
   }
