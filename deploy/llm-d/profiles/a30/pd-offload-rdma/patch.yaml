@@ -55,11 +55,12 @@ spec:
             # channel does (base sets VLLM_NIXL_SIDE_CHANNEL_HOST).
             - name: VLLM_P2P_SIDE_CHANNEL_HOST
               valueFrom: {fieldRef: {fieldPath: status.podIP}}
-            # llm-d's P2P guide (Best Practices): one value fleet-wide. vLLM
-            # seeds block hashes per process, so unpinned seeds mean no block
-            # hash matches across pods and every pull misses.
-            - name: PYTHONHASHSEED
-              value: "42"
+            # No PYTHONHASHSEED. llm-d's P2P guide pins it fleet-wide, but on
+            # vLLM 0.30 with sha256 block hashes an unset seed is already the
+            # same everywhere (vLLM's fixed "vllm-none-hash"), and setting one
+            # changed vLLM's hashes so the router's prefix index matched no
+            # pull source on any turn. Unset, as pd-certus-rdma runs: verified
+            # end to end (every follow-up turn pulled).
             # pd pins UCX to TCP; let it choose RC verbs on the RDMA device,
             # as in ../pd-certus-rdma. The P2P tier's data moves through NIXL
             # too, so it rides the same device.
@@ -138,8 +139,6 @@ spec:
               valueFrom: {fieldRef: {fieldPath: status.podIP}}
             - name: VLLM_P2P_SIDE_CHANNEL_HOST
               valueFrom: {fieldRef: {fieldPath: status.podIP}}
-            - name: PYTHONHASHSEED
-              value: "42"
             - name: UCX_TLS
               $patch: delete
             - name: UCX_NET_DEVICES
