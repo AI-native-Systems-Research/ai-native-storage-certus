@@ -1,1 +1,9 @@
-{ "profile": [], "proofs": { "Coma": {} } }
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_tier_event_stats": { "prover": "alt-ergo", "time": 0.039 },
+      "vc_verify_dis_tier_stats_read_only__mutant": null
+    }
+  }
+}

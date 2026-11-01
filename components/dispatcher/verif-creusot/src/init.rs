@@ -143,7 +143,12 @@ pub fn recover_all(s: &mut S, n: usize) {
 
 #[requires(pinv(s.p))]
 #[ensures(pinv((^s).p))]
-#[ensures((^s).p.max_att == cfg.max_att && (^s).p.bp_ms == cfg.bp_ms)]
+// The config's tunables are committed only by a successful initialize
+// (DIS-INITIALIZE-FAILURE-NO-CONFIG-CHANGE, lib.rs:2315): a failing one —
+// unbound receptacle, invalid config, drive-creation error — changes neither
+// the eviction-attempt limit nor the store-backpressure budget.
+#[ensures(result.0 == Ok(()) ==> (^s).p.max_att == cfg.max_att && (^s).p.bp_ms == cfg.bp_ms)]
+#[ensures(result.0 != Ok(()) ==> (^s).p.max_att == s.p.max_att && (^s).p.bp_ms == s.p.bp_ms)]
 #[ensures((^s).p.has_dm == s.p.has_dm && (^s).p.has_mt == s.p.has_mt && (^s).p.has_gpu == s.p.has_gpu && (^s).p.has_spdk == s.p.has_spdk
     && (^s).p.has_factory == s.p.has_factory && (^s).p.has_rl == s.p.has_rl && (^s).p.has_logger == s.p.has_logger)]
 #[ensures(log_ext(*s.g, *(^s).g) && same_ctr((*s.g).c, (*(^s).g).c) && (*(^s).g).wq == (*s.g).wq && (*(^s).g).mt == (*s.g).mt)]
@@ -177,8 +182,6 @@ pub fn initialize(s: &mut S, cfg: ICfg) -> (Result<(), DE>, DFail) {
     let mut gfmt: Snapshot<W> = snapshot!(*s.g);
     let mut grec1: Snapshot<W> = snapshot!(*s.g);
     let mut grec2: Snapshot<W> = snapshot!(*s.g);
-    s.p.max_att = cfg.max_att;
-    s.p.bp_ms = cfg.bp_ms;
     if !s.p.has_dm {
         return (Err(DE::NotInit(Ni::DispatchMap)), DFail::None);
     }
@@ -230,6 +233,11 @@ pub fn initialize(s: &mut S, cfg: ICfg) -> (Result<(), DE>, DFail) {
     if cfg.mt_thr_pos {
         s.p.mt_ev = true;
     }
+    // Every validation has passed: commit the config's tunables now, right
+    // before publishing `init` (lib.rs:2315), so only a successful initialize
+    // applies them.
+    s.p.max_att = cfg.max_att;
+    s.p.bp_ms = cfg.bp_ms;
     s.p.init = true;
     if s.p.has_rl {
         let at = snapshot!(s.g.log.len());

@@ -1,1 +1,9 @@
-{ "profile": [], "proofs": { "Coma": {} } }
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_release_memory": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_verify_dis_release_memory_frees__mutant": null
+    }
+  }
+}

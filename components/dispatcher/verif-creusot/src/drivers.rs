@@ -222,11 +222,27 @@ pub fn verify_dis_initialize_failure_leaves_uninitialized__mutant(s: &mut S, cfg
     initialize(s, cfg)
 }
 
-pub fn refute_dis_initialize_failure_no_config_change() {
-    let mut s = S { p: P { max_att: 5, bp_ms: 9, ..p_zero() }, g: snapshot!(w0()) };
-    let cfg = ICfg { n_addrs: 1, format_on_init: true, ssd_thr_pos: false, mt_thr_pos: false, max_att: 7, bp_ms: 11, stg_slots: 0, stg_bytes: 0 };
-    let (r, _f) = initialize(&mut s, cfg);
-    proof_assert!(r == Err(DE::NotInit(Ni::DispatchMap)) && s.p.max_att@ == 7 && s.p.bp_ms@ == 11);
+/// DIS-INITIALIZE-FAILURE-NO-CONFIG-CHANGE (as repaired): an initialize that
+/// fails — unbound receptacle, invalid config, drive-creation error —
+/// changes neither the eviction-attempt limit nor the store-backpressure
+/// budget; the config's tunables are committed only by a successful
+/// initialize (the old code stored them first, so every failure path retuned
+/// the component: the refutation `refute_dis_initialize_failure_no_config_change`,
+/// a state with `max_att = 5, bp_ms = 9` and no dispatch map, which a failing
+/// initialize left at the rejected config's `7` and `11`).
+#[requires(pinv(s.p))]
+#[ensures(result.0 != Ok(()) ==> (^s).p.max_att == s.p.max_att && (^s).p.bp_ms == s.p.bp_ms)]
+#[ensures(result.0 == Ok(()) ==> (^s).p.max_att == cfg.max_att && (^s).p.bp_ms == cfg.bp_ms)]
+pub fn verify_dis_initialize_failure_no_config_change(s: &mut S, cfg: ICfg) -> (Result<(), DE>, DFail) {
+    initialize(s, cfg)
+}
+
+/// The negated twin: the pre-repair behaviour — a failing initialize still
+/// applying the rejected config's tunables — must NOT be provable anymore.
+#[requires(pinv(s.p))]
+#[ensures(result.0 != Ok(()) ==> ((^s).p.max_att == cfg.max_att && (^s).p.bp_ms == cfg.bp_ms))]
+pub fn verify_dis_initialize_failure_no_config_change__mutant(s: &mut S, cfg: ICfg) -> (Result<(), DE>, DFail) {
+    initialize(s, cfg)
 }
 
 #[requires(pinv(s.p))]

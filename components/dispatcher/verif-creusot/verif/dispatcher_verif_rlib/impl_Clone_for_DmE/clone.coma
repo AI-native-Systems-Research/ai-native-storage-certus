@@ -1,4 +1,4 @@
-(* #"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 52 9 52 29 *)
+(* #"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/core.rs" 52 9 52 29 *)
 
 (* <DmE as std::clone::Clone> *)
 
@@ -20,7 +20,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_DmE [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 52 9 52 29]
-  (self: t_DmE) (return (x: t_DmE)) = (! bb0
+let clone_DmE [#"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/core.rs" 52 9 52 29] (self: t_DmE)
+  (return (x: t_DmE)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_DmE = Any.any_l () | & self: t_DmE = self ]) [ return (result: t_DmE) -> (! return {result}) ]

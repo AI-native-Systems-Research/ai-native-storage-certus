@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_elim_Ok": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_gpu_sync": { "prover": "alt-ergo", "time": 0.011 },
+      "vc_lookup": { "prover": "z3", "time": 0.054 },
+      "vc_lookup_async": { "prover": "alt-ergo", "time": 0.017 }
+    }
+  }
+}

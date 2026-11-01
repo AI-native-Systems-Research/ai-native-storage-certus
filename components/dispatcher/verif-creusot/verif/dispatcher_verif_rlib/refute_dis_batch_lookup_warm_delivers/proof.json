@@ -5,9 +5,9 @@
       "vc_p_zero": { "prover": "alt-ergo", "time": 0.016 },
       "vc_refute_dis_batch_lookup_warm_delivers": {
         "prover": "z3",
-        "time": 0.027
+        "time": 0.024
       },
-      "vc_serve_memory_tier_to_gpu": { "prover": "alt-ergo", "time": 0.032 }
+      "vc_serve_memory_tier_to_gpu": { "prover": "alt-ergo", "time": 0.033 }
     }
   }
 }

@@ -1,15 +1,15 @@
-(* #"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 2141 0 2141 81 *)
+(* #"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/drivers.rs" 2157 0 2157 81 *)
 
-let%span score = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 607 16 607 102
-let%span svec = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
-let%span sbg = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 167 10 167 73
-let%span sbg'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 180 11 180 22
-let%span sbg'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 181 10 181 104
-let%span sbg'2 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 162 16 163 80
-let%span sdrivers = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 2142 16 2142 30
-let%span sdrivers'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 2143 12 2143 37
-let%span sdrivers'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 2144 18 2144 36
-let%span sdrivers'2 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 2140 11 2140 32
+let%span score = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/core.rs" 607 16 607 102
+let%span svec = "/home/cornel/repair-j33-rc26/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sbg = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 167 10 167 73
+let%span sbg'0 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 180 11 180 22
+let%span sbg'1 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 181 10 181 104
+let%span sbg'2 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 162 16 163 80
+let%span sdrivers = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/drivers.rs" 2158 16 2158 30
+let%span sdrivers'0 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/drivers.rs" 2159 12 2159 37
+let%span sdrivers'1 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/drivers.rs" 2160 18 2160 36
+let%span sdrivers'2 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/drivers.rs" 2156 11 2156 32
 
 use creusot.prelude.MutBorrow
 use creusot.int.UInt64
@@ -142,7 +142,7 @@ axiom view_Vec_usize_Global_spec:
   forall self: t_Vec_usize_Global [view_Vec_usize_Global self]. [%#svec] Seq.length (view_Vec_usize_Global self)
     <= UInt64.t'int const_MAX
 
-predicate stg_inv [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 161 0 161 30] (p'0: t_Stg) =
+predicate stg_inv [#"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 161 0 161 30] (p'0: t_Stg) =
   [%#sbg'2] p'0.leased >= 0
   /\ p'0.leased + Seq.length (view_Vec_usize_Global p'0.free) = UInt64.t'int p'0.slots
   /\ (forall i: int. 0 <= i /\ i < Seq.length (view_Vec_usize_Global p'0.free)
@@ -175,14 +175,14 @@ type t_ICfg = {
   stg_slots'0: UInt64.t;
   stg_bytes'0: UInt64.t }
 
-predicate pinv [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 606 0 606 25] (p'0: t_P) =
+predicate pinv [#"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/core.rs" 606 0 606 25] (p'0: t_P) =
   [%#score] (p'0.init -> p'0.has_dm /\ p'0.has_mt /\ p'0.writer) /\ (not p'0.init -> not p'0.ssd_ev /\ not p'0.mt_ev)
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let verify_dis_inv_staging_bounded__mutant [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 2141 0 2141 81]
+let verify_dis_inv_staging_bounded__mutant [#"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/drivers.rs" 2157 0 2157 81]
   (slots'0: UInt64.t) (s: MutBorrow.t t_S) (cfg: t_ICfg) (return (x: ())) =
 {[@stop_split] [@expl:verify_dis_inv_staging_bounded__mutant requires] [%#sdrivers'2] pinv s.current.p
   /\ not s.current.p.stg}

@@ -1,0 +1,45 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_initialize": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_verify_dis_initialize_drive_failure_io_error__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.04 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      null,
+                      null,
+                      null,
+                      {
+                        "tactic": "split_vc",
+                        "children": [
+                          null,
+                          null,
+                          { "prover": "alt-ergo", "time": 0.196 },
+                          { "prover": "z3", "time": 0.025 },
+                          { "prover": "alt-ergo", "time": 0.037 },
+                          { "prover": "alt-ergo", "time": 0.077 }
+                        ]
+                      },
+                      null
+                    ]
+                  },
+                  null
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

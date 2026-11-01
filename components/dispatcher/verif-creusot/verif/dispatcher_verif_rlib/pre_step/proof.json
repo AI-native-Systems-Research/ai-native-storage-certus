@@ -1,4 +1,4 @@
 {
   "profile": [],
-  "proofs": { "Coma": { "vc_pre_step": { "prover": "z3", "time": 0.017 } } }
+  "proofs": { "Coma": { "vc_pre_step": { "prover": "z3", "time": 0.021 } } }
 }

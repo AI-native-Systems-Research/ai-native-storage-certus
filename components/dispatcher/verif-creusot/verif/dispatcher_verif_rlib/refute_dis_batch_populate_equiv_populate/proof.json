@@ -4,10 +4,10 @@
     "Coma": {
       "vc_batch_populate": { "prover": "alt-ergo", "time": 0.037 },
       "vc_p_zero": { "prover": "alt-ergo", "time": 0.014 },
-      "vc_populate": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_populate": { "prover": "alt-ergo", "time": 0.033 },
       "vc_refute_dis_batch_populate_equiv_populate": {
         "prover": "alt-ergo",
-        "time": 0.127
+        "time": 0.112
       }
     }
   }

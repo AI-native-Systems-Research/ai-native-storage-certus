@@ -1,1 +1,17 @@
-{ "profile": [], "proofs": { "Coma": {} } }
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_populate": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_verify_dis_populate_write_through_drive_placement__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "alt-ergo", "time": 0.035 }, null ]
+          }
+        ]
+      }
+    }
+  }
+}

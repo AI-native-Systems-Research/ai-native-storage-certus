@@ -1,1 +1,9 @@
-{ "profile": [], "proofs": { "Coma": {} } }
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_unpin": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_verify_dis_unpin_decrements__mutant": null
+    }
+  }
+}

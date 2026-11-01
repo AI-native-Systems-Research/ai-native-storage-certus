@@ -5,9 +5,9 @@
       "vc_p_zero": { "prover": "alt-ergo", "time": 0.015 },
       "vc_refute_dis_reserve_memory_already_exists": {
         "prover": "alt-ergo",
-        "time": 0.06
+        "time": 0.044
       },
-      "vc_reserve_memory": { "prover": "alt-ergo", "time": 0.031 }
+      "vc_reserve_memory": { "prover": "alt-ergo", "time": 0.03 }
     }
   }
 }

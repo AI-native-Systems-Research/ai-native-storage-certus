@@ -1,17 +1,17 @@
-(* #"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 168 0 168 35 *)
+(* #"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 168 0 168 35 *)
 
-let%span svec = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
-let%span svec'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
-let%span svec'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
-let%span sbg = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 169 31 169 41
-let%span sbg'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 170 23 170 24
-let%span sbg'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 171 16 171 107
-let%span sbg'2 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 173 8 173 20
-let%span sbg'3 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 174 13 174 14
-let%span sbg'4 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 174 8 174 14
-let%span sbg'5 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 176 41 176 42
-let%span sbg'6 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 167 10 167 73
-let%span sbg'7 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 162 16 163 80
+let%span svec = "/home/cornel/repair-j33-rc26/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'0 = "/home/cornel/repair-j33-rc26/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'1 = "/home/cornel/repair-j33-rc26/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span sbg = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 169 31 169 41
+let%span sbg'0 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 170 23 170 24
+let%span sbg'1 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 171 16 171 107
+let%span sbg'2 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 173 8 173 20
+let%span sbg'3 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 174 13 174 14
+let%span sbg'4 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 174 8 174 14
+let%span sbg'5 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 176 41 176 42
+let%span sbg'6 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 167 10 167 73
+let%span sbg'7 = "/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 162 16 163 80
 
 use seq.Seq
 use creusot.int.UInt64
@@ -41,7 +41,7 @@ let push_usize (self_: MutBorrow.t t_Vec_usize_Global) (v: UInt64.t) (return (x:
 
 type t_Stg = { slots: UInt64.t; free: t_Vec_usize_Global; leased: int }
 
-predicate stg_inv [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 161 0 161 30] (p: t_Stg) =
+predicate stg_inv [#"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 161 0 161 30] (p: t_Stg) =
   [%#sbg'7] p.leased >= 0
   /\ p.leased + Seq.length (view_Vec_usize_Global p.free) = UInt64.t'int p.slots
   /\ (forall i: int. 0 <= i /\ i < Seq.length (view_Vec_usize_Global p.free)
@@ -51,7 +51,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let stg_new [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 168 0 168 35]
+let stg_new [#"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/bg.rs" 168 0 168 35]
   (slots'0: UInt64.t) (return (x: t_Stg)) = (! bb0
   [ bb0 = s0
     [ s0 = new_usize [%#sbg] (fun (_x: t_Vec_usize_Global) -> [ &free'0 <- _x ] s1)

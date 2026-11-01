@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_schedule_write_through": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_dis_schedule_wt_failure_keeps_entry__mutant": null
+    }
+  }
+}

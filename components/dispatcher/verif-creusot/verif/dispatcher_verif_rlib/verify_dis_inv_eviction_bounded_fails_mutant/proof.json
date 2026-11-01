@@ -1,1 +1,22 @@
-{ "profile": [], "proofs": { "Coma": {} } }
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_evict_for_space": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_verify_dis_inv_eviction_bounded_fails__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              {
+                "tactic": "split_vc",
+                "children": [ null, { "prover": "alt-ergo", "time": 0.049 } ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

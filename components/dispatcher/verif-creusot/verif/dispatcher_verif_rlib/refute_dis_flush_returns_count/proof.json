@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_flush_to_ssd": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_flush_to_ssd": { "prover": "alt-ergo", "time": 0.029 },
       "vc_p_zero": { "prover": "alt-ergo", "time": 0.015 },
       "vc_refute_dis_flush_returns_count": {
         "tactic": "compute_specified",
@@ -10,13 +10,13 @@
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.053 },
+              { "prover": "alt-ergo", "time": 0.062 },
               {
                 "tactic": "split_vc",
                 "children": [
                   null,
-                  { "prover": "alt-ergo", "time": 0.084 },
-                  { "prover": "z3", "time": 0.012 }
+                  { "prover": "alt-ergo", "time": 0.098 },
+                  { "prover": "z3", "time": 0.013 }
                 ]
               }
             ]

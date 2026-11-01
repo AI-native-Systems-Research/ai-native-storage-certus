@@ -2,14 +2,19 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_initialize": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_initialize": { "prover": "alt-ergo", "time": 0.021 },
       "vc_verify_dis_initialize_partition_guard": {
-        "tactic": "split_vc",
+        "tactic": "compute_specified",
         "children": [
-          { "prover": "alt-ergo", "time": 0.031 },
           {
             "tactic": "split_vc",
-            "children": [ null, { "prover": "z3", "time": 0.003 } ]
+            "children": [
+              { "prover": "alt-ergo", "time": 0.041 },
+              {
+                "tactic": "split_vc",
+                "children": [ null, { "prover": "z3", "time": 0.005 } ]
+              }
+            ]
           }
         ]
       }

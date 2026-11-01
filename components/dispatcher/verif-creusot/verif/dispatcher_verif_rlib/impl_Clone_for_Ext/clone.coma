@@ -1,4 +1,4 @@
-(* #"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 144 9 144 29 *)
+(* #"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/core.rs" 144 9 144 29 *)
 
 (* <Ext as std::clone::Clone> *)
 
@@ -12,7 +12,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_Ext [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 144 9 144 29]
+let clone_Ext [#"/home/cornel/repair-j33-rc26/components/dispatcher/verif-creusot/src/core.rs" 144 9 144 29]
   (self: t_Ext) (return (x: t_Ext)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_Ext = Any.any_l () | & self: t_Ext = self ]) [ return (result: t_Ext) -> (! return {result}) ]

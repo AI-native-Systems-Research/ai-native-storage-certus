@@ -5,7 +5,7 @@
       "vc_served_by_is_hit": { "prover": "alt-ergo", "time": 0.014 },
       "vc_verify_dis_servedby_is_hit": {
         "prover": "alt-ergo",
-        "time": 0.013
+        "time": 0.015
       }
     }
   }

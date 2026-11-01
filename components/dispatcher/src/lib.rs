@@ -2076,10 +2076,12 @@ impl IDispatcher for DispatcherComponent {
     fn initialize(&self, config: DispatcherConfig) -> Result<(), DispatcherError> {
         self.log_info("dispatcher: initializing");
 
-        self.max_eviction_attempts
-            .store(config.max_eviction_attempts, Ordering::Relaxed);
-        self.store_backpressure_ms
-            .store(config.store_backpressure_ms, Ordering::Relaxed);
+        // The config's tunables (eviction-attempt limit, store-backpressure
+        // budget) are committed only once every validation below has passed:
+        // an initialize that fails — unbound receptacle, invalid config, drive
+        // creation — changes nothing (DIS-INITIALIZE-FAILURE-NO-CONFIG-CHANGE).
+        // Nothing reads them before `initialized` is set, so committing them
+        // just before that release store also publishes them with it.
 
         self.dispatch_map
             .get()
@@ -2295,6 +2297,14 @@ impl IDispatcher for DispatcherComponent {
             );
             *self.bg_mt_evictor.lock().unwrap() = Some(mt_evictor);
         }
+
+        // Every validation has passed: commit the config's tunables now, right
+        // before publishing `initialized`, so only a successful initialize
+        // applies them (see the comment at the top of this function).
+        self.max_eviction_attempts
+            .store(config.max_eviction_attempts, Ordering::Relaxed);
+        self.store_backpressure_ms
+            .store(config.store_backpressure_ms, Ordering::Relaxed);
 
         self.initialized.store(true, Ordering::Release);
 
@@ -8613,3 +8623,7 @@ mod repair_test_duplicate_check_after_eviction;
 #[cfg(test)]
 #[path = "repair_test_check_present_map_timeout.rs"]
 mod repair_test_check_present_map_timeout;
+
+#[cfg(test)]
+#[path = "repair_test_failed_initialize_changes_config.rs"]
+mod repair_test_failed_initialize_changes_config;
