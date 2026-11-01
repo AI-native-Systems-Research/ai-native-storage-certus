@@ -27,7 +27,7 @@ pub fn w0() -> W {
         ob: |i: Int| true, ob2: |i: Int| true, og: |i: Int| true, os: |i: Int| true,
         ov: |i: Int| 0u64, ok: |i: Int| Seq::empty(), ext: |i: Int| Seq::empty(),
         pool: false, cluster: false, threads: 0, rw: |i: Int| 0u64, rw_base: 0, cfree: |i: Int| 0,
-        wf: |k: u64| false,
+        wf: |k: u64| false, sdev: |k: u64| 0i32,
     } }
 }
 
@@ -722,8 +722,8 @@ pub fn refute_dis_lookup_size_mismatch() {
 #[requires(pinv(s.p) && s.p.init)]
 #[requires(s.p.has_gpu)]
 #[requires(has((*s.g), key) && is_mem(ent((*s.g), key).loc) && ent((*s.g), key).wr@ == 0 && ent((*s.g), key).rr@ < u32::MAX@)]
-#[ensures(result.1.path == LPath::Warm && (result.0 == Ok(0u64)) == result.1.sv.gpu_ok && match ent((*s.g), key).loc { Loc::Mem { ptr, size, .. } => min_int(h.size@, size@) > 0 && result.0 == Ok(0u64) ==> h2d_logged((*s.g), (*(^s).g), ptr, h.addr, min_int(h.size@, size@)), _ => false })]
-#[ensures(all_from((*s.g).og, (*s.g).tick) ==> result.0 == Ok(0u64))]
+#[ensures(result.1.path == LPath::Warm && (match result.0 { Ok(_) => true, _ => false }) == result.1.sv.gpu_ok && match ent((*s.g), key).loc { Loc::Mem { ptr, size, .. } => min_int(h.size@, size@) > 0 && result.0 == Ok(result.1.warm) ==> h2d_logged((*s.g), (*(^s).g), ptr, h.addr, min_int(h.size@, size@)), _ => false })]
+#[ensures(all_from((*s.g).og, (*s.g).tick) ==> result.0 == Ok(result.1.warm))]
 pub fn verify_dis_lookup_warm_copies_data(s: &mut S, key: u64, h: Ipc) -> (Result<u64, DE>, Snapshot<LaG>) {
     lookup_async(s, key, h)
 }
@@ -793,7 +793,10 @@ pub fn verify_dis_lookup_cold_staging_fallback__mutant(s: &mut S, key: u64, h: I
 }
 
 #[requires(pinv(s.p) && s.p.init)]
-#[ensures(result.0 == match (*result.1).0 { Ok(_) => Ok(()), Err(e) => Err(e) } && (*(^s).g) == (*result.1).2 && match (*result.1).0 { Ok(st) => st@ == 0, _ => true })]
+#[ensures(match (*result.1).0 { Err(e) => result.0 == Err(e), Ok(st) => st@ == 0 ==> result.0 == Ok(()) })]
+#[ensures(match (*result.1).0 { Ok(st) => st@ != 0 ==> (result.0 == Ok(()) || result.0 == Err(DE::Io(IoK::Sync))), Err(_) => true })]
+#[ensures((*(^s).g) == (*result.1).2)]
+#[ensures(ret_stream_ok((*result.1).0, (*result.1).1))]
 pub fn verify_dis_lookup_delegates_async(s: &mut S, key: u64, h: Ipc) -> (Result<(), DE>, Snapshot<(Result<u64, DE>, LaG, W)>) {
     lookup(s, key, h)
 }
@@ -807,7 +810,7 @@ pub fn verify_dis_lookup_delegates_async__mutant(s: &mut S, key: u64, h: Ipc) ->
 #[requires(pinv(s.p) && s.p.init)]
 #[requires(s.p.has_gpu)]
 #[requires(has((*s.g), key) && is_mem(ent((*s.g), key).loc) && ent((*s.g), key).wr@ == 0 && ent((*s.g), key).rr@ < u32::MAX@)]
-#[ensures(result.1.path == LPath::Warm && (all_from((*s.g).og, (*s.g).tick) ==> result.0 == Ok(0u64)))]
+#[ensures(result.1.path == LPath::Warm && (all_from((*s.g).og, (*s.g).tick) ==> result.0 == Ok(result.1.warm)))]
 pub fn verify_dis_lookup_after_downgrade(s: &mut S, key: u64, h: Ipc) -> (Result<u64, DE>, Snapshot<LaG>) {
     lookup_async(s, key, h)
 }
@@ -879,6 +882,57 @@ pub fn verify_dis_lookup_async_dma_error(s: &mut S, key: u64, h: Ipc) -> (Result
 #[ensures(result.1.path == LPath::Warm && !result.1.sv.gpu_ok ==> result.0 == Ok(0u64))]
 #[ensures(result.1.path == LPath::Cold && result.1.ps.path == Path::NoDrives && !result.1.ps.read_ok ==> result.0 == Err(DE::Io(IoK::Gpu)))]
 pub fn verify_dis_lookup_async_dma_error__mutant(s: &mut S, key: u64, h: Ipc) -> (Result<u64, DE>, Snapshot<LaG>) {
+    lookup_async(s, key, h)
+}
+
+// DIS-LOOKUP-ASYNC-WARM-STREAM: for a memory-tier hit, lookup_async returns
+// the GPU stream on which the copy was queued (not the null stream), and the
+// copy of the slot's bytes to the caller's destination was issued on that
+// stream (FR-036: the caller synchronizes the returned stream).
+#[requires(pinv(s.p) && s.p.init)]
+#[requires(s.p.has_gpu)]
+#[requires(has((*s.g), key) && is_mem(ent((*s.g), key).loc) && ent((*s.g), key).wr@ == 0 && ent((*s.g), key).rr@ < u32::MAX@)]
+#[ensures(result.1.path == LPath::Warm)]
+#[ensures(match result.0 {
+    Ok(st) => st@ == result.1.warm@
+        && match ent((*s.g), key).loc { Loc::Mem { ptr, size, .. } =>
+              (min_int(h.size@, size@) > 0 ==> result.1.sv.m == 1
+                  && h2d_logged((*s.g), (*(^s).g), ptr, h.addr, min_int(h.size@, size@)))
+              && scattered((*(^s).g), result.1.sv.base, Seq::singleton(h), result.1.sv.m, ptr, size, result.1.warm),
+            _ => false },
+    _ => true })]
+pub fn verify_dis_lookup_async_warm_stream(s: &mut S, key: u64, h: Ipc) -> (Result<u64, DE>, Snapshot<LaG>) {
+    lookup_async(s, key, h)
+}
+
+#[requires(pinv(s.p) && s.p.init)]
+#[requires(s.p.has_gpu)]
+#[requires(has((*s.g), key) && is_mem(ent((*s.g), key).loc) && ent((*s.g), key).wr@ == 0 && ent((*s.g), key).rr@ < u32::MAX@)]
+#[ensures(result.1.path == LPath::Warm && match result.0 { Ok(st) => st@ == 0, _ => true })]
+pub fn verify_dis_lookup_async_warm_stream__mutant(s: &mut S, key: u64, h: Ipc) -> (Result<u64, DE>, Snapshot<LaG>) {
+    lookup_async(s, key, h)
+}
+
+// DIS-LOOKUP-ASYNC-DEVICE-STREAM: when the destination's device is known, the
+// warm copy is queued on a stream bound to that device and that stream is
+// returned; when it is unknown, lookup_async falls back to the shared warm
+// stream (FR-037/FR-052).
+#[requires(pinv(s.p) && s.p.init)]
+#[requires(s.p.has_gpu)]
+#[requires(has((*s.g), key) && is_mem(ent((*s.g), key).loc) && ent((*s.g), key).wr@ == 0 && ent((*s.g), key).rr@ < u32::MAX@)]
+#[ensures(result.1.path == LPath::Warm)]
+#[ensures(match result.0 { Ok(st) => st@ == result.1.warm@, _ => true })]
+#[ensures(result.1.dev@ >= 0 ==> result.1.warm@ != 0 ==> (*s.g).sdev[result.1.warm] == result.1.dev)]
+#[ensures(result.1.dev@ < 0 ==> result.1.warm@ == s.p.warm@)]
+pub fn verify_dis_lookup_async_device_stream(s: &mut S, key: u64, h: Ipc) -> (Result<u64, DE>, Snapshot<LaG>) {
+    lookup_async(s, key, h)
+}
+
+#[requires(pinv(s.p) && s.p.init)]
+#[requires(s.p.has_gpu)]
+#[requires(has((*s.g), key) && is_mem(ent((*s.g), key).loc) && ent((*s.g), key).wr@ == 0 && ent((*s.g), key).rr@ < u32::MAX@)]
+#[ensures(result.1.path == LPath::Warm && result.1.dev@ >= 0 ==> result.1.warm@ == s.p.warm@)]
+pub fn verify_dis_lookup_async_device_stream__mutant(s: &mut S, key: u64, h: Ipc) -> (Result<u64, DE>, Snapshot<LaG>) {
     lookup_async(s, key, h)
 }
 
@@ -979,7 +1033,7 @@ pub fn refute_dis_inv_eviction_demoted_still_readable() {
 pub fn verify_dis_tier_stats_promotions_to_gpu(s: &mut S, key: u64, h: Ipc, s2: &mut S, entries: &[Be]) {
     let g0 = snapshot!(*s.g);
     let (r, _g) = lookup_async(s, key, h);
-    proof_assert!(s.g.c.promo_gpu == g0.c.promo_gpu + (if r == Ok(0u64) { 1 } else { 0 }));
+    proof_assert!(s.g.c.promo_gpu == g0.c.promo_gpu + (if (match r { Ok(_) => true, _ => false }) { 1 } else { 0 }));
     let g2 = snapshot!(*s2.g);
     let (out, bg) = batch_lookup(s2, entries);
     proof_assert!(bg.ready ==> s2.g.c.promo_gpu == g2.c.promo_gpu + count_ok(out@, entries@.len()));

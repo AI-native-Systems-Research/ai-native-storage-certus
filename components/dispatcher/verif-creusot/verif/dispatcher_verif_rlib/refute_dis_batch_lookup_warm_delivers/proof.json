@@ -2,12 +2,12 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_p_zero": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_p_zero": { "prover": "alt-ergo", "time": 0.022 },
       "vc_refute_dis_batch_lookup_warm_delivers": {
         "prover": "z3",
-        "time": 0.036
+        "time": 0.038
       },
-      "vc_serve_memory_tier_to_gpu": { "prover": "alt-ergo", "time": 0.047 }
+      "vc_serve_memory_tier_to_gpu": { "prover": "alt-ergo", "time": 0.056 }
     }
   }
 }

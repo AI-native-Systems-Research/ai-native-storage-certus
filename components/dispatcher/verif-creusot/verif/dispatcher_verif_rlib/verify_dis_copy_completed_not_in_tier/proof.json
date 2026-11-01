@@ -4,11 +4,11 @@
     "Coma": {
       "vc_copy_gpu_to_memory_completed": {
         "prover": "alt-ergo",
-        "time": 0.022
+        "time": 0.014
       },
       "vc_verify_dis_copy_completed_not_in_tier": {
         "prover": "alt-ergo",
-        "time": 0.074
+        "time": 0.041
       }
     }
   }

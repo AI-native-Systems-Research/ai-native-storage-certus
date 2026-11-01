@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_ensure_initialized": { "prover": "alt-ergo", "time": 0.037 }
+      "vc_ensure_initialized": { "prover": "alt-ergo", "time": 0.042 }
     }
   }
 }

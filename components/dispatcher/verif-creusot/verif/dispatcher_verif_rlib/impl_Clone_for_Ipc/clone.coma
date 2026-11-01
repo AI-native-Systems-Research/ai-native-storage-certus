@@ -1,4 +1,4 @@
-(* #"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 129 9 129 29 *)
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 129 9 129 29 *)
 
 (* <Ipc as std::clone::Clone> *)
 
@@ -12,7 +12,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_Ipc [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 129 9 129 29]
+let clone_Ipc [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 129 9 129 29]
   (self: t_Ipc) (return (x: t_Ipc)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_Ipc = Any.any_l () | & self: t_Ipc = self ]) [ return (result: t_Ipc) -> (! return {result}) ]

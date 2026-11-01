@@ -1,6 +1,6 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_pre_full": { "prover": "cvc5", "time": 0.051 } }
+    "Coma": { "vc_pre_full": { "prover": "cvc5", "time": 0.056 } }
   }
 }

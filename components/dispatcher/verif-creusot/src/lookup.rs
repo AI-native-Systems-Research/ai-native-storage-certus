@@ -95,6 +95,12 @@ pub fn serve_memory_tier_to_gpu(s: &mut S, pointer: u64, size: u32, regions: &[I
         if !ok {
             return (Err(DE::Io(IoK::Gpu)), snapshot!(ServeG { base: *base, m: i@, gpu_ok: false }));
         }
+        // The log grew by exactly this iteration's H2D event (queued on the
+        // requested stream, or the null stream of the synchronous DmaBuffer
+        // copy). State the `scattered` invariant for i+1 directly so the loop
+        // preservation goal does not have to re-derive it from the world-frame
+        // axioms.
+        proof_assert!(scattered(*s.g, *base, regions@, (i@ + 1), pointer, size, warm_raw));
         off = padd(off, region.size as usize);
         i += 1;
     }
@@ -282,17 +288,24 @@ pub struct LaG {
     pub path: LPath,
     /// state right after the dispatch-map lookup
     pub after_lookup: W,
-    /// warm path: serve record; cold path: promote_and_serve record
+    /// warm path: the stream the H2D copy was queued on (and returned to the
+    /// caller); cold path: the per-device warm stream that was resolved
     pub warm: u64,
+    /// the device `set_batch_device` resolved for the destination pointer
+    /// (-1 = unknown)
+    pub dev: i32,
     pub sv: ServeG,
     pub ps: PsG,
 }
 
 #[requires(pinv(s.p))]
 #[ensures((^s).p == s.p)]
+#[ensures(match result.0 { Ok(_) => s.p.has_gpu, Err(_) => true })]
 #[ensures(!s.p.init ==> result.0 == Err(DE::NotInit(Ni::Dispatcher)) && *(^s).g == *s.g)]
 #[ensures(rd_ctr((*s.g).c, (*(^s).g).c) && log_ext(*s.g, *(^s).g) && same_env(*s.g, *(^s).g) && (*(^s).g).wq == (*s.g).wq)]
-#[ensures(match result.0 { Ok(st) => st@ == 0, _ => true })]
+#[ensures(match result.1.path {
+    LPath::Warm => match result.0 { Ok(st) => st@ == result.1.warm@, _ => true },
+    _ => match result.0 { Ok(st) => st@ == 0, _ => true } })]
 #[ensures(s.p.init && s.p.has_gpu ==> match result.1.path {
     LPath::Early => false,
     LPath::Miss => !has(*s.g, key) && result.0 == Err(DE::KeyNotFound(key)) && *(^s).g == W { tick: (*(^s).g).tick, ..*s.g },
@@ -302,16 +315,21 @@ pub struct LaG {
         && (match ent(*s.g, key).loc { Loc::Mem { ptr, size, .. } =>
               scattered(*(^s).g, result.1.sv.base, Seq::singleton(h), result.1.sv.m, ptr, size, result.1.warm)
               && h2d_within(*s.g, *(^s).g, ptr, size)
-              && (min_int(h.size@, size@) > 0 && result.0 == Ok(0u64) ==> result.1.sv.m == 1)
+              && (min_int(h.size@, size@) > 0 && result.0 == Ok(result.1.warm) ==> result.1.sv.m == 1)
               && (result.1.sv.m == 1 ==> h2d_logged(*s.g, *(^s).g, ptr, h.addr, min_int(h.size@, size@))),
             _ => false })
-        && (result.0 == Ok(0u64)) == result.1.sv.gpu_ok
+        && (match result.0 { Ok(_) => true, _ => false }) == result.1.sv.gpu_ok
         && (match result.0 { Ok(_) => true, Err(DE::Io(_)) => true, _ => false })
         && (forall<j: u64> (*(^s).g).dm.get(j) == (*s.g).dm.get(j)) && (*(^s).g).mt == (*s.g).mt
         && logged(*s.g, *(^s).g, Ev::MtTouch { key }) && logged(*s.g, *(^s).g, Ev::RelRead { key, own: 1 })
         && (*(^s).g).c.promo_gpu == (*s.g).c.promo_gpu + (if result.1.sv.gpu_ok { 1 } else { 0 })
         && (*(^s).g).c.promo_mem == (*s.g).c.promo_mem
-        && own_reads(*s.g, *(^s).g) && own_writes(*s.g, *(^s).g),
+        && own_reads(*s.g, *(^s).g) && own_writes(*s.g, *(^s).g)
+        // DIS-LOOKUP-ASYNC-DEVICE-STREAM: a known destination device serves the
+        // copy on a stream bound to that device; an unknown one falls back to
+        // the shared warm stream (FR-037/FR-052).
+        && (result.1.dev@ >= 0 ==> result.1.warm@ != 0 ==> (*s.g).sdev[result.1.warm] == result.1.dev)
+        && (result.1.dev@ < 0 ==> result.1.warm@ == s.p.warm@),
     LPath::Cold => has(*s.g, key) && is_blk(ent(*s.g, key).loc) && ent(*s.g, key).wr@ == 0 && ent(*s.g, key).rr@ < u32::MAX@
         && (match result.0 { Ok(_) => result.1.ps.read_ok || s.p.nd@ == 0, _ => true })
         && (*(^s).g).c.promo_gpu == (*s.g).c.promo_gpu + (if result.0 == Ok(0u64) { 1 } else { 0 })
@@ -333,19 +351,19 @@ pub fn lookup_async(s: &mut S, key: u64, h: Ipc) -> (Result<u64, DE>, Snapshot<L
     let dsv = snapshot!(ServeG { base: 0, m: 0, gpu_ok: false });
     let dps = snapshot!(PsG { path: Path::NoSlot, ptr: 0u64, read_ok: false, promoted: false, mid: *g0 });
     match ensure_initialized(s) {
-        Err(e) => return (Err(e), snapshot!(LaG { path: LPath::Early, after_lookup: *g0, warm: 0u64, sv: *dsv, ps: *dps })),
+        Err(e) => return (Err(e), snapshot!(LaG { path: LPath::Early, after_lookup: *g0, warm: 0u64, dev: -1i32, sv: *dsv, ps: *dps })),
         Ok(()) => {}
     }
     if !s.p.has_dm {
-        return (Err(DE::NotInit(Ni::DispatchMap)), snapshot!(LaG { path: LPath::Early, after_lookup: *g0, warm: 0u64, sv: *dsv, ps: *dps }));
+        return (Err(DE::NotInit(Ni::DispatchMap)), snapshot!(LaG { path: LPath::Early, after_lookup: *g0, warm: 0u64, dev: -1i32, sv: *dsv, ps: *dps }));
     }
     if !s.p.has_mt {
-        return (Err(DE::NotInit(Ni::MemoryTier)), snapshot!(LaG { path: LPath::Early, after_lookup: *g0, warm: 0u64, sv: *dsv, ps: *dps }));
+        return (Err(DE::NotInit(Ni::MemoryTier)), snapshot!(LaG { path: LPath::Early, after_lookup: *g0, warm: 0u64, dev: -1i32, sv: *dsv, ps: *dps }));
     }
     let result = dm_lookup(s, key);
     let g1 = snapshot!(*s.g);
     if !s.p.has_gpu {
-        return (Err(DE::NotInit(Ni::Gpu)), snapshot!(LaG { path: LPath::Early, after_lookup: *g1, warm: 0u64, sv: *dsv, ps: *dps }));
+        return (Err(DE::NotInit(Ni::Gpu)), snapshot!(LaG { path: LPath::Early, after_lookup: *g1, warm: 0u64, dev: -1i32, sv: *dsv, ps: *dps }));
     }
     let null_stream: u64 = 0;
     let device = set_batch_device(s, h.addr);
@@ -353,18 +371,30 @@ pub fn lookup_async(s: &mut S, key: u64, h: Ipc) -> (Result<u64, DE>, Snapshot<L
         Some(d) => d.warm,
         None => 0,
     };
+    // FR-036/FR-037/FR-052: the stream the warm copy is queued on and handed
+    // back to the caller - the destination device's warm stream when that
+    // device is known (device_streams_for created it on the device), the
+    // shared warm stream when it is not. A known device whose per-device
+    // setup failed (warm_raw == 0) degrades to the synchronous DmaBuffer
+    // path, so stream 0 (the null stream) is returned: that copy has already
+    // completed when lookup_async returns.
+    let stream_raw = if device >= 0 { warm_raw } else { s.p.warm };
     match result {
-        Ok(Lr::NotExist) => (Err(DE::KeyNotFound(key)), snapshot!(LaG { path: LPath::Miss, after_lookup: *g1, warm: warm_raw, sv: *dsv, ps: *dps })),
+        Ok(Lr::NotExist) => (Err(DE::KeyNotFound(key)), snapshot!(LaG { path: LPath::Miss, after_lookup: *g1, warm: stream_raw, dev: device, sv: *dsv, ps: *dps })),
         Ok(Lr::Mismatch) => {
             let _ = dm_release_read(s, key, snapshot!(1));
-            (Err(DE::InvalidParam), snapshot!(LaG { path: LPath::Early, after_lookup: *g1, warm: warm_raw, sv: *dsv, ps: *dps }))
+            (Err(DE::InvalidParam), snapshot!(LaG { path: LPath::Early, after_lookup: *g1, warm: stream_raw, dev: device, sv: *dsv, ps: *dps }))
         }
         Ok(Lr::Mem { ptr, size }) => {
             let regions = [h];
             proof_assert!(regions@ == Seq::singleton(h));
             proof_assert!(pre_zero(regions@) == ());
             let gs = snapshot!(*s.g);
-            let (r, sv) = serve_memory_tier_to_gpu(s, ptr, size, &regions, warm_raw, true);
+            // Queue without synchronizing (FR-036): the caller synchronizes
+            // the returned stream. Only when no stream exists at all
+            // (stream_raw == 0) does serve's DmaBuffer branch copy
+            // synchronously.
+            let (r, sv) = serve_memory_tier_to_gpu(s, ptr, size, &regions, stream_raw, false);
             let h2d_ev = snapshot!(s.g.log[sv.base]);
             proof_assert!(sv.m == 1 ==> match *h2d_ev { Ev::H2D { src, dst, len, .. } => src == ptr && dst == h.addr && len@ == min_int(h.size@, size@), _ => false });
             let rel_at = snapshot!(s.g.log.len());
@@ -378,9 +408,9 @@ pub fn lookup_async(s: &mut S, key: u64, h: Ipc) -> (Result<u64, DE>, Snapshot<L
             match r {
                 Ok(()) => {
                     rec_promotions_to_gpu(s, 1);
-                    (Ok(null_stream), snapshot!(LaG { path: LPath::Warm, after_lookup: *g1, warm: warm_raw, sv: *sv, ps: *dps }))
+                    (Ok(stream_raw), snapshot!(LaG { path: LPath::Warm, after_lookup: *g1, warm: stream_raw, dev: device, sv: *sv, ps: *dps }))
                 }
-                Err(e) => (Err(e), snapshot!(LaG { path: LPath::Warm, after_lookup: *g1, warm: warm_raw, sv: *sv, ps: *dps })),
+                Err(e) => (Err(e), snapshot!(LaG { path: LPath::Warm, after_lookup: *g1, warm: stream_raw, dev: device, sv: *sv, ps: *dps })),
             }
         }
         Ok(Lr::Blk { off }) => {
@@ -394,12 +424,12 @@ pub fn lookup_async(s: &mut S, key: u64, h: Ipc) -> (Result<u64, DE>, Snapshot<L
                     proof_assert!(promote_post(*g0, *g2, *b0, s.p, key, h, Ok(0u64), *ps));
                     rec_promotions_to_gpu(s, 1);
                     proof_assert!(s.g.dm == b0.dm && s.g.mt == b0.mt && s.g.log == b0.log && s.g.tick == b0.tick);
-                    (Ok(null_stream), snapshot!(LaG { path: LPath::Cold, after_lookup: *g2, warm: warm_raw, sv: *dsv, ps: *ps }))
+                    (Ok(null_stream), snapshot!(LaG { path: LPath::Cold, after_lookup: *g2, warm: stream_raw, dev: device, sv: *dsv, ps: *ps }))
                 }
-                Err(e) => (Err(e), snapshot!(LaG { path: LPath::Cold, after_lookup: *g2, warm: warm_raw, sv: *dsv, ps: *ps })),
+                Err(e) => (Err(e), snapshot!(LaG { path: LPath::Cold, after_lookup: *g2, warm: stream_raw, dev: device, sv: *dsv, ps: *ps })),
             }
         }
-        Err(_) => (Err(DE::KeyNotFound(key)), snapshot!(LaG { path: LPath::Timeout, after_lookup: *g1, warm: warm_raw, sv: *dsv, ps: *dps })),
+        Err(_) => (Err(DE::KeyNotFound(key)), snapshot!(LaG { path: LPath::Timeout, after_lookup: *g1, warm: stream_raw, dev: device, sv: *dsv, ps: *dps })),
     }
 }
 
@@ -440,27 +470,52 @@ pub fn promote_post(g: W, a: W, b: W, p: P, key: u64, h: Ipc, r: Result<u64, DE>
     }
 }
 
+/// The stream contract shared by `lookup_async` and its synchronous wrapper
+/// `lookup` (FR-036): on a warm hit the stream handed back is the one the
+/// copy was queued on; on every other success it is the null stream.
+/// Stated as a named predicate so `lookup`'s return sites can discharge it
+/// by matching the atom `ret_stream_ok(r, *g)` (available from the body's
+/// proof hint) instead of re-reasoning through the `LPath` match.
+#[logic]
+pub fn ret_stream_ok(r: Result<u64, DE>, g: LaG) -> bool {
+    pearlite! {
+        match g.path {
+            LPath::Warm => match r { Ok(st) => st@ == g.warm@, _ => true },
+            _ => match r { Ok(st) => st@ == 0, _ => true },
+        }
+    }
+}
+
 /// `lookup` = `lookup_async` + synchronize the returned stream if it is non-null.
+/// The ghost triple records (inner result, inner ghost record, world at
+/// completion); the world is captured at each exit so it is exactly the
+/// final world, including the `Sync` event a successful synchronize logs.
+/// Delegation: an inner error propagates unchanged; a null stream means the
+/// copy already completed, so `lookup` succeeds; a queued (non-null) stream
+/// either synchronizes cleanly or surfaces `Io(Sync)`. The `NotInit(Gpu)`
+/// exit is unreachable because a queued copy implies the GPU receptacle was
+/// bound (`lookup_async` guarantees this above).
 #[requires(pinv(s.p))]
 #[ensures((^s).p == s.p)]
-#[ensures(result.0 == match (*result.1).0 { Ok(_) => Ok(()), Err(e) => Err(e) })]
+#[ensures(match (*result.1).0 { Err(e) => result.0 == Err(e), Ok(st) => st@ == 0 ==> result.0 == Ok(()) })]
+#[ensures(match (*result.1).0 { Ok(st) => st@ != 0 ==> (result.0 == Ok(()) || result.0 == Err(DE::Io(IoK::Sync))), Err(_) => true })]
 #[ensures(*(^s).g == (*result.1).2)]
-#[ensures(match (*result.1).0 { Ok(st) => st@ == 0, _ => true })]
+#[ensures(ret_stream_ok((*result.1).0, (*result.1).1))]
 pub fn lookup(s: &mut S, key: u64, h: Ipc) -> (Result<(), DE>, Snapshot<(Result<u64, DE>, LaG, W)>) {
     let (r, g) = lookup_async(s, key, h);
-    let after = snapshot!(*s.g);
+    proof_assert!(ret_stream_ok(r, *g));
     match r {
-        Err(e) => (Err(e), snapshot!((r, *g, *after))),
+        Err(e) => (Err(e), snapshot!((r, *g, *s.g))),
         Ok(stream) => {
             if stream != 0 {
                 if !s.p.has_gpu {
-                    return (Err(DE::NotInit(Ni::Gpu)), snapshot!((r, *g, *after)));
+                    return (Err(DE::NotInit(Ni::Gpu)), snapshot!((r, *g, *s.g)));
                 }
                 if !gpu_sync(s, stream) {
-                    return (Err(DE::Io(IoK::Sync)), snapshot!((r, *g, *after)));
+                    return (Err(DE::Io(IoK::Sync)), snapshot!((r, *g, *s.g)));
                 }
             }
-            (Ok(()), snapshot!((r, *g, *after)))
+            (Ok(()), snapshot!((r, *g, *s.g)))
         }
     }
 }

@@ -1,4 +1,4 @@
-(* #"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/store.rs" 287 9 287 29 *)
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/store.rs" 287 9 287 29 *)
 
 (* <Pe as std::clone::Clone> *)
 
@@ -14,7 +14,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_Pe [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/store.rs" 287 9 287 29] (self: t_Pe)
-  (return (x: t_Pe)) = (! bb0
+let clone_Pe [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/store.rs" 287 9 287 29]
+  (self: t_Pe) (return (x: t_Pe)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ] [ & _ret: t_Pe = Any.any_l () | & self: t_Pe = self ])
   [ return (result: t_Pe) -> (! return {result}) ]

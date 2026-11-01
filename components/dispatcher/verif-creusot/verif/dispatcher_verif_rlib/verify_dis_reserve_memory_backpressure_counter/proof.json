@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_reserve_memory": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_reserve_memory": { "prover": "alt-ergo", "time": 0.026 },
       "vc_verify_dis_reserve_memory_backpressure_counter": {
         "prover": "alt-ergo",
-        "time": 0.092
+        "time": 0.1
       }
     }
   }
