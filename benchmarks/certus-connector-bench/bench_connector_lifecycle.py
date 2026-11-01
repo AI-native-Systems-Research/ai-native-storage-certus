@@ -1368,7 +1368,7 @@ def bench_contention(
     }
 
     store_state = {"total_blocks": 0, "drops": 0}
-    load_state = {"total_blocks": 0, "misses": 0, "skipped_batches": 0}
+    load_state = {"total_blocks": 0, "misses": 0, "skipped_batches": 0, "service_s": 0.0}
     alone_phases = {name: PhaseTiming(name) for name in load_phases}
     alone_state = {"total_blocks": 0, "misses": 0}
 
@@ -1478,7 +1478,9 @@ def bench_contention(
                 time.sleep(0.001)
                 continue
             job_id += 1
+            t0 = time.perf_counter()
             _load_batch(batch_keys, job_id, load_phases, load_state)
+            load_state["service_s"] += time.perf_counter() - t0
 
     def _store_batch(generation, job_id):
         """Store one new batch through manager_store / worker_store; its stored keys."""
@@ -1508,6 +1510,11 @@ def bench_contention(
             t0 = time.perf_counter()
             _load_batch(stored, job_id + 1, alone_phases, alone_state)
             loaded += time.perf_counter() - t0
+        # The concurrent window starts from an empty memory tier, as it did before this phase
+        # existed: the reference's batches (about one per 3 ms) would otherwise fill it and
+        # bring eviction and write-through into the window.
+        manager_store._ring.flush_to_ssd()
+        manager_store._ring.clear_memory_tier()
         return loaded
 
     alone_wall = _load_alone()
@@ -1562,6 +1569,14 @@ def bench_contention(
     alone_result.print_report()
     print(f"  Load-alone misses: {alone_state['misses']}  (same manager and worker as the load "
           f"thread, no store running)")
+    # One basis for both: blocks over the time spent loading them. The load thread's throughput
+    # above is over the whole window, its 0.5 s start and its waits for a batch included; the
+    # load-alone throughput is over its load time already.
+    load_service = (load_state["total_blocks"] * block_bytes / load_state["service_s"] / 1e9
+                    if load_state["service_s"] else 0.0)
+    print(f"  Load service throughput: under the store {load_service:.2f} GB/s, alone "
+          f"{alone_result.total_bytes / (alone_wall or 1e-9) / 1e9:.2f} GB/s "
+          f"(blocks over load time)")
 
     return [store_result, load_result]
 

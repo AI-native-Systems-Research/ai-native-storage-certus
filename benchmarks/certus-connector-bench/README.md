@@ -113,7 +113,7 @@ python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --mode contention --min-duration 10 --working-set 1024
 ```
 
-Reports per-thread throughput and latency, and `Contention: Load Alone`: before the concurrent window the load thread loads freshly stored batches on its own for 3 s (`CONTENTION_ALONE_SECONDS`), with the same managers, worker and keys, and only the load timed. Compare the load thread against that, not against `--mode default`: the warm load there runs on the manager that stored its keys, whose commit-group record answers most of a batch's lookups from one Check, which the contention load's own manager cannot do.
+Reports per-thread throughput and latency, and `Contention: Load Alone`: before the concurrent window the load thread loads freshly stored batches on its own for 3 s (`CONTENTION_ALONE_SECONDS`), with the same managers, worker and keys, and only the load timed; the memory tier is then flushed and cleared, so the concurrent window starts empty. `Load service throughput` puts both on one basis (blocks over the time spent loading them; the load thread's own throughput is over the whole window, its start delay and waits included). Compare the load thread against that, not against `--mode default`: the warm load there runs on the manager that stored its keys, whose commit-group record answers most of a batch's lookups from one Check, which the contention load's own manager cannot do.
 
 #### Scheduler-step mode (`--mode scheduler-step`)
 
