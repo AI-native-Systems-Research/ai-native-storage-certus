@@ -495,7 +495,7 @@ def bench_store_lifecycle(stack, num_blocks, batch_size, min_duration) -> BenchR
     has_l2 = stack.has_l2()
     wall_start = time.perf_counter()
     iteration = 0
-    while (time.perf_counter() - wall_start) < min_duration or iteration < 2:
+    while (time.perf_counter() - wall_start - excluded) < min_duration or iteration < 2:
         for seq in make_sequences(stack, num_blocks, batch_size):
             total += store_batch(stack, seq, phases)
         iteration += 1
@@ -677,7 +677,7 @@ def bench_pipelined(stack, num_blocks, batch_size, min_duration, *,
         in_flight.clear()
         _rec(phases, "pipeline_drain", t0)
 
-    while (time.perf_counter() - wall_start) < min_duration or iteration < 2:
+    while (time.perf_counter() - wall_start - excluded) < min_duration or iteration < 2:
         in_flight: list = []
         pass_seqs = make_sequences(stack, num_blocks, batch_size) if is_store else seqs
         for seq in pass_seqs:

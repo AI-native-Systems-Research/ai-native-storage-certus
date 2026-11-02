@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Render the connector-bench comparison (certus / cputier / lmcache) as one HTML page.
+"""Render the connector-bench comparison (certus / cputier / lmcache / 3fs / cputier-3fs)
+as one HTML page.
 
 Reads <artifacts>/params.json and one CSV per arm (certus.csv, cputier.csv,
-lmcache.csv; written by run_compare.sh), joins result rows by label and writes
+lmcache.csv, 3fs.csv, cputier-3fs.csv; written by run_compare.sh), joins result rows by label and writes
 a self-contained HTML report: parameter parity, throughput/IOPS side by side,
 and per-phase latency. An arm with no CSV is shown as having no results.
 """
@@ -21,16 +22,21 @@ PARITY_COLUMNS = ["bs", "num_blocks", "block_bytes", "working_set", "tp", "looku
                   "pipeline_depth", "direction", "hit_ratio", "requests_per_step",
                   "num_sessions"]
 # Per-block KV tensors: certus records it as pieces_per_block, the others as layers.
-LAYERS_COLUMN = {"certus": "pieces_per_block", "cputier": "layers", "lmcache": "layers"}
+LAYERS_COLUMN = {"certus": "pieces_per_block", "cputier": "layers", "lmcache": "layers",
+                 "3fs": "layers", "cputier-3fs": "layers"}
+# Arms with no memory tier: excluded from the DRAM-tier parity check.
+NO_DRAM_TIER = {"3fs"}
 
 # (key, display name, legend description, CSS colour variable)
 ARMS = [
     ("certus", "certus", "certus-server, SPDK NVMe", "--c"),
     ("cputier", "cputier", "vLLM TieringOffloadingSpec, fs tier", "--t"),
     ("lmcache", "lmcache", "LMCache MP server, L1 + fs_native L2", "--l"),
+    ("3fs", "3fs", "vLLM HF3FSKVConnector, 3FS USRBIO, no memory tier", "--h"),
+    ("cputier-3fs", "cputier-3fs", "vLLM TieringOffloadingSpec, CPU tier + fs tier on 3FS (FUSE)", "--h2"),
 ]
 # Column holding each arm's DRAM tier size in bytes.
-DRAM_COLUMN = {"cputier": "cpu_bytes", "lmcache": "l1_bytes"}
+DRAM_COLUMN = {"cputier": "cpu_bytes", "lmcache": "l1_bytes", "cputier-3fs": "cpu_bytes"}
 
 
 def parse_size(s: str) -> int:
@@ -85,6 +91,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--artifacts", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--latex", metavar="PATH",
+                    help="also write the throughput table as a LaTeX (booktabs) table to PATH")
     a = ap.parse_args()
 
     params = json.load(open(os.path.join(a.artifacts, "params.json")))
@@ -105,13 +113,17 @@ def main() -> None:
         dram = parse_size(params["shared"]["dram"])
         vals = {}
         for k, *_ in present:
+            if k in NO_DRAM_TIER:
+                continue
             if k == "certus":
                 vals[k] = [str(dram)]
             else:
                 vals[k] = _distinct(r.get(DRAM_COLUMN[k]) for r in data[k])
         same = all(len(v) == 1 and _num_eq(v[0], dram) for v in vals.values())
+        dram_vals = {k: " / ".join(v) or "—" for k, v in vals.items()}
+        dram_vals.update({k: "none (no memory tier)" for k, *_ in present if k in NO_DRAM_TIER})
         parity.append(("DRAM tier bytes (certus --memory-tier-size / cputier cpu_bytes / lmcache L1)",
-                       {k: " / ".join(v) or "—" for k, v in vals.items()}, same))
+                       dram_vals, same))
         vals = {k: _distinct(r.get(LAYERS_COLUMN[k]) or ("1" if k == "certus" else "")
                              for r in data[k]) for k, *_ in present}
         flat = [v[0] for v in vals.values() if len(v) == 1]
@@ -224,12 +236,17 @@ def main() -> None:
 
     status = []
     logs = {"certus": "certus-bench.log / server.log", "cputier": "cputier-bench.log",
-            "lmcache": "lmcache-bench.log"}
+            "lmcache": "lmcache-bench.log", "3fs": "3fs-bench.log",
+            "cputier-3fs": "cputier-3fs-bench.log"}
     for k, n, _, _ in ARMS:
         if data[k]:
             continue
         note = params.get(k, {}).get("note") if isinstance(params.get(k), dict) else None
         status.append(f"{n} arm: {note}." if note else f"{n} arm produced no results (see {logs[k]}).")
+    h3_clients = _distinct(r.get("hf3fs_client") for r in data["3fs"])
+    if "mock" in h3_clients:
+        status.append("3fs arm ran on vLLM's file-backed MOCK client (no 3FS cluster): its rows test the "
+                      "code path only and are NOT a 3FS measurement.")
     if mismatches:
         status.append(f"{len(mismatches)} parameter(s) differ between arms — results are not comparable.")
     banner = "".join(f"<div class='warn'>{esc(s)}</div>" for s in status)
@@ -237,6 +254,8 @@ def main() -> None:
     shared_html = "".join(f"<tr><td>{esc(k)}</td><td class='num'>{esc(v)}</td></tr>" for k, v in sh.items())
     cp, tp = params["certus"], params["cputier"]
     lp = params.get("lmcache", {})
+    hp = params.get("3fs", {})
+    c3 = params.get("cputier-3fs", {})
     legend = "".join(f'<span><i class="sw" style="background:var({var})"></i>{esc(n)} ({esc(d)})</span>'
                      for _, n, d, var in ARMS)
     iops_head = "".join(f'<th class="num">{esc(n)} IOPS</th>' for _, n, _, _ in ARMS)
@@ -250,12 +269,12 @@ def main() -> None:
 <title>Connector Bench Comparison</title>
 <style>
 :root {{ --bg:#fbfaf8; --fg:#1d1c1a; --muted:#6b6862; --line:#e4e1db; --card:#ffffff;
-  --c:#2f6fb5; --t:#c9792b; --l:#3f8f5a; --bad:#b3261e; --badbg:#fdecea; --warnbg:#fff4e0; }}
+  --c:#2f6fb5; --t:#c9792b; --l:#3f8f5a; --h:#7d52b8; --h2:#c2549a; --bad:#b3261e; --badbg:#fdecea; --warnbg:#fff4e0; }}
 @media (prefers-color-scheme: dark) {{ :root:not([data-theme="light"]) {{
   --bg:#171614; --fg:#ecebe8; --muted:#a19d96; --line:#34322e; --card:#201f1c;
-  --c:#6aa5e6; --t:#e7a35f; --l:#6cc38a; --bad:#f28b82; --badbg:#3a1f1d; --warnbg:#3a2f1a; }} }}
+  --c:#6aa5e6; --t:#e7a35f; --l:#6cc38a; --h:#b393e6; --h2:#e58cc2; --bad:#f28b82; --badbg:#3a1f1d; --warnbg:#3a2f1a; }} }}
 :root[data-theme="dark"] {{ --bg:#171614; --fg:#ecebe8; --muted:#a19d96; --line:#34322e; --card:#201f1c;
-  --c:#6aa5e6; --t:#e7a35f; --l:#6cc38a; --bad:#f28b82; --badbg:#3a1f1d; --warnbg:#3a2f1a; }}
+  --c:#6aa5e6; --t:#e7a35f; --l:#6cc38a; --h:#b393e6; --h2:#e58cc2; --bad:#f28b82; --badbg:#3a1f1d; --warnbg:#3a2f1a; }}
 * {{ box-sizing:border-box; }}
 body {{ margin:0; background:var(--bg); color:var(--fg);
   font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }}
@@ -337,18 +356,112 @@ so its throughput is not like for like.</p>
 <tr><td>L2 dir (fs_native, O_DIRECT)</td><td>{esc(lp.get('l2_dir', '—'))}</td></tr>
 <tr><td>chunk size (tokens)</td><td>{esc(lmc_chunk)}</td></tr></table>
 <p class="note">bench: <code>{esc(lp.get('bench_cmd', '—'))}</code></p></div>
+<div class="card"><b>3fs</b><table>
+<tr><td>image</td><td>{esc(hp.get('image', '—'))}</td></tr>
+<tr><td>client</td><td>{esc(' / '.join(h3_clients) or hp.get('client', '—'))}</td></tr>
+<tr><td>storage</td><td>{esc(hp.get('storage', '—'))}</td></tr>
+<tr><td>data file</td><td>{esc(hp.get('file_size', '—'))}</td></tr>
+<tr><td>I/O jobs</td><td>{esc(hp.get('numjobs', '—'))}</td></tr>
+<tr><td>memory tier</td><td>none</td></tr></table>
+<p class="note">bench: <code>{esc(hp.get('bench_cmd', '—'))}</code></p></div>
+<div class="card"><b>cputier-3fs</b><table>
+<tr><td>image</td><td>{esc(c3.get('image', '—'))}</td></tr>
+<tr><td>spec</td><td>{esc(c3.get('spec', '—'))}</td></tr>
+<tr><td>fs tier dir (3FS FUSE, O_DIRECT)</td><td>{esc(c3.get('fs_tier', '—'))}</td></tr>
+<tr><td>memory tier</td><td>CPU tier, --dram</td></tr></table>
+<p class="note">bench: <code>{esc(c3.get('bench_cmd', '—'))}</code></p></div>
 </div>
 <p class="note">The disk tiers are inherently different: certus drives raw NVMe through SPDK; cputier writes one file per block
-under its fs tier directory; lmcache writes one file per chunk under its L2 directory. Put the fs tier and the L2 dir on
-comparable NVMe for a fair cold-path comparison.</p>
+under its fs tier directory; lmcache writes one file per chunk under its L2 directory; 3fs writes pages of one connector data
+file on a 3FS cluster through the USRBIO client. Put the fs tier, the L2 dir and the 3FS storage targets on comparable NVMe
+for a fair cold-path comparison.</p>
+<p class="note">3fs has no memory tier: every store and load goes to 3FS, so its warm and cold rows are the same disk path,
+and it has no mixed-eviction row. It is a disk-only baseline, not a tiered cache. cputier-3fs is the same cputier bench with
+its fs tier moved onto the 3FS mount: 3FS behind a memory tier. Its difference from cputier is the disk (3FS vs local
+RAID0); its difference from 3fs is the memory tier. It reaches 3FS through FUSE, not USRBIO.</p>
 </main></body></html>
 """
     with open(a.out, "w") as fh:
         fh.write(page)
+    if a.latex:
+        with open(a.latex, "w") as fh:
+            fh.write(latex_table(order, by, names, present, sh, work_flags))
+        print(f"wrote {a.latex}")
     if mismatches:
         print("WARNING: parameters differ between arms: "
               + "; ".join(f"{c} ({', '.join(f'{k}={v}' for k, v in vals.items())})"
                           for c, vals, _ in mismatches))
+
+
+def _tex(s: str) -> str:
+    """Escape LaTeX specials in plain text."""
+    out = str(s)
+    for a, b in (("\\", r"\textbackslash{}"), ("&", r"\&"), ("%", r"\%"), ("$", r"\$"),
+                 ("#", r"\#"), ("_", r"\_"), ("{", r"\{"), ("}", r"\}"),
+                 ("~", r"\textasciitilde{}"), ("^", r"\textasciicircum{}"),
+                 ("→", r"$\to$"), ("×", r"$\times$"), ("—", "---")):
+        out = out.replace(a, b)
+    return out
+
+
+def latex_table(order, by, names, present, sh, work_flags) -> str:
+    """Throughput (GB/s) per result row and arm, as a booktabs tabular.
+
+    Rows are the report's result rows (label text before its parenthesised
+    details); store rows with a sustained figure get an extra "incl. disk drain"
+    row. The fastest arm in each row is bold. A row where an arm skipped work
+    (the report's warning flag) carries a dagger on that arm's value and a
+    footnote line under the table. Needs \\usepackage{booktabs}.
+    """
+    arms = [k for k, *_ in present]
+    lines, notes = [], []
+    mark = 0
+
+    def cells(vals: dict, exclude=()) -> list[str]:
+        # Flagged arms (they skipped work) are not eligible for the bold.
+        got = {k: v for k, v in vals.items() if v is not None and names[k] not in exclude}
+        best = max(got.values()) if got else None
+        return [("---" if vals.get(k) is None else
+                 (rf"\textbf{{{vals[k]:.2f}}}" if best is not None and vals[k] == best and len(got) > 1
+                  else f"{vals[k]:.2f}"))
+                for k in arms]
+
+    for key in order:
+        rows = {k: by[k].get(key) for k in arms}
+        if not any(rows.values()):
+            continue
+        label = key[0]
+        vals = {k: (float(r["throughput_gbs"]) if r else None) for k, r in rows.items()}
+        flags = work_flags(rows)
+        flagged = {part.split(":", 1)[0] for part in flags.split("; ")} if flags else set()
+        row = cells(vals, flagged)
+        if flags:
+            mark += 1
+            sym = r"$^{\dagger" + ("" if mark == 1 else str(mark)) + "}$"
+            row = [c + (sym if names[k] in flagged else "") for c, k in zip(row, arms)]
+            notes.append(sym + " " + _tex(flags) + ".")
+        lines.append(_tex(label) + " & " + " & ".join(row) + r" \\")
+        sust = {k: (float(r["sustained_gbs"]) if r and r.get("sustained_gbs") else None)
+                for k, r in rows.items()}
+        if any(v is not None for v in sust.values()):
+            lines.append(r"\quad incl.\ disk drain & " + " & ".join(cells(sust)) + r" \\")
+
+    cols = "l" + "r" * len(arms)
+    head = " & ".join(_tex(names[k]) for k in arms)
+    caption = (f"KV-offload connector throughput (GB/s), mode {sh.get('mode')}, "
+               f"{sh.get('min_duration')}\\,s per phase, {sh.get('dram')} memory tier, "
+               f"block {int(sh.get('block_bytes', 0)) // 1024}\\,KiB, "
+               f"{sh.get('layers', '?')} KV tensor(s) per block. Bold: fastest per row; "
+               f"--- : the arm has no such phase. $^{{\\dagger}}$: the arm skipped work in that row "
+               f"(not like for like; never bold).")
+    out = [r"% generated by benchmarks/connector-sweep/make_report.py --latex; needs \usepackage{booktabs}",
+           r"\begin{table}[t]", r"\centering", r"\small",
+           rf"\begin{{tabular}}{{{cols}}}", r"\toprule",
+           rf"Phase & {head} \\", r"\midrule", *lines, r"\bottomrule", r"\end{tabular}"]
+    if notes:
+        out += [r"\par\smallskip", r"\parbox{\linewidth}{\footnotesize " + r" \\ ".join(notes) + "}"]
+    out += [rf"\caption{{{caption}}}", r"\label{tab:connector-sweep}", r"\end{table}", ""]
+    return "\n".join(out)
 
 
 def _distinct(values) -> list[str]:

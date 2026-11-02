@@ -1,14 +1,17 @@
 # connector-sweep
 
-Runs the three KV-offload connector benches with one shared set of workload parameters, then renders a side-by-side HTML report:
+Runs the four KV-offload connector benches with one shared set of workload parameters, then renders a side-by-side HTML report:
 
 | Arm | Bench | Backend |
 |---|---|---|
 | certus | [`certus-connector-bench`](../certus-connector-bench/README.md) (host) | `certus-server` over `/dev/shm/certus-shmq`, SPDK NVMe |
 | cputier | [`cputier-connector-bench`](../cputier-connector-bench/README.md) (vLLM ≥ 0.30 image) | vLLM `TieringOffloadingSpec`: pinned CPU tier + `fs` disk tier |
 | lmcache | [`lmcache-connector-bench`](../lmcache-connector-bench/README.md) (vLLM + LMCache image) | LMCache MP server: pinned-RAM L1 + `fs_native` L2 |
+| 3fs | [`3fs-connector-bench`](../3fs-connector-bench/README.md) (vLLM + 3FS image) | vLLM `HF3FSKVConnector`: 3FS via USRBIO, **no memory tier** |
 
-Every workload flag is given once and forwarded identically to each bench, so the arms can't drift. `--dram` sets all three memory tiers: certus-server's `--memory-tier-size`, cputier's `--cpu-bytes` and LMCache's L1. The arms run one after another because they share the GPU.
+Every workload flag is given once and forwarded identically to each bench, so the arms can't drift. `--dram` sets the three memory tiers: certus-server's `--memory-tier-size`, cputier's `--cpu-bytes` and LMCache's L1. The 3fs arm has no memory tier, so it's a disk-only baseline with no mixed-eviction row. The arms run one after another because they share the GPU.
+
+The 3fs arm needs a live 3FS cluster mounted at `/mnt/3fs` (`sudo deploy/3fs/run.sh`) and the vLLM + 3FS image. Without the mount it's skipped with a note in the report. `--h3fs-mock` runs it instead on vLLM's file-backed mock client on `/raid0`. That checks the code path, but it's **not** a 3FS measurement, and the report shows a banner saying so.
 
 The `/profile-connector-benches` Claude Code skill drives these same scripts. It also asks for the disk tier, SSD count and tier size, and runs the preflight checks for you.
 
@@ -45,10 +48,14 @@ benchmarks/connector-sweep/run_compare.sh --out bench-results/connector-compare.
 `--out` is resolved against the directory you run from. Artifacts go to `<out-without-.html>.d/`: `params.json` (records every arm's exact command line), `certus.csv`, `cputier.csv`, `lmcache.csv`, the three bench logs and `server.log`.
 
 ```bash
-run_compare.sh --out <path> ... --skip-lmcache      # drop an arm (--skip-certus / --skip-cputier)
-run_compare.sh --out <path> ... --report-only       # re-render the HTML from existing artifacts
+run_compare.sh --out <path> ... --skip-lmcache      # drop an arm (--skip-certus / --skip-cputier / --skip-3fs)
+run_compare.sh --out <path> ... --h3fs-mock         # 3fs arm on the mock client (no cluster; code path only)
+run_compare.sh --out <path> ... --report-only       # re-render the HTML from existing artifacts (keeps the run's params.json)
+run_compare.sh --out <path> ... --latex             # also write the throughput table as LaTeX: <path>.tex
 run_compare.sh --help                               # every option and its default
 ```
+
+The LaTeX table (`--latex`, or `make_report.py --latex PATH`) is a `booktabs` `table` with one row per result and one column per arm, in GB/s. Store rows get an extra "incl. disk drain" row. The fastest arm in each row is in bold. A value from an arm that skipped work in that row (dropped stores, load misses, or a cold pass that barely touched disk) carries a dagger, is never bold, and is explained in a footnote under the table. Add `\usepackage{booktabs}` to the preamble.
 
 ## Before running
 
@@ -64,11 +71,11 @@ run_compare.sh --help                               # every option and its defau
 | Held equal | How |
 |---|---|
 | Workload | Every workload flag is given once and forwarded verbatim to all three benches |
-| Memory tier | `--dram` sets certus `--memory-tier-size`, cputier `--cpu-bytes` and the lmcache L1 |
+| Memory tier | `--dram` sets certus `--memory-tier-size`, cputier `--cpu-bytes` and the lmcache L1. 3fs has none, and the parity table shows it as "none" |
 | KV layout | `--layers` (default 1, the contiguous `BLHNC` layout that `CertusConnector` requests) splits every block into the same number of GPU tensors on every arm: certus `--pieces-per-block`, cputier and lmcache `--layers`. `--layers 32` gives vLLM's default layer-outermost `LBHNC`, which roughly halves certus load throughput (each piece is copied separately) |
 | NUMA | Every arm's CPUs and memory are bound to the GPU's node (`--numa`, default the GPU's). certus runs under `numactl`. The podman arms inherit its memory policy and pin their CPUs with `taskset` inside the container, because rootless podman has no cpuset controller |
-| Disk hardware | certus: 4 SPDK drives (61–64). cputier fs tier and lmcache L2: `/raid0`, an XFS RAID0 over 4 other NVMe drives, `O_DIRECT` |
-| Disk I/O parallelism | `--io-threads` (default 16) sets cputier's fs read and write threads and lmcache's `fs_native` workers |
+| Disk hardware | certus: 4 SPDK drives (61–64). cputier fs tier and lmcache L2: `/raid0`, an XFS RAID0 over 4 other NVMe drives, `O_DIRECT`. 3fs: wherever `deploy/3fs` put its storage targets (`DATA_DIR`, default `/cache/3fs`). Start it with `DATA_DIR` on `/raid0` to match |
+| Disk I/O parallelism | `--io-threads` (default 16) sets cputier's fs read and write threads, lmcache's `fs_native` workers and 3fs's USRBIO I/O jobs (`hf3fs_client_numjobs`) |
 | Timing | Store rows exclude each pass's disk write-through drain (certus DRAM→SSD, cputier CPU→fs, lmcache L1→L2) and report the sustained figure including it (`sustained_gbs`). Cold rows empty the memory tier before *every* pass, outside the timed window, so every block is read back from disk |
 | Proof of work | Every bench writes `store_drops`, `load_misses` and, on cold and mixed rows, `disk_read_bytes` to its CSV. certus-server is built with `rw-telemetry` so its SSD reads are counted |
 

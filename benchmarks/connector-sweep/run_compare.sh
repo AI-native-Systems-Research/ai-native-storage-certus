@@ -1,7 +1,7 @@
 #!/bin/bash
-# run_compare.sh — run certus-connector-bench, cputier-connector-bench and
-# lmcache-connector-bench with one shared parameter set, then render a
-# side-by-side HTML report.
+# run_compare.sh — run certus-connector-bench, cputier-connector-bench,
+# lmcache-connector-bench and 3fs-connector-bench with one shared parameter set,
+# then render a side-by-side HTML report.
 #
 #   run_compare.sh --out bench-results/connector-compare.html [options]
 #
@@ -15,11 +15,26 @@
 # for --mode contention and for --tp > 1 (with a note), and runs its own
 # --mode all (default, pipelined, prefix-miss, scheduler-step) for --mode all.
 #
+# The 3fs arm (vLLM's HF3FSKVConnector) has no memory tier: --dram does not apply,
+# every store and load goes to 3FS, and it has no mixed-eviction or contention
+# phase. It needs a live 3FS FUSE mount (deploy/3fs/run.sh, as root) and the
+# vLLM + 3FS image; without the mount the arm is skipped with a note.
+# --h3fs-mock runs it instead on vLLM's file-backed mock client on /raid0, which
+# tests the code path but is NOT a 3FS measurement (the report says so).
+#
+# The cputier-3fs arm is cputier-connector-bench unchanged — vLLM's
+# TieringOffloadingSpec with the same --dram CPU tier — but with its fs secondary
+# tier on the 3FS FUSE mount (O_DIRECT) instead of /raid0: 3FS WITH a memory tier,
+# to set against the memory-tier-less 3fs arm. It reaches 3FS through FUSE (POSIX
+# I/O), not the USRBIO path the 3fs arm uses. It runs when the 3FS mount is live.
+#
 # Artifacts go to <out-without-.html>.d/: params.json, certus.csv, cputier.csv,
-# lmcache.csv, certus-bench.log, cputier-bench.log, lmcache-bench.log, server.log.
+# lmcache.csv, 3fs.csv, one <arm>-bench.log per arm, server.log.
 #
 # Options (defaults in brackets):
 #   --out PATH               HTML report path (required; relative to the current dir)
+#   --latex                  also write the throughput table as LaTeX (booktabs) to
+#                            <out-without-.html>.tex
 #   --mode M                 default|pipelined|prefix-miss|contention|scheduler-step|all [all]
 #   --bs N [16]  --num-blocks N [128]  --block-bytes N [2097152]
 #   --min-duration S [5]  --warmup N [4]  --working-set N [512]
@@ -48,7 +63,13 @@
 #   --l2-dir DIR             lmcache L2 (fs_native) host dir [/raid0/lmcache-bench-l2]
 #   --lmcache-image IMAGE    lmcache image [localhost/vllm-lmcache-bench:vllm0.30.0]
 #   --chunk-size N           lmcache server --chunk-size in tokens [256]
-#   --skip-certus | --skip-cputier | --skip-lmcache | --report-only
+#   --h3fs-mount DIR         3FS FUSE mountpoint for the 3fs arm [/mnt/3fs]
+#   --h3fs-image IMAGE       vLLM + 3FS USRBIO image [localhost/vllm-hf3fs-bench:vllm0.30.0]
+#   --h3fs-file-size SIZE    3fs connector data file (hf3fs_file_size) [64G]
+#   --h3fs-mock              run the 3fs arm on vLLM's mock client (code path only)
+#   --h3fs-mock-dir DIR      mock data dir [/raid0/h3fs-mock]
+#   --skip-certus | --skip-cputier | --skip-lmcache | --skip-3fs | --skip-cputier-3fs
+#   --report-only
 #
 # Fairness: every arm gets the same workload flags, DRAM tier, KV layout (--layers),
 # NUMA node (CPU + memory bound to the GPU's node) and disk I/O parallelism; each
@@ -59,6 +80,8 @@
 # Disk tiers default to equal hardware: certus gets 4 SPDK NVMe drives, and the
 # file-based tiers (cputier fs, lmcache L2) share /raid0, a 4-drive XFS RAID0 on
 # separate NVMe drives (so the two do not contend with certus for SSD bandwidth).
+# 3FS keeps its storage targets wherever deploy/3fs put them (DATA_DIR, default
+# /cache/3fs); for matched hardware start it with DATA_DIR on /raid0 too.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -73,13 +96,16 @@ LAYERS=1 IO_THREADS=16 NUMA=""
 DRIVE_COUNT="" EVICT_THRESHOLD=0.9 WORKERS=4 CHANNELS="" FS_TIER=/raid0/cputier-bench-fs-tier
 SERVER_BIN="" IMAGE=docker.io/vllm/vllm-openai:v0.30.0
 L2_DIR=/raid0/lmcache-bench-l2 LMCACHE_IMAGE=localhost/vllm-lmcache-bench:vllm0.30.0 CHUNK_SIZE=256
-RUN_CERTUS=1 RUN_CPUTIER=1 RUN_LMCACHE=1
+RUN_CERTUS=1 RUN_CPUTIER=1 RUN_LMCACHE=1 RUN_H3FS=1 RUN_CPUTIER_3FS=1 REPORT_ONLY=0 LATEX=0
+H3FS_MOUNT=/mnt/3fs H3FS_IMAGE=localhost/vllm-hf3fs-bench:vllm0.30.0 H3FS_FILE_SIZE=64G
+H3FS_MOCK=0 H3FS_MOCK_DIR=/raid0/h3fs-mock
 SHM_PATH=/dev/shm/certus-shmq
 DEFAULT_DEVICE_PCI=(0000:61:00.0 0000:62:00.0 0000:63:00.0 0000:64:00.0)
 
 while (($#)); do
   case "$1" in
     --out) OUT="$2"; shift ;;
+    --latex) LATEX=1 ;;
     --mode) MODE="$2"; shift ;;
     --bs) BS="$2"; shift ;;
     --num-blocks) NUM_BLOCKS="$2"; shift ;;
@@ -113,7 +139,14 @@ while (($#)); do
     --skip-certus) RUN_CERTUS=0 ;;
     --skip-cputier) RUN_CPUTIER=0 ;;
     --skip-lmcache) RUN_LMCACHE=0 ;;
-    --report-only) RUN_CERTUS=0; RUN_CPUTIER=0; RUN_LMCACHE=0 ;;
+    --skip-3fs) RUN_H3FS=0 ;;
+    --skip-cputier-3fs) RUN_CPUTIER_3FS=0 ;;
+    --h3fs-mount) H3FS_MOUNT="$2"; shift ;;
+    --h3fs-image) H3FS_IMAGE="$2"; shift ;;
+    --h3fs-file-size) H3FS_FILE_SIZE="$2"; shift ;;
+    --h3fs-mock) H3FS_MOCK=1 ;;
+    --h3fs-mock-dir) H3FS_MOCK_DIR="$2"; shift ;;
+    --report-only) RUN_CERTUS=0; RUN_CPUTIER=0; RUN_LMCACHE=0; RUN_H3FS=0; RUN_CPUTIER_3FS=0; REPORT_ONLY=1 ;;
     -h|--help) sed -n '2,/^set -uo pipefail/{/^#/p}' "$0"; exit 0 ;;
     *) echo "error: unknown option $1" >&2; exit 2 ;;
   esac
@@ -205,6 +238,45 @@ LMCACHE_CMD=(benchmarks/lmcache-connector-bench/run-in-container.sh "${SHARED[@]
              --layers "$LAYERS"
              --gpu 0 --csv "$LMCACHE_CSV_IN" --tag lmcache)
 
+# 3fs: one rank, no contention mode, no memory tier. Real 3FS needs the mount.
+H3FS_NOTE=""
+if [[ "$MODE" == contention ]]; then
+  H3FS_NOTE="skipped: 3fs-connector-bench has no contention mode"
+elif (( TP > 1 )); then
+  H3FS_NOTE="skipped: 3fs-connector-bench is single-rank (--tp 1)"
+elif [[ "$H3FS_MOCK" != 1 ]] && ! mountpoint -q "$H3FS_MOUNT" 2>/dev/null; then
+  H3FS_NOTE="skipped: no 3FS mount at $H3FS_MOUNT (sudo deploy/3fs/run.sh; or --h3fs-mock to test the code path)"
+fi
+[[ -n "$H3FS_NOTE" ]] && ((RUN_H3FS)) && RUN_H3FS=0
+H3FS_CLIENT=$([[ "$H3FS_MOCK" == 1 ]] && echo mock || echo usrbio)
+[[ "$H3FS_MOCK" == 1 ]] && H3FS_RUN_IMAGE="${H3FS_MOCK_IMAGE:-docker.io/vllm/vllm-openai:v0.30.0}" || H3FS_RUN_IMAGE="$H3FS_IMAGE"
+if [[ "$REL_ART" == /* ]]; then H3FS_CSV_IN=/certus/.3fs-compare-$$.csv; else H3FS_CSV_IN="/certus/$REL_ART/3fs.csv"; fi
+# The 3FS connector's I/O jobs (hf3fs_client_numjobs) are its disk parallelism,
+# set like the file-based arms' threads.
+H3FS_CMD=(benchmarks/3fs-connector-bench/run-in-container.sh "${SHARED[@]}"
+          --layers "$LAYERS" --numjobs "$IO_THREADS" --file-size "$H3FS_FILE_SIZE"
+          --gpu 0 --csv "$H3FS_CSV_IN" --tag 3fs)
+
+# cputier-3fs: the cputier bench with its fs tier on 3FS. Needs a live 3FS mount
+# (the mock is a plain directory, so it would just be cputier again).
+C3_FS_TIER="$H3FS_MOUNT/vllm/cputier-bench-fs-tier"
+C3_NOTE=""
+if ! mountpoint -q "$H3FS_MOUNT" 2>/dev/null; then
+  C3_NOTE="skipped: no 3FS mount at $H3FS_MOUNT (sudo deploy/3fs/run.sh)"
+elif [[ ! -w "$H3FS_MOUNT/vllm" ]]; then
+  C3_NOTE="skipped: $H3FS_MOUNT/vllm is not writable"
+fi
+[[ -n "$C3_NOTE" ]] && ((RUN_CPUTIER_3FS)) && RUN_CPUTIER_3FS=0
+if [[ "$REL_ART" == /* ]]; then C3_CSV_IN=/fs-tier/cputier-3fs.csv; else C3_CSV_IN="/certus/$REL_ART/cputier-3fs.csv"; fi
+C3_CMD=(benchmarks/cputier-connector-bench/run-in-container.sh "${SHARED[@]}"
+        --layers "$LAYERS" --fs-read-threads "$IO_THREADS" --fs-write-threads "$IO_THREADS"
+        --gpu 0 --cpu-bytes "$DRAM" --csv "$C3_CSV_IN" --tag cputier-3fs)
+
+# --report-only re-renders an existing run: keep the params.json that run wrote
+# (it records the run's real flags), rather than this invocation's defaults.
+if (( REPORT_ONLY )) && [[ -s "$ART/params.json" ]]; then
+  echo "[compare] --report-only: keeping $ART/params.json from the original run"
+else
 python3 - "$ART/params.json" <<EOF
 import json, sys
 json.dump({
@@ -222,13 +294,20 @@ json.dump({
   "lmcache": {"image": "$LMCACHE_IMAGE", "l2_dir": "$L2_DIR", "l1_gb": $L1_GB, "chunk_size": $CHUNK_SIZE,
               "note": "$LMCACHE_NOTE",
               "bench_cmd": """GPU=$GPU L1_GB=$L1_GB L2_DIR=$L2_DIR CHUNK_SIZE=$CHUNK_SIZE IMAGE=$LMCACHE_IMAGE CPUS=$NUMA_CPUS L2_THREADS=$IO_THREADS ${NUMA_CMD[*]} ${LMCACHE_CMD[*]}"""},
+  "cputier-3fs": {"image": "$IMAGE", "fs_tier": "$C3_FS_TIER", "spec": "tiering", "note": "$C3_NOTE",
+                  "bench_cmd": """GPU=$GPU_LIST CPU_BYTES=$DRAM FS_TIER_HOST=$C3_FS_TIER IMAGE=$IMAGE CPUS=$NUMA_CPUS ${NUMA_CMD[*]} ${C3_CMD[*]}"""},
+  "3fs": {"image": "$H3FS_RUN_IMAGE", "client": "$H3FS_CLIENT",
+          "storage": "$([[ "$H3FS_MOCK" == 1 ]] && echo "$H3FS_MOCK_DIR (mock file)" || echo "$H3FS_MOUNT")",
+          "file_size": "$H3FS_FILE_SIZE", "numjobs": $IO_THREADS, "note": "$H3FS_NOTE",
+          "bench_cmd": """GPU=$GPU MOCK=$H3FS_MOCK IMAGE=$H3FS_RUN_IMAGE CPUS=$NUMA_CPUS ${NUMA_CMD[*]} ${H3FS_CMD[*]}"""},
   "git": {"branch": "$(git branch --show-current)", "commit": "$(git rev-parse --short HEAD)",
           "dirty": $( [[ -n "$(git status --porcelain --untracked-files=no)" ]] && echo True || echo False )},
   "host": "$(hostname)", "gpu_name": "$(nvidia-smi -i "$GPU" --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)",
 }, open(sys.argv[1], "w"), indent=2)
 EOF
+fi
 
-STATUS_CERTUS=skipped STATUS_CPUTIER=skipped STATUS_LMCACHE=skipped
+STATUS_CERTUS=skipped STATUS_CPUTIER=skipped STATUS_LMCACHE=skipped STATUS_H3FS=skipped STATUS_C3=skipped
 SERVER_PID=""
 
 stop_server() {
@@ -306,7 +385,40 @@ elif [[ -n "$LMCACHE_NOTE" ]]; then
   echo "[compare] lmcache arm $LMCACHE_NOTE"
 fi
 
-echo "[compare] certus=$STATUS_CERTUS cputier=$STATUS_CPUTIER lmcache=$STATUS_LMCACHE"
-python3 "$SCRIPT_DIR/make_report.py" --artifacts "$ART" --out "$OUT"
+if ((RUN_H3FS)); then
+  STATUS_H3FS=failed
+  rm -f "$ART/3fs.csv"
+  echo "[compare] 3fs arm (${H3FS_CLIENT} client): GPU=$GPU ${H3FS_CMD[*]}"
+  GPU="$GPU" MOCK="$H3FS_MOCK" IMAGE="$H3FS_RUN_IMAGE" H3FS_MOUNT="$H3FS_MOUNT" H3FS_DIR="$H3FS_MOCK_DIR" \
+    CPUS="$NUMA_CPUS" \
+    "${NUMA_CMD[@]}" "${H3FS_CMD[@]}" 2>&1 \
+    | grep --line-buffered -vE "CUDA_HOME|Triton|cpp_extension|frombuffer|UserWarning|HF3FS Connector Completed" \
+    | tee "$ART/3fs-bench.log"
+  rc=${PIPESTATUS[0]}
+  tmp_csv="$REPO_ROOT/${H3FS_CSV_IN#/certus/}"
+  [[ "$H3FS_CSV_IN" == /certus/.3fs-compare-* && -f "$tmp_csv" ]] && mv "$tmp_csv" "$ART/3fs.csv"
+  [[ $rc -eq 0 && -s "$ART/3fs.csv" ]] && STATUS_H3FS=ok
+elif [[ -n "$H3FS_NOTE" ]]; then
+  echo "[compare] 3fs arm $H3FS_NOTE"
+fi
+
+if ((RUN_CPUTIER_3FS)); then
+  STATUS_C3=failed
+  mkdir -p "$C3_FS_TIER"
+  rm -f "$ART/cputier-3fs.csv" "$C3_FS_TIER/cputier-3fs.csv"
+  echo "[compare] cputier-3fs arm (fs tier on 3FS): GPU=$GPU_LIST CPU_BYTES=$DRAM ${C3_CMD[*]}"
+  GPU="$GPU_LIST" CPU_BYTES="$DRAM" FS_TIER_HOST="$C3_FS_TIER" IMAGE="$IMAGE" CPUS="$NUMA_CPUS" \
+    "${NUMA_CMD[@]}" "${C3_CMD[@]}" 2>&1 | tee "$ART/cputier-3fs-bench.log"
+  rc=${PIPESTATUS[0]}
+  [[ "$C3_CSV_IN" == /fs-tier/* && -f "$C3_FS_TIER/cputier-3fs.csv" ]] && mv "$C3_FS_TIER/cputier-3fs.csv" "$ART/cputier-3fs.csv"
+  [[ $rc -eq 0 && -s "$ART/cputier-3fs.csv" ]] && STATUS_C3=ok
+elif [[ -n "$C3_NOTE" ]]; then
+  echo "[compare] cputier-3fs arm $C3_NOTE"
+fi
+
+echo "[compare] certus=$STATUS_CERTUS cputier=$STATUS_CPUTIER lmcache=$STATUS_LMCACHE 3fs=$STATUS_H3FS cputier-3fs=$STATUS_C3"
+REPORT_ARGS=(--artifacts "$ART" --out "$OUT")
+((LATEX)) && REPORT_ARGS+=(--latex "${OUT%.html}.tex")
+python3 "$SCRIPT_DIR/make_report.py" "${REPORT_ARGS[@]}"
 echo "[compare] report: $OUT"
-[[ "$STATUS_CERTUS" != failed && "$STATUS_CPUTIER" != failed && "$STATUS_LMCACHE" != failed ]]
+[[ "$STATUS_CERTUS" != failed && "$STATUS_CPUTIER" != failed && "$STATUS_LMCACHE" != failed && "$STATUS_H3FS" != failed && "$STATUS_C3" != failed ]]

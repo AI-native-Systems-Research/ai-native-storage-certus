@@ -1,6 +1,6 @@
 ---
 name: profile-connector-benches
-description: Run certus-connector-bench, cputier-connector-bench and lmcache-connector-bench with identical workload parameters, then write an HTML report comparing the three KV-offload backends side by side (throughput, IOPS, per-phase latency, parameter parity).
+description: Run certus-connector-bench, cputier-connector-bench, lmcache-connector-bench and 3fs-connector-bench with identical workload parameters, then write an HTML report comparing the KV-offload backends side by side (throughput, IOPS, per-phase latency, parameter parity).
 argument-hint: "<output-html-path>"
 ---
 
@@ -14,6 +14,7 @@ them side by side:
 | certus | `benchmarks/certus-connector-bench/bench_connector_lifecycle.py` (host) | `certus-server` over `/dev/shm/certus-shmq`, SPDK NVMe |
 | cputier | `benchmarks/cputier-connector-bench/run-in-container.sh` (vLLM ≥ 0.30 image) | vLLM `TieringOffloadingSpec`: pinned CPU tier + `fs` disk tier |
 | lmcache | `benchmarks/lmcache-connector-bench/run-in-container.sh` (vLLM + LMCache image) | LMCache MP server: pinned-RAM L1 + `fs_native` L2 (the wrapper starts and stops the server) |
+| 3fs | `benchmarks/3fs-connector-bench/run-in-container.sh` (vLLM + 3FS image) | vLLM `HF3FSKVConnector` on a 3FS cluster via USRBIO; no memory tier (disk-only baseline) |
 
 All work is done by `benchmarks/connector-sweep/run_compare.sh` (it also runs
 standalone; see that directory's README). It takes every
@@ -38,8 +39,13 @@ gives (see `run_compare.sh --help`): `--mode` (default `all`), `--bs`,
 `--num-sessions`, `--lookup-order`, `--gpu`, `--tp`, `--dram`; certus-only
 `--device-pci`/`--drive-count`, `--eviction-threshold`, `--workers`,
 `--channels`; cputier-only `--fs-tier`, `--image`; lmcache-only `--l2-dir`,
-`--lmcache-image`, `--chunk-size`. `--skip-certus` / `--skip-cputier` /
-`--skip-lmcache` drop an arm.
+`--lmcache-image`, `--chunk-size`; 3fs-only `--h3fs-mount`, `--h3fs-image`,
+`--h3fs-file-size`, `--h3fs-mock`. `--skip-certus` / `--skip-cputier` /
+`--skip-lmcache` / `--skip-3fs` drop an arm. The 3fs arm runs only when
+`/mnt/3fs` is a live 3FS mount (it needs root to start: `sudo deploy/3fs/run.sh`,
+which you cannot run for the user); otherwise it is skipped with a note. Offer
+`--h3fs-mock` only as a code-path check, and never present mock 3fs numbers as
+3FS results.
 
 ## Steps for Claude
 

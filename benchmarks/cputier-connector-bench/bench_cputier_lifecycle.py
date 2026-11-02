@@ -918,7 +918,7 @@ def bench_store_lifecycle(
     wall_start = time.perf_counter()
     iteration = 0
 
-    while (time.perf_counter() - wall_start) < min_duration or iteration < 2:
+    while (time.perf_counter() - wall_start - excluded) < min_duration or iteration < 2:
         pass_keys = rekey(keys, iteration)
         for i in range(0, len(pass_keys), batch_size):
             s, d = store_batch(stack, pass_keys[i : i + batch_size], phases)
@@ -1160,7 +1160,7 @@ def bench_pipelined(
                 time.sleep(POLL_S)
         _rec(phases, "pipeline_drain", t0)
 
-    while (time.perf_counter() - wall_start) < min_duration or iteration < 2:
+    while (time.perf_counter() - wall_start - excluded) < min_duration or iteration < 2:
         in_flight: collections.deque = collections.deque()
         pass_keys = rekey(keys, iteration) if is_store else keys
 
