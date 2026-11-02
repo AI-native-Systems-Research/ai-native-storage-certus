@@ -1,7 +1,7 @@
-//! Loading a ShareGPT conversation trace and converting it to cache block
+//! Loading a `ShareGPT` conversation trace and converting it to cache block
 //! access operations.
 //!
-//! A ShareGPT file is a JSON array of conversations:
+//! A `ShareGPT` file is a JSON array of conversations:
 //! ```json
 //! [{"id": "abc", "conversations": [
 //!     {"from": "human", "value": "..."},
@@ -38,16 +38,20 @@ struct Conversation {
 
 #[derive(Debug, Deserialize)]
 struct Turn {
-    #[allow(dead_code)]
+    #[expect(
+        dead_code,
+        reason = "deserialized to validate the turn shape; turns are paired by position, not \
+                  by speaker"
+    )]
     from: String,
     value: String,
 }
 
 fn fnv1a_64(data: &[u8]) -> u64 {
-    let mut hash: u64 = 0xcbf29ce484222325;
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for &byte in data {
-        hash ^= byte as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
     hash
 }
@@ -77,6 +81,15 @@ fn text_to_block_keys(text: &str, block_chars: usize) -> Vec<CacheKey> {
 /// prefix blocks up to that turn (modeling a growing KV-cache). `block_chars`
 /// controls how many characters map to one cache block (default 64, roughly
 /// 16 tokens at ~4 chars/token).
+///
+/// # Errors
+///
+/// Returns an error if `path` cannot be opened, or (`InvalidData`) if its
+/// contents are not a JSON array of `ShareGPT` conversations.
+///
+/// # Panics
+///
+/// Panics if `block_chars` is `Some(0)`.
 pub fn load(
     path: &Path,
     block_chars: Option<usize>,

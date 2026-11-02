@@ -204,6 +204,7 @@ impl CachesimStats {
     /// The generated run is **not** listed: it is carried, as stores at the turn that
     /// produced it. The input/output *distinction* is dropped, which is not a loss a cache
     /// can observe — a reference is a reference.
+    #[must_use]
     pub fn declared_losses(&self) -> Vec<String> {
         vec![
             "session grouping and identity: the format has no session field at all, so \
@@ -231,11 +232,13 @@ impl CachesimStats {
     ///
     /// Printed with every conversion, because libCacheSim's columns are configurable
     /// and a CSV file cannot say what its own columns mean.
+    #[must_use]
     pub fn params(&self) -> &'static str {
         "time-col=1, obj-id-col=2, obj-size-col=3, obj-id-is-num=1"
     }
 
     /// A ready-to-run command line, so the layout cannot be lost in transit.
+    #[must_use]
     pub fn example_command(&self, path: &str) -> String {
         format!("cachesim {path} csv lru 1gb -t \"{}\"", self.params())
     }
@@ -261,7 +264,7 @@ impl<W: Write> CsvWriter<W> {
         Self {
             sink,
             object_bytes,
-            distinct: Default::default(),
+            distinct: std::collections::BTreeSet::default(),
             accesses: 0,
         }
     }
@@ -283,6 +286,11 @@ impl<W: Write> CsvWriter<W> {
         // Integer milliseconds: libCacheSim's CSV `clock_time` is int64, and a decimal
         // point in a numeric column is a needless risk in a reader that also has to
         // parse object ids as numbers.
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "the rounded value is integral, so only times beyond i64 milliseconds \
+                      change, and those saturate"
+        )]
         let ms = (at * 1000.0).round() as i64;
         // Prompt reads first, then the generated blocks this turn stored. Both are
         // accesses at this turn's time; see the module docs on why the generated run
@@ -354,8 +362,13 @@ impl<W: Write> OracleGeneralWriter<W> {
     }
 
     fn write_parts(&mut self, at: f64, input: &[u64], output: &[u64]) -> io::Result<()> {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "the rounded value is integral, so only times beyond i64 milliseconds \
+                      change, and those saturate and are refused below"
+        )]
         let ms = (at * 1000.0).round() as i64;
-        if ms < 0 || ms as u64 > MAX_ORACLE_TIMESTAMP_MS {
+        if ms < 0 || ms.unsigned_abs() > MAX_ORACLE_TIMESTAMP_MS {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
@@ -366,6 +379,11 @@ impl<W: Write> OracleGeneralWriter<W> {
                 ),
             ));
         }
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "checked just above: 0 <= ms <= u32::MAX"
+        )]
         let clock_time_ms = ms as u32;
         // Prompt reads then the generated blocks, in that order within the turn, so a
         // generated block's own store is the access its next-access ordinal is measured
@@ -396,7 +414,12 @@ impl<W: Write> OracleGeneralWriter<W> {
             let id = self.pending[i].obj_id;
             if let Some(next) = last_seen.get(&id) {
                 // Ordinals, not time: the reader counts requests.
-                next_access[i] = *next as i64;
+                #[expect(
+                    clippy::cast_possible_wrap,
+                    reason = "an index into a Vec, so at most isize::MAX"
+                )]
+                let ordinal = *next as i64;
+                next_access[i] = ordinal;
             }
             last_seen.insert(id, i);
         }

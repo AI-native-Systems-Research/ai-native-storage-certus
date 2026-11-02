@@ -40,6 +40,10 @@ define_component! {
 }
 
 impl IGreeter for HelloWorldComponent {
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "keeps the impl signature identical to the IGreeter trait's `-> &str`"
+    )]
     fn greeting_prefix(&self) -> &str {
         "Hello"
     }
@@ -51,7 +55,7 @@ pub struct GreetRequest {
     pub name: String,
 }
 
-/// Actor handler that prints greetings and logs via ILogger.
+/// Actor handler that prints greetings and logs via `ILogger`.
 pub struct GreeterHandler {
     count: u32,
     logger: Option<Arc<dyn ILogger + Send + Sync>>,
@@ -68,6 +72,7 @@ impl std::fmt::Debug for GreeterHandler {
 
 impl GreeterHandler {
     /// Create a handler without a logger.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             count: 0,
@@ -75,7 +80,7 @@ impl GreeterHandler {
         }
     }
 
-    /// Create a handler with an ILogger for structured logging.
+    /// Create a handler with an `ILogger` for structured logging.
     pub fn with_logger(logger: Arc<dyn ILogger + Send + Sync>) -> Self {
         Self {
             count: 0,

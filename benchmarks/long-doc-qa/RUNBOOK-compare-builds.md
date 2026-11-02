@@ -94,7 +94,7 @@ Settings, all environment variables of `run_one.sh` (see its header):
 |---|---|---|
 | `GPU` | 0 | the GPU on the NVMe drives' NUMA node (below) |
 | `OUTPUT_LEN` | 1 | 100 to include decode |
-| `CONNECTOR` | `certus` | `CertusConnector`, which requests `BLHNC`; `stock` = vLLM's `OffloadingConnector` (`LBHNC`) |
+| `CONNECTOR` | `certus` | `CertusConnector`, which requests the stock `LBHNC` (`KV_LAYOUT=BLHNC` sets vLLM's `VLLM_KV_CACHE_LAYOUT` for a `BLHNC` run); `stock` = vLLM's `OffloadingConnector` (`LBHNC`) |
 | `KV_LAYOUT` | unset | sets `VLLM_KV_CACHE_LAYOUT`, which overrides the connector's request |
 | `DRIVES`, `TIER` | 4 drives on this host, `12G` | as in `RUNBOOK-certus-iostat.md` |
 

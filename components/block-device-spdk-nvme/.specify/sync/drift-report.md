@@ -1,11 +1,12 @@
 ---
 spec_sync_component: block-device-spdk-nvme
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-29T23:34:02Z
-spec_sync_git_commit: 1de9052f9
-spec_sync_inputs_sha256: 220f47c2d6cb9995f77e5305b31a7f30673627a64d028e9ca362c25743d3f157
+spec_sync_synced_at: 2026-10-31T06:35:50Z
+spec_sync_git_commit: 50a0f2bf
+spec_sync_inputs_sha256: 7ae0533a46438d0b1c124fe93dec1bc23a8e183043943362624ab8e6a5dfbca6
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-31 (branch `opt/evolve-piece-copy-v1/s20261029-094947`, merged with unstable `a0292be6`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IGpuServices::memcpy_batch_async` added by the optimizer session, the workspace clippy cleanup's doc/attribute-only edits, three fixed doc links, and the `copy_gpu_to_memory_async` doc). The interfaces sync of the same date found none of it changes a contract this component relies on. No analysis below changes.
 > **Re-stamp 2026-10-29 (branch `fix/dispatcher-remove-ssd-extent`, merged with unstable `e35618b2`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (the `IDispatcher::check` doc gains an `# Errors` section, B-17 of the dispatcher sync). No analysis below changes.
 > **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IDispatcher::clear_all`) and the rebase brought unstable's changes. No analysis below changes.
 

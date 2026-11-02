@@ -1,16 +1,10 @@
 {
- "applied": "2026-10-09T23:49:23Z",
- "branch": "fix/dispatcher-p2p-clean-eviction",
- "applied_ids": [
-  1,
-  2,
-  3,
-  7,
-  8
- ],
- "not_applied": [
-  4,
-  5,
-  6
- ]
+  "applied": "2026-10-31T06:30:00Z",
+  "branch": "specsync-b",
+  "backup": "backups/20261031T054807Z",
+  "applied_ids": [],
+  "not_applied": [],
+  "source_files_changed": [],
+  "specs_updated": [],
+  "previous": "backups/20261031T054807Z/apply-report.json.prev"
 }

@@ -28,6 +28,11 @@ use crate::error::RegistryError;
 /// ```
 pub trait ComponentFactory: Send + Sync {
     /// Create a new component instance with optional configuration.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the factory reports, conventionally
+    /// [`RegistryError::FactoryFailed`] when it cannot build the component.
     fn create(&self, config: Option<&dyn Any>) -> Result<ComponentRef, RegistryError>;
 }
 
@@ -65,6 +70,7 @@ impl std::fmt::Debug for ComponentRegistry {
 
 impl ComponentRegistry {
     /// Creates an empty registry.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             factories: RwLock::new(HashMap::new()),
@@ -73,7 +79,15 @@ impl ComponentRegistry {
 
     /// Registers a factory under the given name.
     ///
+    /// # Errors
+    ///
     /// Returns `Err(RegistryError::AlreadyRegistered)` if the name is taken.
+    ///
+    /// # Panics
+    ///
+    /// If the registry's lock is poisoned: an earlier call panicked while
+    /// holding it (for example a factory's `Drop` panicked in
+    /// [`unregister`](Self::unregister)).
     ///
     /// # Examples
     ///
@@ -96,6 +110,12 @@ impl ComponentRegistry {
     ///     })
     /// }).is_err());
     /// ```
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the lock is poisoned only by a panic while it is held (a factory's Drop in \
+                  register/unregister); propagating that panic is kept rather than using a \
+                  map the panicking call may have left half-updated"
+    )]
     pub fn register<F: ComponentFactory + 'static>(
         &self,
         name: &str,
@@ -159,7 +179,20 @@ impl ComponentRegistry {
 
     /// Removes a factory by name.
     ///
+    /// # Errors
+    ///
     /// Returns `Err(RegistryError::NotFound)` if the name is not registered.
+    ///
+    /// # Panics
+    ///
+    /// If the registry's lock is poisoned (see [`register`](Self::register)),
+    /// or if the removed factory's `Drop` panics.
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the lock is poisoned only by a panic while it is held (a factory's Drop in \
+                  register/unregister); propagating that panic is kept rather than using a \
+                  map the panicking call may have left half-updated"
+    )]
     pub fn unregister(&self, name: &str) -> Result<(), RegistryError> {
         let mut factories = self.factories.write().unwrap();
         if factories.remove(name).is_none() {
@@ -175,6 +208,16 @@ impl ComponentRegistry {
     /// Passes the optional `config` to the factory. Factory panics are
     /// caught and converted to `RegistryError::FactoryFailed`.
     ///
+    /// # Errors
+    ///
+    /// - [`RegistryError::NotFound`] if no factory is registered as `name`.
+    /// - [`RegistryError::FactoryFailed`] if the factory panics.
+    /// - Any error the factory itself returns.
+    ///
+    /// # Panics
+    ///
+    /// If the registry's lock is poisoned (see [`register`](Self::register)).
+    ///
     /// # Examples
     ///
     /// ```
@@ -185,6 +228,12 @@ impl ComponentRegistry {
     /// let result = registry.create("missing", None);
     /// assert!(matches!(result, Err(RegistryError::NotFound { .. })));
     /// ```
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the lock is poisoned only by a panic while it is held (a factory's Drop in \
+                  register/unregister); propagating that panic is kept rather than using a \
+                  map the panicking call may have left half-updated"
+    )]
     pub fn create(
         &self,
         name: &str,
@@ -213,6 +262,16 @@ impl ComponentRegistry {
     /// Lists all registered component names.
     ///
     /// The order is not guaranteed.
+    ///
+    /// # Panics
+    ///
+    /// If the registry's lock is poisoned (see [`register`](Self::register)).
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the lock is poisoned only by a panic while it is held (a factory's Drop in \
+                  register/unregister); propagating that panic is kept rather than using a \
+                  map the panicking call may have left half-updated"
+    )]
     pub fn list(&self) -> Vec<String> {
         let factories = self.factories.read().unwrap();
         factories.keys().cloned().collect()
@@ -239,7 +298,7 @@ mod tests {
         fn query_interface_raw(&self, _id: TypeId) -> Option<&(dyn Any + Send + Sync)> {
             None
         }
-        fn version(&self) -> &str {
+        fn version(&self) -> &'static str {
             "1.0.0"
         }
         fn provided_interfaces(&self) -> &[InterfaceInfo] {
@@ -255,6 +314,10 @@ mod tests {
         }
     }
 
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "must match the ComponentFactory signature to be registered as a factory"
+    )]
     fn dummy_factory(_config: Option<&dyn Any>) -> Result<ComponentRef, RegistryError> {
         Ok(ComponentRef::from(Arc::new(Dummy)))
     }

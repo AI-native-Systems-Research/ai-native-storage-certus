@@ -25,6 +25,8 @@
 //! cannot be mistaken for a throughput the *server* achieved. That is the whole
 //! risk with this one figure.
 
+use std::fmt::Write as _;
+
 use serde::Serialize;
 use workload_model::project::Projection;
 
@@ -160,36 +162,42 @@ impl EmitReport {
     /// assert!(!json.contains("latency"));
     /// assert!(!json.contains("lane"));
     /// ```
+    #[must_use]
     pub fn render(&self) -> String {
         let mut out = String::new();
         out.push_str("emit run complete\n");
-        out.push_str(&format!(
+        let _ = write!(
+            out,
             "  virtual span      {:.0} s\n  sessions          {} started, {} completed\n",
             self.virtual_span, self.sessions_started, self.sessions_completed
-        ));
-        out.push_str(&format!(
-            "  invocations       {} (projected {})\n",
+        );
+        let _ = writeln!(
+            out,
+            "  invocations       {} (projected {})",
             self.invocations, self.projection.invocations
-        ));
-        out.push_str(&format!(
+        );
+        let _ = write!(
+            out,
             "  blocks minted     {} (projected {})\n  block references  {} (projected {})\n",
             self.blocks_minted,
             self.projection.keys_minted,
             self.block_references,
             self.projection.key_references
-        ));
-        out.push_str(&format!(
+        );
+        let _ = writeln!(
+            out,
             "  generation        {:.0} invocations/s over {:.2} s wallclock \
-             (the generator's own speed, not a server result)\n",
+             (the generator's own speed, not a server result)",
             self.generation_rate_invocations_per_second, self.generation_wallclock_seconds
-        ));
-        out.push_str(&format!(
-            "  reproduce with    --seed {} --until {:.0}   description {} ({})\n",
+        );
+        let _ = writeln!(
+            out,
+            "  reproduce with    --seed {} --until {:.0}   description {} ({})",
             self.reproduction.seed,
             self.reproduction.until,
             self.reproduction.description_path,
             self.reproduction.description_digest
-        ));
+        );
         for w in &self.warnings {
             out.push_str("  warning: ");
             out.push_str(w);
@@ -210,7 +218,8 @@ impl EmitReport {
     }
 }
 
-#[cfg(all(test, feature = "workload-tests"))]
+#[cfg(test)]
+#[cfg(feature = "workload-tests")]
 mod tests {
     use super::*;
 
@@ -600,6 +609,7 @@ pub struct CacheOutcomes {
 
 impl CacheOutcomes {
     /// `CHECK` references answered.
+    #[must_use]
     pub fn checks(&self) -> u64 {
         self.check_resident + self.check_pending + self.check_miss
     }
@@ -613,24 +623,42 @@ impl CacheOutcomes {
     ///
     /// `None` rather than zero: a run that checked nothing has no hit rate, and printing
     /// 0.0% would read as "everything missed".
+    #[must_use]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "reporting ratio: counts and byte totals from one run are far below 2^52, and the \
+                  result is printed rounded anyway"
+    )]
     pub fn check_hit_rate(&self) -> Option<f64> {
         let total = self.checks();
         (total > 0).then(|| self.check_resident as f64 / total as f64)
     }
 
     /// Fraction of `LOOKUP` references that returned data.
+    #[must_use]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "reporting ratio: counts and byte totals from one run are far below 2^52, and the \
+                  result is printed rounded anyway"
+    )]
     pub fn lookup_hit_rate(&self) -> Option<f64> {
         let total = self.lookup_hits + self.lookup_misses;
         (total > 0).then(|| self.lookup_hits as f64 / total as f64)
     }
 
     /// Whether the store path was declined anywhere.
+    #[must_use]
     pub fn any_store_declined(&self) -> bool {
         self.reserves_declined + self.transfers_declined + self.commits_declined > 0
     }
 }
 
 /// Render `n` of `d` as a percentage, or `n/a` when nothing was attempted.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "reporting ratio: counts and byte totals from one run are far below 2^52, and the \
+              result is printed rounded anyway"
+)]
 fn pct(n: u64, d: u64) -> String {
     if d == 0 {
         "n/a".to_string()
@@ -688,6 +716,7 @@ pub struct OpLatency {
 /// The generator no longer depends on `shmq-dispatcher` at all — that is most of the point of
 /// FR-079 — so it could not read the dispatcher's own constants even if it wanted to; the wire
 /// carries the number and the agent-side test pins it to the dispatcher.
+#[must_use]
 pub fn opcode_name(opcode: u32) -> &'static str {
     workload_wire::frame::op_kind::name(opcode)
 }
@@ -738,22 +767,33 @@ impl LiveReport {
     /// An invalid run leads with the invalidity and **does not print a throughput at
     /// all** (FR-062): a number printed beside "invalid" gets copied out of the
     /// terminal without the word.
+    #[must_use]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one straight-line renderer: each block prints one report section in order, and \
+                  the validity gating reads best in one place"
+    )]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "byte totals and microsecond counts from one run are far below 2^52, and are \
+                  printed rounded"
+    )]
     pub fn render(&self) -> String {
         let mut out = String::new();
-        if !self.valid {
+        if self.valid {
+            out.push_str("live run complete and valid\n");
+        } else {
             out.push_str("RUN INVALID — its throughput is not a result\n");
             if let Some(node) = &self.lost_node {
-                out.push_str(&format!("  lost node         {node}\n"));
+                let _ = writeln!(out, "  lost node         {node}");
             }
             if let Some(why) = &self.invalid_reason {
-                out.push_str(&format!("  reason            {why}\n"));
+                let _ = writeln!(out, "  reason            {why}");
             }
-        } else {
-            out.push_str("live run complete and valid\n");
         }
         // Before the figures, always. A paced throughput and a work-conserving one are not
         // comparable, so the mode has to be read before the number it qualifies.
-        out.push_str(&format!("  mode              {}\n", self.mode));
+        let _ = writeln!(out, "  mode              {}", self.mode);
         // And the probe beside it, for the same reason and with more at stake (FR-083): a
         // `check` run never asks a peer for anything, so its hit rate is local residency,
         // while a `lookup` run's includes whatever a peer served. Two reports differing only
@@ -761,20 +801,23 @@ impl LiveReport {
         // structured form only would let a terminal reader quote them as one quantity. Same
         // rule as FR-063's for an implicitly-discovered hardware file: announcing an implicit
         // choice is required, not a courtesy.
-        out.push_str(&format!(
-            "  probe             {} ({})\n",
+        let _ = writeln!(
+            out,
+            "  probe             {} ({})",
             self.probe,
             match self.probe {
                 "check" => "residency answered locally, as the production client does",
                 _ => "a local miss becomes a remote-lookup attempt",
             }
-        ));
-        out.push_str(&format!(
+        );
+        let _ = write!(
+            out,
             "  requests          {}\n  key references    {}\n",
             self.requests, self.key_references
-        ));
+        );
         if let Some(s) = &self.schedule {
-            out.push_str(&format!(
+            let _ = write!(
+                out,
                 "  schedule          rate {:.3} virtual s/wallclock s, achieved {:.3} ({:+.1}% \
                  short)\n  \
                  lateness us       p50 {} p90 {} p99 {} max {} over {} turns, tolerance {}\n",
@@ -787,7 +830,7 @@ impl LiveReport {
                 s.lateness_us.max,
                 s.turns,
                 s.tolerance_us,
-            ));
+            );
             if !s.kept {
                 out.push_str(
                     "                    the schedule was NOT kept, so this machine could not \
@@ -797,7 +840,8 @@ impl LiveReport {
             }
         }
         if self.valid {
-            out.push_str(&format!(
+            let _ = write!(
+                out,
                 "  payload bw        read {:.1} MiB/s ({} blocks), write {:.1} MiB/s ({} \
                  blocks)\n                    control operations move no payload, so this \
                  comes from the hit/miss results\n  \
@@ -813,13 +857,15 @@ impl LiveReport {
                 self.bandwidth.blocks_written,
                 self.keys_per_second,
                 self.virtual_to_wallclock
-            ));
+            );
         }
-        out.push_str(&format!(
-            "  latency us        p50 {} p90 {} p99 {} max {}\n",
+        let _ = writeln!(
+            out,
+            "  latency us        p50 {} p90 {} p99 {} max {}",
             self.latency_us.p50, self.latency_us.p90, self.latency_us.p99, self.latency_us.max
-        ));
-        out.push_str(&format!(
+        );
+        let _ = write!(
+            out,
             "  plan queue        {} batches produced, {} pops, {} found it empty ({:.3}%), \
              min depth {} of {} per lane\n    \
              waiting on the generator {:.4}% of lane-time (worst lane {:.3}s of {:.3}s) \
@@ -850,7 +896,7 @@ impl LiveReport {
             } else {
                 " (the queue never filled and the lanes waited: the generator was the constraint)"
             },
-        ));
+        );
         if !self.producer_completed {
             out.push_str(
                 "  interrupted       the producer was stopped before its span ended; an \
@@ -858,50 +904,56 @@ impl LiveReport {
             );
         }
         if let Some(cleared) = self.cleared_entries {
-            out.push_str(&format!(
+            let _ = writeln!(
+                out,
                 "  cache cleared     {cleared} memory-tier entries dropped before the \
-                 timed window (FR-046); disk-backed entries survive a clear\n"
-            ));
+                 timed window (FR-046); disk-backed entries survive a clear"
+            );
         }
         // Led with, and before any throughput: a wrong block is a correctness failure, not a
         // performance figure, and it must not be read past.
         if self.outcomes.payload_mismatches > 0 {
-            out.push_str(&format!(
+            let _ = writeln!(
+                out,
                 "  WRONG DATA        {} of {} loaded blocks carried a different key than the \
                  one asked for. Certus returned the wrong block; this is not a cache \
-                 outcome and no throughput below is meaningful\n",
+                 outcome and no throughput below is meaningful",
                 self.outcomes.payload_mismatches, self.outcomes.payloads_verified
-            ));
+            );
         } else if self.outcomes.payloads_verified > 0 {
-            out.push_str(&format!(
-                "  payload verified  {} loaded blocks carried the key they were asked for\n",
+            let _ = writeln!(
+                out,
+                "  payload verified  {} loaded blocks carried the key they were asked for",
                 self.outcomes.payloads_verified
-            ));
+            );
         }
         if let Some(rate) = self.outcomes.check_hit_rate() {
-            out.push_str(&format!(
+            let _ = writeln!(
+                out,
                 "  check             {} resident, {} pending, {} miss of {} ({:.1}% \
-                 resident)\n",
+                 resident)",
                 self.outcomes.check_resident,
                 self.outcomes.check_pending,
                 self.outcomes.check_miss,
                 self.outcomes.checks(),
                 rate * 100.0
-            ));
+            );
         }
         if let Some(rate) = self.outcomes.lookup_hit_rate() {
-            out.push_str(&format!(
-                "  lookup            {} returned data, {} did not ({:.1}% hit)\n",
+            let _ = writeln!(
+                out,
+                "  lookup            {} returned data, {} did not ({:.1}% hit)",
                 self.outcomes.lookup_hits,
                 self.outcomes.lookup_misses,
                 rate * 100.0
-            ));
+            );
         }
         if self.outcomes.any_store_declined() {
-            out.push_str(&format!(
+            let _ = writeln!(
+                out,
                 "  stores declined   {} of {} reserves ({}), {} transfers, {} of {} \
                  commits ({}). The wire carries no reason code, so these are \
-                 observations and not a diagnosis\n",
+                 observations and not a diagnosis",
                 self.outcomes.reserves_declined,
                 self.outcomes.reserves_attempted,
                 pct(
@@ -915,7 +967,7 @@ impl LiveReport {
                     self.outcomes.commits_declined,
                     self.outcomes.commits_attempted
                 ),
-            ));
+            );
         }
         if !self.latency_by_op.is_empty() {
             out.push_str("  latency by op     (us)  requests    p50    p90    p99    max\n");
@@ -927,40 +979,45 @@ impl LiveReport {
                 } else {
                     ""
                 };
-                out.push_str(&format!(
-                    "    {:<14} {:>10} {:>6} {:>6} {:>6} {:>6}{}\n",
+                let _ = writeln!(
+                    out,
+                    "    {:<14} {:>10} {:>6} {:>6} {:>6} {:>6}{}",
                     l.op, l.requests, l.us.p50, l.us.p90, l.us.p99, l.us.max, mark
-                ));
+                );
             }
             if thin {
-                out.push_str(&format!(
+                let _ = write!(
+                    out,
                     "                    a p50 over a few dozen requests is noise and the \
                      p99 is just the max;\n                    {QUOTABLE_REQUESTS}+ before \
                      comparing operations\n"
-                ));
+                );
             }
         }
-        out.push_str(&format!(
-            "  lanes             {} of {} channels\n",
+        let _ = writeln!(
+            out,
+            "  lanes             {} of {} channels",
             self.lanes, self.node_channels
-        ));
+        );
         if self.skipped_needing_gpu > 0 {
-            out.push_str(&format!(
+            let _ = writeln!(
+                out,
                 "  PARTIAL RUN       {} operations ({} keys) were NOT issued: LOOKUP and \
                  COPY_TO_STORE need a GPU IPC handle per key, which this build has no \
                  payload buffer for. The control path was exercised; no data moved, so \
-                 this throughput is not comparable with a complete run's.\n",
+                 this throughput is not comparable with a complete run's.",
                 self.skipped_needing_gpu, self.skipped_keys
-            ));
+            );
         }
-        out.push_str(&format!(
-            "  reproduce with    --seed {} --lanes {} --batch-keys {}   description {} ({})\n",
+        let _ = writeln!(
+            out,
+            "  reproduce with    --seed {} --lanes {} --batch-keys {}   description {} ({})",
             self.reproduction.seed,
             self.tuning.lanes,
             self.tuning.batch_keys,
             self.reproduction.description_path,
             self.reproduction.description_digest
-        ));
+        );
         out
     }
 

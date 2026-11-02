@@ -1,11 +1,12 @@
 ---
 spec_sync_component: disk-partition-manager
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-29T23:34:02Z
-spec_sync_git_commit: 1de9052f9
-spec_sync_inputs_sha256: 430d08a0ad01478a16b46a27af2c81d747a28c069f50898d3740ac77d87dd21d
+spec_sync_synced_at: 2026-10-31T06:35:50Z
+spec_sync_git_commit: 50a0f2bf
+spec_sync_inputs_sha256: ca38c609188bbee30b2224a04b61d34f823172e2929c42a90688598d2257cbc9
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-10-31 (branch `opt/evolve-piece-copy-v1/s20261029-094947`, merged with unstable `a0292be6`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IGpuServices::memcpy_batch_async` added by the optimizer session, the workspace clippy cleanup's doc/attribute-only edits, three fixed doc links, and the `copy_gpu_to_memory_async` doc). The interfaces sync of the same date found none of it changes a contract this component relies on. No analysis below changes.
 > **Re-stamp 2026-10-29 (branch `fix/dispatcher-remove-ssd-extent`, merged with unstable `e35618b2`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (the `IDispatcher::check` doc gains an `# Errors` section, B-17 of the dispatcher sync). No analysis below changes.
 > **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IDispatcher::clear_all`) and the rebase brought unstable's changes. No analysis below changes.
 

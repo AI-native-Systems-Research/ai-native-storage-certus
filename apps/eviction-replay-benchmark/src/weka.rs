@@ -48,10 +48,10 @@ struct Request {
 }
 
 fn fnv1a_64(data: &[u8]) -> u64 {
-    let mut hash: u64 = 0xcbf29ce484222325;
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for &byte in data {
-        hash ^= byte as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
     hash
 }
@@ -67,6 +67,11 @@ fn remap_local_key(conv_id: &str, local_id: u64) -> CacheKey {
 /// Each line is one conversation; each request within a conversation becomes
 /// one [`Op`]. When `hash_id_scope` is `"local"`, block IDs are remapped to
 /// globally unique keys; when `"global"`, they are used directly.
+///
+/// # Errors
+///
+/// Returns an error if `path` cannot be opened or read, or (`InvalidData`) if
+/// a non-blank line is not a valid Weka conversation record.
 pub fn load(path: &Path, max_conversations: Option<usize>) -> io::Result<Trace> {
     let reader = BufReader::new(File::open(path)?);
     let mut ops = Vec::new();

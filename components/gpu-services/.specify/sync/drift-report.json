@@ -1,60 +1,57 @@
 {
-  "generated": "2026-09-09",
+  "generated": "2026-10-31T06:30:00Z",
   "project": "gpu-services",
+  "branch": "specsync-b",
+  "head": "0a71990e",
+  "base": "a0292be6 (origin/unstable; fresh stamp)",
+  "scope": "delta: git diff a0292be6 HEAD -- components/gpu-services components/interfaces/src",
   "summary": {
     "specs_analyzed": 3,
-    "requirements_checked": 78,
-    "aligned": 78,
+    "requirements_checked": 4,
+    "aligned": 2,
     "drifted": 0,
-    "drifted_resolved_this_sync": 3,
     "not_implemented": 0,
-    "unspecced_features": 0
+    "unspecced_features": 1
   },
-  "resolved_this_sync": [
+  "items": [
     {
-      "spec": "001-gpu-cuda-services",
-      "requirement": "FR-015",
-      "resolution": "backfill",
-      "note": "Documented CUDA_HOST_REGISTER_PORTABLE + idempotent ALREADY_REGISTERED/EBUSY handling + conditional cudaHostUnregister rollback (ecf2dbe3, Gate #1)."
+      "requirement": "memcpy_batch_async",
+      "code": "src/lib.rs:973-1038",
+      "verdict": "unspecced",
+      "resolution": "B-1, B-2"
     },
     {
-      "spec": "001-gpu-cuda-services",
-      "requirement": "FR-020",
-      "resolution": "backfill",
-      "note": "Documented CUDA_HOST_ALLOC_PORTABLE for the pinned DMA buffer (ecf2dbe3, Gate #1)."
+      "requirement": "FR-014 (no-gpu returns error)",
+      "code": "src/lib.rs:981-985",
+      "verdict": "aligned",
+      "resolution": "none"
     },
     {
-      "spec": "002-gpu-ssd-dma-prepare",
-      "requirement": "FR-019",
-      "resolution": "backfill",
-      "note": "Documented portable flag + idempotent registration, consistent with spec-001 FR-015."
+      "requirement": "not_unsafe_ptr_arg_deref attrs / build.rs expects",
+      "code": "src/lib.rs:300,517,750,811,862,923; build.rs",
+      "verdict": "no behaviour change",
+      "resolution": "none"
+    },
+    {
+      "requirement": "GpuDmaBuffer Debug (interfaces)",
+      "code": "components/interfaces/src/igpu_services.rs:222",
+      "verdict": "aligned (no spec quotes Debug output)",
+      "resolution": "none"
     }
   ],
-  "specs": [
+  "not_reverified": "FR-001..025, SC-001..008, specs 002/003 (unchanged)",
+  "unspecced": [
     {
-      "id": "001-gpu-cuda-services",
-      "title": "GPU CUDA Services",
-      "aligned": 33,
-      "drifted": [],
-      "not_implemented": []
-    },
-    {
-      "id": "002-gpu-ssd-dma-prepare",
-      "title": "GPU-to-SSD DMA Buffer Preparation",
-      "aligned": 29,
-      "drifted": [],
-      "not_implemented": []
-    },
-    {
-      "id": "003-gpu-p2p-server",
-      "title": "GPU P2P Server",
-      "aligned": 16,
-      "drifted": [],
-      "not_implemented": []
+      "feature": "memcpy_batch_async",
+      "location": "src/lib.rs:973-1038",
+      "lines": 66,
+      "suggested_spec": "001 FR-026 (applied)"
     }
   ],
-  "unspecced": [],
   "conflicts": [],
-  "inputs_sha256": "2558772bad75e523d1c59038fb64d4f2250ada49253c8651a21831d87dd71636",
-  "git_commit": "72c7182b"
+  "notes": [
+    "FFI binds the CUDA 13.x cudaMemcpyBatchAsync signature; CUDA 12.8 has an extra failIdx argument under the same symbol. Stated in FR-026."
+  ],
+  "drift_status": "clean (after apply; not stamped this run)",
+  "previous": "backups/20261031T054807Z/drift-report.json.prev"
 }

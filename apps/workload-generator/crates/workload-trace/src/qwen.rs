@@ -148,6 +148,7 @@ pub struct QwenRecord {
 /// A struct rather than eight positional arguments, which is both over clippy's limit
 /// and the shape in which a `parent_invocation` ends up where an `invocation_index` was
 /// meant.
+#[derive(Clone, Copy)]
 struct Parts<'a> {
     session_id: &'a str,
     invocation_index: i64,
@@ -179,6 +180,7 @@ impl QwenStats {
     ///
     /// The dropped-empty entry appears only when something was dropped: a declaration that
     /// names a loss of zero rows is noise, and noise is what stops these being read.
+    #[must_use]
     pub fn declared_losses(&self) -> Vec<String> {
         let mut losses = vec![
             "session identity: session_id becomes a chat_id/parent_chat_id chain, so the \
@@ -223,7 +225,7 @@ impl<W: Write> QwenWriter<W> {
             sink,
             next_chat_id: 0,
             last: HashMap::new(),
-            distinct: Default::default(),
+            distinct: std::collections::BTreeSet::default(),
             stats: QwenStats::default(),
         }
     }

@@ -173,11 +173,13 @@ impl SessionIds {
     /// let mut ids = SessionIds::new();
     /// assert_eq!(ids.issued(), 0);
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Identities issued so far, which is also the next id.
+    #[must_use]
     pub fn issued(&self) -> u64 {
         self.next
     }
@@ -215,16 +217,19 @@ pub struct Bound {
 
 impl Bound {
     /// Declaration index of the shared class this instance belongs to.
+    #[must_use]
     pub fn class_id(&self) -> u64 {
         self.held.class_id()
     }
 
     /// Key identity of the instance — the salt's `instance_index`.
+    #[must_use]
     pub fn mint(&self) -> u64 {
         self.held.mint()
     }
 
     /// Blocks this instance contributes to the prefix.
+    #[must_use]
     pub fn length_blocks(&self) -> u64 {
         self.length_blocks
     }
@@ -257,17 +262,20 @@ pub struct PrefixChain {
 
 impl PrefixChain {
     /// The keys, in chain order.
+    #[must_use]
     pub fn keys(&self) -> &[CacheKey] {
         &self.keys
     }
 
     /// Blocks in the chain.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.keys.len()
     }
 
     /// Whether the chain is empty — true for a session that binds no shared
     /// instances and has taken no turn.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.keys.is_empty()
     }
@@ -276,6 +284,7 @@ impl PrefixChain {
     ///
     /// [`ROOT_PARENT`] for an empty chain, so a session with no shared instances
     /// starts from the same root every time rather than from something arbitrary.
+    #[must_use]
     pub fn tip(&self) -> CacheKey {
         self.keys.last().copied().unwrap_or(ROOT_PARENT)
     }
@@ -306,28 +315,33 @@ pub struct Turn {
 
 impl Turn {
     /// 0-based position within the session.
+    #[must_use]
     pub fn index(&self) -> usize {
         self.index
     }
 
     /// Virtual time this turn happens at. A turn occupies a single instant;
     /// virtual time advances only through think time.
+    #[must_use]
     pub fn at(&self) -> f64 {
         f64::from_bits(self.at_bits)
     }
 
     /// How many keys this turn reads — its whole prefix, so this grows linearly
     /// with the turn index (FR-025).
+    #[must_use]
     pub fn reads_len(&self) -> usize {
         self.reads
     }
 
     /// How many input blocks this turn minted.
+    #[must_use]
     pub fn new_input_len(&self) -> usize {
         self.input.len()
     }
 
     /// How many output blocks this turn minted.
+    #[must_use]
     pub fn new_output_len(&self) -> usize {
         self.output.len()
     }
@@ -435,7 +449,7 @@ pub fn take_turn<R: Rng + ?Sized>(
     // The read list is the prefix as it stands *before* this turn adds anything.
     let reads = session.chain.len();
 
-    let n_input = growth.input.sample_int(rng).max(0) as u64;
+    let n_input = growth.input.sample_int(rng).max(0).unsigned_abs();
     let input_start = session.chain.len();
     for _ in 0..n_input {
         let salt = input_salt(session.id, session.next_input_ordinal);
@@ -443,7 +457,7 @@ pub fn take_turn<R: Rng + ?Sized>(
         session.chain.push(salt);
     }
     let output_start = session.chain.len();
-    let n_output = growth.output.sample_int(rng).max(0) as u64;
+    let n_output = growth.output.sample_int(rng).max(0).unsigned_abs();
     for _ in 0..n_output {
         let salt = output_salt(session.id, session.next_output_ordinal);
         session.next_output_ordinal += 1;
@@ -489,6 +503,7 @@ pub struct Session {
 
 impl Session {
     /// Run-global identity, and the salt's `session_id`.
+    #[must_use]
     pub fn id(&self) -> u64 {
         self.id
     }
@@ -503,11 +518,13 @@ impl Session {
     /// two-node run and a four-node run are different experiments rather than the same
     /// workload dispatched differently. FR-072's guarantee is unaffected: the plan is still a
     /// function of description and seed *for a given deployment*.
+    #[must_use]
     pub fn node(&self) -> usize {
         self.node
     }
 
     /// When this session next migrates, if it ever does.
+    #[must_use]
     pub fn next_migration_at(&self) -> Option<f64> {
         self.next_migration_at
     }
@@ -536,11 +553,13 @@ impl Session {
     }
 
     /// Declaration index of the session class this belongs to.
+    #[must_use]
     pub fn class_id(&self) -> u64 {
         self.class_id
     }
 
     /// Virtual time this session was created.
+    #[must_use]
     pub fn born_at(&self) -> f64 {
         self.born_at
     }
@@ -549,21 +568,25 @@ impl Session {
     ///
     /// For a session created by seeding this is its *residual* count, which is
     /// less than a full session's; see the module docs.
+    #[must_use]
     pub fn turns_total(&self) -> usize {
         self.turn_at.len()
     }
 
     /// Turns already taken.
+    #[must_use]
     pub fn turns_taken(&self) -> usize {
         self.cursor
     }
 
     /// Turns not yet taken.
+    #[must_use]
     pub fn turns_remaining(&self) -> usize {
         self.turn_at.len() - self.cursor
     }
 
     /// Virtual time of the next turn, or `None` when the session is spent.
+    #[must_use]
     pub fn next_turn_at(&self) -> Option<f64> {
         self.turn_at.get(self.cursor).copied()
     }
@@ -572,6 +595,12 @@ impl Session {
     ///
     /// A session with no turns at all cannot occur — a turn count is truncated
     /// to at least one — so this is always a real time.
+    #[must_use]
+    #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        reason = "every constructor gives a session at least one turn, so turn_at is never empty"
+    )]
     pub fn dies_at(&self) -> f64 {
         *self
             .turn_at
@@ -592,11 +621,13 @@ impl Session {
     }
 
     /// Whether this session's shared instances have been bound.
+    #[must_use]
     pub fn is_bound(&self) -> bool {
         self.bound
     }
 
     /// The session's shared instances, in canonical order (FR-028).
+    #[must_use]
     pub fn chosen(&self) -> &[Bound] {
         &self.chosen
     }
@@ -609,27 +640,37 @@ impl Session {
 
     /// Every key this session holds, in chain order: its shared run first, then
     /// each turn's input and output growth.
+    #[must_use]
     pub fn prefix(&self) -> &[CacheKey] {
         self.chain.keys()
     }
 
     /// Blocks in the shared run — the leading part of the prefix that other
     /// sessions can share.
+    #[must_use]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "each run's blocks are already laid down in the in-memory chain, so its \
+                  length fits in usize"
+    )]
     pub fn shared_len(&self) -> usize {
         self.chosen.iter().map(|b| b.length_blocks() as usize).sum()
     }
 
     /// The keys a turn reads: its whole prefix as it stood before the turn.
+    #[must_use]
     pub fn reads_of(&self, turn: &Turn) -> &[CacheKey] {
         &self.chain.keys()[..turn.reads]
     }
 
     /// The input blocks a turn minted.
+    #[must_use]
     pub fn new_input_of(&self, turn: &Turn) -> &[CacheKey] {
         &self.chain.keys()[turn.input.clone()]
     }
 
     /// The output blocks a turn minted.
+    #[must_use]
     pub fn new_output_of(&self, turn: &Turn) -> &[CacheKey] {
         &self.chain.keys()[turn.output.clone()]
     }
@@ -748,11 +789,16 @@ pub fn bind<R: Rng + ?Sized>(
             "uses names shared class {idx}, but only {} are declared",
             pools.len()
         );
-        let count = u.count.sample_int(rng).max(0) as u64;
+        let count = u.count.sample_int(rng).max(0).unsigned_abs();
         // Slots come back ascending, which is rule 2. Copied out because acquiring
         // needs the pool mutably while the selector still owns its buffer.
         let slots: Vec<u32> = selectors[idx].draw(&pools[idx], count, rng).to_vec();
         for slot in slots {
+            #[expect(
+                clippy::expect_used,
+                reason = "Selector::draw only returns slots of selectable instances in this \
+                          pool, and nothing changes the pool between the draw and here"
+            )]
             let held = pools[idx]
                 .acquire(slot)
                 .expect("selection returned an unoccupied slot");
@@ -794,7 +840,7 @@ fn is_canonical(chosen: &[Bound], uses: &[Uses]) -> bool {
             loop {
                 match expected.next() {
                     Some(c) if c == b.class_id() => break,
-                    Some(_) => continue,
+                    Some(_) => {}
                     None => return false,
                 }
             }
@@ -853,6 +899,10 @@ impl SessionPool {
         // FR-024, Little's law. Nothing draws a session lifetime; it is this.
         let mean_duration = turns.effective().mean * think_time.effective().mean;
         let arrival_rate = match form {
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a population target; inexact only above 2^53 sessions"
+            )]
             Population::Poisson(n) if mean_duration > 0.0 && mean_duration.is_finite() => {
                 n as f64 / mean_duration
             }
@@ -879,12 +929,14 @@ impl SessionPool {
     }
 
     /// The class's declaration index.
+    #[must_use]
     pub fn class_id(&self) -> u64 {
         self.class_id
     }
 
     /// Mean session duration, `E[turns] * E[think_time]` — emergent, never
     /// written (FR-024).
+    #[must_use]
     pub fn mean_duration(&self) -> f64 {
         self.mean_duration
     }
@@ -893,26 +945,31 @@ impl SessionPool {
     /// pool, which replaces each death instead of arriving freely.
     ///
     /// This is an **output** of the description and not a parameter of it.
+    #[must_use]
     pub fn arrival_rate(&self) -> f64 {
         self.arrival_rate
     }
 
     /// The target concurrency.
+    #[must_use]
     pub fn nominal(&self) -> u64 {
         self.form.nominal()
     }
 
     /// Sessions currently live.
+    #[must_use]
     pub fn live(&self) -> usize {
         self.live_count
     }
 
     /// Sessions created since the run began, seeded ones included.
+    #[must_use]
     pub fn started(&self) -> u64 {
         self.started
     }
 
     /// Sessions that have taken their last turn.
+    #[must_use]
     pub fn completed(&self) -> u64 {
         self.completed
     }
@@ -941,6 +998,10 @@ impl SessionPool {
         );
         self.seeded = true;
         self.now = t0;
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a population target; inexact only above 2^53 sessions"
+        )]
         let initial = match self.form {
             Population::Exact(n) => n,
             Population::Poisson(n) => poisson(rng, n as f64),
@@ -951,6 +1012,12 @@ impl SessionPool {
             // uniform point within it. `ceil` turns a uniform point in `[0, T)`
             // into a uniform integer in `1..=T`, which is the discrete form.
             let residual = self.residual_turns.sample(rng).ceil().max(1.0);
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "residual is a whole number >= 1, so the cast is exact up to usize::MAX \
+                          and saturates beyond"
+            )]
             let turns = residual as usize;
             self.create(t0, turns, ids, rng);
         }
@@ -965,6 +1032,7 @@ impl SessionPool {
     /// in response to a death, so it has no schedule of its own. This is **not**
     /// the next turn and not a death — the loop takes the earliest of this and its
     /// own turn schedule.
+    #[must_use]
     pub fn next_event_at(&self) -> Option<f64> {
         if self.next_birth_at.is_finite() {
             Some(self.next_birth_at)
@@ -978,6 +1046,10 @@ impl SessionPool {
     /// A no-op for an exact class. New sessions are listed by
     /// [`Self::newly_born`], and the caller must bind their shared instances
     /// before their first turn.
+    ///
+    /// # Panics
+    ///
+    /// If the pool has not been seeded.
     pub fn advance_births_to<R: Rng + ?Sized>(
         &mut self,
         t: f64,
@@ -1016,6 +1088,10 @@ impl SessionPool {
         ids: &mut SessionIds,
         rng: &mut R,
     ) -> Session {
+        #[expect(
+            clippy::expect_used,
+            reason = "a dead handle is the programming error documented under Panics"
+        )]
         let session = self.live[handle].take().expect("finish on a dead handle");
         assert_eq!(
             session.turns_remaining(),
@@ -1056,6 +1132,11 @@ impl SessionPool {
     /// # Panics
     ///
     /// If the handle is not live.
+    #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "a dead handle is the programming error documented under Panics"
+    )]
     pub fn session(&self, handle: usize) -> &Session {
         self.live[handle].as_ref().expect("dead session handle")
     }
@@ -1065,6 +1146,10 @@ impl SessionPool {
     /// # Panics
     ///
     /// If the handle is not live.
+    #[expect(
+        clippy::expect_used,
+        reason = "a dead handle is the programming error documented under Panics"
+    )]
     pub fn session_mut(&mut self, handle: usize) -> &mut Session {
         self.live[handle].as_mut().expect("dead session handle")
     }
@@ -1076,11 +1161,17 @@ impl SessionPool {
     /// Those two calls clear it; [`Self::finish`] **appends** to it. A loop step
     /// advances births once and then finishes several sessions, so the caller
     /// needs everything created during the whole step.
+    #[must_use]
     pub fn newly_born(&self) -> &[usize] {
         &self.born
     }
 
     /// A full turn count, for a session born during the run rather than seeded.
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the count is >= 1, and a turn count is allocated as a Vec, so it fits usize"
+    )]
     fn draw_turns<R: Rng + ?Sized>(&self, rng: &mut R) -> usize {
         self.turns.sample_int(rng).max(1) as usize
     }
@@ -1117,16 +1208,13 @@ impl SessionPool {
             node: 0,
             next_migration_at: None,
         };
-        let handle = match self.free_handles.pop() {
-            Some(h) => {
-                debug_assert!(self.live[h].is_none(), "reused a live handle");
-                self.live[h] = Some(session);
-                h
-            }
-            None => {
-                self.live.push(Some(session));
-                self.live.len() - 1
-            }
+        let handle = if let Some(h) = self.free_handles.pop() {
+            debug_assert!(self.live[h].is_none(), "reused a live handle");
+            self.live[h] = Some(session);
+            h
+        } else {
+            self.live.push(Some(session));
+            self.live.len() - 1
         };
         self.live_count += 1;
         self.born.push(handle);

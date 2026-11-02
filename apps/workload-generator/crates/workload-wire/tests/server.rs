@@ -39,6 +39,14 @@ impl Service for Recorder {
         }
     }
 
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test helper outside #[test]: a failure here must fail the test"
+    )]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "stub reply: a test path is a handful of keys"
+    )]
     fn submit_turn(&mut self, turn: &SubmitTurn) -> TurnOutcome {
         self.turns.lock().unwrap().push(turn.clone());
         // Deterministic: every key resident, so a test can tell a real reply from a default.
@@ -94,6 +102,10 @@ struct Pipe {
 struct ClientEnd(Arc<Mutex<Pipe>>, usize);
 
 impl Write for ClientEnd {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test helper outside #[test]: a failure here must fail the test"
+    )]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.0.lock().unwrap().to_server.extend_from_slice(buf);
         Ok(buf.len())
@@ -104,6 +116,10 @@ impl Write for ClientEnd {
 }
 
 impl Read for ClientEnd {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test helper outside #[test]: a failure here must fail the test"
+    )]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let p = self.0.lock().unwrap();
         let left = p.to_client.len() - self.1;
@@ -123,6 +139,10 @@ impl Read for ClientEnd {
 struct ServerEnd(Arc<Mutex<Pipe>>, usize);
 
 impl Write for ServerEnd {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test helper outside #[test]: a failure here must fail the test"
+    )]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.0.lock().unwrap().to_client.extend_from_slice(buf);
         Ok(buf.len())
@@ -133,6 +153,10 @@ impl Write for ServerEnd {
 }
 
 impl Read for ServerEnd {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test helper outside #[test]: a failure here must fail the test"
+    )]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let p = self.0.lock().unwrap();
         let left = p.to_server.len() - self.1;
@@ -156,6 +180,10 @@ fn turn(session: u64, keys: &[u64]) -> SubmitTurn {
 }
 
 /// Write a raw frame straight into the pipe, bypassing the client.
+#[expect(
+    clippy::unwrap_used,
+    reason = "test helper outside #[test]: a failure here must fail the test"
+)]
 fn raw(pipe: &Arc<Mutex<Pipe>>, opcode: u16, corr: u32, body: &[u8], len_override: Option<u32>) {
     let mut w = Writer::new();
     w.bytes(body);
@@ -197,6 +225,10 @@ fn a_whole_conversation_round_trips_over_a_pipe() {
 }
 
 #[test]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the loop sends 20 frames, so i + 2 fits in u32"
+)]
 fn turns_reach_the_service_in_the_order_they_were_sent() {
     // The causal rule the whole design rests on: turn n+1 of a session holds the blocks
     // turn n stored, so a server that reordered a connection's frames would make the
@@ -232,7 +264,7 @@ fn a_frame_before_hello_closes_the_connection() {
     let mut svc = Recorder::default();
     match serve_prefilled(&pipe, &mut svc) {
         Err(ServerError::HelloNotFirst { opcode: op }) => {
-            assert_eq!(op, opcode::SUBMIT_TURN)
+            assert_eq!(op, opcode::SUBMIT_TURN);
         }
         other => panic!("expected HelloNotFirst, got {other:?}"),
     }
@@ -323,8 +355,8 @@ fn shutdown_is_answered_before_the_loop_ends() {
 fn a_live_client_and_server_agree_over_tcp() {
     // The end-to-end check: two halves written against one contract, exercised against each
     // other rather than against a shared assumption.
-    let served = Arc::new(AtomicUsize::new(0));
-    let counter = Arc::clone(&served);
+    let connections = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&connections);
     let factory = FnFactory(move || {
         counter.fetch_add(1, Ordering::Relaxed);
         Ok(Recorder::default())
@@ -373,7 +405,11 @@ fn a_live_client_and_server_agree_over_tcp() {
 
     // Shutdown stops the accept loop, so the server thread joins on its own.
     handle.join().expect("server thread").expect("serve");
-    assert_eq!(served.load(Ordering::Relaxed), 1, "one connection served");
+    assert_eq!(
+        connections.load(Ordering::Relaxed),
+        1,
+        "one connection served"
+    );
 }
 
 #[test]
@@ -397,7 +433,7 @@ fn a_refused_connection_does_not_stop_the_agent() {
         mailbox: "/dev/shm/x".to_string(),
     });
     assert!(
-        matches!(refused, Err(ClientError::Closed) | Err(ClientError::Io(_))),
+        matches!(refused, Err(ClientError::Closed | ClientError::Io(_))),
         "expected a close, got {refused:?}"
     );
 
@@ -443,6 +479,10 @@ impl Service for StaleAgent {
         ack.status = workload_wire::handshake::status::BUILD_MISMATCH;
         ack
     }
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "stub reply: a test path is a handful of keys"
+    )]
     fn submit_turn(&mut self, turn: &SubmitTurn) -> TurnOutcome {
         TurnOutcome {
             resident: turn.path.len() as u32,

@@ -1,0 +1,60 @@
+{
+  "generated": "2026-09-09",
+  "project": "gpu-services",
+  "summary": {
+    "specs_analyzed": 3,
+    "requirements_checked": 78,
+    "aligned": 78,
+    "drifted": 0,
+    "drifted_resolved_this_sync": 3,
+    "not_implemented": 0,
+    "unspecced_features": 0
+  },
+  "resolved_this_sync": [
+    {
+      "spec": "001-gpu-cuda-services",
+      "requirement": "FR-015",
+      "resolution": "backfill",
+      "note": "Documented CUDA_HOST_REGISTER_PORTABLE + idempotent ALREADY_REGISTERED/EBUSY handling + conditional cudaHostUnregister rollback (ecf2dbe3, Gate #1)."
+    },
+    {
+      "spec": "001-gpu-cuda-services",
+      "requirement": "FR-020",
+      "resolution": "backfill",
+      "note": "Documented CUDA_HOST_ALLOC_PORTABLE for the pinned DMA buffer (ecf2dbe3, Gate #1)."
+    },
+    {
+      "spec": "002-gpu-ssd-dma-prepare",
+      "requirement": "FR-019",
+      "resolution": "backfill",
+      "note": "Documented portable flag + idempotent registration, consistent with spec-001 FR-015."
+    }
+  ],
+  "specs": [
+    {
+      "id": "001-gpu-cuda-services",
+      "title": "GPU CUDA Services",
+      "aligned": 33,
+      "drifted": [],
+      "not_implemented": []
+    },
+    {
+      "id": "002-gpu-ssd-dma-prepare",
+      "title": "GPU-to-SSD DMA Buffer Preparation",
+      "aligned": 29,
+      "drifted": [],
+      "not_implemented": []
+    },
+    {
+      "id": "003-gpu-p2p-server",
+      "title": "GPU P2P Server",
+      "aligned": 16,
+      "drifted": [],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [],
+  "conflicts": [],
+  "inputs_sha256": "2558772bad75e523d1c59038fb64d4f2250ada49253c8651a21831d87dd71636",
+  "git_commit": "72c7182b"
+}

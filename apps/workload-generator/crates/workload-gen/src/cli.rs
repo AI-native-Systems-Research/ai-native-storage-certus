@@ -24,6 +24,7 @@
 //! If the call fails the run is **refused**, not permitted. A projection that cannot
 //! be compared against anything is not a check that passed.
 
+use std::fmt::Write as _;
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -86,6 +87,11 @@ pub struct Cli {
 /// how a `--stamp-keys` ended up where a `--verify-payload` was meant more than once.
 #[cfg(feature = "live")]
 #[derive(Debug, clap::Args)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is an independent clap --flag; an enum or bitset would only obscure the \
+              command line it mirrors"
+)]
 pub struct RunArgs {
     /// The workload description.
     pub description: PathBuf,
@@ -162,7 +168,7 @@ pub struct RunArgs {
     /// A Certus instance to drive, as `host[:port][:mailbox]`, repeatable.
     ///
     /// **An instance, not a machine** (FR-081): a host routinely runs several — one per NUMA
-    /// domain, or one per NVMe device — so a hostname is not an identity and two entries may
+    /// domain, or one per `NVMe` device — so a hostname is not an identity and two entries may
     /// share a host. A component that parses as a number is the port, one starting with `/` is
     /// the mailbox, so `node5`, `node5:7001`, `node5:/dev/shm/certus-shmq-1` and
     /// `node5:7001:/dev/shm/certus-shmq-1` are all unambiguous.
@@ -332,6 +338,7 @@ pub enum Command {
 /// # Errors
 ///
 /// Never returns an error; a usage problem becomes an exit code.
+#[must_use]
 pub fn run_argv_os() -> i32 {
     let argv: Vec<String> = std::env::args().collect();
     run_argv(&argv)
@@ -341,6 +348,7 @@ pub fn run_argv_os() -> i32 {
 ///
 /// A clap usage error becomes [`exit::CONFIG`], not a panic: the invocation was
 /// rejected before anything was issued, which is exactly what code 2 means.
+#[must_use]
 pub fn run_argv(argv: &[String]) -> i32 {
     match Cli::try_parse_from(argv) {
         Ok(cli) => run(cli),
@@ -366,6 +374,7 @@ pub fn run_argv(argv: &[String]) -> i32 {
 /// Returns a code rather than calling `exit` so that the whole surface is testable
 /// in-process: a subcommand that can only be checked by spawning a binary tends not
 /// to be checked at all.
+#[must_use]
 pub fn run(cli: Cli) -> i32 {
     match cli.command {
         #[cfg(feature = "live")]
@@ -392,7 +401,7 @@ pub fn run(cli: Cli) -> i32 {
             &description,
             until,
             seed,
-            Outputs {
+            &Outputs {
                 mooncake,
                 cachesim,
                 qwen_bailian,
@@ -524,6 +533,7 @@ impl Failure {
     }
 
     /// The exit code.
+    #[must_use]
     pub fn code(&self) -> i32 {
         self.code
     }
@@ -582,7 +592,14 @@ fn free_bytes(dir: &Path) -> Result<u64, Failure> {
                 std::io::Error::last_os_error()
             )));
         }
-        buf.f_bavail as u64 * buf.f_frsize as u64
+        // `fsblkcnt_t` and `c_ulong` are u64 on 64-bit Linux but u32 on 32-bit targets, so the
+        // widening casts are what keep the product from overflowing there.
+        #[expect(
+            clippy::unnecessary_cast,
+            reason = "a no-op on 64-bit Linux, a widening on 32-bit targets"
+        )]
+        let free = buf.f_bavail as u64 * buf.f_frsize as u64;
+        free
     };
     Ok(free)
 }
@@ -712,17 +729,16 @@ fn check_sizes(
         // free-space check always fires first, and the ceiling branch would never run.
         let free = free_of(probe)?;
         let breakdown = || {
-            group
-                .iter()
-                .map(|p| {
-                    format!(
-                        "  {:<26} {} bytes -> {}\n",
-                        p.flag,
-                        p.bytes,
-                        p.path.display()
-                    )
-                })
-                .collect::<String>()
+            group.iter().fold(String::new(), |mut out, p| {
+                let _ = writeln!(
+                    out,
+                    "  {:<26} {} bytes -> {}",
+                    p.flag,
+                    p.bytes,
+                    p.path.display()
+                );
+                out
+            })
         };
         if need > free {
             return Err(Failure::config(format!(
@@ -790,11 +806,16 @@ fn nearest_existing(dir: &Path) -> PathBuf {
 }
 
 /// The `emit` subcommand.
+#[expect(
+    clippy::too_many_lines,
+    reason = "the emit pipeline (validate, size-check, open writers, simulate, report) in order; \
+              the writers and their stats share too many locals to split cleanly"
+)]
 fn emit(
     description_path: &Path,
     until: f64,
     seed: u64,
-    outputs: Outputs,
+    outputs: &Outputs,
     report_path: Option<PathBuf>,
     force: bool,
 ) -> Result<String, Failure> {
@@ -822,7 +843,7 @@ fn emit(
 
     // Sized against exactly what will be written, each destination checked against the
     // free space on its own filesystem.
-    let planned = planned_outputs(&projection, &outputs);
+    let planned = planned_outputs(&projection, outputs);
     check_sizes(&projection, &planned, force, &|dir| free_bytes(dir))?;
 
     let block_size = description.blocks.tokens;
@@ -940,6 +961,10 @@ fn emit(
         blocks_minted: sim.blocks_minted(),
         block_references: sim.blocks_read(),
         virtual_span: until,
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a turn count far below 2^52, reported as a rate"
+        )]
         generation_rate_invocations_per_second: if wallclock > 0.0 {
             sim.turns_taken() as f64 / wallclock
         } else {
@@ -993,35 +1018,38 @@ fn emit(
     // projection has no other place the declaration could appear.
     let mut wrote_a_projection = false;
     if let (Some(path), Some(s)) = (&outputs.mooncake, &mooncake_stats) {
-        out.push_str(&format!(
-            "  mooncake          {} records to {} ({} distinct identifiers)\n",
+        let _ = writeln!(
+            out,
+            "  mooncake          {} records to {} ({} distinct identifiers)",
             s.records,
             path.display(),
             s.distinct_ids
-        ));
+        );
         out.push_str(&one_projections_losses("    ", &s.declared_losses()));
         wrote_a_projection = true;
     }
     if let (Some(path), Some(s)) = (&outputs.cachesim, &cachesim_stats) {
-        out.push_str(&format!(
+        let _ = write!(
+            out,
             "  cachesim          {} accesses to {} ({} distinct objects)\n    \
              read it with: {}\n",
             s.accesses,
             path.display(),
             s.distinct_objects,
             s.example_command(&path.display().to_string())
-        ));
+        );
         out.push_str(&one_projections_losses("    ", &s.declared_losses()));
         wrote_a_projection = true;
     }
     if let (Some(path), Some(s)) = (&outputs.qwen_bailian, &qwen_stats) {
-        out.push_str(&format!(
-            "  qwen-bailian      {} records to {} ({} sessions, {} distinct keys)\n",
+        let _ = writeln!(
+            out,
+            "  qwen-bailian      {} records to {} ({} sessions, {} distinct keys)",
             s.records,
             path.display(),
             s.sessions,
             s.distinct_keys
-        ));
+        );
         out.push_str(&one_projections_losses("    ", &s.declared_losses()));
         wrote_a_projection = true;
     }
@@ -1047,9 +1075,7 @@ fn validate(
     if let Some(target) = for_invocations {
         let span = span_for_invocations(&description, target)
             .map_err(|e| Failure::config(format!("cannot invert the projection: {e}")))?;
-        out.push_str(&format!(
-            "about {target} invocations needs --until {span:.0}\n"
-        ));
+        let _ = writeln!(out, "about {target} invocations needs --until {span:.0}");
     }
     if let Some(span) = until {
         let p = project(&description, span, seed)
@@ -1077,13 +1103,14 @@ fn plan(description_path: &Path, until: f64, output: &Path, seed: u64) -> Result
         .map_err(|e| Failure::other(format!("writing {}: {e}", output.display())))?;
 
     let mut out = effective;
-    out.push_str(&format!(
-        "wrote {} operations and {} key references to {} (fingerprint {:016x})\n",
+    let _ = writeln!(
+        out,
+        "wrote {} operations and {} key references to {} (fingerprint {:016x})",
         plan.len(),
         plan.key_references(),
         output.display(),
         plan.fingerprint()
-    ));
+    );
     Ok(out)
 }
 
@@ -1112,6 +1139,11 @@ fn plan(description_path: &Path, until: f64, output: &Path, seed: u64) -> Result
 /// [`Failure`] with the exit code the contract gives that outcome: 2 for a refused invocation, 3
 /// for a run that began and was abandoned, 4 for a peer refused before it started.
 #[cfg(feature = "live")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the run's sequence (resolve deployment, launch, drive, report, shut down) in one \
+              place, so the exit-code mapping of each failure stays readable"
+)]
 fn live_run(args: &RunArgs) -> Result<(String, i32), Failure> {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -1135,6 +1167,11 @@ fn live_run(args: &RunArgs) -> Result<(String, i32), Failure> {
     // `--rate` overrides the file's; the default value is indistinguishable from an explicit
     // 1.0, so the file wins only when the flag was left alone.
     let rate = match hardware.as_ref().and_then(|h| h.rate) {
+        // Exact on purpose: only the literal clap default means "flag not given".
+        #[expect(
+            clippy::float_cmp,
+            reason = "comparing against the exact clap default value, not a computed one"
+        )]
         Some(from_file) if args.rate == 1.0 => from_file,
         _ => args.rate,
     };
@@ -1204,9 +1241,7 @@ fn live_run(args: &RunArgs) -> Result<(String, i32), Failure> {
     // The instance list: the command line replaces the file's rather than adding to it, because
     // the case that forces the choice is a rate sweep — vary the rate, hold the deployment — and
     // appending would silently double a cluster on the second invocation.
-    let instances: Vec<crate::hardware::Instance> = if !args.instances.is_empty() {
-        args.instances.clone()
-    } else {
+    let instances: Vec<crate::hardware::Instance> = if args.instances.is_empty() {
         match hardware.as_ref().map(|h| h.instances.clone()) {
             Some(from_file) if !from_file.is_empty() => from_file,
             // This host alone, through an agent launched as a child process.
@@ -1216,6 +1251,8 @@ fn live_run(args: &RunArgs) -> Result<(String, i32), Failure> {
                 mailbox: crate::hardware::DEFAULT_MAILBOX.to_string(),
             }],
         }
+    } else {
+        args.instances.clone()
     };
     crate::hardware::check_distinct(&instances).map_err(Failure::config)?;
     // Local means every instance is on this host, so the child-process launcher applies. A
@@ -1340,42 +1377,46 @@ fn live_run(args: &RunArgs) -> Result<(String, i32), Failure> {
         &args.description,
         args.report.clone(),
     )?);
-    rendered.push_str(&format!("  instances         {}\n", instances.len()));
+    let _ = writeln!(rendered, "  instances         {}", instances.len());
     // Named by instance, not by host: two instances on one machine would otherwise produce two
     // rows reading `node5`, which is not a report. The mailbox is listed here once rather than
     // repeated on every counter row.
     for instance in &instances {
-        rendered.push_str(&format!(
-            "    {:<24} mailbox {}\n",
+        let _ = writeln!(
+            rendered,
+            "    {:<24} mailbox {}",
             instance.label(),
             instance.mailbox
-        ));
+        );
     }
     if let Some(h) = &hardware {
         // Recorded under FR-063 so a report says which deployment file this was, not only that
         // there was one. Together with the announcement above, this is what keeps an implicit
         // file from changing a run's meaning invisibly.
-        rendered.push_str(&format!(
-            "  hardware file     {} ({}{})\n",
+        let _ = writeln!(
+            rendered,
+            "  hardware file     {} ({}{})",
             h.path,
             h.digest,
             if h.implicit { ", by default" } else { "" }
-        ));
+        );
     }
     for (node, c) in &out.per_node {
-        rendered.push_str(&format!(
-            "    {node:<24} {:>8} requests, {:>7} blocks read, {:>7} written\n",
+        let _ = writeln!(
+            rendered,
+            "    {node:<24} {:>8} requests, {:>7} blocks read, {:>7} written",
             c.requests,
             c.blocks_read(),
             c.blocks_written()
-        ));
+        );
     }
     // Printed always, including zero. A multi-instance run whose migration interval is long
     // relative to session lifetime performs none, and it would otherwise be indistinguishable
     // from one that exercised the case — which is what FR-049's "inert rather than an error"
     // makes easy to arrive at by accident. Zero here is a finding, not a missing field.
-    rendered.push_str(&format!(
-        "  migrations        {}{}\n",
+    let _ = writeln!(
+        rendered,
+        "  migrations        {}{}",
         out.migrations,
         if instances.len() < 2 {
             " (inert: migration needs two or more instances, FR-049)"
@@ -1384,7 +1425,7 @@ fn live_run(args: &RunArgs) -> Result<(String, i32), Failure> {
         } else {
             ""
         }
-    ));
+    );
     let code = if out.stats.is_valid() {
         exit::OK
     } else {
@@ -1429,7 +1470,19 @@ fn humanise(seconds: f64) -> String {
 ///
 /// If the structured report cannot be written.
 #[cfg(feature = "live")]
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is one independent report field from a different stage of the run; \
+              bundling them would be a struct built only to be destructured here"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "straight-line assembly of the report struct, one field after another"
+)]
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "microsecond lane-wait total is far below 2^52 and printed to 3 decimals"
+)]
 fn live_report(
     stats: &crate::live::LiveStats,
     lost_node: Option<String>,
@@ -1688,12 +1741,13 @@ fn migration_is_not_emitted(description: &WorkloadDescription) -> Option<String>
 fn digest_of(text: &str) -> String {
     let mut acc = 0x9e37_79b9_7f4a_7c15u64;
     for b in text.as_bytes() {
-        acc = workload_model::keys::splitmix64(acc ^ *b as u64);
+        acc = workload_model::keys::splitmix64(acc ^ u64::from(*b));
     }
     format!("{acc:016x}")
 }
 
-#[cfg(all(test, feature = "workload-tests"))]
+#[cfg(test)]
+#[cfg(feature = "workload-tests")]
 mod tests {
     use super::*;
 

@@ -1,4 +1,4 @@
-//! IRemoteLookupRdmaInitiator interface for pushing local cache values to remote nodes.
+//! `IRemoteLookupRdmaInitiator` interface for pushing local cache values to remote nodes.
 //!
 //! This interface is an **outbound initiator**: given a target host endpoint and
 //! a batch of `(key, remote-region)` pairs, it connects to the host (reusing an

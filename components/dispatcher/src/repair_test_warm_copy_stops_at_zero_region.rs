@@ -419,6 +419,18 @@ impl IGpuServices for HostGpu {
     ) -> Result<(), String> {
         host_copy(src as *const u8, dst as *mut u8, size)
     }
+    fn memcpy_batch_async(
+        &self,
+        dsts: &[*mut std::ffi::c_void],
+        srcs: &[*const std::ffi::c_void],
+        sizes: &[usize],
+        stream: GpuStream,
+    ) -> Result<(), String> {
+        for ((&dst, &src), &size) in dsts.iter().zip(srcs).zip(sizes) {
+            self.memcpy_h2d_async(src, dst, size, stream)?;
+        }
+        Ok(())
+    }
     fn allocate_pinned_dma_buffer(&self, size: usize) -> Result<DmaBuffer, String> {
         DmaBuffer::new(size, 4096, None).map_err(|e| e.to_string())
     }
@@ -441,11 +453,7 @@ impl ILogger for QuietLogger {
 
 /// Wire a dispatcher over the mocks and return the `IDispatcher` plus the
 /// maps backing it.
-fn harness() -> (
-    Arc<dyn IDispatcher + Send + Sync>,
-    Arc<WarmDm>,
-    Arc<PoolMt>,
-) {
+fn harness() -> (Arc<dyn IDispatcher + Send + Sync>, Arc<WarmDm>, Arc<PoolMt>) {
     let dm = Arc::new(WarmDm::default());
     let mt = Arc::new(PoolMt::new(1024 * 1024));
     let c = DispatcherComponent::new_default();
@@ -550,7 +558,8 @@ fn warm_scatter_delivers_regions_after_a_zero_region_in_order() {
     );
     assert_eq!(r0, vec![0xA0, 0xA1], "region 0 must get the first bytes");
     assert_eq!(
-        r2, vec![0xB0, 0xB1],
+        r2,
+        vec![0xB0, 0xB1],
         "region 2 must get the bytes after the preceding regions' sizes (2 + 0)"
     );
 

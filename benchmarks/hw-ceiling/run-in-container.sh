@@ -106,9 +106,9 @@ if [[ -n "$NVME_ARG" ]]; then
   IFS=',' read -r -a _bdfs <<< "$NVME_ARG"
   for bdf in "${_bdfs[@]}"; do
     bdf="${bdf,,}"; [[ "$bdf" =~ ^[0-9a-f]{2}:[0-9a-f]{2}\.[0-9a-f]$ ]] && bdf="0000:${bdf}"
-    cdir="$(ls -d "/sys/bus/pci/devices/${bdf}/nvme/"nvme* 2>/dev/null | head -1)"
+    cdir="$(ls -d "/sys/bus/pci/devices/${bdf}/nvme/"nvme* 2>/dev/null | head -1 || true)"
     [[ -z "$cdir" ]] && { echo "[run-in-container] WARN: $bdf has no kernel block node (on vfio-pci?)"; continue; }
-    blk="$(ls -d "$cdir"/nvme* 2>/dev/null | grep -E '/nvme[0-9]+n[0-9]+$' | head -1)"
+    blk="$(ls -d "$cdir"/nvme* 2>/dev/null | grep -E '/nvme[0-9]+n[0-9]+$' | head -1 || true)"
     [[ -z "$blk" ]] && continue
     node="/dev/$(basename "$blk")"
     echo "[run-in-container] granting container access to $node (chmod o+rw; scratch device)"
@@ -132,11 +132,13 @@ HOST_SHORT="$(hostname -s 2>/dev/null || cat /etc/hostname 2>/dev/null)"; HOST_S
 # userns mapping, not SELinux). GPU/CPU/memory paths work fine here. For the NVMe
 # paths, run profile-hardware-ceiling.sh directly on the host against scratch
 # devices, e.g.  sudo ./.../profile-hardware-ceiling.sh --nvme /dev/nvmeXn1 ...
-podman run --rm -it \
+TTY_FLAG="-i"; [[ -t 0 ]] && TTY_FLAG="-it"
+podman run --rm $TTY_FLAG \
   --privileged \
   --hostname "${HOST_SHORT:-profiled-host}" \
   "${GPU_ARGS[@]}" \
   -v /dev:/dev \
+  -v /sys:/sys:ro \
   -v "$REPO_ROOT":/work:Z \
   -w /work \
   "$IMAGE" \

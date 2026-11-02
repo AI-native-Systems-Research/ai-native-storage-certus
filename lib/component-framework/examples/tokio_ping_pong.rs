@@ -1,8 +1,8 @@
 //! Tokio ping-pong example: two tasks exchanging messages through
-//! TokioMpscChannel components queried via IUnknown.
+//! `TokioMpscChannel` components queried via `IUnknown`.
 //!
-//! Uses `tokio::task::spawn_blocking` because TokioMpscChannel's ISender /
-//! IReceiver use `blocking_send` / `blocking_recv` under the hood.
+//! Uses `tokio::task::spawn_blocking` because `TokioMpscChannel`'s `ISender` /
+//! `IReceiver` use `blocking_send` / `blocking_recv` under the hood.
 //!
 //! Run with: `cargo run --example tokio_ping_pong -p examples`
 
@@ -44,6 +44,15 @@ enum Message {
 }
 
 #[tokio::main]
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "example program: a failed framework call is a bug in the example, and panicking with the error is how it reports it"
+)]
+#[expect(
+    clippy::similar_names,
+    reason = "the paired `ch_to_ping`/`ch_to_pong` and `ping_task`/`pong_task` names mirror the two tasks on purpose"
+)]
 async fn main() {
     println!("=== Tokio Ping-Pong Example ===\n");
 

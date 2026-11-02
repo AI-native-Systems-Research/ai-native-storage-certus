@@ -52,8 +52,12 @@ impl<T: Send + 'static> ISender<T> for CrossbeamSender<T> {
     }
 }
 
-// SAFETY: crossbeam_channel::Sender is Send + Sync when T: Send
+// SAFETY: the only field is a `crossbeam_channel::Sender<T>`, which crossbeam
+// itself declares `Send` when `T: Send`; the wrapper adds no state.
 unsafe impl<T: Send> Send for CrossbeamSender<T> {}
+// SAFETY: as above, crossbeam declares `Sender<T>: Sync` when `T: Send`
+// (its operations synchronise internally); the wrapper only forwards `&self`
+// calls to it.
 unsafe impl<T: Send> Sync for CrossbeamSender<T> {}
 
 /// Receiver wrapper for crossbeam bounded channels implementing [`IReceiver`].
@@ -91,8 +95,12 @@ impl<T: Send + 'static> IReceiver<T> for CrossbeamReceiver<T> {
     }
 }
 
-// SAFETY: crossbeam_channel::Receiver is Send + Sync when T: Send
+// SAFETY: the only field is a `crossbeam_channel::Receiver<T>`, which
+// crossbeam itself declares `Send` when `T: Send`; the wrapper adds no state.
 unsafe impl<T: Send> Send for CrossbeamReceiver<T> {}
+// SAFETY: as above, crossbeam declares `Receiver<T>: Sync` when `T: Send`
+// (concurrent receives are synchronised internally); the wrapper only
+// forwards `&self` calls to it.
 unsafe impl<T: Send> Sync for CrossbeamReceiver<T> {}
 
 /// Crossbeam bounded channel component.
@@ -157,6 +165,7 @@ impl<T: Send + 'static> CrossbeamBoundedChannel<T> {
     ///
     /// let ch = CrossbeamBoundedChannel::<u32>::new(64);
     /// ```
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         assert!(capacity > 0, "capacity must be greater than zero");
         let (tx, rx) = crossbeam_channel::bounded(capacity);
@@ -189,11 +198,17 @@ impl<T: Send + 'static> CrossbeamBoundedChannel<T> {
     ///
     /// let ch = CrossbeamBoundedChannel::<String>::with_default_capacity();
     /// ```
+    #[must_use]
     pub fn with_default_capacity() -> Self {
         Self::new(1024)
     }
 
     /// Get a sender endpoint. Can be called multiple times (multi-producer).
+    ///
+    /// # Errors
+    ///
+    /// None: this always returns `Ok`. The `Result` matches the other
+    /// channel components' `sender()`.
     ///
     /// # Examples
     ///
@@ -272,7 +287,7 @@ impl<T: Send + 'static> IUnknown for CrossbeamBoundedChannel<T> {
         }
     }
 
-    fn version(&self) -> &str {
+    fn version(&self) -> &'static str {
         "1.0.0"
     }
 

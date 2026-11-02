@@ -40,6 +40,10 @@ impl IFarewell for FriendlyComponent {
     }
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "example program: a failed framework call is a bug in the example, and panicking with the error is how it reports it"
+)]
 fn main() {
     // 3. Instantiate — returns Arc<FriendlyComponent>
     let comp = FriendlyComponent::new();

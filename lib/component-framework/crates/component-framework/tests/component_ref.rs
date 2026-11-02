@@ -59,7 +59,7 @@ fn attach_increments_release_decrements_destroy_at_zero() {
         fn query_interface_raw(&self, _id: TypeId) -> Option<&(dyn Any + Send + Sync)> {
             None
         }
-        fn version(&self) -> &str {
+        fn version(&self) -> &'static str {
             "1.0.0"
         }
         fn provided_interfaces(&self) -> &[InterfaceInfo] {
@@ -161,7 +161,7 @@ fn receptacle_keeps_component_alive() {
     }
 
     impl IProvider for ProvComp {
-        fn provide(&self) -> &str {
+        fn provide(&self) -> &'static str {
             "provided"
         }
     }

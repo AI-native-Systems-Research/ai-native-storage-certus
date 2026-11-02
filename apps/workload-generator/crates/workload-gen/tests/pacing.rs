@@ -39,7 +39,7 @@ use workload_wire::server::{FnFactory, Server, Service};
 ///
 /// `think_time` 1 second with 4 turns gives each session a 3-second span, and sessions arrive
 /// across the run — so at rate 1.0 the turns are genuinely spread out rather than all due at once.
-const DESCRIPTION: &str = r#"
+const DESCRIPTION: &str = r"
 version: 1
 blocks: {tokens: 16, bytes: 32768}
 shared_classes:
@@ -54,7 +54,7 @@ session_classes:
     input_growth: {constant: 1}
     output_growth: {constant: 1}
     think_time: {constant: 1}
-"#;
+";
 
 const SEED: u64 = 17;
 
@@ -94,6 +94,14 @@ impl Service for Stub {
         handshake::answer(hello, 8, 32768)
     }
 
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test helper outside #[test]: a failure here must fail the test"
+    )]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "stub reply: a test path is a handful of keys"
+    )]
     fn submit_turn(&mut self, turn: &SubmitTurn) -> TurnOutcome {
         if !self.how.per_turn.is_zero() {
             std::thread::sleep(self.how.per_turn);
@@ -132,6 +140,10 @@ impl Service for Stub {
 /// fails. Remembering what has been issued closes that window. A port can still
 /// be taken by an unrelated process between the probe and the real bind; that
 /// would need a retry at the bind site.
+#[expect(
+    clippy::unwrap_used,
+    reason = "test helper outside #[test]: a failure here must fail the test"
+)]
 fn free_port() -> u16 {
     static ISSUED: OnceLock<Mutex<HashSet<u16>>> = OnceLock::new();
     let issued = ISSUED.get_or_init(|| Mutex::new(HashSet::new()));
@@ -139,7 +151,11 @@ fn free_port() -> u16 {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let p = l.local_addr().unwrap().port();
         drop(l);
-        if issued.lock().unwrap_or_else(|e| e.into_inner()).insert(p) {
+        if issued
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(p)
+        {
             return p;
         }
     }
@@ -147,6 +163,11 @@ fn free_port() -> u16 {
 }
 
 /// Drive one loopback stub and return what the run measured.
+#[expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test helper outside #[test]: a failure here must fail the test"
+)]
 fn drive_stub(how: &Behaviour, options: &RunOptions) -> Result<(DriveStats, Duration), DriveError> {
     let port = free_port();
     let for_service = how.clone();
@@ -441,6 +462,10 @@ fn a_clear_that_worked_is_counted_and_the_run_proceeds() {
 ///
 /// The refusals under test happen **before** any agent is contacted, so nothing needs to be
 /// running for them — and a test that had to start something would be testing two things.
+#[expect(
+    clippy::unwrap_used,
+    reason = "test helper outside #[test]: a failure here must fail the test"
+)]
 fn run_argv(extra: &[&str]) -> i32 {
     let dir = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("d.yml");

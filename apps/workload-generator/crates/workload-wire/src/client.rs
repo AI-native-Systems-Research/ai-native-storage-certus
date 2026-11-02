@@ -332,11 +332,10 @@ impl fmt::Display for ClientError {
             ),
             Self::TimedOut { after } => write!(
                 f,
-                "no reply within the {:.1?} read timeout. The agent is probably alive and \
+                "no reply within the {after:.1?} read timeout. The agent is probably alive and \
                  still working: a turn can legitimately take longer than this when the \
                  server's own operation latency is high. Raise --read-timeout if that is \
-                 expected, or investigate the server's per-operation latency if it is not",
-                after
+                 expected, or investigate the server's per-operation latency if it is not"
             ),
             Self::Mismatched { want, got } => {
                 write!(f, "expected a reply to opcode {want}, got opcode {got}")
@@ -540,6 +539,7 @@ impl<S: Read + Write> Client<S> {
     }
 
     /// Set the largest body this client will accept from the agent.
+    #[must_use]
     pub fn with_max_body(mut self, max_body: u32) -> Self {
         self.max_body = max_body;
         self

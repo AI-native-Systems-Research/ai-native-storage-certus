@@ -1,4 +1,4 @@
-//! IMemoryTier interface and associated types for the memory-tier component.
+//! `IMemoryTier` interface and associated types for the memory-tier component.
 
 use std::fmt;
 
@@ -213,7 +213,7 @@ component_macros::define_interface! {
         fn pool_info(&self) -> Option<(*mut u8, usize)>;
 
         /// Returns `true` when the pool is backed by SPDK hugepages and pointers
-        /// from `insert`/`get` can be used directly for NVMe DMA without an intermediate copy.
+        /// from `insert`/`get` can be used directly for `NVMe` DMA without an intermediate copy.
         fn is_dma_capable(&self) -> bool;
 
         /// Remove all entries from the pool, freeing all slots.

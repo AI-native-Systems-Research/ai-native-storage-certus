@@ -143,6 +143,7 @@ pub struct MooncakeStats {
 
 impl MooncakeStats {
     /// The losses this conversion incurred, for a report to print (FR-077).
+    #[must_use]
     pub fn declared_losses(&self) -> Vec<String> {
         vec![
             "session grouping: the format has no session_id, so sessions survive only \
@@ -221,6 +222,11 @@ impl<W: Write> MooncakeWriter<W> {
             // a reader would divide by nothing to recover the block count.
             return Ok(());
         }
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "the rounded value is integral, so only times beyond i64 milliseconds \
+                      change, and those saturate"
+        )]
         let timestamp = (at * 1000.0).round() as i64;
         if timestamp < self.last_timestamp {
             return Err(io::Error::new(
@@ -237,22 +243,26 @@ impl<W: Write> MooncakeWriter<W> {
 
         let mut hash_ids = Vec::with_capacity(input.len());
         for key in input {
-            let id = match self.dense.get(key) {
-                Some(id) => *id,
-                None => {
-                    let id = self.next_id;
-                    self.next_id += 1;
-                    self.dense.insert(*key, id);
-                    id
-                }
+            let id = if let Some(id) = self.dense.get(key) {
+                *id
+            } else {
+                let id = self.next_id;
+                self.next_id += 1;
+                self.dense.insert(*key, id);
+                id
             };
             hash_ids.push(id);
         }
 
         self.stats.records += 1;
         self.stats.references += hash_ids.len() as u64;
-        self.stats.distinct_ids = self.next_id as u64;
+        self.stats.distinct_ids = self.next_id.unsigned_abs();
 
+        #[expect(
+            clippy::cast_possible_wrap,
+            reason = "slice lengths are at most isize::MAX, and block_size is tokens per block \
+                      (e.g. 16), so the i64 values and their products are far from wrapping"
+        )]
         let out = MooncakeRecord {
             timestamp,
             input_length: input.len() as i64 * self.block_size as i64,

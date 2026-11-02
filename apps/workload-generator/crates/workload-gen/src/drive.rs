@@ -150,6 +150,16 @@ fn clear_every_node(agents: &mut Agents) -> Result<u64, DriveError> {
 ///
 /// If `agents` holds no node, or a node holds no lane. Both are refused earlier — a run with
 /// nothing to drive is a caller's arithmetic error rather than a condition to report.
+#[expect(
+    clippy::too_many_lines,
+    reason = "setup, the scoped producer/lane threads and the merge of their results share the \
+              same borrows of `agents`, which a split would have to thread through by hand"
+)]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "public signature: the caller hands over its handle to the stop flag it shares with \
+              a signal handler"
+)]
 pub fn run(
     agents: &mut Agents,
     description: &WorkloadDescription,
@@ -202,7 +212,7 @@ pub fn run(
             let stop = Arc::clone(&stop);
             handles.push((
                 index,
-                scope.spawn(move || consume(lane, rx, depth, stop, schedule)),
+                scope.spawn(move || consume(lane, &rx, &depth, &stop, schedule)),
             ));
         }
 
@@ -217,6 +227,11 @@ pub fn run(
                 let node = session.node().min(nodes - 1);
                 // Modulo the session id, not round-robin: a session's turns are causally
                 // dependent, so it must stay on one connection for its whole life.
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "only spreads sessions over lanes; on a 32-bit target dropping the \
+                              id's high bits still maps each session to one fixed lane"
+                )]
                 let within = (session.id() as usize) % per_node;
                 (node * per_node + within).min(n - 1)
             },
@@ -239,7 +254,7 @@ pub fn run(
                         node: format!("lane {index}"),
                         during: "submitting turns",
                         reason: "the lane thread panicked".into(),
-                    })
+                    });
                 }
             }
         }
@@ -404,9 +419,9 @@ type LaneOutcome = (LaneStats, Histogram<u64>);
 /// Take turns for one lane and submit them to its node's agent.
 fn consume(
     mut lane: AgentLane<'_>,
-    rx: std::sync::mpsc::Receiver<OperationPlan>,
-    depth: Arc<std::sync::atomic::AtomicUsize>,
-    stop: Arc<AtomicBool>,
+    rx: &std::sync::mpsc::Receiver<OperationPlan>,
+    depth: &std::sync::atomic::AtomicUsize,
+    stop: &AtomicBool,
     schedule: Schedule,
 ) -> Result<LaneOutcome, NodeLost> {
     let mut mine = LaneStats {
@@ -444,7 +459,9 @@ fn consume(
                 // identically, and the first is unavoidable since every queue starts empty.
                 let waited_from = Instant::now();
                 let got = rx.recv();
-                mine.producer_wait_us += waited_from.elapsed().as_micros() as u64;
+                // Saturating: u64 microseconds is ~584,000 years, so this never clamps.
+                mine.producer_wait_us +=
+                    u64::try_from(waited_from.elapsed().as_micros()).unwrap_or(u64::MAX);
                 match got {
                     Ok(b) => b,
                     Err(_) => break,
@@ -458,16 +475,20 @@ fn consume(
 
         batch.key_path(&mut path);
         let first = batch.operations().first();
-        let session = first.map(|o| o.session()).unwrap_or_default();
-        let at = first.map(|o| o.at()).unwrap_or_default();
+        let session = first
+            .map(workload_model::plan::Operation::session)
+            .unwrap_or_default();
+        let at = first
+            .map(workload_model::plan::Operation::at)
+            .unwrap_or_default();
         let polls = batch
             .operations()
             .iter()
             .any(|o| o.kind() == OpKind::PollEvents);
         // Held until due, if this run is paced. The wait is outside the submit so that what is
         // recorded as lateness is the schedule error and not the server's service time.
-        if let Some(late) = schedule.wait_for(at, &stop) {
-            let _ = lateness.record(late.as_micros().min(u128::from(u64::MAX)) as u64);
+        if let Some(late) = schedule.wait_for(at, stop) {
+            let _ = lateness.record(u64::try_from(late.as_micros()).unwrap_or(u64::MAX));
             mine.paced_turns += 1;
         }
         let turn = SubmitTurn {
@@ -487,7 +508,8 @@ fn consume(
     Ok((mine, lateness))
 }
 
-#[cfg(all(test, feature = "workload-tests"))]
+#[cfg(test)]
+#[cfg(feature = "workload-tests")]
 mod tests {
     use super::*;
 
@@ -511,7 +533,9 @@ mod tests {
         // shortfall is recorded rather than slept off, so lateness accumulates against `t0`
         // instead of being absorbed.
         let s = Schedule {
-            t0: Instant::now() - Duration::from_millis(500),
+            t0: Instant::now()
+                .checked_sub(Duration::from_millis(500))
+                .expect("the monotonic clock is more than 500 ms past its origin"),
             pacing: Pacing::Real,
             rate: 1.0,
         };

@@ -112,11 +112,11 @@ gRPC surface that `97e26738` removed. The intent is preserved; the mechanism is 
 ### The one channel available
 
 `op_lookup` returns exactly one byte per key — `ok_flags`, currently `0` or `1`
-(`lib/shmq-dispatcher/src/translate.rs:573`). It is the **only** per-key channel in a
+(`lib/shmq-dispatcher/src/translate.rs:1152`). It is the **only** per-key channel in a
 `LOOKUP` response. So attribution either widens that byte or changes the framing, and
 widening is available because `check_state` in the same module already did it and documented
 the rule: `MISS`/`RESIDENT` keep their `0`/`1` meaning and `PENDING` takes `2`, so a reader
-testing `byte != 0` is unaffected (`lib/shmq-dispatcher/src/wire.rs:98-110`).
+testing `byte != 0` is unaffected (`lib/shmq-dispatcher/src/wire.rs:194-205`).
 
 ### **DECISION — needs sign-off:** the wire carries a 5-value projection, not all 7
 

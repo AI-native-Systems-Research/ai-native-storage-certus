@@ -1,4 +1,4 @@
-//! IEvictionPolicy interface and associated types.
+//! `IEvictionPolicy` interface and associated types.
 
 use std::fmt;
 
@@ -12,14 +12,17 @@ pub struct EvictionHandle {
 }
 
 impl EvictionHandle {
+    #[must_use]
     pub fn new(pool_id: u32, index: u32) -> Self {
         Self { pool_id, index }
     }
 
+    #[must_use]
     pub fn pool_id(&self) -> u32 {
         self.pool_id
     }
 
+    #[must_use]
     pub fn index(&self) -> u32 {
         self.index
     }

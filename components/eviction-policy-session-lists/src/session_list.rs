@@ -65,6 +65,11 @@ impl Pool {
     }
 
     /// Place `node` into a free slot (reusing the free list) or append it.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "EvictionHandle carries a u32 index by interface; a pool holds one node per \
+                  cached block of its tier, far below u32::MAX"
+    )]
     fn alloc(&mut self, node: Node) -> u32 {
         if let Some(idx) = self.free.pop() {
             self.nodes[idx as usize] = node;
@@ -230,6 +235,11 @@ impl Pool {
     /// Assert every data-model invariant holds. Test-only; used by the internal
     /// property test (SC-006).
     #[cfg(test)]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "node indices are u32 handles by construction (see `alloc`), so every \
+                  enumerate() position fits in u32"
+    )]
     pub(crate) fn check_invariants(&self) {
         use std::collections::HashSet;
 
@@ -512,9 +522,14 @@ mod tests {
     // ---- Internal invariant property test (SC-006) ----------------------
 
     #[test]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "random u64 is reduced modulo the live-set length; dropping high bits on a \
+                  32-bit target only changes which index is picked"
+    )]
     fn randomized_operations_preserve_invariants() {
         // Deterministic xorshift RNG (no external crate).
-        let mut s: u64 = 0x9E3779B97F4A7C15;
+        let mut s: u64 = 0x9E37_79B9_7F4A_7C15;
         let mut next = || {
             s ^= s << 13;
             s ^= s >> 7;

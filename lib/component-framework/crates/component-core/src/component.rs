@@ -43,6 +43,7 @@ impl std::fmt::Debug for InterfaceMap {
 
 impl InterfaceMap {
     /// Creates an empty `InterfaceMap`.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             map: HashMap::new(),
@@ -67,6 +68,7 @@ impl InterfaceMap {
     /// Looks up an interface by `TypeId`.
     ///
     /// Returns a reference to the type-erased value if found.
+    #[must_use]
     pub fn lookup(&self, type_id: TypeId) -> Option<&(dyn Any + Send + Sync)> {
         self.map.get(&type_id).map(|b| &**b)
     }
@@ -90,6 +92,7 @@ impl InterfaceMap {
     /// assert_eq!(info.len(), 1);
     /// assert_eq!(info[0].name, "IName");
     /// ```
+    #[must_use]
     pub fn info(&self) -> &[InterfaceInfo] {
         &self.info
     }

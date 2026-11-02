@@ -60,14 +60,19 @@ pub struct GpuIpcHandle {
     pub(crate) ptr: *mut std::ffi::c_void,
     /// Buffer size in bytes.
     pub(crate) size: usize,
-    /// Whether verify_memory() has been called successfully.
+    /// Whether `verify_memory()` has been called successfully.
     pub(crate) verified: bool,
-    /// Whether pin_memory() has been called successfully.
+    /// Whether `pin_memory()` has been called successfully.
     pub(crate) pinned: bool,
 }
 
 // SAFETY: The GPU pointer is valid from any thread once opened.
 unsafe impl Send for GpuIpcHandle {}
+// SAFETY: `GpuIpcHandle` has no interior mutability: every `&self` method only
+// copies out a plain field (`size`, `ptr`, `verified`, `pinned`), and the flags
+// change only through `&mut self`. The device pointer is never dereferenced on
+// the host by this type, and a CUDA IPC mapping is valid from any host thread
+// of the process.
 unsafe impl Sync for GpuIpcHandle {}
 
 impl GpuIpcHandle {
@@ -83,24 +88,28 @@ impl GpuIpcHandle {
 
     /// Return the buffer size in bytes.
     #[inline]
+    #[must_use]
     pub fn size(&self) -> usize {
         self.size
     }
 
     /// Return the raw device pointer.
     #[inline]
+    #[must_use]
     pub fn as_ptr(&self) -> *mut std::ffi::c_void {
         self.ptr
     }
 
     /// Return whether this handle has been verified.
     #[inline]
+    #[must_use]
     pub fn is_verified(&self) -> bool {
         self.verified
     }
 
     /// Return whether this handle has been pinned.
     #[inline]
+    #[must_use]
     pub fn is_pinned(&self) -> bool {
         self.pinned
     }
@@ -143,6 +152,10 @@ pub struct GpuDmaBuffer {
 // SAFETY: GPU device memory is accessible from any thread via DMA.
 // The pointer remains valid until free_fn is called on drop.
 unsafe impl Send for GpuDmaBuffer {}
+// SAFETY: `GpuDmaBuffer` has no interior mutability: its `&self` methods only
+// copy out `len` and `ptr`, and the device memory is never dereferenced on the
+// host by this type. `free_fn` runs only in `Drop`, which needs exclusive
+// ownership, so no shared reference can observe the pointer after it is freed.
 unsafe impl Sync for GpuDmaBuffer {}
 
 impl GpuDmaBuffer {
@@ -167,18 +180,21 @@ impl GpuDmaBuffer {
 
     /// Return the buffer length in bytes.
     #[inline]
+    #[must_use]
     pub fn len(&self) -> usize {
         self.len
     }
 
     /// Return true if the buffer is empty.
     #[inline]
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
     /// Return the raw GPU device pointer.
     #[inline]
+    #[must_use]
     pub fn as_ptr(&self) -> *mut std::ffi::c_void {
         self.ptr
     }
@@ -203,7 +219,7 @@ impl std::fmt::Debug for GpuDmaBuffer {
         f.debug_struct("GpuDmaBuffer")
             .field("ptr", &self.ptr)
             .field("len", &self.len)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -226,6 +242,9 @@ pub struct GpuStream(pub *mut std::ffi::c_void);
 
 // SAFETY: CUDA streams can be used from any thread.
 unsafe impl Send for GpuStream {}
+// SAFETY: `GpuStream` is an immutable `Copy` wrapper around an opaque
+// `cudaStream_t` handle that Rust never dereferences; sharing it only shares the
+// handle value, and the CUDA runtime accepts a stream from any host thread.
 unsafe impl Sync for GpuStream {}
 
 // # Verified Properties (see `components/gpu-services/verif/`)
@@ -306,7 +325,7 @@ define_interface! {
         /// Deserialize a base64-encoded CUDA IPC handle and size.
         ///
         /// Input: base64 string encoding 72 bytes (64-byte
-        /// cudaIpcMemHandle_t + 8-byte LE u64 size).  Opens the IPC
+        /// `cudaIpcMemHandle_t` + 8-byte LE u64 size).  Opens the IPC
         /// handle and returns an opaque handle referencing GPU memory.
         ///
         /// # Errors
@@ -565,7 +584,7 @@ define_interface! {
         /// ```
         fn device_of_ptr(&self, ptr: *const std::ffi::c_void) -> Result<i32, String>;
 
-        /// Destroy a CUDA stream previously created with [`create_stream`].
+        /// Destroy a CUDA stream previously created with [`create_stream`](Self::create_stream).
         ///
         /// # Errors
         ///
@@ -585,7 +604,7 @@ define_interface! {
         /// Query whether all operations on a CUDA stream have completed.
         ///
         /// Returns `Ok(true)` if all operations are complete, `Ok(false)` if
-        /// work is still in-flight. Unlike [`stream_synchronize`], this does
+        /// work is still in-flight. Unlike [`stream_synchronize`](Self::stream_synchronize), this does
         /// not block.
         ///
         /// # Errors
@@ -721,6 +740,31 @@ define_interface! {
         fn memcpy_d2h_async(
             &self, src: *const std::ffi::c_void, dst: *mut std::ffi::c_void,
             size: usize, stream: GpuStream
+        ) -> Result<(), String>;
+
+        /// Asynchronously submit a batch of pointer-to-pointer copies in one call.
+        ///
+        /// Entry `i` copies `sizes[i]` bytes from `srcs[i]` to `dsts[i]`. The
+        /// direction (host-to-device, device-to-host) comes from the pointers.
+        /// The batch as a whole runs in stream order on `stream`, but there is
+        /// no order among its copies.
+        ///
+        /// # Safety (caller contract)
+        ///
+        /// * The entries must not overlap or depend on each other.
+        /// * Every pointer must be valid for its size and stay valid until the
+        ///   stream is synchronized; host pointers must be CUDA-pinned.
+        /// * `stream` must be a created stream, not the legacy NULL stream.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if GPU support is not compiled in, the component
+        /// is not initialized, the slices differ in length, or the CUDA batch
+        /// memcpy fails.
+        #[cfg(feature = "spdk")]
+        fn memcpy_batch_async(
+            &self, dsts: &[*mut std::ffi::c_void], srcs: &[*const std::ffi::c_void],
+            sizes: &[usize], stream: GpuStream
         ) -> Result<(), String>;
 
         /// Allocate a CUDA-pinned host buffer registered with SPDK for DMA.

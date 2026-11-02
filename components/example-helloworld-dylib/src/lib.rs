@@ -1,4 +1,4 @@
-//! Dynamic library wrapper for the HelloWorld component.
+//! Dynamic library wrapper for the `HelloWorld` component.
 //!
 //! Exports a Rust-ABI factory function that returns a `ComponentRef`.
 //! Because this dylib and the host binary dynamically link the same
@@ -13,11 +13,17 @@ use component_core::component_ref::ComponentRef;
 use example_helloworld::HelloWorldComponent;
 use std::sync::Arc;
 
-/// Create a new HelloWorld component instance.
+/// Create a new `HelloWorld` component instance.
 ///
 /// The caller receives a `ComponentRef` (an `Arc<dyn IUnknown>` wrapper)
 /// and can use `query_interface!` / `query()` to obtain typed interfaces.
 #[no_mangle]
+#[expect(
+    clippy::no_mangle_with_rust_abi,
+    reason = "the Rust ABI is the point of this example: `ComponentRef` wraps an `Arc<dyn \
+              IUnknown>`, which has no C representation, and the host loads the symbol as \
+              `fn() -> ComponentRef` built by the same rustc"
+)]
 pub fn create_component() -> ComponentRef {
     let comp = HelloWorldComponent::new();
     ComponentRef::from(comp as Arc<_>)

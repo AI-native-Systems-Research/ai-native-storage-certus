@@ -123,6 +123,13 @@ impl InvocationRecord {
     /// assert_eq!(first.parent_invocation, -1);
     /// assert!(first.request_end.is_none());
     /// ```
+    #[must_use]
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "a turn index and slice lengths are at most isize::MAX, and block_size is \
+                  tokens per block (e.g. 16), so the i64 values and their products are far \
+                  from wrapping"
+    )]
     pub fn from_turn(trace_id: &str, session: &Session, turn: &Turn, block_size: u64) -> Self {
         let index = turn.index() as i64;
         let reads = session.reads_of(turn);
@@ -166,6 +173,11 @@ impl InvocationRecord {
     ///
     /// Naming the invariant and the row, because a trace that violates its own
     /// declared schema is worse than one that declares less.
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "slice lengths are at most isize::MAX, and block_size is tokens per block \
+                  (e.g. 16), so the i64 values and their products are far from wrapping"
+    )]
     pub fn check(
         &self,
         block_size: u64,

@@ -5,7 +5,7 @@
 
 ## Summary
 
-The `interfaces` crate is fully implemented and serves as the centralized definition point for all Certus component interface traits. It defines 20 `define_interface!` interface traits (178 methods), their supporting types, and feature gates (`spdk`, `integrity-check`, `gpu`) that allow builds without hardware dependencies. This plan documents the existing architecture for maintenance and evolution purposes.
+The `interfaces` crate is fully implemented and serves as the centralized definition point for all Certus component interface traits. It defines 20 `define_interface!` interface traits (180 methods), their supporting types, and feature gates (`spdk`, `integrity-check`, `gpu`) that allow builds without hardware dependencies. This plan documents the existing architecture for maintenance and evolution purposes.
 
 ## Technical Context
 
@@ -22,10 +22,10 @@ components/interfaces/
     iblock_device.rs                 # IBlockDevice (11), IBlockDeviceAdmin (6), + types; module spdk-gated
     ieviction_policy.rs              # IEvictionPolicy (9 methods), + types
     idispatch_map.rs                 # IDispatchMap (20 methods, 2 of them integrity-check-gated), + types
-    idispatcher.rs                   # IDispatcher (24 methods, trait spdk-gated), + ungated types
+    idispatcher.rs                   # IDispatcher (25 methods, trait spdk-gated), + ungated types
     imemory_tier.rs                  # IMemoryTier (21 methods), + bounce-reserve types
     iextent_manager.rs               # IExtentManager (14 methods, trait spdk-gated), + ungated types
-    igpu_services.rs                 # IGpuServices (24 methods, 10 of them spdk-gated), + types
+    igpu_services.rs                 # IGpuServices (25 methods, 11 of them spdk-gated), + types
     iremote_lookup.rs                # IRemoteLookup (5 methods), + types
     iremote_lookup_rdma_initiator.rs # IRemoteLookupRdmaInitiator (6 methods), + RemoteRegion, PushStatus
     iremote_lookup_rdma_responder.rs # IRemoteLookupRdmaResponder (3), IRemoteLookupRdmaResponderAdmin (5), + types
@@ -38,7 +38,7 @@ components/interfaces/
 
 ### Interface Count
 
-Counted from the `define_interface!` blocks in `src/`. `IZyreNode` is a plain trait, not a component interface, and is not counted.
+Counted from the `define_interface!` blocks in `src/`. `IZyreNode` is a plain trait, not a component interface, and is not counted. *(Recounted 2026-10-30: `IGpuServices::memcpy_batch_async` (`4941320a`, spdk-gated) and `IDispatcher::clear_all` (added on unstable in `266ed975`; this table had not been updated for it) bring the total from 178 to 180.)*
 
 | Interface | Methods | Feature Gate |
 |-----------|---------|--------------|
@@ -49,10 +49,10 @@ Counted from the `define_interface!` blocks in `src/`. `IZyreNode` is a plain tr
 | IBlockDeviceAdmin | 6 | spdk |
 | IEvictionPolicy | 9 | none |
 | IDispatchMap | 20 | none (`set_checksum`/`get_checksum`: integrity-check) |
-| IDispatcher | 24 | spdk |
+| IDispatcher | 25 | spdk |
 | IMemoryTier | 21 | none |
 | IExtentManager | 14 | spdk |
-| IGpuServices | 24 | none (10 DMA methods spdk-gated) |
+| IGpuServices | 25 | none (11 DMA methods spdk-gated) |
 | IRemoteLookup | 5 | none |
 | IRemoteLookupRdmaInitiator | 6 | none |
 | IRemoteLookupRdmaResponder | 3 | none |
@@ -62,7 +62,7 @@ Counted from the `define_interface!` blocks in `src/`. `IZyreNode` is a plain tr
 | IZyre | 2 | none |
 | IExtendedMetadataStore | 5 | none |
 | IPartitionTable | 4 | spdk |
-| **Total** | **178** | |
+| **Total** | **180** | |
 
 ## Architecture
 

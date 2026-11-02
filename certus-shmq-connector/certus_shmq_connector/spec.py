@@ -128,6 +128,22 @@ def _resolve_dp_rank() -> int:
         return 0
 
 
+
+def _check_slot_size(block_bytes: int, blocks_per_chunk: int) -> None:
+    """A key's slot (``blocks_per_chunk`` GPU blocks) is sized in a u32 on the wire,
+    and a ChunkBlockBatch counts a key's blocks in a u16."""
+    if blocks_per_chunk > 0xFFFF:
+        raise ValueError(
+            f"blocks_per_chunk={blocks_per_chunk} is past the wire's 65535 GPU blocks "
+            f"per key. Lower block_size / blocks_per_chunk."
+        )
+    if block_bytes * blocks_per_chunk > 0xFFFFFFFF:
+        raise ValueError(
+            f"blocks_per_chunk={blocks_per_chunk} x {block_bytes}-byte GPU blocks is "
+            f"{block_bytes * blocks_per_chunk} bytes per key; Certus slots are at "
+            f"most 4 GiB - 1. Lower block_size / blocks_per_chunk."
+        )
+
 class CertusShmqOffloadingSpec(OffloadingSpec):
     """OffloadingSpec backed by a remote certus-server over shared memory."""
 
@@ -249,6 +265,7 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
                 if self._block_bytes is not None
                 else self._slab_size_bytes
             )
+            _check_slot_size(size, 1)
             # Scheduler role → this replica's base channel slot. The manager
             # mirrors what all W workers physically store, so it operates over
             # every per-rank key.
@@ -308,6 +325,7 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
                 flush=True,
             )
         self._block_bytes = block_bytes
+        _check_slot_size(block_bytes, self._blocks_per_chunk)
         if self._manager is not None:
             # If a manager exists in this instance, keep its Reserve size in sync
             # with the copy size (belt-and-suspenders; the scheduler-role instance
@@ -328,6 +346,11 @@ class CertusShmqOffloadingSpec(OffloadingSpec):
             rank=rank, world_size=self._world_size,
             blocks_per_chunk=self._blocks_per_chunk,
         )
+        if self._blocks_per_chunk > 1:
+            # A load starting inside a key needs scratch for the blocks it skips
+            # (up to blocks_per_chunk - 1 of them). Allocated now: vLLM treats a failed
+            # load as fatal, so an allocation must not fail mid-serve.
+            self._worker.allocate_scratch()
         return self._worker
 
     def get_worker(self, kv_caches):

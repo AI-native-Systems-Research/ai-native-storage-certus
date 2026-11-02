@@ -8,6 +8,7 @@
 //!     --dataset chat --cache-size-nelements 256K,1M,4M --policy both
 //! ```
 
+use std::fmt::Write as _;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -79,6 +80,11 @@ impl PolicyKind {
     }
 
     /// Build a fresh component instance and run one replay.
+    #[expect(
+        clippy::expect_used,
+        reason = "each component declares `provides: [IEvictionPolicy]`, so the query cannot \
+                  fail; a failure would be a component-framework bug worth aborting on"
+    )]
     fn run(self, trace: &replay::Trace, cache_size: usize) -> SimStats {
         match self {
             PolicyKind::Lru => {
@@ -125,11 +131,11 @@ struct Cli {
     sharegpt: Option<PathBuf>,
 
     /// Use a local Weka JSONL trace file (one conversation per line, with
-    /// hash_ids and hash_id_scope).
+    /// `hash_ids` and `hash_id_scope`).
     #[arg(long)]
     weka_file: Option<PathBuf>,
 
-    /// Characters per cache block when converting ShareGPT text to block keys
+    /// Characters per cache block when converting `ShareGPT` text to block keys
     /// (approximately 16 tokens at ~4 chars/token).
     #[arg(long, default_value_t = 64)]
     block_chars: usize,
@@ -159,15 +165,20 @@ struct Cli {
     output_pdf: Option<PathBuf>,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "linear CLI driver: resolve trace, print header, run the size x policy grid, \
+              optionally plot; splitting it would only thread the same locals through helpers"
+)]
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
     // Resolve the trace: --sharegpt, --weka-file, --qwen-file, or --dataset (download-on-demand).
     let (trace, source, trace_name) = if let Some(ref p) = cli.sharegpt {
-        let name = p
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| p.display().to_string());
+        let name = p.file_name().map_or_else(
+            || p.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        );
         match eviction_replay_benchmark::sharegpt::load(
             p,
             Some(cli.block_chars),
@@ -184,10 +195,10 @@ fn main() -> ExitCode {
             }
         }
     } else if let Some(ref p) = cli.weka_file {
-        let name = p
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| p.display().to_string());
+        let name = p.file_name().map_or_else(
+            || p.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        );
         match eviction_replay_benchmark::weka::load(p, cli.max_conversations) {
             Ok(t) => (t, format!("weka {}", p.display()), name),
             Err(e) => {
@@ -198,10 +209,10 @@ fn main() -> ExitCode {
     } else {
         let (path, src, name) = match &cli.qwen_file {
             Some(p) => {
-                let name = p
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| p.display().to_string());
+                let name = p.file_name().map_or_else(
+                    || p.display().to_string(),
+                    |n| n.to_string_lossy().into_owned(),
+                );
                 (p.clone(), format!("qwen-file {}", p.display()), name)
             }
             None => match dataset::ensure(cli.dataset.id()) {
@@ -279,11 +290,20 @@ fn main() -> ExitCode {
             .collect();
 
         if best_only {
-            results.sort_by(|a, b| b.1.hit_rate().partial_cmp(&a.1.hit_rate()).unwrap());
+            // hit_rate() is 0.0 or hits/accesses with accesses > 0: never NaN or -0.0,
+            // so total_cmp orders exactly as partial_cmp did.
+            results.sort_by(|a, b| b.1.hit_rate().total_cmp(&a.1.hit_rate()));
             results.truncate(1);
         }
 
         for (kind, s) in &results {
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "ops/s is finite and non-negative; `as` saturates and drops the \
+                          fraction, which is what a whole-number display wants"
+            )]
+            let ops_per_sec = s.ops_per_sec() as u64;
             println!(
                 "{:<14} {:>7} {:>9} {:>6.1}% {:>9} {:>12.1} {:>12.1} {:>12.1} {:>12}",
                 kind.label(),
@@ -294,7 +314,7 @@ fn main() -> ExitCode {
                 s.mean_touch_ns(),
                 s.mean_evict_ns(),
                 s.mean_track_ns(),
-                format_thousands(s.ops_per_sec() as u64),
+                format_thousands(ops_per_sec),
             );
             all_results.push((size, *kind, s.clone()));
         }
@@ -336,7 +356,13 @@ fn parse_cache_size(s: &str) -> Result<usize, String> {
         .trim()
         .parse()
         .map_err(|e| format!("invalid cache size '{s}': {e}"))?;
-    let result = (num * multiplier as f64) as usize;
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "fractional sizes like 1.5M are allowed and truncate to whole blocks; `as` \
+                  saturates, and negative or NaN input becomes 0, which is rejected below"
+    )]
+    let result = (num * f64::from(multiplier)) as usize;
     if result == 0 {
         return Err(format!("cache size must be > 0, got '{s}'"));
     }
@@ -376,11 +402,13 @@ fn generate_pdf(
         }
         let xs: Vec<String> = points.iter().map(|(s, _)| s.to_string()).collect();
         let ys: Vec<String> = points.iter().map(|(_, h)| format!("{h:.2}")).collect();
-        json_series.push_str(&format!(
+        // Writing to a String cannot fail.
+        let _ = write!(
+            json_series,
             "{{\"label\":\"{label}\",\"x\":[{}],\"y\":[{}]}}",
             xs.join(","),
             ys.join(",")
-        ));
+        );
     }
     json_series.push(']');
 
