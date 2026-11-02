@@ -426,6 +426,16 @@ for P/D routing, not a tuned deployment.
     drives.
   - `TIERED=1` without `PD=1` is `profiles/a30/agg-tiered`: the same tiers under
     aggregated serving, with llm-d's tiered-prefix-cache router values.
+- **Checking the router: `deploy/llm-d/router-check.sh`.** Run it after every
+  install and before every measurement. The router's envoy health-checks the
+  endpoint picker and, if it finds it unhealthy, fails open: requests go to the
+  model servers with no P/D decision, no prefix affinity and no fetch, and all
+  of them still succeed, so nothing visibly breaks. The check reads envoy's own
+  view and exits non-zero unless the picker is healthy. `install.sh` passes the
+  picker `--health-checking=true` (without it the picker serves no health
+  service on the port envoy checks) and pins the router chart to v1.0.0, whose
+  picker image is the same release; llm-d's `env.sh` default is the moving tag
+  `v0`, whose picker is `:main` pulled on every restart.
 - **Restarting the prefill pod: restart decode too.** NIXL's decode side caches
   the prefill agent. With the vLLM 0.30 image a restarted prefill can segfault
   decode, or leave it failing every handoff for up to an hour (llm-d's
