@@ -1,4 +1,4 @@
-//! IDispatcher interface and associated types for the dispatcher component.
+//! `IDispatcher` interface and associated types for the dispatcher component.
 
 use std::fmt;
 
@@ -43,7 +43,7 @@ pub struct DispatcherConfig {
     /// Seconds between SSD utilization checks.
     /// Default: 5.
     pub ssd_eviction_interval_secs: u64,
-    /// Base CPU index for NVMe poller threads.
+    /// Base CPU index for `NVMe` poller threads.
     ///
     /// Drive `i`'s actor thread is pinned to CPU `poller_base_cpu + i`.
     /// When `None`, the dispatcher pins each drive's actor to a core on the
@@ -54,7 +54,7 @@ pub struct DispatcherConfig {
     /// Set this to a dedicated core range to give each drive exclusive use of
     /// a core, which is required for SPDK busy-polling to achieve full bandwidth.
     pub poller_base_cpu: Option<usize>,
-    /// Maximum eviction attempts before returning AllocationFailed.
+    /// Maximum eviction attempts before returning `AllocationFailed`.
     /// Default: 2048.
     pub max_eviction_attempts: usize,
     /// Maximum time, in milliseconds, that a store allocation
@@ -290,6 +290,7 @@ impl ServedBy {
     ///
     /// A hit is reported if and only if the lookup succeeded, so a consumer can
     /// compute a hit rate as `hits / total` without knowing the error taxonomy.
+    #[must_use]
     pub fn is_hit(&self) -> bool {
         matches!(self, Self::Dram | Self::Ssd | Self::Remote | Self::Fetched)
     }
@@ -335,7 +336,7 @@ pub struct ClearAll {
 ///
 /// All fields are monotonic since process start; subtract two successive
 /// snapshots to obtain a per-interval delta. Returned by
-/// [`IDispatcher::tier_event_stats`].
+/// `IDispatcher::tier_event_stats`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TierEventStats {
     /// Blocks promoted SSD -> DRAM (memory tier), across all promote paths.
@@ -446,7 +447,7 @@ pub struct TierEventStats {
     /// This is the *other* reason a clean eviction fails, and it involves no reader and
     /// no peer — `reserve_memory`'s own comment names both: the oldest entries are
     /// transiently un-evictable because they are "pinned by an in-flight load, or not
-    /// yet written through by the bg_writer".
+    /// yet written through by the `bg_writer`".
     ///
     /// It is counted rather than inferred by subtraction from
     /// `evictions_blocked_by_pin`, because subtraction would silently absorb every
@@ -744,7 +745,8 @@ component_macros::define_interface! {
         /// DMA-copy from GPU into a previously reserved memory-tier slot.
         ///
         /// The slot must have been allocated by a prior `reserve_memory` call.
-        /// Issues one `cudaMemcpyAsync` per region on the given stream and returns
+        /// Issues the regions' copies on the given stream, batched (`IGpuServices::
+        /// memcpy_batch_async`; one plain copy for a single region), and returns
         /// immediately. The N regions are gathered contiguously into the one slot
         /// (region L lands at `slot + sum of preceding region sizes`), so a block
         /// split into N per-layer GPU allocations (vLLM 0.23+) is stored as one

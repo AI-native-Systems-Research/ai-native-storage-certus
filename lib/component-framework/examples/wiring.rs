@@ -1,7 +1,7 @@
 //! Wiring example: connect two components via a receptacle.
 //!
-//! A StorageComponent provides IStorage.
-//! A CacheComponent requires IStorage (via receptacle) and provides ICache.
+//! A `StorageComponent` provides `IStorage`.
+//! A `CacheComponent` requires `IStorage` (via receptacle) and provides `ICache`.
 //!
 //! Uses `query_interface!` macro for concise interface queries.
 
@@ -66,6 +66,10 @@ impl ICache for CacheComponent {
     }
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "example program: a failed framework call is a bug in the example, and panicking with the error is how it reports it"
+)]
 fn main() {
     let storage = StorageComponent::new();
     let cache = CacheComponent::new();

@@ -1,48 +1,17 @@
 {
-  "applied": "2026-08-20",
-  "component": "eviction-policy-session-lists",
-  "policy": ".specify/sync/PHASE_B_POLICY.md",
-  "source": "drift-report.{json,md} (2026-08-20)",
-  "counts": {
-    "backfill_applied": 1,
-    "backfill_unspecced": 0,
-    "align_tasks": 0,
-    "resolved": 0,
-    "human_decision": 0
-  },
+  "applied": "2026-10-31T04:54:40Z",
+  "backup": "backups/20261031T045440Z/",
   "specs_updated": [
     {
-      "spec": "001-session-list-eviction",
-      "requirement": "SC-001",
-      "change_type": "BACKFILL",
-      "detail": "Re-verified against benches/session_list_benchmark.rs; sharpened wording (named four benches, explicit non-measured design goal, pointer to align-tasks.md Task 1)."
-    },
-    {
-      "spec": "001-session-list-eviction",
-      "requirement": "(metadata)",
-      "change_type": "BACKFILL",
-      "detail": "Added Last-Synced: 2026-08-20 line under Status."
-    }
-  ],
-  "align_tasks_generated": [],
-  "align_tasks_carried_forward": [
-    "align-tasks.md Task 1 — build comparative prefix-reload trace-replay harness (verify/retire SC-001 >=15% target)"
-  ],
-  "unspecced_backfilled": [],
-  "resolved": [],
-  "backups": [
-    {
       "spec": "specs/001-session-list-eviction/spec.md",
-      "backup": ".specify/sync/backups/specs/001-session-list-eviction/spec.md.bak"
+      "requirement": "Observability",
+      "before": "`src/lib.rs:83-87,107-120`",
+      "after": "`src/lib.rs:83-87,149-162` (the `announced` field did not move; the announcement in `create_pool` moved by +42)",
+      "change": "citation",
+      "applied_at": "2026-10-31T04:54:40Z"
     }
   ],
-  "verification": {
-    "edits_confined_to": ["specs/001-session-list-eviction/spec.md", ".specify/sync/"],
-    "rs_source_modified": false,
-    "cargo_run": false
-  },
-  "history": [
-    { "date": "2026-08-07", "note": "First apply pass; SC-001 downgraded (maintainer fork), startup-log backfilled, harness queued. See proposals-20260807.json." },
-    { "date": "2026-08-20", "note": "Re-sync; reaffirmed+sharpened SC-001 BACKFILL, added Last-Synced metadata." }
-  ]
+  "align_tasks_generated": 0,
+  "not_applied": [],
+  "source_files_changed": 0
 }

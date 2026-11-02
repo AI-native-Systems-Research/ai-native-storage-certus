@@ -58,11 +58,21 @@ impl Shadow {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test-file helper outside a #[test] fn; a broken shadow model must fail the test"
+    )]
     fn remove(&mut self, key: CacheKey) {
         if let Some(session) = self.session_of.remove(&key) {
             self.stamp.remove(&key);
-            let chain = self.sessions.get_mut(&session).unwrap();
-            let pos = chain.iter().position(|&k| k == key).unwrap();
+            let chain = self
+                .sessions
+                .get_mut(&session)
+                .expect("a live key's session has a chain");
+            let pos = chain
+                .iter()
+                .position(|&k| k == key)
+                .expect("a live key is on its session's chain");
             chain.remove(pos);
             if chain.is_empty() {
                 self.sessions.remove(&session);
@@ -71,10 +81,14 @@ impl Shadow {
     }
 
     /// Current leaves (chain tops), i.e. the eviction candidates.
+    #[expect(
+        clippy::expect_used,
+        reason = "test-file helper outside a #[test] fn; a broken shadow model must fail the test"
+    )]
     fn leaves(&self) -> Vec<CacheKey> {
         self.sessions
             .values()
-            .map(|chain| *chain.last().unwrap())
+            .map(|chain| *chain.last().expect("empty chains are removed"))
             .collect()
     }
 
@@ -96,15 +110,26 @@ impl Shadow {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test-file helper outside a #[test] fn; a missing interface must fail the test"
+)]
 fn ep() -> Arc<dyn IEvictionPolicy + Send + Sync> {
     let comp = EvictionPolicySessionListsComponent::new_default();
-    query_interface!(comp, IEvictionPolicy).unwrap()
+    query_interface!(comp, IEvictionPolicy).expect("the component provides IEvictionPolicy")
 }
 
 #[test]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "random u64 is reduced modulo the live-set length; dropping high bits on a \
+              32-bit target only changes which index is picked"
+)]
 fn random_operations_match_reference_model() {
+    const SESSIONS: u64 = 12;
+
     // Deterministic xorshift RNG — no external crate, reproducible.
-    let mut s: u64 = 0xD1B54A32D192ED03;
+    let mut s: u64 = 0xD1B5_4A32_D192_ED03;
     let mut next = move || {
         s ^= s << 13;
         s ^= s >> 7;
@@ -120,7 +145,6 @@ fn random_operations_match_reference_model() {
     let mut handles: HashMap<CacheKey, EvictionHandle> = HashMap::new();
     let mut live: Vec<CacheKey> = Vec::new();
     let mut next_key: CacheKey = 1;
-    const SESSIONS: u64 = 12;
 
     for _ in 0..8_000 {
         match next() % 6 {

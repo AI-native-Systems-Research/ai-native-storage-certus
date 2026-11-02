@@ -56,6 +56,10 @@ define_component! {
 }
 
 impl IProcessor for ProcessorComp {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test component: every test connects the receptacle before calling it; an unconnected one is a test bug and must panic"
+    )]
     fn process(&self, input: &str) -> String {
         let store = self.store.get().unwrap();
         match store.get(input) {
@@ -76,6 +80,10 @@ define_component! {
 }
 
 impl IFrontend for FrontendComp {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test component: every test connects the receptacle before calling it; an unconnected one is a test bug and must panic"
+    )]
     fn handle_request(&self, req: &str) -> String {
         let proc = self.processor.get().unwrap();
         format!("response:{}", proc.process(req))

@@ -85,6 +85,11 @@ pub struct Trace {
 /// Lines that are blank or carry an empty `hash_ids` array (e.g. image/file
 /// requests with no cached token blocks) are skipped. Returns an error if the
 /// file cannot be read or a line is not valid JSON in the expected shape.
+///
+/// # Errors
+///
+/// Returns an error if `path` cannot be opened or read, or (`InvalidData`) if
+/// a non-blank line is not a valid trace record.
 pub fn load(path: &Path, max_conversations: Option<usize>) -> io::Result<Trace> {
     let reader = BufReader::new(File::open(path)?);
     let mut ops = Vec::new();
@@ -146,6 +151,11 @@ pub fn load(path: &Path, max_conversations: Option<usize>) -> io::Result<Trace> 
         } else {
             raw.request_type
         };
+        #[expect(
+            clippy::cast_sign_loss,
+            reason = "bit-preserving reinterpretation: distinct chat ids map to distinct \
+                      session ids, which is all a session id needs to be"
+        )]
         ops.push(Op {
             method,
             keys,

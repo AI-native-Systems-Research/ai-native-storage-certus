@@ -111,38 +111,45 @@ pub struct SharedInstance {
 impl SharedInstance {
     /// Key identity — the salt's `instance_index`. Monotonic within a class, so a
     /// replacement never inherits its predecessor's keys.
+    #[must_use]
     pub fn mint(&self) -> u64 {
         self.mint
     }
 
     /// Bounded selection index, reused after death so that popularity attached to
     /// a position outlives its occupant.
+    #[must_use]
     pub fn slot(&self) -> u32 {
         self.slot
     }
 
     /// Blocks in this instance, drawn once at creation.
+    #[must_use]
     pub fn length_blocks(&self) -> u64 {
         self.length_blocks
     }
 
     /// Virtual time this instance was created.
+    #[must_use]
     pub fn born_at(&self) -> f64 {
         self.born_at
     }
 
     /// Virtual time this instance stops being selectable.
+    #[must_use]
     pub fn dies_at(&self) -> f64 {
         self.dies_at
     }
 
     /// Sessions currently using it.
+    #[must_use]
     pub fn users(&self) -> u32 {
         self.users
     }
 
     /// Whether its lifetime has expired. A retired instance is unselectable but
     /// still usable by the sessions already holding it (FR-018).
+    #[must_use]
     pub fn retired(&self) -> bool {
         self.retired
     }
@@ -196,12 +203,14 @@ pub struct Held {
 
 impl Held {
     /// Key identity of the held instance — the salt's `instance_index`.
+    #[must_use]
     pub fn mint(&self) -> u64 {
         self.mint
     }
 
     /// Class this hold belongs to. [`SharedPool::release`] refuses a hold from
     /// another class, since the handle would name an unrelated instance.
+    #[must_use]
     pub fn class_id(&self) -> u64 {
         self.class_id
     }
@@ -310,11 +319,13 @@ impl ResidualLife {
     }
 
     /// Effective mean of the underlying lifetime, after truncation.
+    #[must_use]
     pub fn mean_lifetime(&self) -> f64 {
         self.mean_lifetime
     }
 
     /// Whether the lifetime is unbounded, making the pool mint-once (FR-017).
+    #[must_use]
     pub fn immortal(&self) -> bool {
         self.immortal
     }
@@ -405,6 +416,10 @@ impl SharedPool {
         let residual = ResidualLife::build(&lifetime, rng);
         // FR-013: births are a free-running process at rate N / E[lifetime].
         // There is no error term and no gain; the target enters only here.
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a population target; inexact only above 2^53 instances"
+        )]
         let birth_rate = match (form, residual.immortal()) {
             (Population::Poisson(n), false) => n as f64 / residual.mean_lifetime(),
             _ => 0.0,
@@ -432,6 +447,7 @@ impl SharedPool {
     }
 
     /// The class's declaration index.
+    #[must_use]
     pub fn class_id(&self) -> u64 {
         self.class_id
     }
@@ -448,7 +464,7 @@ impl SharedPool {
     ///
     /// If called twice.
     pub fn seed<R: Rng + ?Sized>(&mut self, t0: f64, rng: &mut R) {
-        self.seed_with_policy(t0, SeedingPolicy::Equilibrium, rng)
+        self.seed_with_policy(t0, SeedingPolicy::Equilibrium, rng);
     }
 
     /// Seed at `t0` under an explicit [`SeedingPolicy`].
@@ -472,6 +488,10 @@ impl SharedPool {
         self.seeded = true;
         self.now = t0;
         let nominal = self.form.nominal();
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a population target; inexact only above 2^53 instances"
+        )]
         let initial = match self.form {
             Population::Exact(n) => n,
             Population::Poisson(n) => poisson(rng, n as f64),
@@ -492,11 +512,9 @@ impl SharedPool {
     }
 
     /// The next virtual time at which this pool changes, if any.
+    #[must_use]
     pub fn next_event_at(&self) -> Option<f64> {
-        let death = self
-            .peek_death()
-            .map(|(_, _, at)| at)
-            .unwrap_or(f64::INFINITY);
+        let death = self.peek_death().map_or(f64::INFINITY, |(_, _, at)| at);
         let next = death.min(self.next_birth_at);
         if next.is_finite() {
             Some(next)
@@ -506,18 +524,23 @@ impl SharedPool {
     }
 
     /// Advance to `t`, processing deaths and births in virtual-time order.
+    ///
+    /// # Panics
+    ///
+    /// If the pool has not been seeded.
     pub fn advance_to<R: Rng + ?Sized>(&mut self, t: f64, rng: &mut R) {
         assert!(self.seeded, "pool advanced before being seeded");
         loop {
             let death = self.peek_death();
-            let next = death.map(|(_, _, at)| at).unwrap_or(f64::INFINITY);
+            let next = death.map_or(f64::INFINITY, |(_, _, at)| at);
             let birth = self.next_birth_at;
             let step = next.min(birth);
             if step > t || !step.is_finite() {
                 break;
             }
-            if next <= birth {
-                let (slot, mint, at) = death.expect("a finite death time has a slot");
+            // `step` is finite here, so `next <= birth` implies a finite `next`,
+            // which only a death entry provides.
+            if let Some((slot, mint, at)) = death.filter(|_| next <= birth) {
                 debug_assert!(
                     self.entry_is_live(slot, mint),
                     "stale death entry for slot {slot} mint {mint}; the heap is \
@@ -553,11 +576,13 @@ impl SharedPool {
     }
 
     /// Number of selectable instances.
+    #[must_use]
     pub fn live(&self) -> usize {
         self.slots.iter().flatten().count()
     }
 
     /// Instance occupying a selection slot, if any.
+    #[must_use]
     pub fn by_slot(&self, slot: u32) -> Option<&SharedInstance> {
         self.slots
             .get(slot as usize)
@@ -575,6 +600,7 @@ impl SharedPool {
 
     /// Highest slot ever occupied, plus one — the realised width of the selection
     /// index space.
+    #[must_use]
     pub fn slot_capacity(&self) -> usize {
         self.slots.len()
     }
@@ -582,16 +608,19 @@ impl SharedPool {
     /// Total instances ever created. Bounded by the salt's 26-bit
     /// `instance_index` field, which the pre-flight projection must check against
     /// the run's span.
+    #[must_use]
     pub fn total_mints(&self) -> u64 {
         self.total_mints
     }
 
     /// Effective mean lifetime after truncation.
+    #[must_use]
     pub fn mean_lifetime(&self) -> f64 {
         self.residual.mean_lifetime()
     }
 
     /// Births per virtual second, or zero for an exact or mint-once pool.
+    #[must_use]
     pub fn birth_rate(&self) -> f64 {
         self.birth_rate
     }
@@ -603,6 +632,7 @@ impl SharedPool {
     /// variance equal to it, so it is a target rather than a guarantee. Selection
     /// bounds a draw by `min(nominal, live)` (FR-022), and the two bounds mean
     /// different things — see `selection.rs`.
+    #[must_use]
     pub fn nominal(&self) -> u64 {
         self.form.nominal()
     }
@@ -664,6 +694,12 @@ impl SharedPool {
     ///
     /// If the hold has been released, or belongs to another pool — both are
     /// programming errors rather than states the simulation can reach.
+    #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "a live hold keeps its arena entry allocated; a freed one is the \
+                  programming error documented under Panics"
+    )]
     pub fn held(&self, held: &Held) -> &SharedInstance {
         assert_eq!(
             held.class_id, self.class_id,
@@ -692,6 +728,16 @@ impl SharedPool {
     ///
     /// If the hold belongs to another pool, or names an instance that has already
     /// been freed.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "taking the hold by value consumes it, so a released hold cannot be \
+                  used or released again"
+    )]
+    #[expect(
+        clippy::expect_used,
+        reason = "a live hold keeps its arena entry allocated; a freed one is the \
+                  programming error documented under Panics"
+    )]
     pub fn release(&mut self, held: Held) {
         assert_eq!(
             held.class_id, self.class_id,
@@ -721,6 +767,7 @@ impl SharedPool {
 
     /// Retired instances still held by at least one session — the population that
     /// exists but cannot be selected.
+    #[must_use]
     pub fn retained(&self) -> usize {
         self.retained
     }
@@ -731,6 +778,7 @@ impl SharedPool {
     /// of `live() + retained()`. It is exposed because "bookkeeping is freed" is a
     /// claim about this number staying bounded, and a test should be able to check
     /// it rather than take it on trust.
+    #[must_use]
     pub fn arena_len(&self) -> usize {
         self.instances.len()
     }
@@ -787,18 +835,21 @@ impl SharedPool {
     fn mint<R: Rng + ?Sized>(&mut self, born_at: f64, dies_at: f64, rng: &mut R) -> u32 {
         // Lowest free slot, so the index space stays compact instead of growing
         // with the number of births.
-        let slot = match self.free_slots.pop() {
-            Some(s) => {
-                debug_assert!(
-                    self.slots[s as usize].is_none(),
-                    "slot {s} was free-listed while still occupied"
-                );
-                s
-            }
-            None => {
-                self.slots.push(None);
-                (self.slots.len() - 1) as u32
-            }
+        let slot = if let Some(s) = self.free_slots.pop() {
+            debug_assert!(
+                self.slots[s as usize].is_none(),
+                "slot {s} was free-listed while still occupied"
+            );
+            s
+        } else {
+            self.slots.push(None);
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "slots are u32 by design; the slot table only grows to the peak \
+                          live count, far below 2^32"
+            )]
+            let slot = (self.slots.len() - 1) as u32;
+            slot
         };
         self.mint_in_slot(slot, born_at, dies_at, rng);
         slot
@@ -811,7 +862,7 @@ impl SharedPool {
         dies_at: f64,
         rng: &mut R,
     ) {
-        let length_blocks = self.length.sample_int(rng).max(1) as u64;
+        let length_blocks = self.length.sample_int(rng).max(1).unsigned_abs();
         let inst = SharedInstance {
             mint: self.next_mint,
             slot,
@@ -823,15 +874,12 @@ impl SharedPool {
         };
         self.next_mint += 1;
         self.total_mints += 1;
-        let handle = match self.free_handles.pop() {
-            Some(h) => {
-                self.instances[h] = Some(inst);
-                h
-            }
-            None => {
-                self.instances.push(Some(inst));
-                self.instances.len() - 1
-            }
+        let handle = if let Some(h) = self.free_handles.pop() {
+            self.instances[h] = Some(inst);
+            h
+        } else {
+            self.instances.push(Some(inst));
+            self.instances.len() - 1
         };
         if (slot as usize) >= self.slots.len() {
             self.slots.resize(slot as usize + 1, None);

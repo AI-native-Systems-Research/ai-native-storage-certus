@@ -52,9 +52,9 @@ pub struct SpscChannel<T: Send + 'static> {
     state: Arc<ChannelState<T>>,
     sender_bound: Arc<AtomicBool>,
     receiver_bound: Arc<AtomicBool>,
-    /// Lazily created sender interface for IUnknown queries.
+    /// Lazily created sender interface for `IUnknown` queries.
     sender_iface: OnceLock<Box<dyn Any + Send + Sync>>,
-    /// Lazily created receiver interface for IUnknown queries.
+    /// Lazily created receiver interface for `IUnknown` queries.
     receiver_iface: OnceLock<Box<dyn Any + Send + Sync>>,
     /// Cached interface metadata for introspection.
     interface_info: Vec<InterfaceInfo>,
@@ -80,6 +80,7 @@ impl<T: Send + 'static> SpscChannel<T> {
     ///
     /// let ch = SpscChannel::<u32>::new(64);
     /// ```
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         let queue = RingBuffer::new(capacity);
         let state = Arc::new(ChannelState {
@@ -90,6 +91,7 @@ impl<T: Send + 'static> SpscChannel<T> {
             receiver_parked: std::sync::atomic::AtomicBool::new(false),
             sender_parked: std::sync::atomic::AtomicBool::new(false),
             force_closed: std::sync::atomic::AtomicBool::new(false),
+            receiver_closed: std::sync::atomic::AtomicBool::new(false),
         });
 
         let interface_info = vec![
@@ -122,6 +124,7 @@ impl<T: Send + 'static> SpscChannel<T> {
     ///
     /// let ch = SpscChannel::<String>::with_default_capacity();
     /// ```
+    #[must_use]
     pub fn with_default_capacity() -> Self {
         Self::new(1024)
     }
@@ -150,6 +153,7 @@ impl<T: Send + 'static> SpscChannel<T> {
     /// tx.send(42).unwrap();
     /// assert_eq!(rx.recv().unwrap(), 42);
     /// ```
+    #[must_use]
     pub fn new_numa(capacity: usize, _node: usize) -> Self {
         Self::new(capacity)
     }
@@ -296,7 +300,7 @@ impl<T: Send + 'static> IUnknown for SpscChannel<T> {
         }
     }
 
-    fn version(&self) -> &str {
+    fn version(&self) -> &'static str {
         "1.0.0"
     }
 
@@ -324,6 +328,35 @@ mod tests {
     use super::*;
     use crate::iunknown::query;
     use std::thread;
+
+    #[test]
+    fn send_returns_closed_when_the_receiver_is_gone_and_the_queue_is_full() {
+        // Used to spin/park forever: nothing drains the queue once the receiver drops.
+        let ch = SpscChannel::<u32>::new(2);
+        let (tx, rx) = ch.split().unwrap();
+        tx.send(1).unwrap();
+        tx.send(2).unwrap();
+        drop(rx);
+        assert_eq!(tx.send(3).unwrap_err(), ChannelError::Closed);
+    }
+
+    #[test]
+    fn send_buffers_before_any_receiver_and_reopens_for_a_new_one() {
+        let ch = SpscChannel::<u32>::new(2);
+        let tx = ch.sender().unwrap();
+        tx.send(1).unwrap(); // no receiver yet: buffered, not Closed
+        let rx = ch.receiver().unwrap();
+        assert_eq!(rx.recv().unwrap(), 1);
+        drop(rx);
+        tx.send(2).unwrap();
+        tx.send(3).unwrap();
+        assert_eq!(tx.send(4).unwrap_err(), ChannelError::Closed);
+        let rx = ch.receiver().unwrap(); // a new receiver reopens the channel
+        assert_eq!(rx.recv().unwrap(), 2);
+        tx.send(4).unwrap();
+        assert_eq!(rx.recv().unwrap(), 3);
+        assert_eq!(rx.recv().unwrap(), 4);
+    }
 
     #[test]
     fn new_creates_channel() {

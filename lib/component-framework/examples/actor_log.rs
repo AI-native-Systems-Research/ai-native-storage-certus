@@ -34,6 +34,11 @@ impl IExampleLog for ExampleLog {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "example program: a failed framework call is a bug in the example, and panicking with the error is how it reports it"
+)]
 fn main() {
     println!("=== Logging Actor Example ===\n");
 

@@ -11,6 +11,10 @@ struct DoublerHandler {
 }
 
 impl ActorHandler<u64> for DoublerHandler {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test handler: a closed output channel means the pipeline under test broke, so panicking fails the test"
+    )]
     fn handle(&mut self, msg: u64) {
         self.output.send(msg * 2).unwrap();
     }
@@ -22,6 +26,10 @@ struct CollectorHandler {
 }
 
 impl ActorHandler<u64> for CollectorHandler {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the shared mutex is only poisoned if another thread already panicked; re-panicking is the intended response"
+    )]
     fn handle(&mut self, msg: u64) {
         self.collected.lock().unwrap().push(msg);
     }
@@ -47,11 +55,8 @@ fn two_actors_through_spsc_channel() {
 
     // Spawn a thread to forward from channel to consumer actor
     let forward_handle = std::thread::spawn(move || {
-        loop {
-            match rx.recv() {
-                Ok(val) => consumer_handle.send(val).unwrap(),
-                Err(_) => break,
-            }
+        while let Ok(val) = rx.recv() {
+            consumer_handle.send(val).unwrap();
         }
         consumer_handle.deactivate().unwrap();
     });
@@ -94,11 +99,8 @@ fn three_stage_pipeline_producer_doubler_consumer() {
 
     // Forward ch2 -> consumer actor
     let forward2 = std::thread::spawn(move || {
-        loop {
-            match rx2.recv() {
-                Ok(val) => consumer_handle.send(val).unwrap(),
-                Err(_) => break,
-            }
+        while let Ok(val) = rx2.recv() {
+            consumer_handle.send(val).unwrap();
         }
         consumer_handle.deactivate().unwrap();
     });
@@ -109,11 +111,8 @@ fn three_stage_pipeline_producer_doubler_consumer() {
 
     // Forward ch1 -> doubler actor
     let forward1 = std::thread::spawn(move || {
-        loop {
-            match rx1.recv() {
-                Ok(val) => doubler_handle.send(val).unwrap(),
-                Err(_) => break,
-            }
+        while let Ok(val) = rx1.recv() {
+            doubler_handle.send(val).unwrap();
         }
         doubler_handle.deactivate().unwrap();
     });

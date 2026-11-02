@@ -106,14 +106,14 @@ Reports the latency of lookups answering hit and miss separately (`lookup_hit`, 
 
 #### Contention mode (`--mode contention`)
 
-Runs store and load streams from separate threads against the same ring. Reveals server-side contention (reserve vs pin, copy_to_store vs lookup, write-through vs promote).
+Runs store and load streams from separate threads against the same ring. Reveals server-side contention (reserve vs pin, copy_to_store vs lookup, write-through vs promote). The load thread reads only the batch the store thread committed most recently (a one-entry mailbox; batches replaced before it got to them are reported as `Skipped store batches`), so it does not fall behind the store: with the earlier oldest-first queue a faster store let the backlog grow until every batch the load reached had been demoted to SSD. A batch can still be demoted while the load is reading it, under eviction pressure; a slow load still shows as lower load throughput.
 
 ```bash
 python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --mode contention --min-duration 10 --working-set 1024
 ```
 
-Reports per-thread throughput and latency. Compare against `--mode default` to see the contention penalty.
+Reports per-thread throughput and latency, and `Contention: Load Alone`: before the concurrent window the load thread loads freshly stored batches on its own for 3 s (`CONTENTION_ALONE_SECONDS`), with the same managers, worker and keys, and only the load timed; the memory tier is then flushed and cleared, so the concurrent window starts empty. `Load service throughput` puts both on one basis (blocks over the time spent loading them; the load thread's own throughput is over the whole window, its start delay and waits included). Compare the load thread against that, not against `--mode default`: the warm load there runs on the manager that stored its keys, whose commit-group record answers most of a batch's lookups from one Check, which the contention load's own manager cannot do.
 
 #### Scheduler-step mode (`--mode scheduler-step`)
 
@@ -225,7 +225,7 @@ in 32 different allocations, and certus-server copies each piece separately.
 layout, which the Certus connector did not; see
 `knowledge/inference_workload_mapping.md`, "Layout history".) The
 default, 1, is one contiguous region per block, as under vLLM 0.20/0.22 and under
-the block-outermost `BLHNC` layout that `CertusConnector` requests. It is a count
+the block-outermost `BLHNC` layout (`CertusConnector` with `CERTUS_KV_CACHE_LAYOUT=BLHNC`). It is a count
 of pieces, not of model layers: the same 32-layer model gives 32 pieces under
 `LBHNC` and 1 under `BLHNC`. `--block-bytes` must be divisible by N.
 

@@ -124,6 +124,11 @@ impl NodeLost {
     /// means it is answering something this build cannot use. There is no variant worth
     /// retrying — a retry would extend the window in which the run is measuring a cluster it no
     /// longer has.
+    #[must_use]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "public signature: callers hand over the error from `map_err`, which owns it"
+    )]
     pub fn from_client(node: &str, during: &'static str, e: ClientError) -> Self {
         Self {
             node: node.to_string(),
@@ -158,6 +163,7 @@ impl AgentSpec {
     /// The command line this spec launches, as a list of arguments.
     ///
     /// Separated from the launching so a test can check what would be run without running it.
+    #[must_use]
     pub fn command(&self) -> Vec<String> {
         let mut args = vec![
             self.binary.clone(),
@@ -177,6 +183,7 @@ impl AgentSpec {
     }
 
     /// `host:port`, which is what the client connects to.
+    #[must_use]
     pub fn address(&self) -> String {
         format!("{}:{}", self.node, self.port)
     }
@@ -187,6 +194,7 @@ impl AgentSpec {
     /// coincide because an instance is reached where it is, but one is a socket address and the
     /// other is a name. `node` alone will not do — a host runs several instances, so two rows
     /// reading `node5` are not a report.
+    #[must_use]
     pub fn label(&self) -> String {
         self.address()
     }
@@ -291,6 +299,7 @@ impl Default for LocalLauncher {
 
 impl LocalLauncher {
     /// A launcher writing agent output under `log_dir`.
+    #[must_use]
     pub fn with_log_dir(log_dir: PathBuf) -> Self {
         Self {
             started: Mutex::new(HashMap::new()),
@@ -330,14 +339,17 @@ impl Launcher for LocalLauncher {
             })?;
         self.started
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(spec.port, child);
         eprintln!("local agent on port {}: {}", spec.port, path.display());
         Ok(())
     }
 
     fn why_not_listening(&self, spec: &AgentSpec) -> Option<String> {
-        let mut started = self.started.lock().unwrap_or_else(|e| e.into_inner());
+        let mut started = self
+            .started
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let child = started.get_mut(&spec.port)?;
         // Still running and simply not listening yet is not a diagnosis, so say nothing.
         let status = child.try_wait().ok().flatten()?;
@@ -362,18 +374,19 @@ impl Launcher for LocalLauncher {
     }
 
     fn kill(&self, spec: &AgentSpec) -> Result<(), String> {
-        let mut started = self.started.lock().unwrap_or_else(|e| e.into_inner());
+        let mut started = self
+            .started
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(mut child) = started.remove(&spec.port) {
             // Already gone is the ordinary case after a clean `Shutdown`, and killing a reaped
             // PID would be at best pointless and at worst somebody else's process.
-            match child.try_wait() {
-                Ok(Some(_)) => return Ok(()),
-                _ => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Ok(());
-                }
+            if let Ok(Some(_)) = child.try_wait() {
+                return Ok(());
             }
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(());
         }
         drop(started);
         // A leftover from a *previous* generator process: its PID is gone, so the port-scoped
@@ -401,7 +414,7 @@ impl Launcher for LocalLauncher {
 /// `Agents::stop` returns once the agent's **port** has gone quiet, which happens when its
 /// listener closes — and the process still has its own teardown to do after that: releasing
 /// mailbox channels and freeing a device allocation. Without a grace period the reap below
-/// SIGKILLed a healthy agent a few milliseconds into that, printing an alarming line about an
+/// `SIGKILLed` a healthy agent a few milliseconds into that, printing an alarming line about an
 /// agent that had done nothing wrong and cutting short exactly the cleanup FR-053 is about.
 ///
 /// Derived from the agent's own linger rather than picked, and that is the whole point. An agent
@@ -419,7 +432,10 @@ impl Drop for LocalLauncher {
         // A backstop, not the mechanism: `Agents::stop` asks each agent to exit and verifies its
         // port went quiet. This reaps a child that ignored that, so a generator run cannot leave a
         // process holding this node's mailbox channels behind it.
-        let mut started = self.started.lock().unwrap_or_else(|e| e.into_inner());
+        let mut started = self
+            .started
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         for (port, child) in started.iter_mut() {
             let deadline = Instant::now() + EXIT_GRACE;
             let mut exited = false;
@@ -453,6 +469,7 @@ impl Drop for LocalLauncher {
 /// a cargo build puts it and `run description.yml` is meant to need no setup. A name containing a
 /// separator is taken as given. Remote specs are never resolved here: the path belongs to the
 /// remote filesystem, and guessing from this one would name a file that node does not have.
+#[must_use]
 pub fn local_agent_binary(name: &str) -> String {
     if name.contains('/') {
         return name.to_string();
@@ -561,11 +578,13 @@ pub struct Agent {
 
 impl Agent {
     /// Lanes on this node.
+    #[must_use]
     pub fn lane_count(&self) -> usize {
         self.lanes.len()
     }
 
     /// What this agent was started from.
+    #[must_use]
     pub fn spec(&self) -> &AgentSpec {
         &self.spec
     }
@@ -727,8 +746,8 @@ impl Agents {
         // killed it first, which leaks the claims into the shared segment where only a server
         // restart clears them. Four refused runs against an eight-channel mailbox and the fifth
         // cannot start. Found by running the same smoke test five times.
-        let mut launched: Vec<AgentSpec> = Vec::new();
-        match Self::start_inner(launcher, specs, depth, replace, read_timeout, &mut launched) {
+        let mut spawned: Vec<AgentSpec> = Vec::new();
+        match Self::start_inner(launcher, specs, depth, replace, read_timeout, &mut spawned) {
             Ok(agents) => Ok(agents),
             Err(e) => {
                 // Only what **this** launcher started. `replace` false means the caller manages
@@ -736,7 +755,7 @@ impl Agents {
                 // them with nothing to talk to and nothing able to start it again — which is the
                 // very reason that flag exists.
                 if replace {
-                    for spec in &launched {
+                    for spec in &spawned {
                         // Asked first, killed second: a `Shutdown` lets the agent release its
                         // channels and its device memory in order, and it is answered whatever the
                         // agent's provenance — which matters, because a provenance refusal is the
@@ -758,7 +777,7 @@ impl Agents {
         depth: usize,
         replace: bool,
         read_timeout: Duration,
-        launched: &mut Vec<AgentSpec>,
+        spawned: &mut Vec<AgentSpec>,
     ) -> Result<Self, String> {
         assert!(depth > 0, "a pipelining depth of 0 could never send");
         let mut agents = Vec::with_capacity(specs.len());
@@ -781,7 +800,7 @@ impl Agents {
                 }
             }
             launcher.launch(spec)?;
-            launched.push(spec.clone());
+            spawned.push(spec.clone());
             // One connection per lane: the agent claims a mailbox channel per connection, and the
             // mailbox is depth-1 per channel, so this is the whole of a node's concurrency. The
             // first connection is also what proves the agent came up at all.
@@ -814,6 +833,11 @@ impl Agents {
                 ack = Some(this);
                 lanes.push(client);
             }
+            #[expect(
+                clippy::expect_used,
+                reason = "`spec.lanes == 0` returned early above, so the lane loop ran at least \
+                          once and set `ack`"
+            )]
             agents.push(Agent {
                 node: spec.label(),
                 ack: ack.expect("at least one lane, checked above"),
@@ -865,21 +889,25 @@ impl Agents {
     }
 
     /// How many nodes are in the run.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.agents.len()
     }
 
     /// Lanes across every node, which is how many consumers the driver runs.
+    #[must_use]
     pub fn total_lanes(&self) -> usize {
         self.agents.iter().map(|a| a.lanes.len()).sum()
     }
 
     /// Lanes per node, which is uniform because every spec is built from one `--lanes`.
+    #[must_use]
     pub fn lanes_per_node(&self) -> usize {
-        self.agents.first().map(|a| a.lanes.len()).unwrap_or(0)
+        self.agents.first().map_or(0, |a| a.lanes.len())
     }
 
     /// Whether no agent was started.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.agents.is_empty()
     }
@@ -1084,7 +1112,8 @@ fn describe(spec: &AgentSpec, e: HandshakeError) -> String {
     }
 }
 
-#[cfg(all(test, feature = "workload-tests"))]
+#[cfg(test)]
+#[cfg(feature = "workload-tests")]
 mod tests {
     use super::*;
 

@@ -23,6 +23,10 @@ impl IBenchLogger for LogProvider {
     }
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+)]
 fn bench_receptacle(c: &mut Criterion) {
     let provider = LogProvider::new();
     let ilogger: Arc<dyn IBenchLogger + Send + Sync> =
@@ -33,7 +37,7 @@ fn bench_receptacle(c: &mut Criterion) {
         b.iter(|| {
             r.connect(black_box(ilogger.clone())).unwrap();
             r.disconnect().unwrap();
-        })
+        });
     });
 
     c.bench_function("receptacle_get", |b| {
@@ -41,7 +45,7 @@ fn bench_receptacle(c: &mut Criterion) {
         r.connect(ilogger.clone()).unwrap();
         b.iter(|| {
             let _ = black_box(r.get().unwrap());
-        })
+        });
     });
 }
 

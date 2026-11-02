@@ -25,6 +25,14 @@
 > `flush_to_ssd` result contracts), FR-021, FR-023, Overview/FR-009 gating, NFR-002 and
 > the Implementation Notes. See `.specify/sync/apply-report.md`.
 
+> **Last Synced 2026-10-30** (branch `specsync-a`, optimizer session `s20261029-094947`
+> merged onto unstable): backfilled FR-011 (`IGpuServices::memcpy_batch_async`, added in
+> `4941320a`) and the Implementation Notes line citation; `plan.md` method counts
+> recounted. The clippy commit `55a4ddd4` (doc comments, `#[must_use]`, SAFETY comments,
+> `GpuDmaBuffer` `Debug` via `finish_non_exhaustive()`, `# Errors`/`# Panics` on
+> `WriteHandle::publish` and `IZyreNode`) contradicts no requirement. See
+> `.specify/sync/apply-report.md`.
+
 ## Overview
 
 The `interfaces` crate provides centralized trait definitions for all Certus component interfaces. It allows components to depend on interface definitions without pulling in implementation crates, enforcing low coupling and enabling independent development. Interfaces are defined using the `define_interface!` procedural macro from `component-macros`, and all components implement `IUnknown` for runtime interface discovery.
@@ -260,6 +268,7 @@ The crate has three Cargo features:
 - **Method**: `memcpy_h2d_async(&self, src, dst, size, stream) -> Result<(), String>` (feature: spdk) - Async raw-pointer H2D copy.
 - **Method**: `dma_copy_to_host_async(&self, src, dst, size, stream) -> Result<(), String>` (feature: spdk) - Async GPU-to-host copy.
 - **Method**: `memcpy_d2h_async(&self, src, dst, size, stream) -> Result<(), String>` (feature: spdk) - Async raw-pointer D2H copy.
+- **Method**: `memcpy_batch_async(&self, dsts: &[*mut c_void], srcs: &[*const c_void], sizes: &[usize], stream: GpuStream) -> Result<(), String>` (feature: spdk) *(Sync 2026-10-30 — CODE CHANGE, commit `4941320a`)* - Submit a batch of raw-pointer copies in one call (`cudaMemcpyBatchAsync`): entry `i` copies `sizes[i]` bytes from `srcs[i]` to `dsts[i]`, and the direction (H2D or D2H) comes from the pointers. The batch as a whole runs in stream order on `stream`, but there is **no order among its entries**, so the entries MUST NOT overlap or depend on each other. Caller contract: every pointer is valid for its size until the stream is synchronized, host pointers are CUDA-pinned, and `stream` is a created stream — the legacy NULL stream is not accepted by the batch API, so a caller with no created stream uses the per-copy `memcpy_h2d_async`/`memcpy_d2h_async` instead. Returns `Err` if GPU support is not compiled in, the component is not initialized, the three slices differ in length, or the CUDA call fails; an empty batch is `Ok` with no CUDA call. Used by the dispatcher to submit one block's piece copies at once (dispatcher spec 001 FR-056).
 - **Method**: `allocate_pinned_dma_buffer(&self, size) -> Result<DmaBuffer, String>` (feature: spdk) - Allocate CUDA-pinned + SPDK-registered buffer.
 - **Method**: `register_host_memory(&self, ptr, size) -> Result<(), String>` (feature: spdk) - Register existing memory for DMA.
 - **Method**: `unregister_host_memory(&self, ptr, size) -> Result<(), String>` (feature: spdk) - Unregister host memory.
@@ -585,4 +594,4 @@ The crate has three Cargo features:
 - SPDK-gated interfaces are conditionally compiled at the module level (`#[cfg(feature = "spdk")]`).
 - `DmaBuffer::Drop` checks the global `SPDK_ENV_ACTIVE` flag to avoid calling into torn-down SPDK infrastructure.
 - `WriteHandle` uses `Option<Box<dyn FnOnce()>>` closures for publish/abort, consumed on first call, with drop guard for abort.
-- Verification status is not recorded in the interface definitions: per-property proof claims were removed from `IDispatchMap`, `IDispatcher`, `IExtentManager` and `IMemoryTier` in `a93b5620f` (2026-08-20) and live with each component's verification artifacts. `IGpuServices` still carries a comment summarising `components/gpu-services/verif/` (`src/igpu_services.rs:231-246`).
+- Verification status is not recorded in the interface definitions: per-property proof claims were removed from `IDispatchMap`, `IDispatcher`, `IExtentManager` and `IMemoryTier` in `a93b5620f` (2026-08-20) and live with each component's verification artifacts. `IGpuServices` still carries a comment summarising `components/gpu-services/verif/` (`src/igpu_services.rs:250-265`).

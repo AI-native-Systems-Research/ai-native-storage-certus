@@ -60,6 +60,7 @@ impl ComponentRef {
     /// Creates a new handle to the same component (increments reference count).
     ///
     /// Equivalent to `Clone::clone`.
+    #[must_use]
     pub fn attach(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),
@@ -69,6 +70,7 @@ impl ComponentRef {
     /// Returns the current strong reference count.
     ///
     /// Useful for testing and debugging. The count includes this handle.
+    #[must_use]
     pub fn ref_count(&self) -> usize {
         Arc::strong_count(&self.inner)
     }
@@ -96,8 +98,12 @@ impl<T: IUnknown + 'static> From<Arc<T>> for ComponentRef {
     }
 }
 
-// SAFETY: Arc<dyn IUnknown> is Send + Sync because IUnknown: Send + Sync.
+// SAFETY: the only field is an `Arc<dyn IUnknown>`. `IUnknown` has `Send +
+// Sync` as supertraits, so every implementor is `Send + Sync`, and `Arc<U>` is
+// `Send` for `U: Send + Sync`. (The compiler would derive this already.)
 unsafe impl Send for ComponentRef {}
+// SAFETY: as above: `Arc<U>` is `Sync` for `U: Send + Sync`, which
+// `IUnknown`'s supertraits guarantee.
 unsafe impl Sync for ComponentRef {}
 
 #[cfg(test)]
@@ -113,7 +119,7 @@ mod tests {
         fn query_interface_raw(&self, _id: TypeId) -> Option<&(dyn Any + Send + Sync)> {
             None
         }
-        fn version(&self) -> &str {
+        fn version(&self) -> &'static str {
             "1.0.0"
         }
         fn provided_interfaces(&self) -> &[InterfaceInfo] {
@@ -162,7 +168,7 @@ mod tests {
             fn query_interface_raw(&self, _id: TypeId) -> Option<&(dyn Any + Send + Sync)> {
                 None
             }
-            fn version(&self) -> &str {
+            fn version(&self) -> &'static str {
                 "1.0.0"
             }
             fn provided_interfaces(&self) -> &[InterfaceInfo] {

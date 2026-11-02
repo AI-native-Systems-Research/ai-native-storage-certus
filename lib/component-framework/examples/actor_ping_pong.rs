@@ -45,6 +45,10 @@ struct PingHandler {
 }
 
 impl ActorHandler<PingPong> for PingHandler {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "the shared mutex is only poisoned if another thread already panicked; re-panicking is the intended response"
+    )]
     fn handle(&mut self, msg: PingPong) {
         match msg {
             PingPong::Pong(n) => {
@@ -79,6 +83,14 @@ impl ActorHandler<PingPong> for PongHandler {
     }
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "example program: a failed framework call is a bug in the example, and panicking with the error is how it reports it"
+)]
+#[expect(
+    clippy::similar_names,
+    reason = "the paired `ping`/`pong`, `ping_handle`/`pong_handle` and `fwd_to_ping`/`fwd_to_pong` names mirror the two actors on purpose"
+)]
 fn main() {
     println!("=== Actor Ping-Pong Example ===\n");
 

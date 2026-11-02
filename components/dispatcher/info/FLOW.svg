@@ -36,6 +36,7 @@
 
   <!-- Title -->
   <text x="550" y="35" text-anchor="middle" font-size="18" font-weight="700" fill="#1e293b">Dispatcher v0 — Data Flow</text>
+  <text x="550" y="50" text-anchor="middle" font-size="11" font-style="italic" fill="#b91c1c">Historical: the v0 design (prepare/commit store, staging buffer, no memory tier). Current flow: specs/001-dispatcher-cache-interface/spec.md FR-039, FR-056, FR-061 and data-model.md.</text>
 
   <!-- Legend -->
   <g transform="translate(30, 55)">

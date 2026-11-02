@@ -34,6 +34,10 @@ impl Mock {
     }
 
     /// The frames the client wrote, as `(opcode, corr, body)`.
+    #[expect(
+        clippy::expect_used,
+        reason = "test helper outside #[test]: a failure here must fail the test"
+    )]
     fn frames(&self) -> Vec<(u16, u32, Vec<u8>)> {
         let mut out = Vec::new();
         let mut at = 0usize;
@@ -357,6 +361,11 @@ fn connect_bounds_writing_as_well_as_reading() {
 ///
 /// Real sockets rather than the `Mock`, because non-blocking reads are a property of a socket
 /// and an in-memory transport cannot exhibit them.
+#[expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test helper outside #[test]: a failure here must fail the test"
+)]
 fn connected(depth: usize) -> (Client<TcpStream>, TcpStream) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
     let addr = listener.local_addr().unwrap();
@@ -639,7 +648,7 @@ fn the_reported_deadline_is_the_configured_one() {
         drop(held);
     });
 
-    let mut c = Client::<std::net::TcpStream>::connect(&addr.to_string(), 8, None)
+    let mut c = Client::<std::net::TcpStream>::connect(addr.to_string(), 8, None)
         .expect("connect")
         .with_read_timeout(configured)
         .expect("set deadline");

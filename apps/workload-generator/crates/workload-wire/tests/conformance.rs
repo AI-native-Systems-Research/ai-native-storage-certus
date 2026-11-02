@@ -20,8 +20,9 @@ use workload_wire::server::Service;
 /// A recognisable digest, so a shifted or truncated copy is visible rather than plausible.
 fn build_id(seed: u8) -> [u8; BUILD_ID_BYTES] {
     let mut id = [0u8; BUILD_ID_BYTES];
-    for (i, b) in id.iter_mut().enumerate() {
-        *b = seed.wrapping_add(i as u8);
+    // BUILD_ID_BYTES is 32, so the u8 counter never wraps before the array ends.
+    for (b, i) in id.iter_mut().zip(0u8..) {
+        *b = seed.wrapping_add(i);
     }
     id
 }
@@ -105,6 +106,17 @@ fn every_body_round_trips() {
 
 #[test]
 fn a_clear_that_did_not_happen_says_so_rather_than_reporting_zero_entries() {
+    // A transport-only service: no mailbox, so it keeps the trait's default `clear_cache`.
+    struct NoMailbox;
+    impl Service for NoMailbox {
+        fn hello(&mut self, h: &Hello) -> HelloAck {
+            workload_wire::handshake::answer(h, 1, 32768)
+        }
+        fn submit_turn(&mut self, _t: &SubmitTurn) -> TurnOutcome {
+            TurnOutcome::default()
+        }
+    }
+
     // The distinction the frame exists for. "0 entries dropped" is a legitimate answer — a
     // cache that was already empty — so it cannot also mean "I could not clear". Conflating
     // them would let a run report a cold cache it never had, which is a plausible number for a
@@ -123,15 +135,6 @@ fn a_clear_that_did_not_happen_says_so_rather_than_reporting_zero_entries() {
 
     // And the default a transport-only service gives is the refusal, not the success: a stub
     // that has no mailbox must not answer as though it had cleared one.
-    struct NoMailbox;
-    impl Service for NoMailbox {
-        fn hello(&mut self, h: &Hello) -> HelloAck {
-            workload_wire::handshake::answer(h, 1, 32768)
-        }
-        fn submit_turn(&mut self, _t: &SubmitTurn) -> TurnOutcome {
-            TurnOutcome::default()
-        }
-    }
     assert!(
         !NoMailbox.clear_cache().is_ok(),
         "the default ClearCache must refuse, or a service without a mailbox would claim to \

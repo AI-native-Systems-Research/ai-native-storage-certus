@@ -7,7 +7,7 @@
 
 use std::any::{Any, TypeId};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::thread::{self, Thread};
 
 use crate::error::RegistryError;
@@ -24,8 +24,13 @@ pub(crate) struct MpscState<T> {
     pub(crate) receiver_thread: Mutex<Option<Thread>>,
     pub(crate) sender_thread: Mutex<Option<Thread>>,
     /// Force-close flag set by actor deactivation to ensure the receiver
-    /// exits even when other senders (from IUnknown queries) are still alive.
+    /// exits even when other senders (from `IUnknown` queries) are still alive.
     pub(crate) force_closed: AtomicBool,
+    /// Set when a receiver is dropped and cleared when one is created, so a
+    /// blocked `send` can return `Closed` instead of waiting forever. Before any
+    /// receiver exists it stays clear: sends may fill the queue for a receiver
+    /// bound later.
+    pub(crate) receiver_closed: AtomicBool,
 }
 
 /// MPSC channel component.
@@ -53,9 +58,9 @@ pub(crate) struct MpscState<T> {
 pub struct MpscChannel<T: Send + 'static> {
     state: Arc<MpscState<T>>,
     receiver_bound: Arc<AtomicBool>,
-    /// Lazily created sender interface for IUnknown queries.
+    /// Lazily created sender interface for `IUnknown` queries.
     sender_iface: OnceLock<Box<dyn Any + Send + Sync>>,
-    /// Lazily created receiver interface for IUnknown queries.
+    /// Lazily created receiver interface for `IUnknown` queries.
     receiver_iface: OnceLock<Box<dyn Any + Send + Sync>>,
     /// Cached interface metadata for introspection.
     interface_info: Vec<InterfaceInfo>,
@@ -100,11 +105,23 @@ impl<T: Send + 'static> MpscSender<T> {
                     return Ok(());
                 }
                 Err(returned) => {
+                    // Full, and nobody will ever drain it.
+                    if self.state.receiver_closed.load(Ordering::Acquire) {
+                        return Err(ChannelError::Closed);
+                    }
                     val = returned;
                     // Park briefly and retry
                     {
-                        let mut guard = self.state.sender_thread.lock().unwrap();
-                        *guard = Some(thread::current());
+                        // `thread::current()` runs before the lock is taken, so the guard
+                        // only covers a store into an `Option<Thread>`, which cannot panic:
+                        // this lock is never poisoned.
+                        let me = thread::current();
+                        let mut guard = self
+                            .state
+                            .sender_thread
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner);
+                        *guard = Some(me);
                     }
                     thread::park_timeout(std::time::Duration::from_millis(1));
                 }
@@ -171,9 +188,13 @@ impl<T: Send + 'static> Drop for MpscSender<T> {
     }
 }
 
-// SAFETY: MpscSender uses lock-free CAS on the MpscRingBuffer. The underlying
-// state uses atomics and Mutex only for thread parking (not data path).
+// SAFETY: an `MpscSender` is an `Arc<MpscState<T>>`. The state is atomics,
+// `Mutex<Option<Thread>>`s (both thread-safe) and an `MpscRingBuffer<T>`,
+// which is `Send + Sync` for `T: Send`; values of `T` only move through it.
 unsafe impl<T: Send + 'static> Send for MpscSender<T> {}
+// SAFETY: through `&MpscSender` threads can only push, and `MpscRingBuffer`
+// allows any number of concurrent pushers (CAS on `tail`, see its `Sync`
+// impl); the parking mutexes and counters are thread-safe.
 unsafe impl<T: Send + 'static> Sync for MpscSender<T> {}
 
 /// Receiver endpoint for the MPSC channel.
@@ -207,13 +228,17 @@ impl<T: Send + 'static> std::fmt::Debug for MpscReceiver<T> {
 
 impl<T: Send + 'static> MpscReceiver<T> {
     pub(crate) fn new(state: Arc<MpscState<T>>, bound_flag: Option<Arc<AtomicBool>>) -> Self {
+        state.receiver_closed.store(false, Ordering::Release);
         Self { state, bound_flag }
     }
 
     /// Receive a message. Blocks if the queue is empty.
     ///
+    /// # Errors
+    ///
     /// Returns [`ChannelError::Closed`] when all senders are dropped and
-    /// the queue is fully drained.
+    /// the queue is fully drained, or the channel was force-closed (actor
+    /// deactivation) and is drained.
     ///
     /// # Examples
     ///
@@ -259,8 +284,16 @@ impl<T: Send + 'static> MpscReceiver<T> {
 
             // Park until a sender wakes us
             {
-                let mut guard = self.state.receiver_thread.lock().unwrap();
-                *guard = Some(thread::current());
+                // `thread::current()` runs before the lock is taken, so the guard
+                // only covers a store into an `Option<Thread>`, which cannot panic:
+                // this lock is never poisoned.
+                let me = thread::current();
+                let mut guard = self
+                    .state
+                    .receiver_thread
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
+                *guard = Some(me);
             }
             thread::park_timeout(std::time::Duration::from_millis(1));
         }
@@ -301,7 +334,15 @@ impl<T: Send + 'static> MpscReceiver<T> {
     /// `unpark()` on the registered thread. Used by the actor polling
     /// loop before calling `thread::park_timeout()`.
     pub fn register_for_unpark(&self) {
-        *self.state.receiver_thread.lock().unwrap() = Some(thread::current());
+        // `thread::current()` runs before the lock is taken, so every holder
+        // of this lock only stores or reads an `Option<Thread>`, which cannot
+        // panic: it is never poisoned.
+        let me = thread::current();
+        *self
+            .state
+            .receiver_thread
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(me);
     }
 }
 
@@ -317,15 +358,23 @@ impl<T: Send + 'static> IReceiver<T> for MpscReceiver<T> {
 
 impl<T: Send + 'static> Drop for MpscReceiver<T> {
     fn drop(&mut self) {
+        self.state.receiver_closed.store(true, Ordering::Release);
         if let Some(ref flag) = self.bound_flag {
             flag.store(false, Ordering::Release);
         }
     }
 }
 
-// SAFETY: MpscReceiver is the sole consumer. The underlying MpscState uses
-// atomics for the data path and Mutex only for thread parking.
+// SAFETY: an `MpscReceiver` is an `Arc<MpscState<T>>` (see `MpscSender`) plus
+// an `Option<Arc<AtomicBool>>`; all of it is thread-safe for `T: Send`, so
+// moving the receiver to another thread is sound. `MpscChannel::receiver`
+// hands out at most one receiver per channel, so it is the only popper.
 unsafe impl<T: Send + 'static> Send for MpscReceiver<T> {}
+// SAFETY: `MpscRingBuffer::pop` must not run on two threads at once. Sharing
+// `&MpscReceiver` lets several threads call `recv`/`try_recv`, so soundness
+// rests on callers using the one receiver from one thread at a time. The
+// framework does (the actor loop, `pipe_mpsc`, and the `IReceiver` handed to a
+// single consumer), but nothing in the type enforces it.
 unsafe impl<T: Send + 'static> Sync for MpscReceiver<T> {}
 
 impl<T: Send + 'static> MpscChannel<T> {
@@ -342,6 +391,7 @@ impl<T: Send + 'static> MpscChannel<T> {
     ///
     /// let ch = MpscChannel::<u32>::new(64);
     /// ```
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         let queue = MpscRingBuffer::new(capacity);
         let state = Arc::new(MpscState {
@@ -350,6 +400,7 @@ impl<T: Send + 'static> MpscChannel<T> {
             receiver_thread: Mutex::new(None),
             sender_thread: Mutex::new(None),
             force_closed: AtomicBool::new(false),
+            receiver_closed: AtomicBool::new(false),
         });
 
         let interface_info = vec![
@@ -381,6 +432,7 @@ impl<T: Send + 'static> MpscChannel<T> {
     ///
     /// let ch = MpscChannel::<String>::with_default_capacity();
     /// ```
+    #[must_use]
     pub fn with_default_capacity() -> Self {
         Self::new(1024)
     }
@@ -412,6 +464,7 @@ impl<T: Send + 'static> MpscChannel<T> {
     /// tx.send(42).unwrap();
     /// assert_eq!(rx.recv().unwrap(), 42);
     /// ```
+    #[must_use]
     pub fn new_numa(capacity: usize, _node: usize) -> Self {
         Self::new(capacity)
     }
@@ -446,7 +499,7 @@ impl<T: Send + 'static> MpscChannel<T> {
     /// after draining any remaining messages.
     ///
     /// This is used by actor deactivation to ensure the receiver thread exits
-    /// even when other senders (e.g., from IUnknown queries) are still alive.
+    /// even when other senders (e.g., from `IUnknown` queries) are still alive.
     pub(crate) fn close(&self) {
         self.state.force_closed.store(true, Ordering::Release);
         // Wake the receiver so it can see the closed signal
@@ -461,6 +514,11 @@ impl<T: Send + 'static> MpscChannel<T> {
     ///
     /// Each call creates an independent sender. When all senders are dropped,
     /// the channel closes.
+    ///
+    /// # Errors
+    ///
+    /// None: this always returns `Ok`. The `Result` matches the other
+    /// channel components' `sender()`.
     ///
     /// # Examples
     ///
@@ -552,7 +610,7 @@ impl<T: Send + 'static> IUnknown for MpscChannel<T> {
         }
     }
 
-    fn version(&self) -> &str {
+    fn version(&self) -> &'static str {
         "1.0.0"
     }
 
@@ -580,6 +638,16 @@ mod tests {
     use super::*;
     use crate::iunknown::query;
     use std::thread;
+
+    #[test]
+    fn send_returns_closed_when_the_receiver_is_gone_and_the_queue_is_full() {
+        let ch = MpscChannel::<u32>::new(2);
+        let (tx, rx) = ch.split().unwrap();
+        tx.send(1).unwrap();
+        tx.send(2).unwrap();
+        drop(rx);
+        assert_eq!(tx.send(3).unwrap_err(), ChannelError::Closed);
+    }
 
     #[test]
     fn new_creates_channel() {
@@ -633,7 +701,7 @@ mod tests {
 
         // Drain remaining
         let mut msgs = vec![rx.recv().unwrap(), rx.recv().unwrap()];
-        msgs.sort();
+        msgs.sort_unstable();
         assert_eq!(msgs, vec![1, 2]);
 
         // Now closed

@@ -1,11 +1,15 @@
 ---
 spec_sync_component: logger
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-29T23:35:11Z
-spec_sync_git_commit: 1de9052f9
-spec_sync_inputs_sha256: 5b4600b44bf3ebfbcb3fd459d64a1cf8853e7f98f755805a9f2898a6f1975257
+spec_sync_synced_at: 2026-10-31T06:35:50Z
+spec_sync_git_commit: 50a0f2bf
+spec_sync_inputs_sha256: 0c6606ba0722a345a26c0ca97aa5f4f3fdcb4ad7a7063c4a5420d36962265631
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-10-30 (branch `specsync-c`, piece-copy-bench merge) — clippy commit `55a4ddd4`, behaviour unchanged.** Base `a0292be6` (`origin/unstable`, where the last stamp was fresh), HEAD `0a71990e`. This component's only change on the branch is the clippy commit `55a4ddd4`; its digest also moves because `components/interfaces` changed (analysed by the interfaces sync, not here). `cargo clippy --all-targets -D warnings` and `cargo test` pass for logger, eviction-policy-lru, eviction-policy-optimized and eviction-policy-session-lists at HEAD. `55a4ddd4` adds `#[must_use]` to `LogLevel::from_env_str` (`src/lib.rs:57`) and `LoggerComponent::new_with_writer` (`:196`), an `#[expect(clippy::unwrap_used)]` on the private `log` (`:209-213`; the writer-lock `unwrap()` at `:231` is unchanged), and folds the `"info"` arm of `from_env_str` into `_` and merges `"debug" | "trace"` (`:58-66`). The mapping is identical: error→Error, warn/warning→Warn, debug/trace→Debug, info and anything else→Info, case-insensitive. Tests/benches get lint attributes only. Every spec statement the commit could affect was checked (8 items: FR-004, FR-011, FR-012, FR-014, Key Entities LogLevel (parsing), Edge cases invalid RUST_LOG / trace, FR-010 / SC-005 thread safety, SC-007): all aligned. No spec states lock-poison behaviour, quotes `from_env_str` arms or `Debug` output, or bounds pool ids or node indices, so the `#[expect]` reasons and the private helpers' panic docs add no requirement. Recorded only, not proposed: the specs do not say that a poisoned lock panics; this is pre-existing, the same before and after the commit, and the `IEvictionPolicy`/`ILogger` methods have no error channel for it. No spec text in this component cites a source line number, so nothing moved. No actionable drift. No source files changed.
+>
+> **Status: clean** (to be stamped by the final pass; frontmatter left as it was).
+
 > **Re-stamp 2026-10-29 (branch `fix/dispatcher-remove-ssd-extent`, merged with unstable `e35618b2`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (the `IDispatcher::check` doc gains an `# Errors` section, B-17 of the dispatcher sync). No analysis below changes.
 > **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IDispatcher::clear_all`) and the rebase brought unstable's changes. No analysis below changes.
 

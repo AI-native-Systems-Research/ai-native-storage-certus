@@ -1,4 +1,4 @@
-//! IZyre interface definition and associated value types.
+//! `IZyre` interface definition and associated value types.
 //!
 //! `IZyre` is a **factory**: [`IZyre::create_node`] constructs an un-started
 //! node returned as a [`IZyreNode`] handle. All peer-discovery and messaging
@@ -61,12 +61,13 @@ impl std::error::Error for ZyreError {}
 pub struct PeerId(String);
 
 impl PeerId {
-    /// Create a PeerId from a UUID string.
+    /// Create a `PeerId` from a UUID string.
     pub fn new(uuid: impl Into<String>) -> Self {
         Self(uuid.into())
     }
 
     /// Return the UUID string.
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -157,6 +158,7 @@ pub enum ZyreEvent {
 
 impl ZyreEvent {
     /// Returns the peer ID associated with this event, if any.
+    #[must_use]
     pub fn peer(&self) -> Option<&PeerId> {
         match self {
             Self::Enter { peer, .. }
@@ -172,6 +174,7 @@ impl ZyreEvent {
     }
 
     /// Returns the peer name associated with this event, if any.
+    #[must_use]
     pub fn peer_name(&self) -> Option<&str> {
         match self {
             Self::Enter { name, .. }
@@ -187,6 +190,7 @@ impl ZyreEvent {
     }
 
     /// Returns the group name if this is a group-related event.
+    #[must_use]
     pub fn group(&self) -> Option<&str> {
         match self {
             Self::Join { group, .. } | Self::Leave { group, .. } | Self::Shout { group, .. } => {
@@ -361,6 +365,11 @@ impl NodeConfig {
 /// resource. As a returned handle it does not need runtime interface discovery.
 pub trait IZyreNode: Send {
     /// Start the node, beginning network discovery and messaging.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZyreError::StartFailed`] if the node has already been started
+    /// (or stopped), or if the underlying `zyre_start` call fails.
     fn start(&mut self) -> Result<(), ZyreError>;
 
     /// Stop the node, signaling departure to peers.
@@ -373,15 +382,41 @@ pub trait IZyreNode: Send {
     fn stop(&mut self);
 
     /// Join a named group.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZyreError::NotStarted`] before [`start`](Self::start),
+    /// [`ZyreError::Stopped`] after [`stop`](Self::stop), and
+    /// [`ZyreError::InvalidConfig`] if `group` contains a NUL byte.
     fn join(&mut self, group: &str) -> Result<(), ZyreError>;
 
     /// Leave a named group.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZyreError::NotStarted`] before [`start`](Self::start),
+    /// [`ZyreError::Stopped`] after [`stop`](Self::stop), and
+    /// [`ZyreError::InvalidConfig`] if `group` contains a NUL byte.
     fn leave(&mut self, group: &str) -> Result<(), ZyreError>;
 
     /// Send a message to all peers in a group.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZyreError::NotStarted`] before [`start`](Self::start),
+    /// [`ZyreError::Stopped`] after [`stop`](Self::stop),
+    /// [`ZyreError::InvalidConfig`] if `group` contains a NUL byte, and
+    /// [`ZyreError::SendFailed`] if the underlying shout fails.
     fn shout(&self, group: &str, data: &[u8]) -> Result<(), ZyreError>;
 
     /// Send a message directly to a specific peer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZyreError::NotStarted`] before [`start`](Self::start),
+    /// [`ZyreError::Stopped`] after [`stop`](Self::stop),
+    /// [`ZyreError::InvalidConfig`] if the peer id contains a NUL byte, and
+    /// [`ZyreError::SendFailed`] if the underlying whisper fails.
     fn whisper(&self, peer: &PeerId, data: &[u8]) -> Result<(), ZyreError>;
 
     /// Receive the next event from the network (blocking).
@@ -390,6 +425,12 @@ pub trait IZyreNode: Send {
     /// [`stop`](Self::stop) it continues to deliver queued events and then the
     /// terminal [`ZyreEvent::Stop`]; subsequent calls return
     /// [`ZyreError::Stopped`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZyreError::NotStarted`] before `start`, [`ZyreError::Stopped`]
+    /// once the terminal `Stop` event has been consumed, and
+    /// [`ZyreError::RecvFailed`] if no event could be read or parsed.
     fn recv(&self) -> Result<ZyreEvent, ZyreError>;
 
     /// Try to receive an event without blocking. Returns `Ok(None)` if none.
@@ -397,6 +438,12 @@ pub trait IZyreNode: Send {
     /// Follows the same lifecycle as [`recv`](Self::recv): it yields `Ok(None)`
     /// once the node has stopped and the terminal [`ZyreEvent::Stop`] has been
     /// consumed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZyreError::NotStarted`] before `start`, and
+    /// [`ZyreError::RecvFailed`] if the node's socket is unavailable or a ready
+    /// event could not be read or parsed.
     fn try_recv(&self) -> Result<Option<ZyreEvent>, ZyreError>;
 
     /// Get this node's UUID.
@@ -531,8 +578,10 @@ mod tests {
 
     #[test]
     fn empty_name_is_invalid() {
-        let mut config = NodeConfig::default();
-        config.name = Some(String::new());
+        let config = NodeConfig {
+            name: Some(String::new()),
+            ..Default::default()
+        };
         assert!(matches!(
             config.validate(),
             Err(ZyreError::InvalidConfig(_))
@@ -541,8 +590,10 @@ mod tests {
 
     #[test]
     fn zero_evasive_timeout_is_invalid() {
-        let mut config = NodeConfig::default();
-        config.evasive_timeout_ms = 0;
+        let config = NodeConfig {
+            evasive_timeout_ms: 0,
+            ..Default::default()
+        };
         assert!(matches!(
             config.validate(),
             Err(ZyreError::InvalidConfig(_))
@@ -551,9 +602,11 @@ mod tests {
 
     #[test]
     fn expired_must_exceed_evasive() {
-        let mut config = NodeConfig::default();
-        config.evasive_timeout_ms = 5000;
-        config.expired_timeout_ms = 5000;
+        let config = NodeConfig {
+            evasive_timeout_ms: 5000,
+            expired_timeout_ms: 5000,
+            ..Default::default()
+        };
         assert!(matches!(
             config.validate(),
             Err(ZyreError::InvalidConfig(_))
@@ -562,8 +615,10 @@ mod tests {
 
     #[test]
     fn zero_port_is_invalid() {
-        let mut config = NodeConfig::default();
-        config.port = Some(0);
+        let config = NodeConfig {
+            port: Some(0),
+            ..Default::default()
+        };
         assert!(matches!(
             config.validate(),
             Err(ZyreError::InvalidConfig(_))
@@ -572,12 +627,14 @@ mod tests {
 
     #[test]
     fn gossip_requires_bind_or_connect() {
-        let mut config = NodeConfig::default();
-        config.endpoint = Some("tcp://127.0.0.1:9998".into());
-        config.gossip = Some(GossipConfig {
-            bind: None,
-            connect: vec![],
-        });
+        let config = NodeConfig {
+            endpoint: Some("tcp://127.0.0.1:9998".into()),
+            gossip: Some(GossipConfig {
+                bind: None,
+                connect: vec![],
+            }),
+            ..Default::default()
+        };
         assert!(matches!(
             config.validate(),
             Err(ZyreError::InvalidConfig(_))
@@ -586,24 +643,30 @@ mod tests {
 
     #[test]
     fn gossip_bind_is_valid() {
-        let mut config = NodeConfig::default();
-        config.endpoint = Some("tcp://127.0.0.1:9998".into());
-        config.gossip = Some(GossipConfig::bind("tcp://*:9999"));
+        let config = NodeConfig {
+            endpoint: Some("tcp://127.0.0.1:9998".into()),
+            gossip: Some(GossipConfig::bind("tcp://*:9999")),
+            ..Default::default()
+        };
         assert!(config.validate().is_ok());
     }
 
     #[test]
     fn gossip_connect_is_valid() {
-        let mut config = NodeConfig::default();
-        config.endpoint = Some("tcp://127.0.0.1:9998".into());
-        config.gossip = Some(GossipConfig::connect("tcp://server:9999"));
+        let config = NodeConfig {
+            endpoint: Some("tcp://127.0.0.1:9998".into()),
+            gossip: Some(GossipConfig::connect("tcp://server:9999")),
+            ..Default::default()
+        };
         assert!(config.validate().is_ok());
     }
 
     #[test]
     fn gossip_without_endpoint_is_invalid() {
-        let mut config = NodeConfig::default();
-        config.gossip = Some(GossipConfig::bind("tcp://*:9999"));
+        let config = NodeConfig {
+            gossip: Some(GossipConfig::bind("tcp://*:9999")),
+            ..Default::default()
+        };
         assert!(matches!(
             config.validate(),
             Err(ZyreError::InvalidConfig(_))

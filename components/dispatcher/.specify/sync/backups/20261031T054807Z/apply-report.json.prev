@@ -1,0 +1,95 @@
+{
+  "applied": "2026-10-27T04:27:01Z",
+  "sync_date": "2026-10-27",
+  "project": "dispatcher",
+  "branch": "spec-sync/coldload-v3-s20261025",
+  "head": "3921112a",
+  "base": "a905f89b",
+  "mode": "non-interactive, approved by the user's sync request",
+  "backup": ".specify/sync/backups/20261027T042701Z/",
+  "backed_up_files": [
+    "specs/001-dispatcher-cache-interface/spec.md",
+    "specs/001-dispatcher-cache-interface/data-model.md",
+    ".specify/sync/apply-report.md",
+    ".specify/sync/apply-report.json",
+    ".specify/sync/proposals.md",
+    ".specify/sync/proposals.json",
+    ".specify/sync/drift-report.json"
+  ],
+  "changes": [
+    {
+      "proposal": "B-14",
+      "spec": "001 spec.md",
+      "requirement": "SC-007",
+      "change_type": "Modified"
+    },
+    {
+      "proposal": "B-15",
+      "spec": "001 spec.md",
+      "requirement": "FR-025",
+      "change_type": "Modified"
+    },
+    {
+      "proposal": "B-16",
+      "spec": "001 spec.md",
+      "requirement": "FR-004",
+      "change_type": "Modified"
+    },
+    {
+      "proposal": "B-17",
+      "spec": "001 spec.md",
+      "requirement": "FR-009",
+      "change_type": "Modified"
+    },
+    {
+      "proposal": "B-18",
+      "spec": "001 spec.md",
+      "requirement": "FR-028",
+      "change_type": "Modified"
+    },
+    {
+      "proposal": "B-19",
+      "spec": "001 spec.md",
+      "requirement": "FR-040",
+      "change_type": "Modified"
+    },
+    {
+      "proposal": "B-20",
+      "spec": "001 spec.md",
+      "requirement": "US-11 narrative",
+      "change_type": "Modified"
+    },
+    {
+      "proposal": "B-21",
+      "spec": "001 spec.md",
+      "requirement": "Key Entity Dispatch Map Entry",
+      "change_type": "Modified"
+    },
+    {
+      "proposal": "B-22",
+      "spec": "001 spec.md",
+      "requirement": "Key Entity Background Writer",
+      "change_type": "Modified"
+    },
+    {
+      "proposal": "B-23",
+      "spec": "001 spec.md",
+      "requirement": "spec header",
+      "change_type": "Added"
+    },
+    {
+      "proposal": "B-24",
+      "spec": "001 data-model.md",
+      "requirement": "data-model.md device_index",
+      "change_type": "Modified"
+    },
+    {
+      "proposal": "D-1",
+      "spec": "info/FLOW.svg",
+      "requirement": "info/FLOW.svg",
+      "change_type": "Modified"
+    }
+  ],
+  "source_files_changed": [],
+  "align_tasks_generated": 0
+}

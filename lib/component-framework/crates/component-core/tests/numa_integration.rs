@@ -13,6 +13,10 @@ struct CpuReportHandler {
 }
 
 impl ActorHandler<()> for CpuReportHandler {
+    #[expect(
+        clippy::unwrap_used,
+        reason = "test helper: a poisoned lock means another test step already failed"
+    )]
     fn handle(&mut self, _msg: ()) {
         if let Ok(cpus) = get_thread_affinity() {
             let ids: Vec<usize> = cpus.iter().collect();
@@ -79,8 +83,6 @@ fn actor_pinned_to_multiple_cpus() {
 
 #[test]
 fn actor_no_affinity_backward_compatible() {
-    let count = Arc::new(Mutex::new(0u32));
-
     struct Counter {
         count: Arc<Mutex<u32>>,
     }
@@ -90,6 +92,7 @@ fn actor_no_affinity_backward_compatible() {
         }
     }
 
+    let count = Arc::new(Mutex::new(0u32));
     let actor = Actor::new(
         Counter {
             count: count.clone(),
@@ -124,15 +127,6 @@ fn actor_invalid_cpu_returns_error() {
 
 #[test]
 fn actor_reactivate_with_new_affinity() {
-    let observed1 = Arc::new(Mutex::new(Vec::new()));
-    let _observed2 = Arc::new(Mutex::new(Vec::<usize>::new()));
-
-    let current = get_thread_affinity().unwrap();
-    let cpus: Vec<usize> = current.iter().take(2).collect();
-    if cpus.len() < 2 {
-        return; // Need 2 CPUs.
-    }
-
     struct CpuCapture {
         observed: Arc<Mutex<Vec<usize>>>,
     }
@@ -142,6 +136,15 @@ fn actor_reactivate_with_new_affinity() {
                 *self.observed.lock().unwrap() = cpus.iter().collect();
             }
         }
+    }
+
+    let observed1 = Arc::new(Mutex::new(Vec::new()));
+    let _observed2 = Arc::new(Mutex::new(Vec::<usize>::new()));
+
+    let current = get_thread_affinity().unwrap();
+    let cpus: Vec<usize> = current.iter().take(2).collect();
+    if cpus.len() < 2 {
+        return; // Need 2 CPUs.
     }
 
     // First activation on cpu[0].

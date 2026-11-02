@@ -1,0 +1,49 @@
+{
+  "generated": "2026-09-09",
+  "based_on": "drift-report 2026-09-09",
+  "summary": {
+    "backfill": 3,
+    "align": 0,
+    "human_decision": 0,
+    "new_specs": 0,
+    "remove_from_spec": 0
+  },
+  "proposals": [
+    {
+      "id": 1,
+      "spec": "001-gpu-cuda-services",
+      "requirement": "FR-015",
+      "direction": "BACKFILL",
+      "confidence": "HIGH",
+      "location": "components/gpu-services/src/lib.rs:960-1010",
+      "spec_text": "register_host_memory page-locks host memory via cudaHostRegister and registers with SPDK; on CUDA-success/SPDK-fail MUST roll back via cudaHostUnregister.",
+      "actual": "Uses CUDA_HOST_REGISTER_PORTABLE; treats cudaHostRegister ALREADY_REGISTERED (712) and spdk_mem_register EBUSY (-16) as success; rolls back cudaHostUnregister only when we_registered_cuda.",
+      "resolution": "Append: registration uses the portable flag so pinning holds across all GPU contexts (multi-GPU/DP); idempotent on ALREADY_REGISTERED and SPDK EBUSY; cudaHostUnregister rollback only when this call performed the CUDA registration.",
+      "status": "approve"
+    },
+    {
+      "id": 2,
+      "spec": "001-gpu-cuda-services",
+      "requirement": "FR-020",
+      "direction": "BACKFILL",
+      "confidence": "HIGH",
+      "location": "components/gpu-services/src/lib.rs:937-939",
+      "spec_text": "allocate_pinned_dma_buffer allocates page-locked host memory via cudaHostAlloc.",
+      "actual": "Allocates with CUDA_HOST_ALLOC_PORTABLE (was CUDA_HOST_ALLOC_DEFAULT).",
+      "resolution": "Append: allocation uses the portable flag so the buffer is usable as an async H2D source for any device, not only the device current at allocation.",
+      "status": "approve"
+    },
+    {
+      "id": 3,
+      "spec": "002-gpu-ssd-dma-prepare",
+      "requirement": "FR-019",
+      "direction": "BACKFILL",
+      "confidence": "HIGH",
+      "location": "components/gpu-services/src/lib.rs:960-1010",
+      "spec_text": "register_host_memory page-locks an existing host allocation via cudaHostRegister and registers with SPDK; roll back cudaHostRegister on partial failure.",
+      "actual": "Identical method to spec-001 FR-015: portable flag + idempotent ALREADY_REGISTERED/EBUSY handling + conditional rollback.",
+      "resolution": "Append (consistent with spec-001 FR-015): portable flag; idempotent on ALREADY_REGISTERED and SPDK EBUSY; conditional cudaHostUnregister rollback.",
+      "status": "approve"
+    }
+  ]
+}

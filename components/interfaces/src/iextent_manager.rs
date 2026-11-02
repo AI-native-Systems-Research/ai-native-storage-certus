@@ -57,7 +57,7 @@ pub struct FormatParams {
     /// Instance identifier stored in the superblock. If None, a random
     /// value is generated at format time.
     pub instance_id: Option<u64>,
-    /// NVMe namespace identifier for the metadata disk.
+    /// `NVMe` namespace identifier for the metadata disk.
     pub metadata_disk_ns_id: u32,
     /// Maximum bytes reserved for metadata (superblock + checkpoints) on the
     /// device. Caps the checkpoint region calculation so that metadata and data
@@ -67,6 +67,7 @@ pub struct FormatParams {
 }
 
 impl FormatParams {
+    #[must_use]
     pub fn new(data_disk_size: u64, instance_id: Option<u64>) -> Self {
         Self {
             data_disk_size,
@@ -101,6 +102,7 @@ pub struct WriteHandle {
 }
 
 impl WriteHandle {
+    #[must_use]
     pub fn new(
         key: ExtentKey,
         offset: u64,
@@ -117,19 +119,39 @@ impl WriteHandle {
         }
     }
 
+    #[must_use]
     pub fn key(&self) -> ExtentKey {
         self.key
     }
 
+    #[must_use]
     pub fn extent_offset(&self) -> u64 {
         self.offset
     }
 
+    #[must_use]
     pub fn extent_size(&self) -> u32 {
         self.size
     }
 
+    /// Commit the reserved extent by running its publish callback.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever error the publish callback supplied to
+    /// [`WriteHandle::new`] returns; the extent manager that created the handle
+    /// defines those conditions.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if the publish callback has already been taken. That cannot
+    /// happen through the public API: the callback is set by `new` and taken only
+    /// by `publish` or `abort`, both of which consume the handle.
     pub fn publish(mut self) -> Result<Extent, ExtentManagerError> {
+        #[expect(
+            clippy::expect_used,
+            reason = "publish_fn is Some from new() and is taken only by publish/abort, which consume self; it is an Option only so it can be moved out of a Drop type"
+        )]
         let f = self
             .publish_fn
             .take()

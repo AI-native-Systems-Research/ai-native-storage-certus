@@ -92,6 +92,7 @@
 //! time — `verify` refuses instead, which is the fail-closed direction.
 
 use std::fmt;
+use std::fmt::Write as _;
 
 use workload_model::keys::splitmix64;
 
@@ -123,6 +124,12 @@ pub mod status {
 ///
 /// A run across nodes requires it: an unknown identity cannot demonstrate that two binaries
 /// came from one tree, and FR-051 asks for a demonstration rather than an assumption.
+#[must_use]
+#[expect(
+    clippy::const_is_empty,
+    reason = "SOURCE_ID comes from build.rs via env!, so it is constant per build but differs \
+              between builds; the empty check guards a packager setting it to \"\""
+)]
 pub fn is_known() -> bool {
     SOURCE_ID != UNKNOWN && !SOURCE_ID.is_empty()
 }
@@ -133,11 +140,13 @@ pub fn is_known() -> bool {
 /// reused here rather than adding a hashing dependency to a workspace default member. It is
 /// not cryptographic and does not need to be: the failure being prevented is an accident, and
 /// anyone able to replace a binary can replace the identity it reports.
+#[must_use]
 pub fn current() -> [u8; BUILD_ID_BYTES] {
     digest(SOURCE_ID)
 }
 
 /// A 32-byte digest of an arbitrary identity string.
+#[must_use]
 pub fn digest(id: &str) -> [u8; BUILD_ID_BYTES] {
     let mut out = [0u8; BUILD_ID_BYTES];
     // Four independent 64-bit chains, each seeded differently, so a one-byte change in the
@@ -262,6 +271,7 @@ impl fmt::Display for Refused {
 impl std::error::Error for Refused {}
 
 /// Build the `Hello` this generator sends.
+#[must_use]
 pub fn hello(mailbox: &str) -> Hello {
     Hello {
         proto_version: PROTO_VERSION,
@@ -349,6 +359,7 @@ pub fn check_capacity(
 ///
 /// The agent refuses too, so a mismatch is reported from both ends and the operator learns
 /// which side disagreed rather than only that someone did.
+#[must_use]
 pub fn answer(hello: &Hello, channels: u32, block_bytes: u32) -> HelloAck {
     let status = if hello.proto_version != PROTO_VERSION {
         status::PROTO_MISMATCH
@@ -371,6 +382,13 @@ pub fn answer(hello: &Hello, channels: u32, block_bytes: u32) -> HelloAck {
 }
 
 /// The first eight bytes of a digest, hex, for a message a human reads.
+#[must_use]
 pub fn abbreviate(id: &[u8; BUILD_ID_BYTES]) -> String {
-    id[..8].iter().map(|b| format!("{b:02x}")).collect()
+    id[..8]
+        .iter()
+        .fold(String::with_capacity(16), |mut out, b| {
+            // Writing to a String cannot fail.
+            let _ = write!(out, "{b:02x}");
+            out
+        })
 }

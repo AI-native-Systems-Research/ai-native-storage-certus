@@ -1,34 +1,37 @@
 {
-  "applied_at": "2026-09-09",
-  "based_on": "proposals 2026-09-09",
+  "applied_at": "2026-10-31T06:30:00Z",
+  "based_on": "proposals.json (same run)",
+  "backup": "backups/20261031T054807Z",
   "changes": [
     {
-      "spec": "001-gpu-cuda-services",
-      "requirement": "FR-015",
-      "direction": "backfill",
-      "change_type": "modified_append",
-      "summary": "Documented CUDA_HOST_REGISTER_PORTABLE + idempotent ALREADY_REGISTERED/EBUSY handling + conditional cudaHostUnregister rollback."
+      "id": "B-1",
+      "spec": "001",
+      "requirement": "FR-026",
+      "change": "Added"
     },
     {
-      "spec": "001-gpu-cuda-services",
-      "requirement": "FR-020",
-      "direction": "backfill",
-      "change_type": "modified_append",
-      "summary": "Documented CUDA_HOST_ALLOC_PORTABLE for the pinned DMA buffer."
+      "id": "B-1",
+      "spec": "001",
+      "requirement": "Assumptions (feature flags)",
+      "change": "Modified"
     },
     {
-      "spec": "002-gpu-ssd-dma-prepare",
-      "requirement": "FR-019",
-      "direction": "backfill",
-      "change_type": "modified_append",
-      "summary": "Documented portable flag + idempotent registration, consistent with spec-001 FR-015."
+      "id": "B-1",
+      "spec": "001",
+      "requirement": "Last-Synced header",
+      "change": "Added"
+    },
+    {
+      "id": "B-2",
+      "spec": "001",
+      "requirement": "contracts/igpu_services.md",
+      "change": "Added section"
     }
   ],
   "new_specs": [],
   "align_tasks": [],
   "not_applied": [],
-  "result": {
-    "drift_status": "clean",
-    "actionable_drift_remaining": 0
-  }
+  "source_files_changed": [],
+  "result": "2 proposals applied",
+  "previous": "backups/20261031T054807Z/apply-report.json.prev"
 }

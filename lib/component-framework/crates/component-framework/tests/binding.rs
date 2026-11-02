@@ -176,10 +176,18 @@ fn bind_same_receptacle_twice_returns_error() {
 
 // --- End-to-end: registry-create-bind-invoke (SC-006) ---
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "signature is fixed by the registry factory type passed to `register`"
+)]
 fn log_provider_factory(_config: Option<&dyn Any>) -> Result<ComponentRef, RegistryError> {
     Ok(ComponentRef::from(LogProvider::new()))
 }
 
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "signature is fixed by the registry factory type passed to `register`"
+)]
 fn log_consumer_factory(_config: Option<&dyn Any>) -> Result<ComponentRef, RegistryError> {
     Ok(ComponentRef::from(LogConsumer::new()))
 }

@@ -1,6 +1,6 @@
 //! SPSC throughput benchmarks comparing all SPSC-capable backends.
 //!
-//! Backends: built-in SpscChannel, CrossbeamBounded, CrossbeamUnbounded,
+//! Backends: built-in `SpscChannel`, `CrossbeamBounded`, `CrossbeamUnbounded`,
 //! Kanal, rtrb.
 
 use component_framework::channel::crossbeam_bounded::CrossbeamBoundedChannel;
@@ -19,6 +19,10 @@ const MSG_COUNT: u64 = 100_000;
 // ---------------------------------------------------------------------------
 // Helper: run a SPSC throughput benchmark with ISender/IReceiver
 // ---------------------------------------------------------------------------
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+)]
 fn run_spsc_u64(
     tx: Arc<dyn ISender<u64> + Send + Sync>,
     rx: Arc<dyn IReceiver<u64> + Send + Sync>,
@@ -38,6 +42,10 @@ fn run_spsc_u64(
     consumer.join().unwrap();
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+)]
 fn run_spsc_vec(
     tx: Arc<dyn ISender<Vec<u8>> + Send + Sync>,
     rx: Arc<dyn IReceiver<Vec<u8>> + Send + Sync>,
@@ -60,6 +68,10 @@ fn run_spsc_vec(
 // ---------------------------------------------------------------------------
 // SPSC throughput — small messages (u64)
 // ---------------------------------------------------------------------------
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+)]
 fn spsc_throughput_small(c: &mut Criterion) {
     let mut group = c.benchmark_group("spsc_throughput_u64");
     group.throughput(Throughput::Elements(MSG_COUNT));
@@ -134,6 +146,10 @@ fn spsc_throughput_small(c: &mut Criterion) {
 // ---------------------------------------------------------------------------
 // SPSC throughput — large messages (Vec<u8> 1024 bytes)
 // ---------------------------------------------------------------------------
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+)]
 fn spsc_throughput_large(c: &mut Criterion) {
     let mut group = c.benchmark_group("spsc_throughput_vec1024");
     group.throughput(Throughput::Elements(MSG_COUNT));

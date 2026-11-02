@@ -45,6 +45,7 @@ impl Error {
     ///     "shared_classes.tool.lifetime: sigma must be positive"
     /// );
     /// ```
+    #[must_use]
     pub fn within(self, context: impl fmt::Display) -> Self {
         Self {
             message: format!("{context}: {}", self.message),

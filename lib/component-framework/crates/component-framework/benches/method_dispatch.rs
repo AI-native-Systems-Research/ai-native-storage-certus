@@ -35,6 +35,10 @@ impl DirectCompute for DirectImpl {
     }
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+)]
 fn bench_method_dispatch(c: &mut Criterion) {
     let comp = ComputeComponent::new();
     let iface: Arc<dyn IBenchCompute + Send + Sync> =
@@ -42,13 +46,13 @@ fn bench_method_dispatch(c: &mut Criterion) {
 
     // Dispatch through queried Arc<dyn Trait>
     c.bench_function("dispatch_via_query", |b| {
-        b.iter(|| iface.compute(black_box(42)))
+        b.iter(|| iface.compute(black_box(42)));
     });
 
     // Direct dyn Trait dispatch (baseline)
     let direct: Box<dyn DirectCompute> = Box::new(DirectImpl);
     c.bench_function("dispatch_direct_dyn", |b| {
-        b.iter(|| direct.compute(black_box(42)))
+        b.iter(|| direct.compute(black_box(42)));
     });
 }
 

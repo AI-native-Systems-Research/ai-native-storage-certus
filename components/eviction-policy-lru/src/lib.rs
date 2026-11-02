@@ -6,7 +6,7 @@
 
 mod lru_list;
 
-use std::sync::{Mutex, RwLock};
+use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use component_framework::define_component;
 use interfaces::{
@@ -24,6 +24,43 @@ struct EvictionState {
     pools: Vec<Mutex<Pool>>,
 }
 
+/// Take the shared read lock on the pool table. Panics if the lock is poisoned.
+#[inline]
+#[track_caller]
+#[expect(
+    clippy::unwrap_used,
+    reason = "poison means another thread panicked while resizing the pool table; the \
+              IEvictionPolicy methods have no error variant for that, so the panic propagates"
+)]
+fn read_state(state: &RwLock<EvictionState>) -> RwLockReadGuard<'_, EvictionState> {
+    state.read().unwrap()
+}
+
+/// Take the exclusive write lock on the pool table. Panics on poison, like [`read_state`].
+#[inline]
+#[track_caller]
+#[expect(
+    clippy::unwrap_used,
+    reason = "poison means another thread panicked while holding the pool table; the \
+              IEvictionPolicy methods have no error variant for that, so the panic propagates"
+)]
+fn write_state(state: &RwLock<EvictionState>) -> RwLockWriteGuard<'_, EvictionState> {
+    state.write().unwrap()
+}
+
+/// Lock one pool. Panics on poison, like [`read_state`].
+#[inline]
+#[track_caller]
+#[expect(
+    clippy::unwrap_used,
+    reason = "poison means a pool operation panicked mid-update, so the pool's list may be \
+              inconsistent; the IEvictionPolicy methods have no error variant for that, so the \
+              panic propagates"
+)]
+fn lock_pool(pool: &Mutex<Pool>) -> MutexGuard<'_, Pool> {
+    pool.lock().unwrap()
+}
+
 define_component! {
     pub EvictionPolicyLruComponent {
         version: "0.1.0",
@@ -38,8 +75,13 @@ define_component! {
 }
 
 impl IEvictionPolicy for EvictionPolicyLruComponent {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "PoolId is u32 by interface; pools are created once at startup, a handful per \
+                  consumer (memory-tier 16, dispatch-map 1), nowhere near u32::MAX"
+    )]
     fn create_pool(&self) -> PoolId {
-        let mut state = self.state.write().unwrap();
+        let mut state = write_state(&self.state);
         let id = state.pools.len() as u32;
         state.pools.push(Mutex::new(Pool {
             lru: LruList::new(),
@@ -56,7 +98,7 @@ impl IEvictionPolicy for EvictionPolicyLruComponent {
         key: CacheKey,
         _semantics: BlockSemantics,
     ) -> Result<EvictionHandle, EvictionPolicyError> {
-        let state = self.state.read().unwrap();
+        let state = read_state(&self.state);
         let pool_mutex = state.pools.get(pool as usize).ok_or_else(|| {
             if let Ok(logger) = self.logger.get() {
                 logger.warn(&format!(
@@ -65,13 +107,13 @@ impl IEvictionPolicy for EvictionPolicyLruComponent {
             }
             EvictionPolicyError::InvalidPool(pool)
         })?;
-        let mut pool_guard = pool_mutex.lock().unwrap();
+        let mut pool_guard = lock_pool(pool_mutex);
         let index = pool_guard.lru.push_back(key);
         Ok(EvictionHandle::new(pool, index))
     }
 
     fn touch(&self, handle: EvictionHandle) -> Result<(), EvictionPolicyError> {
-        let state = self.state.read().unwrap();
+        let state = read_state(&self.state);
         let pool_mutex = state.pools.get(handle.pool_id() as usize).ok_or_else(|| {
             if let Ok(logger) = self.logger.get() {
                 logger.warn(&format!(
@@ -81,7 +123,7 @@ impl IEvictionPolicy for EvictionPolicyLruComponent {
             }
             EvictionPolicyError::InvalidPool(handle.pool_id())
         })?;
-        let mut pool_guard = pool_mutex.lock().unwrap();
+        let mut pool_guard = lock_pool(pool_mutex);
         pool_guard.lru.move_to_back(handle.index());
         Ok(())
     }
@@ -90,13 +132,13 @@ impl IEvictionPolicy for EvictionPolicyLruComponent {
         if handles.is_empty() {
             return Ok(());
         }
-        let state = self.state.read().unwrap();
+        let state = read_state(&self.state);
         let mut current_pool_id = handles[0].pool_id();
         let pool_mutex = state
             .pools
             .get(current_pool_id as usize)
             .ok_or(EvictionPolicyError::InvalidPool(current_pool_id))?;
-        let mut pool_guard = pool_mutex.lock().unwrap();
+        let mut pool_guard = lock_pool(pool_mutex);
         pool_guard.lru.move_to_back(handles[0].index());
 
         for handle in &handles[1..] {
@@ -107,7 +149,7 @@ impl IEvictionPolicy for EvictionPolicyLruComponent {
                     .pools
                     .get(current_pool_id as usize)
                     .ok_or(EvictionPolicyError::InvalidPool(current_pool_id))?;
-                pool_guard = pm.lock().unwrap();
+                pool_guard = lock_pool(pm);
             }
             pool_guard.lru.move_to_back(handle.index());
         }
@@ -115,7 +157,7 @@ impl IEvictionPolicy for EvictionPolicyLruComponent {
     }
 
     fn remove(&self, handle: EvictionHandle) -> Result<(), EvictionPolicyError> {
-        let state = self.state.read().unwrap();
+        let state = read_state(&self.state);
         let pool_mutex = state.pools.get(handle.pool_id() as usize).ok_or_else(|| {
             if let Ok(logger) = self.logger.get() {
                 logger.warn(&format!(
@@ -125,23 +167,23 @@ impl IEvictionPolicy for EvictionPolicyLruComponent {
             }
             EvictionPolicyError::InvalidPool(handle.pool_id())
         })?;
-        let mut pool_guard = pool_mutex.lock().unwrap();
+        let mut pool_guard = lock_pool(pool_mutex);
         pool_guard.lru.remove(handle.index());
         Ok(())
     }
 
     fn identify_next_to_evict(&self, pool: PoolId) -> Option<CacheKey> {
-        let state = self.state.read().unwrap();
+        let state = read_state(&self.state);
         let pool_mutex = state.pools.get(pool as usize)?;
-        let mut pool_guard = pool_mutex.lock().unwrap();
+        let mut pool_guard = lock_pool(pool_mutex);
         pool_guard.lru.pop_front()
     }
 
     fn get_eviction_candidates(&self, pool: PoolId, n: usize) -> Vec<CacheKey> {
-        let state = self.state.read().unwrap();
+        let state = read_state(&self.state);
         match state.pools.get(pool as usize) {
             Some(pool_mutex) => {
-                let pool_guard = pool_mutex.lock().unwrap();
+                let pool_guard = lock_pool(pool_mutex);
                 pool_guard.lru.peek_front_n(n)
             }
             None => Vec::new(),
@@ -149,10 +191,10 @@ impl IEvictionPolicy for EvictionPolicyLruComponent {
     }
 
     fn len(&self, pool: PoolId) -> usize {
-        let state = self.state.read().unwrap();
+        let state = read_state(&self.state);
         match state.pools.get(pool as usize) {
             Some(pool_mutex) => {
-                let pool_guard = pool_mutex.lock().unwrap();
+                let pool_guard = lock_pool(pool_mutex);
                 pool_guard.lru.len()
             }
             None => 0,
@@ -160,9 +202,9 @@ impl IEvictionPolicy for EvictionPolicyLruComponent {
     }
 
     fn clear_pool(&self, pool: PoolId) {
-        let state = self.state.read().unwrap();
+        let state = read_state(&self.state);
         if let Some(pool_mutex) = state.pools.get(pool as usize) {
-            let mut pool_guard = pool_mutex.lock().unwrap();
+            let mut pool_guard = lock_pool(pool_mutex);
             pool_guard.lru.clear();
         }
     }
@@ -315,12 +357,12 @@ mod tests {
             query_interface!(comp, IEvictionPolicy).unwrap();
         let pool = ep.create_pool();
 
-        let handles: Vec<_> = (0..4)
+        let handles: Vec<_> = (0..4u64)
             .map(|t| {
                 let ep = Arc::clone(&ep);
                 thread::spawn(move || {
                     for i in 0..100 {
-                        let key = (t * 1000 + i) as u64;
+                        let key = t * 1000 + i;
                         let h = ep.track(pool, key, BlockSemantics::default()).unwrap();
                         ep.touch(h).unwrap();
                     }

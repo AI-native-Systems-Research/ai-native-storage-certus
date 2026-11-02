@@ -13,24 +13,43 @@ use interfaces::IEvictionPolicy;
 use eviction_replay_benchmark::replay::{self, Op, Trace};
 use eviction_replay_benchmark::sim::{simulate, SimStats};
 
+#[expect(
+    clippy::expect_used,
+    reason = "test-file helper outside a #[test] fn; a failed setup must fail the test"
+)]
 fn run_lru(trace: &Trace, cache_size: usize) -> SimStats {
     let comp = eviction_policy_lru::EvictionPolicyLruComponent::new_default();
-    let ep = query_interface!(comp, IEvictionPolicy).unwrap();
+    let ep =
+        query_interface!(comp, IEvictionPolicy).expect("the component provides IEvictionPolicy");
     simulate(&*ep, trace, cache_size)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test-file helper outside a #[test] fn; a failed setup must fail the test"
+)]
 fn run_session_lists(trace: &Trace, cache_size: usize) -> SimStats {
     let comp = eviction_policy_session_lists::EvictionPolicySessionListsComponent::new_default();
-    let ep = query_interface!(comp, IEvictionPolicy).unwrap();
+    let ep =
+        query_interface!(comp, IEvictionPolicy).expect("the component provides IEvictionPolicy");
     simulate(&*ep, trace, cache_size)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test-file helper outside a #[test] fn; a failed setup must fail the test"
+)]
 fn run_optimized(trace: &Trace, cache_size: usize) -> SimStats {
     let comp = eviction_policy_optimized::EvictionPolicyOptimizedComponent::new_default();
-    let ep = query_interface!(comp, IEvictionPolicy).unwrap();
+    let ep =
+        query_interface!(comp, IEvictionPolicy).expect("the component provides IEvictionPolicy");
     simulate(&*ep, trace, cache_size)
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test-file helper outside a #[test] fn; a failed setup must fail the test"
+)]
 fn write_tmp(tag: &str, contents: &str) -> PathBuf {
     let mut p = std::env::temp_dir();
     p.push(format!("erb-test-{}-{}.jsonl", std::process::id(), tag));
@@ -154,9 +173,9 @@ fn lru_hit_count_is_monotonic_in_cache_size() {
     }
 }
 
-/// `eviction-policy-optimized` layers a TinyLFU admission gate (a per-pool
+/// `eviction-policy-optimized` layers a `TinyLFU` admission gate (a per-pool
 /// Count-Min Sketch) on top of the shared LRU list, so it deliberately no longer
-/// reproduces plain LRU's hit counts (commit "TinyLFU Admission Gate via
+/// reproduces plain LRU's hit counts (commit "`TinyLFU` Admission Gate via
 /// Count-Min Sketch"; see FR-011 in the component spec).
 ///
 /// Under this 5-way interleaved pressure trace the divergence is *beneficial*:

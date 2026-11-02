@@ -50,7 +50,12 @@ impl<T: Send + 'static> ISender<T> for CrossbeamUnboundedSender<T> {
     }
 }
 
+// SAFETY: the only field is a `crossbeam_channel::Sender<T>`, which crossbeam
+// itself declares `Send` when `T: Send`; the wrapper adds no state.
 unsafe impl<T: Send> Send for CrossbeamUnboundedSender<T> {}
+// SAFETY: as above, crossbeam declares `Sender<T>: Sync` when `T: Send`
+// (its operations synchronise internally); the wrapper only forwards `&self`
+// calls to it.
 unsafe impl<T: Send> Sync for CrossbeamUnboundedSender<T> {}
 
 /// Receiver wrapper for crossbeam unbounded channels implementing [`IReceiver`].
@@ -88,7 +93,12 @@ impl<T: Send + 'static> IReceiver<T> for CrossbeamUnboundedReceiver<T> {
     }
 }
 
+// SAFETY: the only field is a `crossbeam_channel::Receiver<T>`, which
+// crossbeam itself declares `Send` when `T: Send`; the wrapper adds no state.
 unsafe impl<T: Send> Send for CrossbeamUnboundedReceiver<T> {}
+// SAFETY: as above, crossbeam declares `Receiver<T>: Sync` when `T: Send`
+// (concurrent receives are synchronised internally); the wrapper only
+// forwards `&self` calls to it.
 unsafe impl<T: Send> Sync for CrossbeamUnboundedReceiver<T> {}
 
 /// Crossbeam unbounded channel component.
@@ -140,6 +150,7 @@ impl<T: Send + 'static> CrossbeamUnboundedChannel<T> {
     ///
     /// let ch = CrossbeamUnboundedChannel::<u32>::new();
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         let (tx, rx) = crossbeam_channel::unbounded();
         let interface_info = vec![
@@ -163,6 +174,11 @@ impl<T: Send + 'static> CrossbeamUnboundedChannel<T> {
     }
 
     /// Get a sender endpoint. Can be called multiple times (multi-producer).
+    ///
+    /// # Errors
+    ///
+    /// None: this always returns `Ok`. The `Result` matches the other
+    /// channel components' `sender()`.
     ///
     /// # Examples
     ///
@@ -247,7 +263,7 @@ impl<T: Send + 'static> IUnknown for CrossbeamUnboundedChannel<T> {
         }
     }
 
-    fn version(&self) -> &str {
+    fn version(&self) -> &'static str {
         "1.0.0"
     }
 

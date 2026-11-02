@@ -32,6 +32,10 @@ define_component! {
     }
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark code: a failing framework call means the measurement is invalid, so it panics and aborts the run"
+)]
 fn bench_bind(c: &mut Criterion) {
     c.bench_function("bind_third_party", |b| {
         b.iter(|| {

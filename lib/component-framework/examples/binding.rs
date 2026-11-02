@@ -76,6 +76,10 @@ define_component! {
 }
 
 impl AppService {
+    #[expect(
+        clippy::expect_used,
+        reason = "`run` is only called after both receptacles are connected; an unconnected one is a wiring bug in the example"
+    )]
     fn run(&self) {
         let logger = self.logger.get().expect("logger not connected");
         let storage = self.storage.get().expect("storage not connected");
@@ -99,6 +103,10 @@ impl AppService {
 // ---------- First-party binding ----------
 // The assembler knows the concrete types and wires them directly.
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "example program: a failed framework call is a bug in the example, and panicking with the error is how it reports it"
+)]
 fn first_party_example() {
     println!("=== First-Party Binding ===");
     println!("(Assembler knows concrete component types)\n");
@@ -108,11 +116,12 @@ fn first_party_example() {
     let app = AppService::new();
 
     // query_interface! eliminates the verbose dyn + Send + Sync annotation
-    let ilogger: Arc<dyn ILogger + Send + Sync> = query_interface!(logger, ILogger).unwrap();
-    let istorage: Arc<dyn IStorage + Send + Sync> = query_interface!(storage, IStorage).unwrap();
+    let logger_iface: Arc<dyn ILogger + Send + Sync> = query_interface!(logger, ILogger).unwrap();
+    let storage_iface: Arc<dyn IStorage + Send + Sync> =
+        query_interface!(storage, IStorage).unwrap();
 
-    app.logger.connect(ilogger).unwrap();
-    app.storage.connect(istorage).unwrap();
+    app.logger.connect(logger_iface).unwrap();
+    app.storage.connect(storage_iface).unwrap();
 
     app.run();
     println!();
@@ -121,6 +130,10 @@ fn first_party_example() {
 // ---------- Third-party binding ----------
 // The assembler only sees &dyn IUnknown and uses string names.
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "example program: a failed framework call is a bug in the example, and panicking with the error is how it reports it"
+)]
 fn third_party_example() {
     println!("=== Third-Party Binding ===");
     println!("(Assembler uses only string names and &dyn IUnknown)\n");

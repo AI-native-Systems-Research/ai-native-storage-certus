@@ -403,3 +403,173 @@ def test_fetch_on_an_old_server_is_no_endpoint_and_remembered():
     assert r.fetch("h:1", [(1, 8)]) == (ring.FETCH_NO_ENDPOINT, [False])
     assert r.fetch("h:1", [(2, 8)]) == (ring.FETCH_NO_ENDPOINT, [False])
     assert r.sent == [ring.OP_FETCH], "not asked again"
+
+
+# ── BlockBatch (LookupBlocks / CopyToStoreBlocks): layer table + block ids ───
+
+
+def test_block_opcodes_have_the_wire_values():
+    # wire.rs: LOOKUP_BLOCKS=19, COPY_TO_STORE_BLOCKS=20 (17/18 are FETCH/CLEAR_ALL).
+    assert (ring.OP_LOOKUP_BLOCKS, ring.OP_COPY_TO_STORE_BLOCKS) == (19, 20)
+
+
+def _decode_block_batch(blob: bytes):
+    """Independent mini-parser mirroring translate.rs decode_block_batch: returns
+    (handles, entries expanded through the layer formula, bytes consumed)."""
+    off = 0
+    (n_handles,) = struct.unpack_from("<I", blob, off)
+    off += 4
+    handles = []
+    for _ in range(n_handles):
+        hb = blob[off:off + 64]
+        off += 64
+        (dev,) = struct.unpack_from("<i", blob, off)
+        off += 4
+        handles.append((hb, dev))
+    (n_layers,) = struct.unpack_from("<H", blob, off)
+    off += 2
+    layers = []
+    for _ in range(n_layers):
+        layers.append(struct.unpack_from("<IQQI", blob, off))
+        off += 24
+    (n,) = struct.unpack_from("<I", blob, off)
+    off += 4
+    keys = struct.unpack_from(f"<{n}Q", blob, off)
+    off += 8 * n
+    block_ids = struct.unpack_from(f"<{n}Q", blob, off)
+    off += 8 * n
+    entries = [
+        (k, [(idx, base + b * stride, size) for idx, base, stride, size in layers])
+        for k, b in zip(keys, block_ids)
+    ]
+    return handles, entries, off
+
+
+def _kv(tag: int, dev: int, stride: int, base_delta: int):
+    from certus_shmq_connector.gpu import KvCacheIpc
+
+    return KvCacheIpc(handle_bytes=bytes([tag]) * 64, gpu_device_id=dev,
+                      stride_bytes=stride, base_delta=base_delta)
+
+
+def _layer_rows(regions):
+    # The handler's table rows: size == stride, as _regions_for_block emits.
+    return [(r.handle_bytes, r.gpu_device_id, r.base_delta, r.stride_bytes, r.stride_bytes)
+            for r in regions]
+
+
+_BLOCK_CASES = [
+    # 32 per-layer tensors, non-contiguous ids.
+    ([_kv(i, 0, 65536, 512 * i) for i in range(32)], [9, 3, 40, 41, 1000]),
+    # Single region (p1), reversed ids.
+    ([_kv(7, 1, 2 << 20, 0)], [5, 4, 3, 2, 1, 0]),
+    # Several layers sharing one handle; ids near the int32 limit.
+    ([_kv(6, 0, 4096, 0), _kv(6, 0, 4096, 1024), _kv(8, 0, 4096, 64)],
+     [2**31 - 1, 17, 2**31 - 2]),
+]
+
+
+@pytest.mark.parametrize("regions,block_ids", _BLOCK_CASES)
+def test_block_batch_expands_to_the_legacy_handle_batch(regions, block_ids):
+    from certus_shmq_connector.handler import _regions_for_block
+    from certus_shmq_connector.ring import encode_block_entries, encode_layer_table
+
+    keys = [1000 + i for i in range(len(block_ids))]
+    blob = encode_layer_table(_layer_rows(regions)) + encode_block_entries(keys, block_ids)
+    handles, entries, consumed = _decode_block_batch(blob)
+    assert consumed == len(blob)
+
+    legacy = encode_handle_batch(
+        [(k, _regions_for_block(regions, b)) for k, b in zip(keys, block_ids)]
+    )
+    ref_handles, ref_entries, _ = _decode_handle_batch(legacy)
+    assert handles == ref_handles  # same deduped table, same order
+    assert entries == ref_entries
+
+
+def test_layer_table_rejects_bad_handles_and_empty_tables():
+    from certus_shmq_connector.ring import RingError, encode_layer_table
+
+    with pytest.raises(RingError):
+        encode_layer_table([(b"\x00" * 32, 0, 0, 4096, 4096)])
+    with pytest.raises(RingError):
+        encode_layer_table([])
+
+
+def test_block_entries_mask_keys_and_reject_negative_block_ids():
+    from certus_shmq_connector.ring import encode_block_entries
+
+    blob = encode_block_entries([-1, 2**64 + 5], [3, 4])
+    assert blob == struct.pack("<I2Q2Q", 2, 2**64 - 1, 5, 3, 4)
+    with pytest.raises(struct.error):
+        encode_block_entries([1], [-1])
+
+
+class _BlockScriptedRing(ring.Ring):
+    """A Ring with no shared memory and a fixed cap_req: `request` records each
+    payload and answers one ok byte per key it carries."""
+
+    def __init__(self, cap_req):
+        self._cap_req = cap_req
+        self.sent = []
+
+    def request(self, opcode, data):
+        self.sent.append((opcode, data))
+        (n,) = struct.unpack_from("<I", data, self.table_len)
+        return ring.STATUS_OK, bytes([1]) * n
+
+
+def test_block_batch_chunks_by_key_count():
+    from certus_shmq_connector.ring import encode_block_entries, encode_layer_table
+
+    table = encode_layer_table(_layer_rows(_BLOCK_CASES[0][0]))
+    per_chunk = 5
+    r = _BlockScriptedRing(len(table) + 4 + 16 * per_chunk + 7)
+    r.table_len = len(table)
+    keys = list(range(100, 112))
+    ids = list(range(50, 38, -1))
+    timings = []
+    assert r.lookup_blocks(table, keys, ids, timings=timings) == [True] * 12
+    assert len(timings) == 1
+    assert [op for op, _ in r.sent] == [ring.OP_LOOKUP_BLOCKS] * 3
+    assert [d for _, d in r.sent] == [
+        table + encode_block_entries(keys[i:i + 5], ids[i:i + 5]) for i in (0, 5, 10)
+    ]
+    assert all(len(d) <= r.cap_req for _, d in r.sent)
+
+    r.sent.clear()
+    assert r.copy_to_store_blocks(table, keys[:5], ids[:5]) == [True] * 5
+    assert [op for op, _ in r.sent] == [ring.OP_COPY_TO_STORE_BLOCKS]
+
+
+def test_block_batch_rejects_a_table_larger_than_cap_req():
+    from certus_shmq_connector.ring import RingError, encode_layer_table
+
+    table = encode_layer_table(_layer_rows(_BLOCK_CASES[0][0]))
+    r = _BlockScriptedRing(len(table) + 4 + 15)
+    with pytest.raises(RingError):
+        r.lookup_blocks(table, [1], [0])
+
+
+def test_reserve_refuses_a_size_past_u32():
+    from certus_shmq_connector.ring import encode_reserve
+
+    encode_reserve([(1, 0xFFFFFFFF, 0)])
+    with pytest.raises(ValueError):
+        encode_reserve([(1, 1 << 32, 0)])
+
+
+def test_slot_size_past_u32_is_refused():
+    from certus_shmq_connector.spec import _check_slot_size
+
+    _check_slot_size(2 << 20, 2047)
+    with pytest.raises(ValueError):
+        _check_slot_size(2 << 20, 2048)
+
+
+def test_blocks_per_key_past_u16_is_refused():
+    from certus_shmq_connector.spec import _check_slot_size
+
+    _check_slot_size(4096, 0xFFFF)
+    with pytest.raises(ValueError):
+        _check_slot_size(4096, 0x10000)

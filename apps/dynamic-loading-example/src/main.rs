@@ -18,6 +18,11 @@ use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[expect(
+    clippy::expect_used,
+    reason = "example binary: without its own path it cannot locate the plugin, so it aborts \
+              with the message"
+)]
 fn find_dylib() -> PathBuf {
     let exe = env::current_exe().expect("cannot determine executable path");
     let dir = exe.parent().expect("executable has no parent directory");
@@ -36,11 +41,15 @@ fn find_dylib() -> PathBuf {
     panic!(
         "Could not find libexample_helloworld_dylib.so — \
          build it first with: cargo build -p example-helloworld-dylib\n\
-         Searched: {:?}",
-        candidates
+         Searched: {candidates:?}"
     );
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "example binary: each failure (load, symbol lookup, query) ends the demo, so it \
+              aborts with a message saying which step failed"
+)]
 fn main() {
     println!("=== Dynamic Component Loading Example (Rust-ABI) ===\n");
 
@@ -54,6 +63,11 @@ fn main() {
 
     // 2. Look up the Rust-ABI factory function.
     //    No C shim needed — the symbol returns a ComponentRef directly.
+    // SAFETY: `create_component` is defined in example-helloworld-dylib as
+    // `#[no_mangle] pub fn create_component() -> ComponentRef`, which is exactly
+    // the `fn() -> ComponentRef` type requested here (same rustc, same shared
+    // component-core, per the requirement above). The returned `Symbol` borrows
+    // `lib`, so the library stays loaded for as long as `create` can be called.
     let create: Symbol<'_, fn() -> ComponentRef> =
         unsafe { lib.get(b"create_component") }.expect("symbol 'create_component' not found");
 

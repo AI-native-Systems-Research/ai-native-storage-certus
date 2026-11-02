@@ -22,7 +22,7 @@ pub mod tokio_mpsc;
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 use std::thread::{self, Thread};
 
 use crate::interface::Interface;
@@ -92,8 +92,19 @@ fn escalate(spins: u32) -> u32 {
 /// ```
 pub trait ISender<T: Send + 'static>: Send + Sync + 'static {
     /// Send a message. Blocks if the queue is full.
+    ///
+    /// # Errors
+    ///
+    /// [`ChannelError::Closed`] if the channel is closed (its receiving side
+    /// has gone, or it was force-closed), depending on the implementation.
     fn send(&self, value: T) -> Result<(), ChannelError>;
     /// Try to send without blocking.
+    ///
+    /// # Errors
+    ///
+    /// [`ChannelError::Full`] if the queue has no room, or
+    /// [`ChannelError::Closed`] if the channel is closed, depending on the
+    /// implementation.
     fn try_send(&self, value: T) -> Result<(), ChannelError>;
 }
 
@@ -120,8 +131,19 @@ pub trait ISender<T: Send + 'static>: Send + Sync + 'static {
 /// ```
 pub trait IReceiver<T: Send + 'static>: Send + Sync + 'static {
     /// Receive a message. Blocks if the queue is empty.
+    ///
+    /// # Errors
+    ///
+    /// [`ChannelError::Closed`] once the channel is closed and drained,
+    /// depending on the implementation.
     fn recv(&self) -> Result<T, ChannelError>;
     /// Try to receive without blocking.
+    ///
+    /// # Errors
+    ///
+    /// [`ChannelError::Empty`] if no message is queued, or
+    /// [`ChannelError::Closed`] once the channel is closed and drained,
+    /// depending on the implementation.
     fn try_recv(&self) -> Result<T, ChannelError>;
 }
 
@@ -179,8 +201,13 @@ pub(crate) struct ChannelState<T> {
     pub(crate) receiver_parked: AtomicBool,
     pub(crate) sender_parked: AtomicBool,
     /// Force-close flag set by actor deactivation to ensure the receiver
-    /// exits even when other senders (from IUnknown queries) are still alive.
+    /// exits even when other senders (from `IUnknown` queries) are still alive.
     pub(crate) force_closed: AtomicBool,
+    /// Set when a receiver is dropped and cleared when one is created, so a
+    /// blocked `send` can return `Closed` instead of waiting forever. Before any
+    /// receiver exists it stays clear: sends may fill the queue for a receiver
+    /// bound later.
+    pub(crate) receiver_closed: AtomicBool,
 }
 
 /// Sender endpoint for typed message passing.
@@ -257,6 +284,10 @@ impl<T: Send + 'static> Sender<T> {
                     return Ok(());
                 }
                 Err(returned) => {
+                    // Full, and nobody will ever drain it.
+                    if self.state.receiver_closed.load(Ordering::Acquire) {
+                        return Err(ChannelError::Closed);
+                    }
                     val = returned;
                     spins = escalate(spins);
                     if spins < SPIN_LIMIT {
@@ -265,8 +296,16 @@ impl<T: Send + 'static> Sender<T> {
                         thread::yield_now();
                     } else {
                         {
-                            let mut guard = self.state.sender_thread.lock().unwrap();
-                            *guard = Some(thread::current());
+                            // `thread::current()` runs before the lock is taken, so the guard
+                            // only covers a store into an `Option<Thread>`, which cannot panic:
+                            // this lock is never poisoned.
+                            let me = thread::current();
+                            let mut guard = self
+                                .state
+                                .sender_thread
+                                .lock()
+                                .unwrap_or_else(PoisonError::into_inner);
+                            *guard = Some(me);
                         }
                         self.state.sender_parked.store(true, Ordering::Release);
                         thread::park_timeout(PARK_INTERVAL);
@@ -377,10 +416,13 @@ impl<T: Send + 'static> fmt::Debug for Receiver<T> {
 
 impl<T: Send + 'static> Receiver<T> {
     pub(crate) fn new(state: Arc<ChannelState<T>>, bound_flag: Option<Arc<AtomicBool>>) -> Self {
+        state.receiver_closed.store(false, Ordering::Release);
         Self { state, bound_flag }
     }
 
     /// Receive a message. Blocks if the queue is empty.
+    ///
+    /// # Errors
     ///
     /// Returns [`ChannelError::Closed`] when all senders are dropped and
     /// the queue is fully drained.
@@ -432,8 +474,16 @@ impl<T: Send + 'static> Receiver<T> {
                 thread::yield_now();
             } else {
                 {
-                    let mut guard = self.state.receiver_thread.lock().unwrap();
-                    *guard = Some(thread::current());
+                    // `thread::current()` runs before the lock is taken, so the guard
+                    // only covers a store into an `Option<Thread>`, which cannot panic:
+                    // this lock is never poisoned.
+                    let me = thread::current();
+                    let mut guard = self
+                        .state
+                        .receiver_thread
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner);
+                    *guard = Some(me);
                 }
                 self.state.receiver_parked.store(true, Ordering::Release);
                 thread::park_timeout(PARK_INTERVAL);
@@ -499,19 +549,31 @@ impl<T: Send + 'static> IReceiver<T> for Receiver<T> {
 
 impl<T: Send + 'static> Drop for Receiver<T> {
     fn drop(&mut self) {
+        self.state.receiver_closed.store(true, Ordering::Release);
         if let Some(ref flag) = self.bound_flag {
             flag.store(false, Ordering::Release);
         }
     }
 }
 
-// Sender and Receiver are Send + Sync when T: Send
-// SAFETY: The underlying ChannelState uses atomic operations and Mutex for
-// thread coordination. The RingBuffer's push/pop are safe for SPSC use, and
-// MPSC safety is handled at a higher level.
+// SAFETY: a `Sender` is an `Arc<ChannelState<T>>` plus an
+// `Option<Arc<AtomicBool>>`. The state is atomics, `Mutex<Option<Thread>>`s
+// and a `RingBuffer<T>`, which is `Send + Sync` for `T: Send`; values of `T`
+// only move through it. `SpscChannel` hands out at most one `Sender` at a time
+// (its `sender_bound` flag), so it is the ring's only pusher.
 unsafe impl<T: Send + 'static> Send for Sender<T> {}
+// SAFETY: `RingBuffer::push` must not run on two threads at once. Sharing
+// `&Sender` lets several threads call `send`/`try_send`, so soundness rests on
+// callers using the one sender from one thread at a time, as the SPSC
+// contract says; nothing in the type enforces it.
 unsafe impl<T: Send + 'static> Sync for Sender<T> {}
+// SAFETY: as for `Sender`: thread-safe shared state, and `SpscChannel` hands
+// out at most one `Receiver` at a time, so it is the ring's only popper.
 unsafe impl<T: Send + 'static> Send for Receiver<T> {}
+// SAFETY: `RingBuffer::pop` must not run on two threads at once. Sharing
+// `&Receiver` lets several threads call `recv`/`try_recv`, so soundness rests
+// on callers using the one receiver from one thread at a time, as the SPSC
+// contract says; nothing in the type enforces it.
 unsafe impl<T: Send + 'static> Sync for Receiver<T> {}
 
 #[cfg(test)]
@@ -569,13 +631,13 @@ mod tests {
     fn an_idle_receiver_blocks_instead_of_spinning() {
         let ch = SpscChannel::<u32>::new(4);
         let rx = ch.receiver().unwrap();
-        let _tx = ch.sender().unwrap(); // keep the channel open so recv waits
+        let tx = ch.sender().unwrap(); // keep the channel open so recv waits
 
         let (tid_tx, tid_rx) = std::sync::mpsc::channel();
         let waiter = thread::spawn(move || {
             // SAFETY: `gettid` takes no arguments and only reads the caller's id.
-            tid_tx.send(unsafe { libc::gettid() } as i64).unwrap();
-            // Blocks until the channel closes when `_tx`/`ch` drop.
+            tid_tx.send(i64::from(unsafe { libc::gettid() })).unwrap();
+            // Blocks until the channel closes when `tx`/`ch` drop.
             let _ = rx.recv();
         });
         let tid = tid_rx.recv().unwrap();
@@ -585,7 +647,7 @@ mod tests {
         thread::sleep(wall);
         let used = thread_cpu_us(tid).saturating_sub(before);
 
-        let budget = wall.as_micros() as u64 / 4; // 25% of wall
+        let budget = u64::try_from(wall.as_micros()).unwrap() / 4; // 25% of wall
         assert!(
             used < budget,
             "idle receiver burned {used}us of CPU over {}us of wall clock \
@@ -593,7 +655,7 @@ mod tests {
             wall.as_micros()
         );
 
-        drop(_tx);
+        drop(tx);
         drop(ch);
         waiter.join().unwrap();
     }

@@ -54,13 +54,13 @@ impl LogLevel {
     /// assert!(matches!(LogLevel::from_env_str("trace"), LogLevel::Debug));
     /// assert!(matches!(LogLevel::from_env_str("invalid"), LogLevel::Info));
     /// ```
+    #[must_use]
     pub fn from_env_str(s: &str) -> Self {
         match s.to_ascii_lowercase().as_str() {
             "error" => LogLevel::Error,
             "warn" | "warning" => LogLevel::Warn,
-            "info" => LogLevel::Info,
-            "debug" => LogLevel::Debug,
-            "trace" => LogLevel::Debug,
+            "debug" | "trace" => LogLevel::Debug,
+            // "info" and anything unrecognised.
             _ => LogLevel::Info,
         }
     }
@@ -193,6 +193,7 @@ impl LoggerComponent {
     /// let log = query_interface!(component, ILogger).unwrap();
     /// log.info("captured to buffer");
     /// ```
+    #[must_use]
     pub fn new_with_writer(
         writer: Box<dyn Write + Send>,
         level: LogLevel,
@@ -205,6 +206,11 @@ impl LoggerComponent {
         })
     }
 
+    #[expect(
+        clippy::unwrap_used,
+        reason = "poison means another thread panicked mid-write; ILogger methods return (), \
+                  so there is nowhere to report it and the panic propagates"
+    )]
     fn log(&self, level: LogLevel, msg: &str) {
         if level > self.state.level {
             return;

@@ -42,6 +42,10 @@ fn bench_log_filtered_out(c: &mut Criterion) {
     });
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "benchmark harness: a panicked logging thread must abort the run"
+)]
 fn bench_log_concurrent(c: &mut Criterion) {
     let component = LoggerComponent::new_with_writer(Box::new(NullWriter), LogLevel::Debug, false);
     c.bench_function("log_concurrent_4_threads", |b| {
