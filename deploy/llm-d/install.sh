@@ -274,6 +274,17 @@ echo "[install] profile ${PROFILE}; llm-d pinned at $(git -C "${LLMD_DIR}" rev-p
 
 cd "${LLMD_DIR}"
 export REPO_ROOT="$(realpath "$(git rev-parse --show-toplevel)")"
+# The router chart, pinned to a release. llm-d.ref pins llm-d's guides, but
+# guides/env.sh defaults the chart to the moving tag `v0`, whose endpoint picker
+# is the moving image `:main` with pullPolicy Always: every router restart then
+# runs whatever main is that day. A main build of 2026-11-02 stopped serving
+# grpc.health.v1.Health on the ext-proc port that envoy health-checks, so envoy
+# marked the picker unhealthy and failed open to its fallback route -- no P/D
+# decision, no fetch, while every request still succeeded. v1.0.0 pins the
+# picker to the same tag (pullPolicy IfNotPresent). Bump deliberately, and rerun
+# the router check in deploy/llm-d/README.md, "Checking the router".
+: "${ROUTER_CHART_VERSION:=v1.0.0}"
+export ROUTER_CHART_VERSION
 # shellcheck disable=SC1091
 source "${REPO_ROOT}/guides/env.sh"
 export NAMESPACE GUIDE_NAME
@@ -637,11 +648,19 @@ if [ -f "${OVERLAY_SRC_DIR:-/nonexistent}/router-values.yaml" ]; then
     PROFILE_ROUTER_VALUES=(-f "${OVERLAY_SRC_DIR}/router-values.yaml")
     echo "[install] router values from ${OVERLAY_SRC_DIR#"${SCRIPT_DIR}/"}/router-values.yaml"
 fi
+# --health-checking makes the endpoint picker serve grpc.health.v1.Health on
+# its ext-proc port, which is where the chart's envoy health-checks it. The
+# flag defaults to off and llm-d's values never set it, so the check always
+# failed: older charts left envoy's panic threshold at its default and routed to
+# the picker anyway, newer ones (healthy_panic_threshold 0) fail open instead,
+# silently skipping P/D and fetch. --set-string, after every values file, so no
+# profile can drop it; router-check.sh then confirms envoy sees it healthy.
 helm upgrade --install "${GUIDE_NAME}" \
   "${ROUTER_STANDALONE_CHART}" \
   -f "${REPO_ROOT}/guides/recipes/router/base.values.yaml" \
   -f "${GUIDE_VALUES}" \
   "${PROFILE_ROUTER_VALUES[@]}" \
+  --set-string "router.epp.flags.health-checking=true" \
   -n "${NAMESPACE}" \
   --version "${ROUTER_CHART_VERSION}"
 
