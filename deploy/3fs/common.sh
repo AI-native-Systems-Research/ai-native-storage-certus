@@ -10,6 +10,12 @@
 # Rootless (build.sh, smoke.sh) and rootful (run.sh, admin.sh, teardown.sh) podman
 # cannot share one store, so use a different STORE_DIR for each — run.sh copies the
 # image from the builder's store (BUILD_STORE_DIR) into its own on first use.
+#
+# A ROOTLESS store outside the default location uses fuse-overlayfs: on this host
+# /etc/containers/storage.conf sets overlay mountopt "nodev,metacopy=on", and an
+# unprivileged user may not mount kernel overlay with metacopy on a new store
+# ("failed to mount overlay for metacopy check ... permission denied"). The
+# default rootless store is unaffected (it was created before that setting).
 # Every rootful script must be given the SAME STORE_DIR, or it will not find the
 # container (run.sh saves its choice so admin.sh/teardown.sh pick it up).
 #
@@ -23,8 +29,13 @@ if [[ -z "${STORE_DIR:-}" && $EUID -eq 0 && -f "$_3FS_SAVED" ]]; then
   STORE_DIR="$(cat "$_3FS_SAVED")"
 fi
 
-store_flags() {  # store_flags <dir> — echo --root/--runroot for a store dir (or nothing)
-  [[ -z "$1" ]] || printf -- '--root\n%s\n--runroot\n%s\n' "$1/storage" "$1/run"
+store_flags() {  # store_flags <dir> [rootless] — echo --root/--runroot for a store dir (or nothing)
+  [[ -z "$1" ]] && return 0
+  printf -- '--root\n%s\n--runroot\n%s\n' "$1/storage" "$1/run"
+  # Rootless: kernel overlay + metacopy is refused on a fresh store; fuse-overlayfs works.
+  if [[ "${2:-}" == rootless || $EUID -ne 0 ]] && command -v fuse-overlayfs >/dev/null; then
+    printf -- '--storage-opt\noverlay.mount_program=%s\n' "$(command -v fuse-overlayfs)"
+  fi
 }
 
 PODMAN=(podman)

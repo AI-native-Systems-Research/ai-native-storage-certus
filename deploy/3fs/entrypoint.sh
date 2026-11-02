@@ -18,7 +18,7 @@ set -euo pipefail
 
 CLUSTER_ID="${CLUSTER_ID:-certus3fs}"
 NETWORK="${NETWORK:-RDMA}"
-NET_IFACE="${NET_IFACE:?NET_IFACE (RoCE/IB netdev, e.g. ens6f0np0) is required}"
+NET_IFACE="${NET_IFACE:?NET_IFACE (RoCE netdev of IB_DEVICE; run.sh detects it) is required}"
 IB_DEVICE="${IB_DEVICE:?IB_DEVICE (e.g. mlx5_0) is required}"
 NUM_CHAINS="${NUM_CHAINS:-16}"
 CHUNK_SIZE="${CHUNK_SIZE:-1048576}"
@@ -73,6 +73,18 @@ elif [[ -n "$(find "$D/fdb" "$D/storage" "$STATE" -mindepth 1 -print -quit 2>/de
   die "found data under $D from a previous, unfinished init. Run ./teardown.sh --wipe first."
 fi
 
+# io_uring for storage reads if the kernel allows it (kernel.io_uring_disabled:
+# 0 = on, 1 = io_uring_group only, 2 = off for everyone, root included). Otherwise
+# storage reads fall back to libaio rather than aborting at startup.
+if [[ -z "${ENABLE_IO_URING:-}" ]]; then
+  if python3 -c 'import ctypes,os,sys; fd=ctypes.CDLL(None).syscall(425, 8, (ctypes.c_byte*120)()); sys.exit(0 if fd >= 0 and os.close(fd) is None else 1)' 2>/dev/null; then
+    ENABLE_IO_URING=1
+  else
+    ENABLE_IO_URING=0
+    log "io_uring unavailable (kernel.io_uring_disabled=$(cat /proc/sys/kernel/io_uring_disabled 2>/dev/null || echo ?)); storage reads use libaio"
+  fi
+fi
+export ENABLE_IO_URING
 CLUSTER_ID="$CLUSTER_ID" MGMTD_ADDR="$MGMTD_ADDR" FDB_CLUSTER_FILE="$FDB_CLUSTER_FILE" \
 TOKEN_FILE="$TOKEN_FILE" MOUNTPOINT="$MOUNTPOINT" STORAGE_PATH="$D/storage" \
 NET_IFACE="$NET_IFACE" IB_DEVICE="$IB_DEVICE" NETWORK="$SCHEME" PORTS="$PORTS" \
