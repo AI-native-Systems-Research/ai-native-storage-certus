@@ -76,7 +76,7 @@ echo "[cputier-bench] ${IMAGE}  gpu=${GPU}  shm-size=${SHM_SIZE}  fs-tier=${FS_T
 
 # label=disable: the repo and fs-tier dirs are bind-mounted without relabeling
 # them for SELinux (a :z relabel would rewrite contexts across the whole repo).
-exec command podman run --rm --pull=never \
+exec command podman run --rm --pull=never ${CONTAINER_NAME:+--name "$CONTAINER_NAME"} \
   --security-opt label=disable \
   --shm-size "${SHM_SIZE}" \
   "${DEVICES[@]}" \

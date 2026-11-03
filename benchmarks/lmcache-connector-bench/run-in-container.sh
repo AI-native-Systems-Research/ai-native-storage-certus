@@ -50,7 +50,7 @@ CHUNK_SIZE="${CHUNK_SIZE:-256}"
 LMC_WORKERS="${LMC_WORKERS:-1}"
 ZMQ_PORT="${ZMQ_PORT:-5575}"
 HTTP_PORT="${HTTP_PORT:-8095}"
-SRV="lmcache-connector-bench-server-$$"
+SRV="${CONTAINER_NAME:-lmcache-connector-bench}-server-$$"
 
 if ! command podman image exists "$IMAGE"; then
   echo "error: image '$IMAGE' not found — build it: deploy/lmcache/build.sh" >&2
@@ -92,6 +92,7 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+trap 'exit 130' INT TERM   # run the EXIT cleanup (server container, L2 dir) on interrupt too
 
 echo "[lmcache-bench] ${IMAGE}  gpu=${GPU}  L1=${L1_GB}G  L2=$([[ "$L2" == 1 ]] && echo "${RUN_DIR} ${L2_GB}G" || echo none)  chunk=${CHUNK_SIZE}"
 SRV_ENTRY=()
@@ -114,7 +115,7 @@ curl -sf "http://127.0.0.1:${HTTP_PORT}/status" | grep -q '"is_healthy":true' \
 ENTRY=(python3)
 [[ -n "${CPUS:-}" ]] && ENTRY=(taskset -c "$CPUS" python3)
 set +e
-podman run --rm "${COMMON[@]}" \
+podman run --rm ${CONTAINER_NAME:+--name "$CONTAINER_NAME"} "${COMMON[@]}" \
   -v "${REPO_ROOT}:/certus" -w /certus \
   --entrypoint "${ENTRY[0]}" \
   "$IMAGE" \

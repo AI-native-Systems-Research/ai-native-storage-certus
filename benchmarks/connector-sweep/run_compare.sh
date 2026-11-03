@@ -319,7 +319,64 @@ stop_server() {
   wait "$SERVER_PID" 2>/dev/null
   SERVER_PID=""
 }
-trap stop_server EXIT INT TERM
+# Each arm's container is named after this sweep, so an interrupt can stop it.
+export CONTAINER_NAME="connector-sweep-$$"
+INTERRUPTED=0
+on_interrupt() {
+  # Stop the whole sweep, not just the current arm: without this the shell
+  # carried on with the next arm after the running bench was killed.
+  ((INTERRUPTED)) && return
+  INTERRUPTED=1
+  echo "[compare] interrupted: stopping the current arm and exiting" >&2
+  trap '' INT TERM
+  for c in $(podman ps -q --filter "name=^${CONTAINER_NAME}" 2>/dev/null); do
+    podman stop -t 10 "$c" >/dev/null 2>&1 || true
+  done
+  if [[ -n "${BENCH_PID:-}" ]]; then
+    pkill -TERM -P "$BENCH_PID" 2>/dev/null       # the subshell running the arm
+    for p in $(pgrep -P "$BENCH_PID" 2>/dev/null); do pkill -TERM -P "$p" 2>/dev/null; done
+    kill -TERM "$BENCH_PID" 2>/dev/null
+  fi
+  # A killed bench cannot finish its own exit cleanup (podman stop gives it 10 s,
+  # and an fs tier can hold hundreds of GB), so remove this sweep's per-run data
+  # here: each wrapper makes a fresh run directory inside these, and no other
+  # sweep can be running alongside (the arms share the GPU).
+  local d
+  for d in "$FS_TIER" "${C3_FS_TIER:-}"; do
+    [[ -n "$d" && -d "$d" ]] || continue
+    rm -rf --one-file-system "$d"/cputier-bench-* 2>/dev/null
+    rm -f "$d"/cputier.csv "$d"/cputier-3fs.csv
+  done
+  [[ -d "$L2_DIR" ]] && rm -rf --one-file-system "$L2_DIR"/run-* 2>/dev/null
+  [[ -d "$H3FS_MOCK_DIR" ]] && rm -rf --one-file-system "$H3FS_MOCK_DIR"/run-* 2>/dev/null
+  if mountpoint -q "$H3FS_MOUNT" 2>/dev/null; then
+    rm -rf "$H3FS_MOUNT"/vllm/bench-* 2>/dev/null
+  fi
+  echo "[compare] removed this sweep's per-run disk-tier data" >&2
+  stop_server
+  exit 130
+}
+trap stop_server EXIT
+trap on_interrupt INT TERM
+
+# Run one arm in the background and wait for it, so INT/TERM reach on_interrupt
+# at once (bash defers traps while a foreground command runs). The arm's own
+# process group gets the signal from on_interrupt via BENCH_PID. Returns the
+# arm's exit code; stdout goes to the log via tee, as before.
+run_arm() {  # run_arm <log> <filter-regex-or-empty> <cmd...>
+  local log="$1" filt="$2"; shift 2
+  local rcf; rcf=$(mktemp)
+  if [[ -n "$filt" ]]; then
+    ( "$@" 2>&1; echo $? > "$rcf" ) | grep --line-buffered -vE "$filt" | tee "$log" &
+  else
+    ( "$@" 2>&1; echo $? > "$rcf" ) | tee "$log" &
+  fi
+  BENCH_PID=$!
+  wait "$BENCH_PID"
+  BENCH_PID=""
+  local rc; rc=$(cat "$rcf" 2>/dev/null || echo 1); rm -f "$rcf"
+  return "${rc:-1}"
+}
 
 if ((RUN_CERTUS)); then
   STATUS_CERTUS=failed
@@ -348,8 +405,8 @@ if ((RUN_CERTUS)); then
     if ((ready)); then
       sleep 1
       echo "[compare] certus arm: ${NUMA_CMD[*]} ${CERTUS_CMD[*]}"
-      "${NUMA_CMD[@]}" "${CERTUS_CMD[@]}" 2>&1 | tee "$ART/certus-bench.log"
-      [[ ${PIPESTATUS[0]} -eq 0 && -s "$ART/certus.csv" ]] && STATUS_CERTUS=ok
+      run_arm "$ART/certus-bench.log" "" "${NUMA_CMD[@]}" "${CERTUS_CMD[@]}"
+      [[ $? -eq 0 && -s "$ART/certus.csv" ]] && STATUS_CERTUS=ok
     else
       echo "[compare] certus-server did not become ready; see $ART/server.log" >&2
     fi
@@ -362,8 +419,8 @@ if ((RUN_CPUTIER)); then
   rm -f "$ART/cputier.csv" "$FS_TIER/cputier.csv"
   echo "[compare] cputier arm: GPU=$GPU_LIST CPU_BYTES=$DRAM ${CPUTIER_CMD[*]}"
   GPU="$GPU_LIST" CPU_BYTES="$DRAM" FS_TIER_HOST="$FS_TIER" IMAGE="$IMAGE" CPUS="$NUMA_CPUS" \
-    "${NUMA_CMD[@]}" "${CPUTIER_CMD[@]}" 2>&1 | tee "$ART/cputier-bench.log"
-  rc=${PIPESTATUS[0]}
+    run_arm "$ART/cputier-bench.log" "" "${NUMA_CMD[@]}" "${CPUTIER_CMD[@]}"
+  rc=$?
   [[ "$CPUTIER_CSV_IN" == /fs-tier/* && -f "$FS_TIER/cputier.csv" ]] && mv "$FS_TIER/cputier.csv" "$ART/cputier.csv"
   [[ $rc -eq 0 && -s "$ART/cputier.csv" ]] && STATUS_CPUTIER=ok
 fi
@@ -375,9 +432,9 @@ if ((RUN_LMCACHE)); then
   echo "[compare] lmcache arm: GPU=$GPU L1_GB=$L1_GB ${LMCACHE_CMD[*]}"
   GPU="$GPU" L1_GB="$L1_GB" L2_DIR="$L2_DIR" CHUNK_SIZE="$CHUNK_SIZE" IMAGE="$LMCACHE_IMAGE" \
     CPUS="$NUMA_CPUS" L2_THREADS="$IO_THREADS" \
-    "${NUMA_CMD[@]}" "${LMCACHE_CMD[@]}" 2>&1 | grep --line-buffered -vE "LMCache (INFO|WARNING)|slapd|Discovered API|CudaIPCTypes" \
-    | tee "$ART/lmcache-bench.log"
-  rc=${PIPESTATUS[0]}
+    run_arm "$ART/lmcache-bench.log" "LMCache (INFO|WARNING)|slapd|Discovered API|CudaIPCTypes" \
+      "${NUMA_CMD[@]}" "${LMCACHE_CMD[@]}"
+  rc=$?
   tmp_csv="$REPO_ROOT/${LMCACHE_CSV_IN#/certus/}"
   [[ "$LMCACHE_CSV_IN" == /certus/.lmcache-compare-* && -f "$tmp_csv" ]] && mv "$tmp_csv" "$ART/lmcache.csv"
   [[ $rc -eq 0 && -s "$ART/lmcache.csv" ]] && STATUS_LMCACHE=ok
@@ -391,10 +448,9 @@ if ((RUN_H3FS)); then
   echo "[compare] 3fs arm (${H3FS_CLIENT} client): GPU=$GPU ${H3FS_CMD[*]}"
   GPU="$GPU" MOCK="$H3FS_MOCK" IMAGE="$H3FS_RUN_IMAGE" H3FS_MOUNT="$H3FS_MOUNT" H3FS_DIR="$H3FS_MOCK_DIR" \
     CPUS="$NUMA_CPUS" \
-    "${NUMA_CMD[@]}" "${H3FS_CMD[@]}" 2>&1 \
-    | grep --line-buffered -vE "CUDA_HOME|Triton|cpp_extension|frombuffer|UserWarning|HF3FS Connector Completed" \
-    | tee "$ART/3fs-bench.log"
-  rc=${PIPESTATUS[0]}
+    run_arm "$ART/3fs-bench.log" "CUDA_HOME|Triton|cpp_extension|frombuffer|UserWarning|HF3FS Connector Completed" \
+      "${NUMA_CMD[@]}" "${H3FS_CMD[@]}"
+  rc=$?
   tmp_csv="$REPO_ROOT/${H3FS_CSV_IN#/certus/}"
   [[ "$H3FS_CSV_IN" == /certus/.3fs-compare-* && -f "$tmp_csv" ]] && mv "$tmp_csv" "$ART/3fs.csv"
   [[ $rc -eq 0 && -s "$ART/3fs.csv" ]] && STATUS_H3FS=ok
@@ -408,8 +464,8 @@ if ((RUN_CPUTIER_3FS)); then
   rm -f "$ART/cputier-3fs.csv" "$C3_FS_TIER/cputier-3fs.csv"
   echo "[compare] cputier-3fs arm (fs tier on 3FS): GPU=$GPU_LIST CPU_BYTES=$DRAM ${C3_CMD[*]}"
   GPU="$GPU_LIST" CPU_BYTES="$DRAM" FS_TIER_HOST="$C3_FS_TIER" IMAGE="$IMAGE" CPUS="$NUMA_CPUS" \
-    "${NUMA_CMD[@]}" "${C3_CMD[@]}" 2>&1 | tee "$ART/cputier-3fs-bench.log"
-  rc=${PIPESTATUS[0]}
+    run_arm "$ART/cputier-3fs-bench.log" "" "${NUMA_CMD[@]}" "${C3_CMD[@]}"
+  rc=$?
   [[ "$C3_CSV_IN" == /fs-tier/* && -f "$C3_FS_TIER/cputier-3fs.csv" ]] && mv "$C3_FS_TIER/cputier-3fs.csv" "$ART/cputier-3fs.csv"
   [[ $rc -eq 0 && -s "$ART/cputier-3fs.csv" ]] && STATUS_C3=ok
 elif [[ -n "$C3_NOTE" ]]; then

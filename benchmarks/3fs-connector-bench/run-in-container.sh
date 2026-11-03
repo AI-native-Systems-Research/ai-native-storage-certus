@@ -88,7 +88,7 @@ echo "[3fs-bench] ${IMAGE}  gpu=${GPU}  $([[ "$MOCK" == 1 ]] && echo "MOCK clien
 # label=disable: the repo and 3FS mount are bound without SELinux relabeling
 # (relabeling a FUSE mount fails, and :z would rewrite contexts across the repo).
 set +e
-command podman run --rm --pull=never \
+command podman run --rm --pull=never ${CONTAINER_NAME:+--name "$CONTAINER_NAME"} \
   --security-opt label=disable \
   --ipc host \
   --device "nvidia.com/gpu=${GPU}" \

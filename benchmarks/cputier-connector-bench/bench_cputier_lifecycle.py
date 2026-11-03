@@ -65,6 +65,7 @@ import math
 import os
 import random
 import shutil
+import signal
 import statistics
 import sys
 import tempfile
@@ -1917,6 +1918,10 @@ def main():
         fs_root = fs_run_dir
         if not args.keep_fs:
             atexit.register(shutil.rmtree, fs_run_dir, True)
+            # atexit does not run on a signal: turn SIGTERM (podman stop, the
+            # connector-sweep interrupt) into a normal exit so the fs tier's
+            # files are removed; they run to hundreds of GB.
+            signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 
     shm = shutil.disk_usage("/dev/shm")
     if args.cpu_bytes > shm.free:
