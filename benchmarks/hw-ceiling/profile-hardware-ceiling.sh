@@ -1106,6 +1106,49 @@ open(yaml_path,"a").write("\n".join(out)+"\n")
 def fmt(x): return f"{x:.2f}" if isinstance(x,(int,float)) else (x or "")
 if md_path:
     m=["", "## Summary", ""]
+    # Devices under test — so the reader knows exactly what was profiled.
+    gpu_names=[]
+    for g in sorted(static):
+        n=static[g].get("name","unknown")
+        if n not in gpu_names: gpu_names.append(n)
+    nvme_models=[]
+    # Parse nvme drive info from the YAML we already wrote (simple line scan).
+    # Lines look like:  '    - bdf: "0000:41:00.0"'  /  '      model: "PM9A3 ..."'
+    _cur_bdf=_cur_model=_cur_cap=None
+    def _yval(line):
+        """Extract value after first ': ' in a YAML line, stripping quotes."""
+        _,_,v=line.partition(": ")
+        return v.strip().strip('"').split("#")[0].strip()
+    for _ln in open(yaml_path):
+        _s=_ln.strip()
+        if re.match(r'^- bdf:', _s):
+            if _cur_bdf:
+                _lbl=_cur_model or "unknown"
+                if _cur_cap: _lbl+=f" ({_cur_cap} TB)"
+                nvme_models.append(f"{_cur_bdf} — {_lbl}")
+            _cur_bdf=_yval(_s); _cur_model=_cur_cap=None
+        elif re.match(r'^model:', _s) and _cur_bdf is not None:
+            _cur_model=_yval(_s)
+        elif re.match(r'^capacity_tb:', _s) and _cur_bdf is not None:
+            try: _cur_cap=f"{float(_yval(_s)):.1f}"
+            except ValueError: pass
+    if _cur_bdf:
+        _lbl=_cur_model or "unknown"
+        if _cur_cap: _lbl+=f" ({_cur_cap} TB)"
+        nvme_models.append(f"{_cur_bdf} — {_lbl}")
+    m.append("### Devices under test")
+    m.append("")
+    if gpu_names:
+        m.append(f"**GPU**: {len(static)}x {', '.join(gpu_names)}")
+    else:
+        m.append("**GPU**: _(not detected)_")
+    if nvme_models:
+        m.append(f"**NVMe**: {len(nvme_models)} drive(s)")
+        for _nm in nvme_models:
+            m.append(f"  - {_nm}")
+    else:
+        m.append("**NVMe**: _(none named via --nvme)_")
+    m.append("")
     # Sub-table 2: warm path (H2D ceiling), per GPU
     bw0=parse_bw(numa_files[0] if numa_files else plain)
     m+=["### Warm path — Memory-Tier (DRAM) --H2D--> GPU", "",
