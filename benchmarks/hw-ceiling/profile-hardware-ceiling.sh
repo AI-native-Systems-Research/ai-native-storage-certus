@@ -1115,27 +1115,34 @@ if md_path:
     # Parse nvme drive info from the YAML we already wrote (simple line scan).
     # Lines look like:  '    - bdf: "0000:41:00.0"'  /  '      model: "PM9A3 ..."'
     _cur_bdf=_cur_model=_cur_cap=None
+    _in_nvme=False
     def _yval(line):
         """Extract value after first ': ' in a YAML line, stripping quotes."""
         _,_,v=line.partition(": ")
-        return v.strip().strip('"').split("#")[0].strip()
+        return v.split("#")[0].strip().strip('"')
+    def _flush_drive():
+        nonlocal _cur_bdf,_cur_model,_cur_cap
+        if _cur_bdf:
+            _lbl=_cur_model or "unknown"
+            if _cur_cap: _lbl+=f" ({_cur_cap} TB)"
+            nvme_models.append(f"{_cur_bdf} — {_lbl}")
+        _cur_bdf=_cur_model=_cur_cap=None
     for _ln in open(yaml_path):
         _s=_ln.strip()
+        # Track when we enter/leave the nvme drives section.
+        if _s.startswith("nvme:"): _in_nvme=True; continue
+        if _in_nvme and _s and not _s.startswith("-") and not _s.startswith("#") and not _ln[0].isspace():
+            _flush_drive(); _in_nvme=False; continue
+        if not _in_nvme: continue
         if re.match(r'^- bdf:', _s):
-            if _cur_bdf:
-                _lbl=_cur_model or "unknown"
-                if _cur_cap: _lbl+=f" ({_cur_cap} TB)"
-                nvme_models.append(f"{_cur_bdf} — {_lbl}")
+            _flush_drive()
             _cur_bdf=_yval(_s); _cur_model=_cur_cap=None
         elif re.match(r'^model:', _s) and _cur_bdf is not None:
             _cur_model=_yval(_s)
         elif re.match(r'^capacity_tb:', _s) and _cur_bdf is not None:
             try: _cur_cap=f"{float(_yval(_s)):.1f}"
             except ValueError: pass
-    if _cur_bdf:
-        _lbl=_cur_model or "unknown"
-        if _cur_cap: _lbl+=f" ({_cur_cap} TB)"
-        nvme_models.append(f"{_cur_bdf} — {_lbl}")
+    _flush_drive()
     m.append("### Devices under test")
     m.append("")
     if gpu_names:
