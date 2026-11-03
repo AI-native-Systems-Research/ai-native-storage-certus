@@ -1,0 +1,74 @@
+# Router values for the certus-fetch profile: llm-d's optimized-baseline router
+# (guides/optimized-baseline/router/optimized-baseline.values.yaml at the pinned
+# llm-d.ref), unchanged in how it places a request, with certus peer selection
+# added to name a fetch source: pd-certus's tokenizer, precise prefix producer
+# and p2p-source-producer, on the single profile (as llm-d's
+# guides/p2p-kv-cache-sharing router values run them aggregated).
+# install.sh applies it after the guide's values when WITH_CERTUS=1 FETCH=1.
+#
+# Placement stays the baseline's: prefix-cache-affinity-filter and
+# token-load-scorer read the default prefix producer, approx-prefix-cache-
+# producer, exactly as without fetch. The precise producer is consulted only by
+# the p2p-source-producer, so fetch changes where a moved turn's history comes
+# from, not which pod it moves to.
+#
+# pluginsCustomConfig is a single string, so this file carries the WHOLE plugin
+# config: an llm-d.ref bump must re-check it against upstream's.
+router:
+  epp:
+    flags:
+      # p2p-source-producer is registered Alpha (llm-d-router cmd/epp/runner).
+      allow-experimental-plugins: true
+    pluginsConfigFile: "certus-fetch-plugins.yaml"
+    pluginsCustomConfig:
+      certus-fetch-plugins.yaml: |
+        apiVersion: llm-d.ai/v1alpha1
+        kind: EndpointPickerConfig
+        plugins:
+        # The baseline's plugins, with its defaults.
+        - type: approx-prefix-cache-producer
+        - type: inflight-load-producer
+        - type: prefix-cache-affinity-filter
+        - type: token-load-scorer
+        # Peer selection, as pd-certus/router-values.yaml (see its comments).
+        - type: token-producer
+          parameters:
+            modelName: Qwen/Qwen3-8B
+            vllm:
+              url: "http://render:8000"
+        - type: endpoint-notification-source
+        - type: precise-prefix-cache-producer
+          parameters:
+            indexerConfig:
+              kvBlockIndexConfig:
+                inMemoryConfig:
+                  podCacheSize: 8          # 4 pods, a GPU and a certus tier each
+              kvCacheBackendConfigs:
+                - {name: gpu, weight: 1.0}
+                - {name: cpu, weight: 0.4}
+            tokenProcessorConfig:
+              blockSizeTokens: 16
+            speculativeIndexing: false
+            kvEventsConfig:
+              topicFilter: "kv@"
+              discoverPods: true
+              podDiscoveryConfig:
+                socketPort: 5556
+        - type: p2p-source-producer
+          parameters:
+            prefixMatchInfoProducerName: precise-prefix-cache-producer
+            # No prefill profile: the pod the single profile picks is the one
+            # computing the prompt, and the one a source must out-cache.
+            prefillProfileName: default
+            # The same floor as pd-certus.
+            minCachedTokenDelta: 1024
+        dataLayer:
+          sources:
+            - pluginRef: endpoint-notification-source
+              extractors:
+                - pluginRef: precise-prefix-cache-producer
+        schedulingProfiles:
+        - name: default
+          plugins:
+          - pluginRef: prefix-cache-affinity-filter
+          - pluginRef: token-load-scorer

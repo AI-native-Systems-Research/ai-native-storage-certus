@@ -29,6 +29,7 @@
 # Usage:
 #   deploy/llm-d/install.sh                 # aggregated serving
 #   WITH_CERTUS=1 deploy/llm-d/install.sh   # + certus KV-cache offload
+#   WITH_CERTUS=1 FETCH=1 deploy/llm-d/install.sh   # + fetch on a session move
 #   PD=1 deploy/llm-d/install.sh            # prefill/decode disaggregation
 #   PD=1 WITH_CERTUS=1 deploy/llm-d/install.sh   # P/D, certus beside NIXL
 #   DRY_RUN=1 PD=1 deploy/llm-d/install.sh  # check settings; change nothing
@@ -58,6 +59,9 @@
 #                longer lists, instead of refusing (default: 0)
 #   WITH_CERTUS  1 to apply profiles/<PROFILE>/certus, or with PD=1
 #                profiles/<PROFILE>/pd-certus (default: 0)
+#   FETCH        1, with WITH_CERTUS=1 and no PD: profiles/<PROFILE>/certus-fetch,
+#                aggregated certus plus peer selection, so a pod a session moves
+#                to fetches its history from the old pod's certus (default: 0)
 #   PD           1 to apply profiles/<PROFILE>/pd instead of agg (default: 0)
 #   RDMA         1, with PD=1 WITH_CERTUS=1: profiles/<PROFILE>/pd-certus-rdma,
 #                NIXL GPU to GPU over the `roce` secondary network
@@ -135,6 +139,7 @@ WITH_CERTUS="${WITH_CERTUS:-0}"
 PD="${PD:-0}"
 RDMA="${RDMA:-0}"
 OFFLOAD="${OFFLOAD:-0}"
+FETCH="${FETCH:-0}"
 TIERED="${TIERED:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 KEEP_LLMD="${KEEP_LLMD:-0}"
@@ -198,6 +203,15 @@ if [ "${PD}" != "0" ]; then need_overlay pd; else need_overlay agg; fi
 if [ "${WITH_CERTUS}" != "0" ]; then
     need_overlay certus   # pd-certus takes its entrypoint from certus/
     [ "${PD}" = "0" ] || need_overlay pd-certus
+fi
+if [ "${FETCH}" != "0" ]; then
+    if [ "${WITH_CERTUS}" = "0" ] || [ "${PD}" != "0" ]; then
+        echo "ERROR: FETCH=1 needs WITH_CERTUS=1 without PD (P/D fetches already)." >&2
+        exit 1
+    fi
+    # Takes pd-certus's render service and RBAC.
+    need_overlay certus-fetch
+    need_overlay pd-certus
 fi
 if [ "${TIERED}" != "0" ]; then
     if [ "${WITH_CERTUS}" != "0" ] || [ "${OFFLOAD}" != "0" ]; then
@@ -451,6 +465,14 @@ if [ "${WITH_CERTUS}" != "0" ]; then
         # Consumes ../agg, so it has to sit beside it.
         install_overlay "${VLLM_DIR}" certus
         OVERLAY="${VLLM_DIR}/certus"
+        if [ "${FETCH}" != "0" ]; then
+            # Layers on certus, so it sits beside it; the render service and
+            # the RBAC are pd-certus's, copied in.
+            install_overlay "${VLLM_DIR}" certus-fetch
+            OVERLAY="${VLLM_DIR}/certus-fetch"
+            OVERLAY_SRC_DIR="${PROFILE_DIR}/certus-fetch"
+            cp "${PROFILE_DIR}/pd-certus/render.yaml" "${PROFILE_DIR}/pd-certus/rbac.yaml" "${OVERLAY}/"
+        fi
     fi
 
     # The committed overlay pins a REGISTRY/REPO placeholder rather than a real
@@ -458,8 +480,11 @@ if [ "${WITH_CERTUS}" != "0" ]; then
     # with. Done on the materialized copy, so the sources stay site-neutral.
     # The image pin lives in pd-certus even when pd-certus-rdma layers on it.
     certus_km="${PD_VLLM_DIR}/pd-certus/kustomization.yaml"
-    [ "${PD}" != "0" ] || certus_km="${OVERLAY}/kustomization.yaml"
-    if grep -q 'REGISTRY/REPO/' "${certus_km}"; then
+    [ "${PD}" != "0" ] || certus_km="${VLLM_DIR}/certus/kustomization.yaml"
+    # certus-fetch pins the image again, for its render service.
+    [ "${FETCH}" = "0" ] || certus_km="${certus_km} ${VLLM_DIR}/certus-fetch/kustomization.yaml"
+    # shellcheck disable=SC2086
+    if grep -q 'REGISTRY/REPO/' ${certus_km}; then
         if [ -z "${CERTUS_REGISTRY:-}" ] || [ -z "${CERTUS_REPO:-}" ]; then
             echo "ERROR: profiles/${PROFILE}/$(basename "${OVERLAY}")/kustomization.yaml pins the REGISTRY/REPO" >&2
             echo "       placeholder, so there is no image to pull. Set CERTUS_REGISTRY and" >&2
@@ -467,10 +492,12 @@ if [ "${WITH_CERTUS}" != "0" ]; then
             echo "       ${SITE_ENV} or the environment." >&2
             exit 1
         fi
-        sed -i "s|REGISTRY/REPO/|${CERTUS_REGISTRY}/${CERTUS_REPO}/|" "${certus_km}"
+        # shellcheck disable=SC2086
+        sed -i "s|REGISTRY/REPO/|${CERTUS_REGISTRY}/${CERTUS_REPO}/|" ${certus_km}
         echo "[install] image registry -> ${CERTUS_REGISTRY}/${CERTUS_REPO}"
     fi
     echo "[install] certus KV-cache offload ENABLED"
+    [ "${FETCH}" = "0" ] || echo "[install] certus fetch on a session move ENABLED (aggregated peer selection)"
 elif [ "${OFFLOAD}" != "0" ]; then
     # Consumes ../pd, so it sits beside it. render.yaml and the router values
     # are pd-certus's, so the two arms route identically.
