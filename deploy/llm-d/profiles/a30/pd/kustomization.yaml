@@ -33,5 +33,18 @@ labels:
     includeSelectors: true
     includeTemplates: true
 
+# llm-d's routing sidecar, pinned by digest. The base pulls
+# ghcr.io/llm-d/llm-d-router-disagg-sidecar:main with imagePullPolicy Always, so
+# every pod start takes whatever main is that day, while the router is pinned
+# to v1.0.0 (install.sh). The two have to agree on how the router names a
+# fetch source: from llm-d-router 7cb7709a (2026-11-03) the sidecar reads it
+# only from the request body, which router v1.0.0 does not write, so certus
+# fetch stops silently -- the router still logs every pull. This digest is the
+# build (Git SHA ddabbfd0) every fetching run so far used. Move it with the
+# router, not alone. The policy stays the base's Always: a digest cannot drift.
+images:
+  - name: ghcr.io/llm-d/llm-d-router-disagg-sidecar
+    digest: sha256:adea9eda69259ab60737079c635f5158cfbd31d1e9eadd26ee1c1633a4f835ed
+
 patches:
   - path: patch.yaml
