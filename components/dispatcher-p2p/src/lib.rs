@@ -154,7 +154,80 @@ struct DataDrive {
     block_dev_iface: Arc<dyn IBlockDevice + Send + Sync>,
     _extent_mgr_component: Arc<dyn component_core::IUnknown + Send + Sync>,
     extent_mgr: Arc<dyn IExtentManager + Send + Sync>,
-    cached_channels: Option<ClientChannels>,
+    /// Per-reader client channels for the read pipeline; see [`ChannelPool`].
+    channel_pool: ChannelPool,
+}
+
+/// A pool of per-drive client channels for the read pipeline.
+///
+/// Each [`ClientChannels`] is an SPSC pair (single producer / single consumer)
+/// and must be used by exactly one thread at a time. Lookups reach a drive from
+/// several threads at once (the shmq workers, and the scoped threads of
+/// `promote_to_memory_tier`), so a single shared channel would let one thread's
+/// completions be dequeued by another (completion theft: the victim waits on
+/// `completion_rx` forever). Each concurrent reader therefore checks out its own
+/// channel; channels are reused across checkouts and the pool grows on demand up
+/// to peak concurrency. Same design as `dispatcher`'s `ChannelPool`.
+struct ChannelPool {
+    block_dev: Arc<dyn IBlockDevice + Send + Sync>,
+    free: Mutex<Vec<ClientChannels>>,
+}
+
+impl ChannelPool {
+    /// A pool holding `first`, the channel connected at drive start-up (if that
+    /// connect succeeded), so the first reader does not pay for a connect.
+    fn new(block_dev: Arc<dyn IBlockDevice + Send + Sync>, first: Option<ClientChannels>) -> Self {
+        Self {
+            block_dev,
+            free: Mutex::new(first.into_iter().collect()),
+        }
+    }
+
+    /// Check out an exclusive channel, connecting a fresh one if the pool is
+    /// empty. The returned lease returns the channel to the pool on drop.
+    fn checkout(&self) -> Result<ChannelLease<'_>, DispatcherError> {
+        let reused = self.free.lock().unwrap_or_else(|e| e.into_inner()).pop();
+        let channels = match reused {
+            Some(ch) => ch,
+            None => self.block_dev.connect_client().map_err(|e| {
+                DispatcherError::IoError(format!("channel pool connect_client failed: {e}"))
+            })?,
+        };
+        // Discard any late completions left by a prior user that errored out, so
+        // the next pipeline starts from a clean completion stream (tags from an
+        // old op must never be matched against a new op's segments).
+        while channels.completion_rx.try_recv().is_ok() {}
+        Ok(ChannelLease {
+            pool: self,
+            channels: Some(channels),
+        })
+    }
+}
+
+/// RAII guard for a checked-out [`ClientChannels`]; returns it to the pool on drop.
+struct ChannelLease<'a> {
+    pool: &'a ChannelPool,
+    channels: Option<ClientChannels>,
+}
+
+impl ChannelLease<'_> {
+    fn channels(&self) -> &ClientChannels {
+        self.channels
+            .as_ref()
+            .expect("channel lease used after channel taken")
+    }
+}
+
+impl Drop for ChannelLease<'_> {
+    fn drop(&mut self) {
+        if let Some(ch) = self.channels.take() {
+            self.pool
+                .free
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(ch);
+        }
+    }
 }
 
 fn format_bytes(bytes: usize) -> String {
@@ -506,15 +579,11 @@ impl DispatcherP2pComponent {
         let start_lba = offset / block_size as u64;
         let block_dev = Arc::clone(&drive.block_dev_iface);
 
-        let channels = match &drive.cached_channels {
-            Some(ch) => ch,
-            None => {
-                drop(drives);
-                return Err(DispatcherError::IoError(
-                    "no cached channels for drive".into(),
-                ));
-            }
-        };
+        // An exclusive channel pair for this read: concurrent lookups on the same
+        // drive must not share one (see ChannelPool). Returned to the pool when
+        // `lease` drops, after the read.
+        let lease = drive.channel_pool.checkout()?;
+        let channels = lease.channels();
 
         // Choose P2P path (NVMe → GPU BAR1 → D2D) or DRAM path (NVMe → DRAM → H2D).
         let p2p_guard = self.p2p_ring.read();
@@ -533,6 +602,7 @@ impl DispatcherP2pComponent {
                 )?;
             }
             drop(p2p_guard);
+            drop(lease);
             drop(drives);
 
             // Client is served. Release write lock — key stays as BlockDevice.
@@ -571,6 +641,7 @@ impl DispatcherP2pComponent {
                 )?;
             }
             drop(ring_guard);
+            drop(lease);
             drop(drives);
 
             // DRAM is filled — register as MemoryTier immediately.
@@ -1199,7 +1270,7 @@ impl DispatcherP2pComponent {
                 "dispatcher-p2p: data drive {i} initialized at {addr_str}{cpu_msg}"
             ));
 
-            let cached_channels = ibd.connect_client().ok();
+            let channel_pool = ChannelPool::new(Arc::clone(&ibd), ibd.connect_client().ok());
 
             drives.push(DataDrive {
                 _block_dev: block_dev_component,
@@ -1208,7 +1279,7 @@ impl DispatcherP2pComponent {
                 _extent_mgr_component: extent_mgr
                     as Arc<dyn component_core::IUnknown + Send + Sync>,
                 extent_mgr: iem,
-                cached_channels,
+                channel_pool,
             });
         }
 
@@ -2772,17 +2843,21 @@ impl IDispatcher for DispatcherP2pComponent {
                 }
 
                 let drive = &drives[drive_idx];
-                let channels = match &drive.cached_channels {
-                    Some(ch) => ch,
-                    None => continue,
-                };
                 let block_dev = Arc::clone(&drive.block_dev_iface);
+                let channel_pool = &drive.channel_pool;
                 let dm = &dm;
                 let mt = &mt;
                 let cold = &cold_entries;
                 let logger = &logger;
 
                 s.spawn(move || {
+                    // This thread serves one drive's entries one after another, so one
+                    // exclusive channel pair covers them all; a drive whose channel cannot
+                    // be had is skipped, as it was when none was cached.
+                    let Ok(lease) = channel_pool.checkout() else {
+                        return;
+                    };
+                    let channels = lease.channels();
                     for &ci in entry_indices {
                         let entry = &cold[ci];
                         let block_size = block_dev.block_size() as u64;
@@ -5698,5 +5773,147 @@ mod tests {
 
         std::thread::sleep(std::time::Duration::from_millis(200));
         evictor.shutdown();
+    }
+}
+
+#[cfg(test)]
+mod channel_pool_tests {
+    //! The per-drive [`ChannelPool`]: concurrent readers on a drive must never share one
+    //! SPSC channel pair (completion theft: the victim waits on `completion_rx` forever).
+    use super::*;
+    use component_core::channel::SpscChannel;
+    use interfaces::{NvmeBlockError, TelemetrySnapshot};
+    use std::collections::HashSet;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
+
+    /// A block device that only hands out channel pairs, counting the connects.
+    struct CountingDevice {
+        connects: AtomicUsize,
+    }
+
+    impl IBlockDevice for CountingDevice {
+        fn connect_client(&self) -> Result<ClientChannels, NvmeBlockError> {
+            self.connects.fetch_add(1, Ordering::SeqCst);
+            let cmd = SpscChannel::<Command>::new(8);
+            let comp = SpscChannel::<Completion>::new(8);
+            // The device side (cmd_rx, comp_tx) is dropped: these tests only use the client side.
+            Ok(ClientChannels {
+                command_tx: cmd.sender().unwrap(),
+                completion_rx: comp.receiver().unwrap(),
+            })
+        }
+        fn sector_size(&self, _ns_id: u32) -> Result<u32, NvmeBlockError> {
+            Ok(512)
+        }
+        fn num_sectors(&self, _ns_id: u32) -> Result<u64, NvmeBlockError> {
+            Ok(1 << 20)
+        }
+        fn max_queue_depth(&self) -> u32 {
+            8
+        }
+        fn num_io_queues(&self) -> u32 {
+            1
+        }
+        fn max_transfer_size(&self) -> u32 {
+            128 * 1024
+        }
+        fn block_size(&self) -> u32 {
+            512
+        }
+        fn numa_node(&self) -> i32 {
+            -1
+        }
+        fn nvme_version(&self) -> String {
+            "mock".into()
+        }
+        fn telemetry(&self) -> Result<TelemetrySnapshot, NvmeBlockError> {
+            Err(NvmeBlockError::NotSupported("mock".into()))
+        }
+        fn read_write_stats(&self) -> interfaces::ReadWriteStats {
+            interfaces::ReadWriteStats::default()
+        }
+    }
+
+    fn pool_with(first: bool) -> (Arc<CountingDevice>, ChannelPool) {
+        let dev = Arc::new(CountingDevice {
+            connects: AtomicUsize::new(0),
+        });
+        let first = if first {
+            dev.connect_client().ok()
+        } else {
+            None
+        };
+        let pool = ChannelPool::new(
+            Arc::clone(&dev) as Arc<dyn IBlockDevice + Send + Sync>,
+            first,
+        );
+        (dev, pool)
+    }
+
+    #[test]
+    fn concurrent_checkouts_get_distinct_channels() {
+        let (dev, pool) = pool_with(true);
+        let a = pool.checkout().unwrap();
+        let b = pool.checkout().unwrap();
+        let c = pool.checkout().unwrap();
+        let ptrs = [a.channels(), b.channels(), c.channels()]
+            .map(|ch| ch as *const ClientChannels as usize);
+        assert!(ptrs[0] != ptrs[1] && ptrs[1] != ptrs[2] && ptrs[0] != ptrs[2]);
+        // The start-up pair served the first reader; the other two connected their own.
+        assert_eq!(dev.connects.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn a_returned_channel_is_reused_without_connecting() {
+        let (dev, pool) = pool_with(true);
+        assert_eq!(dev.connects.load(Ordering::SeqCst), 1);
+        for _ in 0..5 {
+            let lease = pool.checkout().unwrap();
+            let _ = lease.channels();
+        }
+        assert_eq!(
+            dev.connects.load(Ordering::SeqCst),
+            1,
+            "no reconnect per checkout"
+        );
+        assert_eq!(pool.free.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn an_empty_pool_connects_on_demand() {
+        // The start-up connect failed (None): the first reader connects its own.
+        let (dev, pool) = pool_with(false);
+        assert_eq!(dev.connects.load(Ordering::SeqCst), 0);
+        let lease = pool.checkout().unwrap();
+        let _ = lease.channels();
+        assert_eq!(dev.connects.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn threads_each_get_their_own_channel() {
+        let (_dev, pool) = pool_with(true);
+        let pool = Arc::new(pool);
+        let barrier = Arc::new(std::sync::Barrier::new(8));
+        let seen: Vec<usize> = (0..8)
+            .map(|_| {
+                let (pool, barrier) = (Arc::clone(&pool), Arc::clone(&barrier));
+                thread::spawn(move || {
+                    let lease = pool.checkout().unwrap();
+                    let addr = lease.channels() as *const ClientChannels as usize;
+                    barrier.wait(); // all eight hold a lease at once
+                    addr
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .collect();
+        let distinct: HashSet<usize> = seen.iter().copied().collect();
+        assert_eq!(
+            distinct.len(),
+            8,
+            "eight simultaneous readers, eight channels"
+        );
     }
 }
