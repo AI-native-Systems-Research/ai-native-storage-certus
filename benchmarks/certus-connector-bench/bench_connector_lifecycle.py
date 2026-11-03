@@ -2600,9 +2600,17 @@ def main():
         ring, block_size_bytes=args.block_bytes, world_size=args.tp,
     )
 
-    # Allocate enough GPU memory for all block_ids the benchmark will use.
-    # The eviction mode uses --working-set blocks; use the max of that and num_blocks.
-    max_blocks = max(args.num_blocks, args.working_set)
+    # Allocate enough GPU memory for all block_ids the benchmark will use. Every
+    # transfer addresses GPU blocks 0..len(batch)-1, so the buffer is sized by
+    # the largest batch, not by --working-set (the mixed-eviction phase cycles
+    # its working set through the TIER in --bs batches). Sizing it from
+    # --working-set allocated 2 x working_set x block_bytes of GPU memory: a
+    # 16 GiB working set at 2 MiB blocks asked for 64 GiB on a 40 GB GPU.
+    # The scheduler-step mode batches a whole step's loads: up to
+    # requests_per_step x (prefix pool + suffix) keys.
+    kpr = max(4, args.num_blocks // args.requests_per_step)
+    step_keys = args.requests_per_step * (min((kpr // 2) * 4, args.num_blocks * 2) + (kpr - kpr // 2))
+    max_blocks = max(args.num_blocks, args.bs, step_keys)
     if not cold_shape_is_default(args):
         # Tier fill stores --bs keys per call at block ids 0..bs-1; in-flight
         # slots each take one load unit's range.

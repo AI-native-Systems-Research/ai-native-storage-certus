@@ -411,7 +411,8 @@ def latex_table(order, by, names, present, sh, work_flags) -> str:
     details); store rows with a sustained figure get an extra "incl. disk drain"
     row. The fastest arm in each row is bold. A row where an arm skipped work
     (the report's warning flag) carries a dagger on that arm's value and a
-    footnote line under the table. Needs \\usepackage{booktabs}.
+    footnote line under the table. A second table gives each row's transfer
+    latency (latency_table). Needs \\usepackage{booktabs}.
     """
     arms = [k for k, *_ in present]
     lines, notes = [], []
@@ -461,7 +462,76 @@ def latex_table(order, by, names, present, sh, work_flags) -> str:
     if notes:
         out += [r"\par\smallskip", r"\parbox{\linewidth}{\footnotesize " + r" \\ ".join(notes) + "}"]
     out += [rf"\caption{{{caption}}}", r"\label{tab:connector-sweep}", r"\end{table}", ""]
+    out += latency_table(order, by, names, arms, sh)
     return "\n".join(out)
+
+
+# Per row: the phase that is the KV transfer itself (submit -> completion seen
+# by the connector), by the name each bench records it under. Mixed eviction
+# records store and load waits separately.
+LATENCY_PHASES = {
+    "Store Lifecycle": [("store", ("get_finished",))],
+    "Warm Load Lifecycle": [("load", ("get_finished",))],
+    # cputier and lmcache read a cold block from disk while the lookup waits
+    # (promotion / L2 prefetch), before the transfer; certus and 3fs read it
+    # inside the transfer. Show both so the cold row is comparable.
+    "Cold Load Lifecycle": [("transfer", ("get_finished",)),
+                            ("disk fetch at lookup", ("lookup_wait",))],
+    "Mixed Store+Load Under Eviction Pressure": [("store", ("store_finish",)),
+                                                 ("load", ("load_finish",))],
+    "Pipelined Store": [("store", ("pipeline_drain",))],
+    "Pipelined Load": [("load", ("pipeline_drain",))],
+}
+
+
+def latency_table(order, by, names, arms, sh) -> list[str]:
+    """p50 / p99 of each row's transfer wait (ms), per arm, as a booktabs table.
+
+    The wait is the bench's get_finished phase (store_finish / load_finish in
+    mixed eviction): from submitting a batch of --bs blocks until the connector
+    reports it done, i.e. the GPU<->tier transfer plus the backend's queueing.
+    Lookup and bookkeeping phases are left out; the HTML report lists them all.
+    """
+    rows = []
+    for key in order:
+        label = key[0]
+        if label not in LATENCY_PHASES:
+            continue
+        recs = {k: by[k].get(key) for k in arms}
+        if not any(recs.values()):
+            continue
+        for kind, cands in LATENCY_PHASES[label]:
+            cells, any_val = [], False
+            for k in arms:
+                r = recs[k]
+                v = None
+                if r:
+                    for c in cands:
+                        p50, p99 = r.get(f"{c}_p50_us"), r.get(f"{c}_p99_us")
+                        if p50 not in (None, "") and float(p50) > 0:
+                            v = (float(p50) / 1e3, float(p99 or 0) / 1e3)
+                            break
+                any_val |= v is not None
+                cells.append("---" if v is None else f"{_fmt_ms(v[0])} / {_fmt_ms(v[1])}")
+            if any_val:
+                name = _tex(label) + (f" ({kind})" if len(LATENCY_PHASES[label]) > 1 else "")
+                rows.append(name + " & " + " & ".join(cells) + r" \\")
+    if not rows:
+        return []
+    cols = "l" + "r" * len(arms)
+    head = " & ".join(_tex(names[k]) for k in arms)
+    caption = (f"Latency per batch of {sh.get('bs')} blocks, p50 / p99 in ms. Rows give the transfer wait: from "
+               f"submitting the batch until the connector reports it done (get\\_finished). On a cold load, "
+               f"cputier and lmcache read from disk during the lookup, before the transfer (disk fetch at "
+               f"lookup row); certus and 3fs read inside the transfer. --- : the arm has no such phase.")
+    return [r"\begin{table}[t]", r"\centering", r"\small",
+            rf"\begin{{tabular}}{{{cols}}}", r"\toprule",
+            rf"Phase & {head} \\", r"\midrule", *rows, r"\bottomrule", r"\end{tabular}",
+            rf"\caption{{{caption}}}", r"\label{tab:connector-sweep-latency}", r"\end{table}", ""]
+
+
+def _fmt_ms(v: float) -> str:
+    return f"{v:.2f}" if v < 10 else (f"{v:.1f}" if v < 100 else f"{v:.0f}")
 
 
 def _distinct(values) -> list[str]:

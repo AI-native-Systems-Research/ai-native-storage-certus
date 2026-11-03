@@ -55,7 +55,7 @@ run_compare.sh --out <path> ... --latex             # also write the throughput 
 run_compare.sh --help                               # every option and its default
 ```
 
-The LaTeX table (`--latex`, or `make_report.py --latex PATH`) is a `booktabs` `table` with one row per result and one column per arm, in GB/s. Store rows get an extra "incl. disk drain" row. The fastest arm in each row is in bold. A value from an arm that skipped work in that row (dropped stores, load misses, or a cold pass that barely touched disk) carries a dagger, is never bold, and is explained in a footnote under the table. Add `\usepackage{booktabs}` to the preamble.
+The LaTeX table (`--latex`, or `make_report.py --latex PATH`) is a `booktabs` `table` with one row per result and one column per arm, in GB/s. Store rows get an extra "incl. disk drain" row. The fastest arm in each row is in bold. A value from an arm that skipped work in that row (dropped stores, load misses, or a cold pass that barely touched disk) carries a dagger, is never bold, and is explained in a footnote under the table. A second table (`tab:connector-sweep-latency`) gives each row's transfer latency per `--bs` batch, p50 / p99 in ms, per arm. Cold loads get two rows, because cputier and lmcache read from disk while the lookup waits, before the transfer, while certus and 3fs read during the transfer. Add `\usepackage{booktabs}` to the preamble.
 
 ## Before running
 
