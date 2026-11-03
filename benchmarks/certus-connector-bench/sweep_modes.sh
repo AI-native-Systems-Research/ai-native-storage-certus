@@ -242,12 +242,16 @@ for mode in "${MODES[@]}"; do
     TAG_ARGS=()
     [ -n "$TAG" ] && TAG_ARGS=(--tag "$TAG")
 
+    SSD_ARGS=()
+    [[ -n "$NVME_BDFS" ]] && SSD_ARGS=(--target-ssd "$NVME_BDFS")
+
     python3 "$BENCH" \
         --mode "$mode" \
         --min-duration "$MIN_DURATION" \
         --output "$YAML_OUT" \
         --csv "$CSV_FILE" \
         "${TAG_ARGS[@]}" \
+        "${SSD_ARGS[@]}" \
         "${EXTRA_ARGS[@]}"
 
     echo "  → $YAML_OUT"
