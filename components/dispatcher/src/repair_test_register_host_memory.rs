@@ -308,6 +308,18 @@ impl IGpuServices for RegGpu {
     ) -> Result<(), String> {
         Ok(())
     }
+    fn memcpy_batch_async(
+        &self,
+        dsts: &[*mut std::ffi::c_void],
+        srcs: &[*const std::ffi::c_void],
+        sizes: &[usize],
+        stream: GpuStream,
+    ) -> Result<(), String> {
+        for ((&dst, &src), &size) in dsts.iter().zip(srcs).zip(sizes) {
+            self.memcpy_h2d_async(src, dst, size, stream)?;
+        }
+        Ok(())
+    }
     fn allocate_pinned_dma_buffer(&self, _size: usize) -> Result<DmaBuffer, String> {
         Err("mock has no DMA buffers".into())
     }

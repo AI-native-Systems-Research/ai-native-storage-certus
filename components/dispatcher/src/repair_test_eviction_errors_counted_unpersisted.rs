@@ -292,6 +292,7 @@ fn unregistered_slot_refusal_is_not_counted_as_unpersisted() {
         Mutex::new(None),
         Mutex::new(None),
         RwLock::new(Vec::new()),
+        RwLock::new(interfaces::ReadWriteStats::default()),
         RwLock::new(None),
         AtomicU64::new(0),
         Mutex::new(None),
