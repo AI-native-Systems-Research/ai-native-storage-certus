@@ -1,0 +1,66 @@
+# Peer selection for aggregated pods: pd-certus/patch.yaml's wiring for both
+# roles, plus llm-d's routing sidecar, which aggregated serving otherwise runs
+# without.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: optimized-baseline-nvidia-gpu-vllm-decode
+spec:
+  template:
+    spec:
+      # Reads and writes pod annotations for peer selection (rbac.yaml).
+      serviceAccountName: certus-peer
+      initContainers:
+        # llm-d's routing sidecar, as guides/p2p-kv-cache-sharing runs it in
+        # front of aggregated pods. With --kv-connector=offloading and no
+        # prefill hop, a request carrying the router's KV-cache-source header
+        # goes to vLLM with kv_transfer_params.remote_kv_source naming the
+        # source pod, which the certus connector resolves to that pod's certus
+        # and fetches from. Skipped when the source is this pod.
+        # --p2p-connector-port is not set: it is vLLM's own P2P tier port, which
+        # the sidecar sends as remote_port and certus ignores.
+        - name: routing-proxy
+          # The image P/D's decode pods run (llm-d's pd base). IfNotPresent, not
+          # the base's Always: main floats, and the nodes hold the copy the P/D
+          # arms ran.
+          image: ghcr.io/llm-d/llm-d-router-disagg-sidecar:main
+          imagePullPolicy: IfNotPresent
+          args:
+            - --port=8000
+            - --vllm-port=8200
+            - --kv-connector=offloading
+            - --zap-log-level=1
+            - --secure-proxy=false
+          env:
+            # Lets the sidecar recognise itself as the named source.
+            - name: POD_IP
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+          ports:
+            - {containerPort: 8000, name: sidecar, protocol: TCP}
+          resources: {}
+          restartPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+      containers:
+        - name: modelserver
+          env:
+            # The entrypoint annotates this pod with its certus instance.
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+            # KV events for the router's precise prefix producer; the topic
+            # names the pod as the router reaches it, POD_IP:8000 (the sidecar).
+            - name: POD_IP
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+            - name: CERTUS_KV_EVENTS
+              value: "tcp://*:5556"
+            # Certus blocks as the CPU tier, the only one p2p-source-producer
+            # counts as pullable (see pd-certus/patch.yaml).
+            - name: CERTUS_EVENT_MEDIUM
+              value: cpu
+            # Store generated blocks too: an answer is the next turn's prefix,
+            # which a pod the session moves to then fetches.
+            - name: CERTUS_OFFLOAD_PROMPT_ONLY
+              value: "false"
