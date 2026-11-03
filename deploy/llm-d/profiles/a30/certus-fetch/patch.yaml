@@ -62,7 +62,3 @@ spec:
             # counts as pullable (see pd-certus/patch.yaml).
             - name: CERTUS_EVENT_MEDIUM
               value: cpu
-            # Store generated blocks too: an answer is the next turn's prefix,
-            # which a pod the session moves to then fetches.
-            - name: CERTUS_OFFLOAD_PROMPT_ONLY
-              value: "false"

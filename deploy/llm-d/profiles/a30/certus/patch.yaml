@@ -49,6 +49,16 @@ spec:
               value: "1"
             - name: DP_RANK
               value: "0"
+            # Store generated blocks too, not only the prompt. vLLM's default
+            # (offload_prompt_only) stores a block only while it is prompt, for
+            # models whose answers are dropped before the next turn. In a chat
+            # the answer is the next turn's prefix: prompt-only drops it when the
+            # request finishes and the next turn recomputes all of it, even on
+            # this pod. Measured at 3.4x overflow (40 sessions, 2,000-token
+            # answers): later-turn TTFT median 0.62 s -> 0.27 s, prompt tokens
+            # from cache 54.7% -> 75.4%.
+            - name: CERTUS_OFFLOAD_PROMPT_ONLY
+              value: "false"
           volumeMounts:
             - mountPath: /certus
               name: certus-entrypoint
