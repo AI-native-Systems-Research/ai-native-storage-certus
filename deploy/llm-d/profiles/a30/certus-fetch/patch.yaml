@@ -26,8 +26,10 @@ spec:
           image: ghcr.io/llm-d/llm-d-router-disagg-sidecar:main
           imagePullPolicy: IfNotPresent
           args:
+            # vLLM's port is the sidecar's default, 8200. llm-d's guide names it
+            # with --vllm-port, which this sidecar build (the P/D arms') predates:
+            # it calls it --model-server-port and exits on --vllm-port.
             - --port=8000
-            - --vllm-port=8200
             - --kv-connector=offloading
             - --zap-log-level=1
             - --secure-proxy=false
