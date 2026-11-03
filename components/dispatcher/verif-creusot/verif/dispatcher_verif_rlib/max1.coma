@@ -1,0 +1,24 @@
+(* #"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/methods.rs" 33 0 33 30 *)
+
+let%span smethods = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/methods.rs" 34 12 34 13
+let%span smethods'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/methods.rs" 34 16 34 17
+let%span smethods'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/methods.rs" 32 10 32 49
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let max1 [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/methods.rs" 33 0 33 30]
+  (n: UInt64.t) (return (x: UInt64.t)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_4 <- n = ([%#smethods] (0: UInt64.t)) ] s1
+    | s1 = any [ br0 -> {_4 = false} (! bb2) | br1 -> {_4} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &_ret <- [%#smethods'0] (1: UInt64.t) ] s1 | s1 = return {_ret} ]
+  | bb2 = s0 [ s0 = [ &_ret <- n ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l () | & n: UInt64.t = n | & _4: bool = Any.any_l () ])
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:max1 ensures] [%#smethods'1] UInt64.t'int result
+    = (if UInt64.t'int n = 0 then 1 else UInt64.t'int n)}
+    (! return {result}) ]

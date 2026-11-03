@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_recover": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_em_extents": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_index_Vec_Ext_Global": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_len_Ext": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_recover_all": { "prover": "cvc4", "time": 1.9 }
+    }
+  }
+}

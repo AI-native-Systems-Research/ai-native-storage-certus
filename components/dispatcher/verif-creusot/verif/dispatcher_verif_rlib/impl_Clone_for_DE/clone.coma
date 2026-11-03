@@ -1,0 +1,32 @@
+(* #"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 106 9 106 29 *)
+
+(* <DE as std::clone::Clone> *)
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_Ni = Dispatcher | DispatchMap | MemoryTier | Gpu | Spdk | Logger | Ring
+
+type t_IoK =
+  | Partition'0 UInt64.t UInt64.t UInt64.t
+  | Drive'0 UInt64.t
+  | Gpu'0
+  | Sync'0
+  | Ssd'0
+  | Promote'0
+  | Dm'0
+  | Remote'0
+  | Stream'0
+  | Channel'0
+  | Other'0
+
+type t_DE = NotInit t_Ni | InvalidParam | KeyNotFound UInt64.t | AlreadyExists UInt64.t | Alloc | Io t_IoK | Timeout
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_DE [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 106 9 106 29]
+  (self: t_DE) (return (x: t_DE)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ] [ & _ret: t_DE = Any.any_l () | & self: t_DE = self ])
+  [ return (result: t_DE) -> (! return {result}) ]

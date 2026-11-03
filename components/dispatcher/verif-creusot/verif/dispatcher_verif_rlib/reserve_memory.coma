@@ -1,0 +1,812 @@
+(* #"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 304 0 304 112 *)
+
+let%span score = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 490 16 494 63
+let%span score'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 383 16 383 32
+let%span score'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 322 16 322 46
+let%span score'2 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 483 16 485 24
+let%span score'3 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 423 16 423 111
+let%span score'4 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 458 16 459 117
+let%span score'5 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 429 16 430 86
+let%span score'6 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 681 16 682 91
+let%span score'7 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 688 16 689 65
+let%span score'8 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 443 16 444 73
+let%span score'9 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 450 16 451 72
+let%span score'10 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 291 16 291 43
+let%span score'11 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 306 16 306 28
+let%span score'12 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 332 16 332 32
+let%span score'13 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 357 16 357 89
+let%span score'14 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 337 16 337 30
+let%span score'15 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 370 16 373 5
+let%span smapping = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
+let%span smethods = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/methods.rs" 7 10 7 102
+let%span sfmap = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sfmap'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 77 14 77 67
+let%span sfmap'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 78 14 78 84
+let%span sfmap'2 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+let%span sfmap'3 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 54 14 54 25
+let%span sfmap'4 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 96 8 96 34
+let%span soption = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/option.rs" 796 15 796 27
+let%span soption'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/option.rs" 798 8 801 9
+let%span slogic = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/logic.rs" 39 11 39 28
+let%span slogic'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/logic.rs" 40 10 40 19
+let%span sevict = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 305 10 305 31
+let%span sevict'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 306 44 306 64
+let%span sevict'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 309 15 309 16
+let%span sevict'2 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 310 49 310 69
+let%span sevict'3 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 322 28 322 29
+let%span sevict'4 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 323 24 323 68
+let%span sevict'5 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 324 37 324 57
+let%span sevict'6 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 327 23 327 28
+let%span sevict'7 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 330 23 330 27
+let%span sevict'8 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 331 23 331 26
+let%span sevict'9 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 332 41 332 42
+let%span sevict'10 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 338 22 338 28
+let%span sevict'11 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 339 14 339 58
+let%span sevict'12 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 336 16 336 35
+let%span sevict'13 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 335 16 335 70
+let%span sevict'14 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 334 16 334 49
+let%span sevict'15 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 333 16 333 66
+let%span sevict'16 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 342 19 342 41
+let%span sevict'17 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 343 20 343 45
+let%span sevict'18 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 349 48 349 69
+let%span sevict'19 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 346 54 346 75
+let%span sevict'20 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 340 58 340 79
+let%span sevict'21 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 316 60 316 80
+let%span sevict'22 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 313 61 313 81
+let%span sevict'23 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 286 10 286 23
+let%span sevict'24 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 287 10 287 87
+let%span sevict'25 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 288 10 288 89
+let%span sevict'26 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 289 10 289 40
+let%span sevict'27 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 290 10 297 131
+let%span sevict'28 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 298 10 298 137
+let%span sevict'29 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 299 10 301 69
+let%span sevict'30 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 302 10 303 110
+let%span sevict'31 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 188 10 188 23
+let%span sevict'32 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 189 10 194 1
+let%span sevict'33 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 195 10 195 41
+let%span sevict'34 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 196 10 197 67
+let%span sevict'35 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 198 10 198 112
+let%span sevict'36 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 199 10 199 145
+let%span sevict'37 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 275 16 278 113
+let%span sevict'38 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 266 10 266 46
+let%span sevict'39 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 267 10 267 42
+let%span sevict'40 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 39 10 39 94
+let%span sevict'41 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 179 16 185 220
+let%span sevict'42 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 247 16 250 113
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use map.Map
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_P = {
+  init: bool;
+  has_dm: bool;
+  has_mt: bool;
+  has_gpu: bool;
+  has_spdk: bool;
+  has_factory: bool;
+  has_rl: bool;
+  has_logger: bool;
+  max_att: UInt64.t;
+  bp_ms: UInt64.t;
+  nd: UInt64.t;
+  writer: bool;
+  ssd_ev: bool;
+  mt_ev: bool;
+  ring: bool;
+  chunk: UInt64.t;
+  stg: bool;
+  stg_bytes: UInt64.t;
+  warm: UInt64.t }
+
+type t_FMap_u64_Ent
+
+type t_FMap_u64_Slot
+
+type t_Ctr = {
+  promo_mem: int;
+  promo_gpu: int;
+  ev_mem: int;
+  ev_ssd: int;
+  hit_dram: int;
+  hit_ssd: int;
+  r_hit: int;
+  r_miss: int;
+  bp: int;
+  drop_full: int;
+  already: int;
+  blk_pin: int;
+  exhausted: int;
+  blk_unp: int }
+
+type t_Job = { key: UInt64.t; size: UInt32.t; dev: UInt64.t }
+
+type t_Option_usize = None | Some UInt64.t
+
+type t_Ev =
+  | H2D UInt64.t UInt64.t UInt64.t UInt64.t
+  | D2H UInt64.t UInt64.t UInt64.t UInt64.t
+  | Sync UInt64.t
+  | MtTouch UInt64.t
+  | MtGet UInt64.t
+  | MtBatchTouch
+  | MtRemove UInt64.t
+  | MtInsert UInt64.t
+  | DmTouch UInt64.t
+  | DmDemote UInt64.t
+  | DmRemove UInt64.t
+  | DmCreate UInt64.t
+  | DmPromote UInt64.t
+  | RelRead UInt64.t int
+  | RelWrite UInt64.t int
+  | Enq t_Job
+  | ExtFree UInt64.t UInt64.t
+  | Recover UInt64.t UInt64.t UInt32.t
+  | EmFormat UInt64.t
+  | EmInit UInt64.t
+  | Checkpoint UInt64.t
+  | DevSignal UInt64.t
+  | DevShutdown UInt64.t
+  | DevDetach UInt64.t
+  | Register
+  | Unregister
+  | Join
+  | Leave
+  | SsdRead UInt64.t UInt64.t
+  | SsdWrite UInt64.t UInt64.t
+  | RemoteFwd UInt64.t UInt32.t
+  | Spawn
+  | Cpu UInt64.t t_Option_usize
+
+type t_Ext = { key'0: UInt64.t; off'0: UInt64.t; size'0: UInt32.t }
+
+type t_W = {
+  dm: t_FMap_u64_Ent;
+  mt: t_FMap_u64_Slot;
+  used: int;
+  cap: int;
+  c: t_Ctr;
+  wq: Seq.seq t_Job;
+  log: Seq.seq t_Ev;
+  tick: int;
+  ob: Map.map int bool;
+  ob2: Map.map int bool;
+  og: Map.map int bool;
+  os: Map.map int bool;
+  ov: Map.map int UInt64.t;
+  ok: Map.map int (Seq.seq UInt64.t);
+  ext: Map.map int (Seq.seq t_Ext);
+  pool: bool;
+  cluster: bool;
+  threads: int;
+  rw: Map.map int UInt64.t;
+  cfree: Map.map int int;
+  wf: Map.map UInt64.t bool }
+
+type t_S = { p: t_P; g: t_W }
+
+type t_Ni = Dispatcher | DispatchMap | MemoryTier | Gpu | Spdk | Logger | Ring
+
+type t_IoK =
+  | Partition'0 UInt64.t UInt64.t UInt64.t
+  | Drive'0 UInt64.t
+  | Gpu'0
+  | Sync'0
+  | Ssd'0
+  | Promote'0
+  | Dm'0
+  | Remote'0
+  | Stream'0
+  | Channel'0
+  | Other'0
+
+type t_DE = NotInit t_Ni | InvalidParam | KeyNotFound UInt64.t | AlreadyExists UInt64.t | Alloc | Io t_IoK | Timeout
+
+type t_Result_unit_DE = Ok () | Err t_DE
+
+let ensure_initialized (s: t_S) (return (x: t_Result_unit_DE)) = any
+  [ return (result: t_Result_unit_DE) ->
+  {[@stop_split] [@expl:ensure_initialized ensures] [%#smethods] match result with
+      | Ok () -> s.p.init
+      | Err e -> not s.p.init /\ e = NotInit (Dispatcher)
+      end}
+    (! return {result}) ]
+
+predicate resolve_refmut_S [@inline:trivial] (_1: MutBorrow.t t_S) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_S
+
+let elim_Err (_x: t_Result_unit_DE) (return (f0: t_DE)) = any
+  [ _k (f0: t_DE) -> {Err f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Err] match _x with
+      | Err _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+type t_Result_u64_DE = Ok'0 UInt64.t | Err'0 t_DE
+
+type t_RsvG = { attempts: int }
+
+type tup2_Result_u64_DE_Snapshot_RsvG = { f0: t_Result_u64_DE; f1: t_RsvG }
+
+type t_Dl = { past: bool }
+
+type t_Option_Dl = None'0 | Some'0 t_Dl
+
+let elim_Some (_x: t_Option_Dl) (return (f0'0: t_Dl)) = any
+  [ _k (f0'0: t_Dl) -> {Some'0 f0'0 = _x} (! return {f0'0})
+  | _chk -> (! {[@expl:elim Some] match _x with
+      | Some'0 _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+type t_Slot = { ptr'1: UInt64.t; size'1: UInt32.t }
+
+type t_Option_Slot = None'1 | Some'1 t_Slot
+
+function to_mapping_u64 (self: t_FMap_u64_Slot) : Map.map UInt64.t t_Option_Slot
+
+function get_u64 [@inline:trivial] (self: t_FMap_u64_Slot) (k: UInt64.t) : t_Option_Slot =
+  [%#sfmap] Map.get (to_mapping_u64 self) k
+
+meta "rewrite_def" function get_u64
+
+type t_Option_u64 = None'2 | Some'2 UInt64.t
+
+type t_Loc = Mem UInt64.t UInt32.t t_Option_u64 | Blk UInt64.t
+
+type t_Ent = { loc: t_Loc; es: UInt32.t; rr: UInt32.t; wr: UInt32.t }
+
+type t_Option_Ent = None'3 | Some'3 t_Ent
+
+function to_mapping_u64'0 (self: t_FMap_u64_Ent) : Map.map UInt64.t t_Option_Ent
+
+function get_u64'0 [@inline:trivial] (self: t_FMap_u64_Ent) (k: UInt64.t) : t_Option_Ent =
+  [%#sfmap] Map.get (to_mapping_u64'0 self) k
+
+meta "rewrite_def" function get_u64'0
+
+predicate contains_u64 [@inline:trivial] (self: t_FMap_u64_Ent) (k: UInt64.t) = [%#sfmap'2] get_u64'0 self k <> None'3
+
+meta "rewrite_def" predicate contains_u64
+
+predicate has [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 331 0 331 32] (w: t_W) (k: UInt64.t) =
+  [%#score'12] contains_u64 w.dm k
+
+predicate persisted [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 356 0 356 32] (l: t_Loc) =
+  [%#score'13] match l with
+    | Mem _ _ ssd -> ssd <> None'2
+    | Blk _ -> false
+    end
+
+predicate index_Mapping_Ent_bool [@inline:trivial] (self: Map.map t_Ent bool) (a: t_Ent) = [%#smapping] Map.get self a
+
+meta "rewrite_def" predicate index_Mapping_Ent_bool
+
+function such_that_Ent (p'0: Map.map t_Ent bool) : t_Ent
+
+axiom such_that_Ent_spec:
+  forall p'0: Map.map t_Ent bool [such_that_Ent p'0]. ([%#slogic] exists x: t_Ent. index_Mapping_Ent_bool p'0 x)
+    -> ([%#slogic'0] index_Mapping_Ent_bool p'0 (such_that_Ent p'0))
+
+function unwrap_Option_Ent (self: t_Option_Ent) : t_Ent = [%#soption'0] match self with
+    | Some'3 x -> x
+    | None'3 -> such_that_Ent (fun (__0: t_Ent) -> true)
+    end
+
+function lookup_u64 [@inline:trivial] (self: t_FMap_u64_Ent) (k: UInt64.t) : t_Ent =
+  [%#sfmap'4] unwrap_Option_Ent (get_u64'0 self k)
+
+meta "rewrite_def" function lookup_u64
+
+function ent [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 336 0 336 31] (w: t_W) (k: UInt64.t) : t_Ent
+ = [%#score'14] lookup_u64 w.dm k
+
+function demoted_loc [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 369 0 369 33] (l: t_Loc) : t_Loc
+ = [%#score'15] match l with
+    | Mem _ _ (Some'2 o) -> Blk o
+    | _ -> l
+    end
+
+predicate contains_u64'0 [@inline:trivial] (self: t_FMap_u64_Slot) (k: UInt64.t) = [%#sfmap'2] get_u64 self k <> None'1
+
+meta "rewrite_def" predicate contains_u64'0
+
+predicate mt_has [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 382 0 382 35] (w: t_W) (k: UInt64.t) =
+  [%#score'0] contains_u64'0 w.mt k
+
+predicate demoted_k [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 482 0 482 44] (a: t_W) (b: t_W) (k: UInt64.t) =
+  [%#score'2] has a k
+  /\ persisted (ent a k).loc
+  /\ UInt32.t'int (ent a k).rr = 0
+  /\ UInt32.t'int (ent a k).wr = 0
+  /\ get_u64'0 b.dm k
+    = Some'3 { loc = demoted_loc (ent a k).loc; es = (ent a k).es; rr = (ent a k).rr; wr = (ent a k).wr }
+  /\ not mt_has b k
+
+function len_u64 (self: t_FMap_u64_Slot) : int
+
+axiom len_u64_spec: forall self: t_FMap_u64_Slot [len_u64 self]. [%#sfmap'3] len_u64 self >= 0
+
+function remove_u64 (self: t_FMap_u64_Slot) (k: UInt64.t) : t_FMap_u64_Slot
+
+axiom remove_u64_spec:
+  forall self: t_FMap_u64_Slot, k: UInt64.t [remove_u64 self k]. [%#sfmap'0] to_mapping_u64 (remove_u64 self k)
+    = Map.set (to_mapping_u64 self) k (None'1)
+
+axiom remove_u64_spec'0:
+  forall self: t_FMap_u64_Slot, k: UInt64.t [remove_u64 self k]. [%#sfmap'1] len_u64 (remove_u64 self k)
+    = (if contains_u64'0 self k then len_u64 self - 1 else len_u64 self)
+
+predicate log_ext [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 422 0 422 34] (a: t_W) (b: t_W) =
+  [%#score'3] Seq.length a.log <= Seq.length b.log
+  /\ (forall i: int. 0 <= i /\ i < Seq.length a.log -> Seq.get b.log i = Seq.get a.log i)
+
+predicate demote_before_free [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 457 0 457 45] (a: t_W) (b: t_W) =
+  [%#score'4] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
+    -> match Seq.get b.log i with
+      | MtRemove key'1 -> i > Seq.length a.log /\ Seq.get b.log (i - 1) = DmDemote key'1
+      | _ -> true
+      end
+
+predicate no_dma [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 428 0 428 33] (a: t_W) (b: t_W) =
+  [%#score'5] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
+    -> match Seq.get b.log i with
+      | H2D _ _ _ _ -> false
+      | D2H _ _ _ _ -> false
+      | _ -> true
+      end
+
+predicate no_reg [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 680 0 680 33] (a: t_W) (b: t_W) =
+  [%#score'6] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
+    -> match Seq.get b.log i with
+      | DmCreate _ -> false
+      | Enq _ -> false
+      | _ -> true
+      end
+
+predicate no_ssd [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 687 0 687 33] (a: t_W) (b: t_W) =
+  [%#score'7] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
+    -> match Seq.get b.log i with
+      | SsdRead _ _ -> false
+      | _ -> true
+      end
+
+predicate own_writes [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 442 0 442 37] (a: t_W) (b: t_W) =
+  [%#score'8] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
+    -> match Seq.get b.log i with
+      | RelWrite _ own -> own > 0
+      | _ -> true
+      end
+
+predicate own_reads [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 449 0 449 36] (a: t_W) (b: t_W) =
+  [%#score'9] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
+    -> match Seq.get b.log i with
+      | RelRead _ own -> own > 0
+      | _ -> true
+      end
+
+predicate eai_frame [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 178 0 178 67] (a: t_W) (b: t_W) (key'1: UInt64.t) (ptr: UInt64.t) (size'2: UInt32.t) =
+  [%#sevict'41] get_u64 b.mt key'1 = Some'1 { ptr'1 = ptr; size'1 = size'2 }
+  /\ b.used <= b.cap
+  /\ Seq.length b.log > Seq.length a.log
+  /\ Seq.get b.log (Seq.length b.log - 1) = MtInsert key'1
+  /\ (get_u64'0 b.dm key'1 = get_u64'0 a.dm key'1
+    \/ demoted_k a { dm = b.dm;
+                     mt = remove_u64 b.mt key'1;
+                     used = b.used;
+                     cap = b.cap;
+                     c = b.c;
+                     wq = b.wq;
+                     log = b.log;
+                     tick = b.tick;
+                     ob = b.ob;
+                     ob2 = b.ob2;
+                     og = b.og;
+                     os = b.os;
+                     ov = b.ov;
+                     ok = b.ok;
+                     ext = b.ext;
+                     pool = b.pool;
+                     cluster = b.cluster;
+                     threads = b.threads;
+                     rw = b.rw;
+                     cfree = b.cfree;
+                     wf = b.wf } key'1)
+  /\ (forall k: UInt64.t. k <> key'1
+      -> get_u64'0 b.dm k = get_u64'0 a.dm k /\ get_u64 b.mt k = get_u64 a.mt k \/ demoted_k a b k)
+  /\ b.cap = a.cap
+  /\ b.wq = a.wq
+  /\ b.pool = a.pool
+  /\ b.cluster = a.cluster
+  /\ b.threads = a.threads
+  /\ log_ext a b
+  /\ demote_before_free a b
+  /\ no_dma a b
+  /\ no_reg a b
+  /\ no_ssd a b
+  /\ own_writes a b
+  /\ own_reads a b
+  /\ b.tick >= a.tick
+  /\ b.ob = a.ob
+  /\ b.ob2 = a.ob2
+  /\ b.og = a.og /\ b.os = a.os /\ b.ov = a.ov /\ b.ok = a.ok /\ b.ext = a.ext /\ b.rw = a.rw /\ b.cfree = a.cfree
+
+predicate evict_frame [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 489 0 489 38] (a: t_W) (b: t_W) =
+  [%#score] (forall k: UInt64.t. get_u64'0 b.dm k = get_u64'0 a.dm k /\ get_u64 b.mt k = get_u64 a.mt k
+      \/ demoted_k a b k)
+  /\ b.cap = a.cap
+  /\ b.wq = a.wq
+  /\ b.pool = a.pool
+  /\ b.cluster = a.cluster
+  /\ b.threads = a.threads
+  /\ log_ext a b
+  /\ demote_before_free a b
+  /\ no_dma a b
+  /\ no_reg a b
+  /\ no_ssd a b
+  /\ own_writes a b
+  /\ own_reads a b
+  /\ b.tick >= a.tick
+  /\ b.ob = a.ob
+  /\ b.ob2 = a.ob2
+  /\ b.og = a.og /\ b.os = a.os /\ b.ov = a.ov /\ b.ok = a.ok /\ b.ext = a.ext /\ b.rw = a.rw /\ b.cfree = a.cfree
+
+predicate ev_ctr_a [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 246 0 246 39] (a: t_Ctr) (b: t_Ctr) =
+  [%#sevict'42] a.promo_mem = b.promo_mem
+  /\ a.promo_gpu = b.promo_gpu
+  /\ a.ev_ssd = b.ev_ssd
+  /\ a.hit_dram = b.hit_dram
+  /\ a.hit_ssd = b.hit_ssd
+  /\ a.r_hit = b.r_hit
+  /\ a.r_miss = b.r_miss
+  /\ a.bp = b.bp
+  /\ a.drop_full = b.drop_full
+  /\ a.already <= b.already
+  /\ a.ev_mem <= b.ev_mem /\ a.blk_pin <= b.blk_pin /\ a.exhausted <= b.exhausted /\ a.blk_unp <= b.blk_unp
+
+predicate index_Mapping_Int_bool [@inline:trivial] (self: Map.map int bool) (a: int) = [%#smapping] Map.get self a
+
+meta "rewrite_def" predicate index_Mapping_Int_bool
+
+predicate all_from [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 321 0 321 54] (m: Map.map int bool) (t: int) =
+  [%#score'1] forall i: int. i >= t -> index_Mapping_Int_bool m i
+
+let evict_and_insert (s: MutBorrow.t t_S) (key'1: UInt64.t) (size'2: UInt32.t) (max_attempts: UInt64.t)
+  (return (x: t_Result_u64_DE)) = any
+  [ return (result: t_Result_u64_DE) ->
+  {[@stop_split] [@expl:evict_and_insert ensures] ([@stop_split] [@expl:evict_and_insert ensures #0] [%#sevict'31] s.final.p
+      = s.current.p)
+    /\ ([@stop_split] [@expl:evict_and_insert ensures #1] [%#sevict'32] match result with
+        | Ok'0 ptr -> eai_frame s.current.g s.final.g key'1 ptr size'2
+        | Err'0 (Alloc) -> evict_frame s.current.g s.final.g
+        | Err'0 (AlreadyExists k) -> k = key'1 /\ evict_frame s.current.g s.final.g /\ mt_has s.final.g key'1
+        | Err'0 _ -> false
+        end)
+    /\ ([@stop_split] [@expl:evict_and_insert ensures #2] [%#sevict'33] ev_ctr_a s.current.g.c s.final.g.c)
+    /\ ([@stop_split] [@expl:evict_and_insert ensures #3] [%#sevict'34] all_from s.current.g.ob s.current.g.tick
+        /\ s.current.g.used + UInt32.t'int size'2 <= s.current.g.cap /\ not mt_has s.current.g key'1
+      -> match result with
+        | Ok'0 _ -> s.final.g.dm = s.current.g.dm
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:evict_and_insert ensures #4] [%#sevict'35] UInt64.t'int max_attempts = 0
+        /\ s.current.g.used + UInt32.t'int size'2 > s.current.g.cap
+      -> result = Err'0 (Alloc) /\ s.final.g = s.current.g)
+    /\ ([@stop_split] [@expl:evict_and_insert ensures #5] [%#sevict'36] match result with
+      | Err'0 (AlreadyExists _) -> s.final.g.c.already = s.current.g.c.already + 1
+      | _ -> s.final.g.c.already = s.current.g.c.already
+      end)}
+    (! return {result}) ]
+
+predicate rsv_ctr [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 274 0 274 38] (a: t_Ctr) (b: t_Ctr) =
+  [%#sevict'37] a.promo_mem = b.promo_mem
+  /\ a.promo_gpu = b.promo_gpu
+  /\ a.ev_ssd = b.ev_ssd
+  /\ a.hit_dram = b.hit_dram
+  /\ a.hit_ssd = b.hit_ssd
+  /\ a.r_hit = b.r_hit
+  /\ a.r_miss = b.r_miss
+  /\ a.drop_full = b.drop_full
+  /\ a.bp <= b.bp
+  /\ a.already <= b.already
+  /\ a.ev_mem <= b.ev_mem /\ a.blk_pin <= b.blk_pin /\ a.exhausted <= b.exhausted /\ a.blk_unp <= b.blk_unp
+
+let elim_Err'0 (_x: t_Result_u64_DE) (return (f0'0: t_DE)) = any
+  [ _k (f0'0: t_DE) -> {Err'0 f0'0 = _x} (! return {f0'0})
+  | _chk -> (! {[@expl:elim Err] match _x with
+      | Err'0 _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+function nx [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 290 0 290 20] (w: t_W) : t_W
+ = [%#score'10] { dm = w.dm;
+                  mt = w.mt;
+                  used = w.used;
+                  cap = w.cap;
+                  c = w.c;
+                  wq = w.wq;
+                  log = w.log;
+                  tick = w.tick + 1;
+                  ob = w.ob;
+                  ob2 = w.ob2;
+                  og = w.og;
+                  os = w.os;
+                  ov = w.ov;
+                  ok = w.ok;
+                  ext = w.ext;
+                  pool = w.pool;
+                  cluster = w.cluster;
+                  threads = w.threads;
+                  rw = w.rw;
+                  cfree = w.cfree;
+                  wf = w.wf }
+
+predicate o1 [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 305 0 305 23] (w: t_W) =
+  [%#score'11] index_Mapping_Int_bool w.ob w.tick
+
+let before_deadline (s: MutBorrow.t t_S) (dl: t_Dl) (return (x: bool)) = any
+  [ return (result: bool) ->
+  {[@stop_split] [@expl:before_deadline ensures] ([@stop_split] [@expl:before_deadline ensures #0] [%#sevict'38] s.final.p
+        = s.current.p
+      /\ s.final.g = nx s.current.g)
+    /\ ([@stop_split] [@expl:before_deadline ensures #1] [%#sevict'39] result = (not dl.past /\ o1 s.current.g))}
+    (! return {result}) ]
+
+let rec_store_backpressure (s: MutBorrow.t t_S) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:rec_store_backpressure ensures] [%#sevict'40] s.final.p = s.current.p
+    /\ s.final.g
+    = { dm = s.current.g.dm;
+        mt = s.current.g.mt;
+        used = s.current.g.used;
+        cap = s.current.g.cap;
+        c = { promo_mem = s.current.g.c.promo_mem;
+              promo_gpu = s.current.g.c.promo_gpu;
+              ev_mem = s.current.g.c.ev_mem;
+              ev_ssd = s.current.g.c.ev_ssd;
+              hit_dram = s.current.g.c.hit_dram;
+              hit_ssd = s.current.g.c.hit_ssd;
+              r_hit = s.current.g.c.r_hit;
+              r_miss = s.current.g.c.r_miss;
+              bp = s.current.g.c.bp + 1;
+              drop_full = s.current.g.c.drop_full;
+              already = s.current.g.c.already;
+              blk_pin = s.current.g.c.blk_pin;
+              exhausted = s.current.g.c.exhausted;
+              blk_unp = s.current.g.c.blk_unp };
+        wq = s.current.g.wq;
+        log = s.current.g.log;
+        tick = s.current.g.tick;
+        ob = s.current.g.ob;
+        ob2 = s.current.g.ob2;
+        og = s.current.g.og;
+        os = s.current.g.os;
+        ov = s.current.g.ov;
+        ok = s.current.g.ok;
+        ext = s.current.g.ext;
+        pool = s.current.g.pool;
+        cluster = s.current.g.cluster;
+        threads = s.current.g.threads;
+        rw = s.current.g.rw;
+        cfree = s.current.g.cfree;
+        wf = s.current.g.wf }}
+    (! return {result}) ]
+
+let elim_Ok (_x: t_Result_u64_DE) (return (f0'0: UInt64.t)) = any
+  [ _k (f0'0: UInt64.t) -> {Ok'0 f0'0 = _x} (! return {f0'0})
+  | _chk -> (! {[@expl:elim Ok] match _x with
+      | Ok'0 _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let reserve_memory [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 304 0 304 112]
+  (s: MutBorrow.t t_S) (key'1: UInt64.t) (size'2: UInt32.t) (deadline: t_Option_Dl)
+  (return (x: tup2_Result_u64_DE_Snapshot_RsvG)) = (! bb0
+  [ bb0 = s0
+    [ s0 = ensure_initialized [%#sevict] {s.current} (fun (_x: t_Result_unit_DE) -> [ &_31 <- _x ] s1)
+    | s1 = any [ br0 (x0: ()) -> {_31 = Ok x0} (! bb4) | br1 (x0: t_DE) -> {_31 = Err x0} (! bb3) ] ]
+  | bb3 = s0
+    [ s0 = -{resolve_refmut_S s}- s1
+    | s1 = elim_Err {_31} (fun (r0: t_DE) -> [ &e <- r0 ] s2)
+    | s2 = [ &_36 <- Err'0 e ] s3
+    | s3 = [ &_ret <- { f0 = _36; f1 = ([%#sevict'0] { attempts = 0 }) } ] s4
+    | s4 = return {_ret} ]
+  | bb4 = s0
+    [ s0 = [ &_41 <- size'2 = ([%#sevict'1] (0: UInt32.t)) ] s1
+    | s1 = any [ br0 -> {_41 = false} (! bb8) | br1 -> {_41} (! bb7) ] ]
+  | bb7 = s0
+    [ s0 = -{resolve_refmut_S s}- s1
+    | s1 = [ &_45 <- InvalidParam ] s2
+    | s2 = [ &_44 <- Err'0 _45 ] s3
+    | s3 = [ &_ret <- { f0 = _44; f1 = ([%#sevict'2] { attempts = 0 }) } ] s4
+    | s4 = return {_ret} ]
+  | bb8 = any [ br0 -> {s.current.p.has_dm = false} (! bb11) | br1 -> {s.current.p.has_dm} (! bb10) ]
+  | bb10 = any [ br0 -> {s.current.p.has_mt = false} (! bb14) | br1 -> {s.current.p.has_mt} (! bb13) ]
+  | bb13 = s0
+    [ s0 = [ &max_attempts <- s.current.p.max_att ] s1
+    | s1 = any [ br0 -> {deadline = None'0} (! bb18) | br1 (x0: t_Dl) -> {deadline = Some'0 x0} (! bb19) ] ]
+  | bb19 = s0 [ s0 = elim_Some {deadline} (fun (r0: t_Dl) -> [ &inst <- r0 ] s1) | s1 = [ &dl <- inst ] s2 | s2 = bb24 ]
+  | bb18 = s0
+    [ s0 = [ &_69 <- s.current.p.bp_ms = ([%#sevict'3] (0: UInt64.t)) ] s1
+    | s1 = any [ br0 -> {_69 = false} (! bb23) | br1 -> {_69} (! bb20) ] ]
+  | bb20 = s0
+    [ s0 = MutBorrow.borrow_final <t_S> {s.current} {MutBorrow.get_id s}
+        (fun (_bor: MutBorrow.t t_S) -> [ &_73 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
+    | s1 = evict_and_insert [%#sevict'4] {_73} {key'1} {size'2} {max_attempts}
+        (fun (_x: t_Result_u64_DE) -> [ &r <- _x ] s2)
+    | s2 = -{resolve_refmut_S s}- s3
+    | s3 = [ &_ret <- { f0 = r; f1 = ([%#sevict'5] { attempts = 1 }) } ] s4
+    | s4 = return {_ret} ]
+  | bb23 = s0 [ s0 = [ &dl <- { past = ([%#sevict'6] false) } ] s1 | s1 = bb24 ]
+  | bb24 = s0
+    [ s0 = [ &g0 <- [%#sevict'7] s.current.g ] s1
+    | s1 = [ &p0 <- [%#sevict'8] s.current.p ] s2
+    | s2 = [ &n <- [%#sevict'9] 0 ] s3
+    | s3 = [ &_old <- s.final ] s4
+    | s4 = bb28 ]
+  | bb28 = bb28
+    [ bb28 = {[@expl:inferred invariant: unchanged value] _old = s.final}
+      {[@expl:loop invariant #0] [%#sevict'15] s.current.p = p0 /\ n >= 0 /\ (n = 0 -> s.current.g = g0)}
+      {[@expl:loop invariant #1] [%#sevict'14] n > 0 -> evict_frame g0 s.current.g}
+      {[@expl:loop invariant #2] [%#sevict'13] rsv_ctr g0.c s.current.g.c /\ s.current.g.c.bp = g0.c.bp + n}
+      {[@expl:loop invariant #3] [%#sevict'12] dl.past -> n = 0}
+      (! s0)
+      [ s0 = [ &n <- [%#sevict'10] n + 1 ] s1
+      | s1 = MutBorrow.borrow_mut <t_S> {s.current}
+          (fun (_bor: MutBorrow.t t_S) -> [ &_112 <- _bor ] [ &s <- { s with current = _bor.final } ] s2)
+      | s2 = evict_and_insert [%#sevict'11] {_112} {key'1} {size'2} {max_attempts}
+          (fun (_x: t_Result_u64_DE) -> [ &_111 <- _x ] s3)
+      | s3 = any [ br0 (x0: UInt64.t) -> {_111 = Ok'0 x0} (! bb33) | br1 (x0: t_DE) -> {_111 = Err'0 x0} (! bb34) ] ]
+      [ bb34 = elim_Err'0 {_111}
+          (fun (r0: t_DE) ->
+            any
+            [ br0 (x0: t_Ni) -> {r0 = NotInit x0} (! bb35)
+            | br1 -> {r0 = InvalidParam} (! bb35)
+            | br2 (x0: UInt64.t) -> {r0 = KeyNotFound x0} (! bb35)
+            | br3 (x0: UInt64.t) -> {r0 = AlreadyExists x0} (! bb35)
+            | br4 -> {r0 = Alloc} (! bb37)
+            | br5 (x0: t_IoK) -> {r0 = Io x0} (! bb35)
+            | br6 -> {r0 = Timeout} (! bb35) ])
+      | bb37 = s0
+        [ s0 = MutBorrow.borrow_mut <t_S> {s.current}
+            (fun (_bor: MutBorrow.t t_S) -> [ &_126 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
+        | s1 = before_deadline [%#sevict'16] {_126} {dl} (fun (_x: bool) -> [ &_125 <- _x ] s2)
+        | s2 = any [ br0 -> {_125 = false} (! bb43) | br1 -> {_125} (! bb41) ] ]
+      | bb41 = s0
+        [ s0 = MutBorrow.borrow_mut <t_S> {s.current}
+            (fun (_bor: MutBorrow.t t_S) -> [ &_129 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
+        | s1 = rec_store_backpressure [%#sevict'17] {_129} (fun (_x: ()) -> [ &_128 <- _x ] s2)
+        | s2 = bb28 ] ] ]
+  | bb35 = s0
+    [ s0 = -{resolve_refmut_S s}- s1
+    | s1 = elim_Err'0 {_111} (fun (r0: t_DE) -> [ &e'0 <- r0 ] s2)
+    | s2 = [ &_138 <- Err'0 e'0 ] s3
+    | s3 = [ &_ret <- { f0 = _138; f1 = ([%#sevict'18] { attempts = n }) } ] s4
+    | s4 = return {_ret} ]
+  | bb43 = s0
+    [ s0 = -{resolve_refmut_S s}- s1
+    | s1 = [ &_132 <- Alloc ] s2
+    | s2 = [ &_131 <- Err'0 _132 ] s3
+    | s3 = [ &_ret <- { f0 = _131; f1 = ([%#sevict'19] { attempts = n }) } ] s4
+    | s4 = return {_ret} ]
+  | bb33 = s0
+    [ s0 = -{resolve_refmut_S s}- s1
+    | s1 = elim_Ok {_111} (fun (r0: UInt64.t) -> [ &mem_ptr <- r0 ] s2)
+    | s2 = [ &_120 <- Ok'0 mem_ptr ] s3
+    | s3 = [ &_ret <- { f0 = _120; f1 = ([%#sevict'20] { attempts = n }) } ] s4
+    | s4 = return {_ret} ]
+  | bb14 = s0
+    [ s0 = -{resolve_refmut_S s}- s1
+    | s1 = [ &_61 <- MemoryTier ] s2
+    | s2 = [ &_60 <- NotInit _61 ] s3
+    | s3 = [ &_59 <- Err'0 _60 ] s4
+    | s4 = [ &_ret <- { f0 = _59; f1 = ([%#sevict'21] { attempts = 0 }) } ] s5
+    | s5 = return {_ret} ]
+  | bb11 = s0
+    [ s0 = -{resolve_refmut_S s}- s1
+    | s1 = [ &_53 <- DispatchMap ] s2
+    | s2 = [ &_52 <- NotInit _53 ] s3
+    | s3 = [ &_51 <- Err'0 _52 ] s4
+    | s4 = [ &_ret <- { f0 = _51; f1 = ([%#sevict'22] { attempts = 0 }) } ] s5
+    | s5 = return {_ret} ] ]
+  [ & _ret: tup2_Result_u64_DE_Snapshot_RsvG = Any.any_l ()
+  | & s: MutBorrow.t t_S = s
+  | & key'1: UInt64.t = key'1
+  | & size'2: UInt32.t = size'2
+  | & deadline: t_Option_Dl = deadline
+  | & _31: t_Result_unit_DE = Any.any_l ()
+  | & e: t_DE = Any.any_l ()
+  | & _36: t_Result_u64_DE = Any.any_l ()
+  | & _41: bool = Any.any_l ()
+  | & _44: t_Result_u64_DE = Any.any_l ()
+  | & _45: t_DE = Any.any_l ()
+  | & _51: t_Result_u64_DE = Any.any_l ()
+  | & _52: t_DE = Any.any_l ()
+  | & _53: t_Ni = Any.any_l ()
+  | & _59: t_Result_u64_DE = Any.any_l ()
+  | & _60: t_DE = Any.any_l ()
+  | & _61: t_Ni = Any.any_l ()
+  | & max_attempts: UInt64.t = Any.any_l ()
+  | & dl: t_Dl = Any.any_l ()
+  | & inst: t_Dl = Any.any_l ()
+  | & _69: bool = Any.any_l ()
+  | & r: t_Result_u64_DE = Any.any_l ()
+  | & _73: MutBorrow.t t_S = Any.any_l ()
+  | & g0: t_W = Any.any_l ()
+  | & p0: t_P = Any.any_l ()
+  | & n: int = Any.any_l ()
+  | & _111: t_Result_u64_DE = Any.any_l ()
+  | & _112: MutBorrow.t t_S = Any.any_l ()
+  | & mem_ptr: UInt64.t = Any.any_l ()
+  | & _120: t_Result_u64_DE = Any.any_l ()
+  | & _125: bool = Any.any_l ()
+  | & _126: MutBorrow.t t_S = Any.any_l ()
+  | & _128: () = Any.any_l ()
+  | & _129: MutBorrow.t t_S = Any.any_l ()
+  | & _131: t_Result_u64_DE = Any.any_l ()
+  | & _132: t_DE = Any.any_l ()
+  | & e'0: t_DE = Any.any_l ()
+  | & _138: t_Result_u64_DE = Any.any_l ()
+  | & _old: t_S = Any.any_l () ])
+  [ return (result: tup2_Result_u64_DE_Snapshot_RsvG) ->
+  {[@stop_split] [@expl:reserve_memory ensures] ([@stop_split] [@expl:reserve_memory ensures #0] [%#sevict'23] s.final.p
+      = s.current.p)
+    /\ ([@stop_split] [@expl:reserve_memory ensures #1] [%#sevict'24] not s.current.p.init
+      -> result.f0 = Err'0 (NotInit (Dispatcher)) /\ s.final.g = s.current.g)
+    /\ ([@stop_split] [@expl:reserve_memory ensures #2] [%#sevict'25] s.current.p.init /\ UInt32.t'int size'2 = 0
+      -> result.f0 = Err'0 (InvalidParam) /\ s.final.g = s.current.g)
+    /\ ([@stop_split] [@expl:reserve_memory ensures #3] [%#sevict'26] rsv_ctr s.current.g.c s.final.g.c)
+    /\ ([@stop_split] [@expl:reserve_memory ensures #4] [%#sevict'27] s.current.p.init
+        /\ UInt32.t'int size'2 > 0 /\ s.current.p.has_dm /\ s.current.p.has_mt
+      -> match result.f0 with
+          | Ok'0 ptr -> eai_frame s.current.g s.final.g key'1 ptr size'2
+          | Err'0 (Alloc) -> evict_frame s.current.g s.final.g
+          | Err'0 (AlreadyExists k) -> k = key'1 /\ evict_frame s.current.g s.final.g /\ mt_has s.final.g key'1
+          | Err'0 _ -> false
+          end
+      /\ result.f1.attempts >= 1
+      /\ s.final.g.c.bp = s.current.g.c.bp + result.f1.attempts - 1
+      /\ (deadline = None'0 /\ UInt64.t'int s.current.p.bp_ms = 0
+        \/ match deadline with
+          | Some'0 d -> d.past
+          | None'0 -> false
+          end -> result.f1.attempts = 1))
+    /\ ([@stop_split] [@expl:reserve_memory ensures #5] [%#sevict'28] match result.f0 with
+        | Ok'0 _ -> true
+        | Err'0 (Alloc) -> true
+        | Err'0 (AlreadyExists _) -> true
+        | _ -> s.final.g.c.bp = s.current.g.c.bp
+        end)
+    /\ ([@stop_split] [@expl:reserve_memory ensures #6] [%#sevict'29] s.current.p.init
+        /\ UInt32.t'int size'2 > 0
+        /\ s.current.p.has_dm
+        /\ s.current.p.has_mt
+        /\ deadline = None'0
+        /\ UInt64.t'int s.current.p.bp_ms = 0
+        /\ all_from s.current.g.ob s.current.g.tick
+        /\ s.current.g.used + UInt32.t'int size'2 <= s.current.g.cap /\ not mt_has s.current.g key'1
+      -> match result.f0 with
+        | Ok'0 _ -> s.final.g.dm = s.current.g.dm
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:reserve_memory ensures #7] [%#sevict'30] s.current.p.init
+      /\ UInt32.t'int size'2 > 0
+      /\ s.current.p.has_dm
+      /\ s.current.p.has_mt
+      /\ deadline = None'0
+      /\ UInt64.t'int s.current.p.bp_ms = 0
+      /\ UInt64.t'int s.current.p.max_att = 0 /\ s.current.g.used + UInt32.t'int size'2 > s.current.g.cap
+    -> result.f0 = Err'0 (Alloc) /\ s.final.g = s.current.g)}
+    (! return {result}) ]

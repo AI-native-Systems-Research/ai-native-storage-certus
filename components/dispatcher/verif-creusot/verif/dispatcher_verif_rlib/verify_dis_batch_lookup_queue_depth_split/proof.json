@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_qd_shares": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_verify_dis_batch_lookup_queue_depth_split": {
+        "prover": "alt-ergo",
+        "time": 0.024
+      }
+    }
+  }
+}

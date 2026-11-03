@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_flush_to_ssd": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_verify_dis_flush_reports_failed_write__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "alt-ergo", "time": 0.029 }, null ]
+          }
+        ]
+      }
+    }
+  }
+}

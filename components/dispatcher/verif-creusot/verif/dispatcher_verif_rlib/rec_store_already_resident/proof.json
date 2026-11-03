@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_rec_store_already_resident": { "prover": "z3", "time": 0.007 }
+    }
+  }
+}

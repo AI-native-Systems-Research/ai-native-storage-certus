@@ -1,0 +1,159 @@
+(* #"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 22 0 22 37 *)
+
+let%span score = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 558 10 558 24
+let%span score'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 560 4 560 52
+let%span score'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 552 10 552 38
+let%span score'2 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 554 4 554 52
+let%span score'3 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 541 16 541 43
+let%span score'4 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 545 11 545 32
+let%span score'5 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 546 10 546 49
+let%span score'6 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 548 4 548 86
+let%span score'7 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 566 10 566 15
+let%span score'8 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 564 11 564 43
+let%span score'9 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 565 10 565 32
+let%span score'10 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 568 4 571 5
+let%span score'11 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 526 10 526 17
+let%span score'12 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 528 16 528 107
+let%span svec = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'2 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span sslice = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+let%span sbatch = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 23 21 23 22
+let%span sbatch'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 24 23 24 24
+let%span sbatch'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 25 18 25 36
+let%span sbatch'2 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 26 18 26 36
+let%span sbatch'3 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 28 14 28 21
+let%span sbatch'4 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 27 16 27 51
+let%span sbatch'5 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 29 22 29 44
+let%span sbatch'6 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 30 22 30 58
+let%span sbatch'7 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 31 17 31 20
+let%span sbatch'8 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 31 8 31 25
+let%span sbatch'9 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 32 13 32 14
+let%span sbatch'10 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 32 8 32 14
+let%span sbatch'11 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 20 11 20 34
+let%span sbatch'12 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 21 10 21 31
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_Ipc = { addr: UInt64.t; size: UInt32.t }
+
+function sum_sz [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 527 0 527 33] (r: Seq.seq t_Ipc) : int
+
+axiom sum_sz_def: forall r: Seq.seq t_Ipc [sum_sz r]. sum_sz r
+    = ([%#score'12] if Seq.length r = 0 then
+      0
+    else
+      sum_sz (Seq.([..]) r 0 (Seq.length r - 1)) + UInt32.t'int (Seq.get r (Seq.length r - 1)).size
+    )
+
+function pre [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 540 0 540 38] (r: Seq.seq t_Ipc) (i: int) : int
+ = [%#score'3] sum_sz (Seq.([..]) r 0 i)
+
+function pre_zero [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 559 0 559 28] (r: Seq.seq t_Ipc) : ()
+ = [%#score'0] ()
+
+axiom pre_zero_spec: forall r: Seq.seq t_Ipc. [%#score] pre r 0 = 0
+
+type t_Vec_Ipc_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_Ipc_Global (self: t_Vec_Ipc_Global) : Seq.seq t_Ipc
+
+axiom view_Vec_Ipc_Global_spec:
+  forall self: t_Vec_Ipc_Global [view_Vec_Ipc_Global self]. [%#svec] Seq.length (view_Vec_Ipc_Global self)
+    <= UInt64.t'int const_MAX
+
+function pre_full [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 553 0 553 28] (r: Seq.seq t_Ipc) : ()
+ = [%#score'2] ()
+
+axiom pre_full_spec: forall r: Seq.seq t_Ipc. [%#score'1] pre r (Seq.length r) = sum_sz r
+
+let len_Ipc (self_: t_Vec_Ipc_Global) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec'0] UInt64.t'int result
+    = Seq.length (view_Vec_Ipc_Global self_)}
+    (! return {result}) ]
+
+function pre_step [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 547 0 547 36] (r: Seq.seq t_Ipc) (i: int) : ()
+ = [%#score'6] ()
+
+axiom pre_step_spec: forall r: Seq.seq t_Ipc, i: int. ([%#score'4] 0 <= i /\ i < Seq.length r)
+    -> ([%#score'5] pre r (i + 1) = pre r i + UInt32.t'int (Seq.get r i).size)
+
+function pre_mono [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 567 0 567 44] (r: Seq.seq t_Ipc) (i: int) (j: int) : ()
+
+axiom pre_mono_def: forall r: Seq.seq t_Ipc, i: int, j: int [pre_mono r i j]. ([%#score'8] 0 <= i
+      /\ i <= j /\ j <= Seq.length r)
+    -> pre_mono r i j
+    = ([%#score'10] if i < j then let _ = pre_mono r i (j - 1) in let _ = pre_step r (j - 1) in () else ())
+
+axiom pre_mono_spec: forall r: Seq.seq t_Ipc, i: int, j: int. ([%#score'8] 0 <= i /\ i <= j /\ j <= Seq.length r)
+    -> ([%#score'9] pre r i <= pre r j)
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_Ipc) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_Ipc) (out: t_Ipc) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_Ipc_Global (self_: t_Vec_Ipc_Global) (ix: UInt64.t) (return (x: t_Ipc)) =
+{[@stop_split] [@expl:index requires] [%#svec'1] in_bounds_usize ix (view_Vec_Ipc_Global self_)}
+  any
+  [ return (result: t_Ipc) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'2] has_value_usize ix (view_Vec_Ipc_Global self_) result}
+    (! return {result}) ]
+
+constant const_MAX'0: UInt32.t = (4294967295: UInt32.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let total_u32 [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 22 0 22 37]
+  (r: t_Vec_Ipc_Global) (return (x: UInt32.t)) =
+{[@stop_split] [@expl:total_u32 requires] [%#sbatch'11] sum_sz (view_Vec_Ipc_Global r) <= UInt32.t'int const_MAX'0}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &t <- [%#sbatch] (0: UInt32.t) ] s1
+    | s1 = [ &i <- [%#sbatch'0] (0: UInt64.t) ] s2
+    | s2 = {[@expl:assertion] [%#sbatch'1] pre_zero (view_Vec_Ipc_Global r) = ()} s3
+    | s3 = {[@expl:assertion] [%#sbatch'2] pre_full (view_Vec_Ipc_Global r) = ()} s4
+    | s4 = bb1 ]
+  | bb1 = bb1
+    [ bb1 = {[@expl:loop invariant] [%#sbatch'4] UInt64.t'int i <= Seq.length (view_Vec_Ipc_Global r)
+      /\ UInt32.t'int t = pre (view_Vec_Ipc_Global r) (UInt64.t'int i)}
+      (! s0)
+      [ s0 = len_Ipc [%#sbatch'3] {r} (fun (_x: UInt64.t) -> [ &_23 <- _x ] s1)
+      | s1 = [ &_21 <- UInt64.lt i _23 ] s2
+      | s2 = any [ br0 -> {_21 = false} (! bb6) | br1 -> {_21} (! bb4) ] ]
+      [ bb4 = s0
+        [ s0 = {[@expl:assertion] [%#sbatch'5] pre_step (view_Vec_Ipc_Global r) (UInt64.t'int i) = ()} s1
+        | s1 = {[@expl:assertion] [%#sbatch'6] pre_mono (view_Vec_Ipc_Global r) (UInt64.t'int i
+            + 1) (Seq.length (view_Vec_Ipc_Global r))
+          = ()}
+          s2
+        | s2 = index_Vec_Ipc_Global [%#sbatch'7] {r} {i} (fun (_x: t_Ipc) -> [ &_35 <- _x ] s3)
+        | s3 = UInt32.add [%#sbatch'8] {t} {_35.size} (fun (_x: UInt32.t) -> [ &t <- _x ] s4)
+        | s4 = UInt64.add [%#sbatch'10] {i} {[%#sbatch'9] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s5)
+        | s5 = bb1 ] ] ]
+  | bb6 = s0 [ s0 = [ &_ret <- t ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: UInt32.t = Any.any_l ()
+  | & r: t_Vec_Ipc_Global = r
+  | & t: UInt32.t = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _21: bool = Any.any_l ()
+  | & _23: UInt64.t = Any.any_l ()
+  | & _35: t_Ipc = Any.any_l () ])
+  [ return (result: UInt32.t) -> {[@stop_split] [@expl:total_u32 ensures] [%#sbatch'12] UInt32.t'int result
+    = sum_sz (view_Vec_Ipc_Global r)}
+    (! return {result}) ]

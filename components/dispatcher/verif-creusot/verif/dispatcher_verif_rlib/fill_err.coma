@@ -1,0 +1,96 @@
+(* #"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/store.rs" 492 0 492 55 *)
+
+let%span svec = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span sstore = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/store.rs" 493 37 493 47
+let%span sstore'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/store.rs" 494 23 494 24
+let%span sstore'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/store.rs" 495 16 495 97
+let%span sstore'2 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/store.rs" 497 8 497 22
+let%span sstore'3 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/store.rs" 498 13 498 14
+let%span sstore'4 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/store.rs" 498 8 498 14
+let%span sstore'5 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/store.rs" 491 10 491 89
+
+use seq.Seq
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_Result_unit_DE_Global
+
+type t_Ni = Dispatcher | DispatchMap | MemoryTier | Gpu | Spdk | Logger | Ring
+
+type t_IoK =
+  | Partition'0 UInt64.t UInt64.t UInt64.t
+  | Drive'0 UInt64.t
+  | Gpu'0
+  | Sync'0
+  | Ssd'0
+  | Promote'0
+  | Dm'0
+  | Remote'0
+  | Stream'0
+  | Channel'0
+  | Other'0
+
+type t_DE = NotInit t_Ni | InvalidParam | KeyNotFound UInt64.t | AlreadyExists UInt64.t | Alloc | Io t_IoK | Timeout
+
+type t_Result_unit_DE = Ok () | Err t_DE
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_Result_unit_DE_Global (self: t_Vec_Result_unit_DE_Global) : Seq.seq t_Result_unit_DE
+
+axiom view_Vec_Result_unit_DE_Global_spec:
+  forall self: t_Vec_Result_unit_DE_Global [view_Vec_Result_unit_DE_Global self]. [%#svec'0] Seq.length (view_Vec_Result_unit_DE_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_Result_unit_DE (return (x: t_Vec_Result_unit_DE_Global)) = any
+  [ return (result: t_Vec_Result_unit_DE_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_Result_unit_DE_Global result) = 0}
+    (! return {result}) ]
+
+let push_Result_unit_DE (self_: MutBorrow.t t_Vec_Result_unit_DE_Global) (v: t_Result_unit_DE) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'1] view_Vec_Result_unit_DE_Global self_.final
+    = Seq.snoc (view_Vec_Result_unit_DE_Global self_.current) v}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let fill_err [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/store.rs" 492 0 492 55]
+  (n: UInt64.t) (e: t_DE) (return (x: t_Vec_Result_unit_DE_Global)) = (! bb0
+  [ bb0 = s0
+    [ s0 = new_Result_unit_DE [%#sstore] (fun (_x: t_Vec_Result_unit_DE_Global) -> [ &v <- _x ] s1)
+    | s1 = [ &i <- [%#sstore'0] (0: UInt64.t) ] s2
+    | s2 = bb2 ]
+  | bb2 = bb2
+    [ bb2 = {[@expl:loop invariant] [%#sstore'1] UInt64.t'int i <= UInt64.t'int n
+      /\ Seq.length (view_Vec_Result_unit_DE_Global v) = UInt64.t'int i
+      /\ (forall j: int. 0 <= j /\ j < UInt64.t'int i -> Seq.get (view_Vec_Result_unit_DE_Global v) j = Err e)}
+      (! s0)
+      [ s0 = [ &_16 <- UInt64.lt i n ] s1 | s1 = any [ br0 -> {_16 = false} (! bb6) | br1 -> {_16} (! bb4) ] ]
+      [ bb4 = s0
+        [ s0 = [ &_21 <- Err e ] s1
+        | s1 = MutBorrow.borrow_mut <t_Vec_Result_unit_DE_Global> {v}
+            (fun (_bor: MutBorrow.t t_Vec_Result_unit_DE_Global) -> [ &_20 <- _bor ] [ &v <- _bor.final ] s2)
+        | s2 = push_Result_unit_DE [%#sstore'2] {_20} {_21} (fun (_x: ()) -> [ &_19 <- _x ] s3)
+        | s3 = UInt64.add [%#sstore'4] {i} {[%#sstore'3] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s4)
+        | s4 = bb2 ] ] ]
+  | bb6 = s0 [ s0 = [ &_ret <- v ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Vec_Result_unit_DE_Global = Any.any_l ()
+  | & n: UInt64.t = n
+  | & e: t_DE = e
+  | & v: t_Vec_Result_unit_DE_Global = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _16: bool = Any.any_l ()
+  | & _19: () = Any.any_l ()
+  | & _20: MutBorrow.t t_Vec_Result_unit_DE_Global = Any.any_l ()
+  | & _21: t_Result_unit_DE = Any.any_l () ])
+  [ return (result: t_Vec_Result_unit_DE_Global) ->
+  {[@stop_split] [@expl:fill_err ensures] [%#sstore'5] Seq.length (view_Vec_Result_unit_DE_Global result)
+      = UInt64.t'int n
+    /\ (forall i: int. 0 <= i /\ i < UInt64.t'int n -> Seq.get (view_Vec_Result_unit_DE_Global result) i = Err e)}
+    (! return {result}) ]

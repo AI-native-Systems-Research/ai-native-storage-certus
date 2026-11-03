@@ -1,0 +1,84 @@
+(* #"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 1029 0 1029 75 *)
+
+let%span svec = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span slookup = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/lookup.rs" 6 16 6 42
+let%span sbg = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 206 11 206 89
+let%span sbg'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 207 10 207 38
+let%span sbg'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 208 10 209 155
+let%span sbg'2 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 210 10 210 89
+let%span sbg'3 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 250 10 250 11
+let%span sbg'4 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 252 16 252 67
+let%span sdrivers = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 1030 29 1030 32
+let%span sdrivers'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 1030 13 1030 33
+let%span sdrivers'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 1031 18 1031 52
+let%span sdrivers'2 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 1028 11 1028 89
+
+use creusot.int.UInt64
+use seq.Seq
+use int.ComputerDivision
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_usize_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_usize_Global (self: t_Vec_usize_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_usize_Global_spec:
+  forall self: t_Vec_usize_Global [view_Vec_usize_Global self]. [%#svec] Seq.length (view_Vec_usize_Global self)
+    <= UInt64.t'int const_MAX
+
+function min_int [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/lookup.rs" 5 0 5 37] (a: int) (b: int) : int
+ = [%#slookup] if a <= b then a else b
+
+function qsum [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 251 0 251 41] (s: Seq.seq UInt64.t) (n: int) : int
+
+axiom qsum_def: forall s: Seq.seq UInt64.t, n: int [qsum s n]. qsum s n
+    = ([%#sbg'4] if n <= 0 then 0 else qsum s (n - 1) + UInt64.t'int (Seq.get s (n - 1)))
+
+let qd_shares (segs: t_Vec_usize_Global) (max_qd: UInt64.t) (return (x: t_Vec_usize_Global)) =
+{[@stop_split] [@expl:qd_shares requires] [%#sbg] Seq.length (view_Vec_usize_Global segs) > 0
+  /\ (forall d: int. 0 <= d /\ d < Seq.length (view_Vec_usize_Global segs)
+    -> UInt64.t'int (Seq.get (view_Vec_usize_Global segs) d) >= 1)}
+  any
+  [ return (result: t_Vec_usize_Global) ->
+  {[@stop_split] [@expl:qd_shares ensures] ([@stop_split] [@expl:qd_shares ensures #0] [%#sbg'0] Seq.length (view_Vec_usize_Global result)
+      = Seq.length (view_Vec_usize_Global segs))
+    /\ ([@stop_split] [@expl:qd_shares ensures #1] [%#sbg'1] forall d: int. 0 <= d
+          /\ d < Seq.length (view_Vec_usize_Global segs)
+        -> UInt64.t'int (Seq.get (view_Vec_usize_Global result) d)
+        = min_int (if ComputerDivision.div (UInt64.t'int max_qd
+          * UInt64.t'int (Seq.get (view_Vec_usize_Global segs) d)) (qsum (view_Vec_usize_Global segs) (Seq.length (view_Vec_usize_Global segs)))
+        >= 1 then
+          ComputerDivision.div (UInt64.t'int max_qd
+          * UInt64.t'int (Seq.get (view_Vec_usize_Global segs) d)) (qsum (view_Vec_usize_Global segs) (Seq.length (view_Vec_usize_Global segs)))
+        else
+          1
+        ) (UInt64.t'int (Seq.get (view_Vec_usize_Global segs) d)))
+    /\ ([@stop_split] [@expl:qd_shares ensures #2] [%#sbg'2] Seq.length (view_Vec_usize_Global segs) = 1
+      /\ UInt64.t'int max_qd >= 1
+    -> UInt64.t'int (Seq.get (view_Vec_usize_Global result) 0)
+    = min_int (UInt64.t'int max_qd) (UInt64.t'int (Seq.get (view_Vec_usize_Global segs) 0)))}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dis_batch_lookup_queue_depth_split__mutant [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 1029 0 1029 75]
+  (segs: t_Vec_usize_Global) (return (x: ())) =
+{[@stop_split] [@expl:verify_dis_batch_lookup_queue_depth_split__mutant requires] [%#sdrivers'2] Seq.length (view_Vec_usize_Global segs)
+    > 0
+  /\ (forall d: int. 0 <= d /\ d < Seq.length (view_Vec_usize_Global segs)
+    -> UInt64.t'int (Seq.get (view_Vec_usize_Global segs) d) >= 1)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = qd_shares [%#sdrivers'0] {segs} {[%#sdrivers] (128: UInt64.t)}
+        (fun (_x: t_Vec_usize_Global) -> [ &qd <- _x ] s1)
+    | s1 = {[@expl:assertion] [%#sdrivers'1] Seq.length (view_Vec_usize_Global segs) = 1
+      -> UInt64.t'int (Seq.get (view_Vec_usize_Global qd) 0) = 64}
+      s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l () | & segs: t_Vec_usize_Global = segs | & qd: t_Vec_usize_Global = Any.any_l () ])
+  [ return (result: ()) -> (! return {result}) ]

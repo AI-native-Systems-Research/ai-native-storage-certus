@@ -1,0 +1,19 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_index_Vec_Option_Result_unit_DE_Global": {
+        "prover": "alt-ergo",
+        "time": 0.02
+      },
+      "vc_len_Option_Result_unit_DE": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_new_Result_unit_DE": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_push_Result_unit_DE": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_unwrap_all": { "prover": "alt-ergo", "time": 0.036 },
+      "vc_unwrap_or_panic_Result_unit_DE": {
+        "prover": "alt-ergo",
+        "time": 0.019
+      }
+    }
+  }
+}

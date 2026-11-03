@@ -1,0 +1,116 @@
+(* #"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 1110 0 1110 113 *)
+
+let%span svec = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sbatch = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 773 11 773 40
+let%span sbatch'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 774 10 774 41
+let%span sbatch'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 775 10 776 64
+let%span sbatch'2 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 765 16 770 5
+let%span sdrivers = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 1111 23 1111 31
+let%span sdrivers'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 1112 14 1112 38
+let%span sdrivers'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 1113 18 1113 44
+let%span sdrivers'2 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 1109 11 1109 40
+
+use creusot.int.UInt64
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_Option_Result_unit_DE_Global
+
+type t_Ni = Dispatcher | DispatchMap | MemoryTier | Gpu | Spdk | Logger | Ring
+
+type t_IoK =
+  | Partition'0 UInt64.t UInt64.t UInt64.t
+  | Drive'0 UInt64.t
+  | Gpu'0
+  | Sync'0
+  | Ssd'0
+  | Promote'0
+  | Dm'0
+  | Remote'0
+  | Stream'0
+  | Channel'0
+  | Other'0
+
+type t_DE = NotInit t_Ni | InvalidParam | KeyNotFound UInt64.t | AlreadyExists UInt64.t | Alloc | Io t_IoK | Timeout
+
+type t_Result_unit_DE = Ok () | Err t_DE
+
+type t_Option_Result_unit_DE = None | Some t_Result_unit_DE
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_Option_Result_unit_DE_Global (self: t_Vec_Option_Result_unit_DE_Global) : Seq.seq t_Option_Result_unit_DE
+
+axiom view_Vec_Option_Result_unit_DE_Global_spec:
+  forall self: t_Vec_Option_Result_unit_DE_Global [view_Vec_Option_Result_unit_DE_Global self]. [%#svec] Seq.length (view_Vec_Option_Result_unit_DE_Global self)
+    <= UInt64.t'int const_MAX
+
+type t_Vec_Option_ServedBy_Global
+
+type t_Vec_Outcome_Global
+
+type t_ServedBy = Dram | Ssd | Remote | Miss | SizeMismatch | Error
+
+type t_Option_ServedBy = None'0 | Some'0 t_ServedBy
+
+function view_Vec_Option_ServedBy_Global (self: t_Vec_Option_ServedBy_Global) : Seq.seq t_Option_ServedBy
+
+axiom view_Vec_Option_ServedBy_Global_spec:
+  forall self: t_Vec_Option_ServedBy_Global [view_Vec_Option_ServedBy_Global self]. [%#svec] Seq.length (view_Vec_Option_ServedBy_Global self)
+    <= UInt64.t'int const_MAX
+
+type t_Outcome = { served_by: t_ServedBy; result: t_Result_unit_DE }
+
+function view_Vec_Outcome_Global (self: t_Vec_Outcome_Global) : Seq.seq t_Outcome
+
+axiom view_Vec_Outcome_Global_spec:
+  forall self: t_Vec_Outcome_Global [view_Vec_Outcome_Global self]. [%#svec] Seq.length (view_Vec_Outcome_Global self)
+    <= UInt64.t'int const_MAX
+
+function attr [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 764 0 764 63] (r: t_Result_unit_DE) (t: t_Option_ServedBy) : t_ServedBy
+ = [%#sbatch'2] match r with
+    | Ok () -> match t with
+      | Some'0 x -> x
+      | None'0 -> Error
+      end
+    | Err (KeyNotFound _) -> Miss
+    | Err (InvalidParam) -> SizeMismatch
+    | Err _ -> Error
+    end
+
+let attribute (results: t_Vec_Option_Result_unit_DE_Global) (tier: t_Vec_Option_ServedBy_Global)
+  (return (x: t_Vec_Outcome_Global)) =
+{[@stop_split] [@expl:attribute requires] [%#sbatch] Seq.length (view_Vec_Option_Result_unit_DE_Global results)
+  = Seq.length (view_Vec_Option_ServedBy_Global tier)}
+  any
+  [ return (result'0: t_Vec_Outcome_Global) ->
+  {[@stop_split] [@expl:attribute ensures] ([@stop_split] [@expl:attribute ensures #0] [%#sbatch'0] Seq.length (view_Vec_Outcome_Global result'0)
+      = Seq.length (view_Vec_Option_Result_unit_DE_Global results))
+    /\ ([@stop_split] [@expl:attribute ensures #1] [%#sbatch'1] forall i: int. 0 <= i
+        /\ i < Seq.length (view_Vec_Option_Result_unit_DE_Global results)
+      -> Seq.get (view_Vec_Option_Result_unit_DE_Global results) i
+        = Some ((Seq.get (view_Vec_Outcome_Global result'0) i).result)
+      /\ (Seq.get (view_Vec_Outcome_Global result'0) i).served_by
+      = attr (Seq.get (view_Vec_Outcome_Global result'0) i).result (Seq.get (view_Vec_Option_ServedBy_Global tier) i))}
+    (! return {result'0}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dis_batch_lookup_servedby_no_outcome_change__mutant [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 1110 0 1110 113]
+  (results: t_Vec_Option_Result_unit_DE_Global) (tier: t_Vec_Option_ServedBy_Global) (return (x: ())) =
+{[@stop_split] [@expl:verify_dis_batch_lookup_servedby_no_outcome_change__mutant requires] [%#sdrivers'2] Seq.length (view_Vec_Option_Result_unit_DE_Global results)
+  = Seq.length (view_Vec_Option_ServedBy_Global tier)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &r0 <- [%#sdrivers] view_Vec_Option_Result_unit_DE_Global results ] s1
+    | s1 = attribute [%#sdrivers'0] {results} {tier} (fun (_x: t_Vec_Outcome_Global) -> [ &out <- _x ] s2)
+    | s2 = {[@expl:assertion] [%#sdrivers'1] Seq.length (view_Vec_Outcome_Global out) = Seq.length r0 + 1} s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & results: t_Vec_Option_Result_unit_DE_Global = results
+  | & tier: t_Vec_Option_ServedBy_Global = tier
+  | & r0: Seq.seq t_Option_Result_unit_DE = Any.any_l ()
+  | & out: t_Vec_Outcome_Global = Any.any_l () ]) [ return (result'0: ()) -> (! return {result'0}) ]

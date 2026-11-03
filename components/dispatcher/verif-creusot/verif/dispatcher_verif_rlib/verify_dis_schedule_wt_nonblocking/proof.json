@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_schedule_write_through": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_verify_dis_schedule_wt_nonblocking": {
+        "prover": "z3",
+        "time": 0.017
+      }
+    }
+  }
+}

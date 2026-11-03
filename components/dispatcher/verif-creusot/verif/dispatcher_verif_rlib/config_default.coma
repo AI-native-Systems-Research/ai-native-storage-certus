@@ -1,0 +1,144 @@
+(* #"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 407 0 407 30 *)
+
+let%span smisc = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 411 48 411 53
+let%span smisc'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 412 52 412 57
+let%span smisc'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 419 39 419 43
+let%span smisc'2 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 419 33 419 36
+let%span smisc'3 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 419 33 419 43
+let%span smisc'4 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 419 46 419 50
+let%span smisc'5 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 419 33 419 50
+let%span smisc'6 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 420 48 420 52
+let%span smisc'7 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 420 42 420 45
+let%span smisc'8 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 420 42 420 52
+let%span smisc'9 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 420 55 420 59
+let%span smisc'10 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 420 42 420 59
+let%span smisc'11 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 421 56 421 61
+let%span smisc'12 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 422 60 422 65
+let%span smisc'13 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 426 36 426 40
+let%span smisc'14 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 426 32 426 33
+let%span smisc'15 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 426 32 426 40
+let%span smisc'16 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 426 43 426 47
+let%span smisc'17 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 426 32 426 47
+let%span smisc'18 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 409 27 409 32
+let%span smisc'19 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 410 24 410 28
+let%span smisc'20 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 413 33 413 35
+let%span smisc'21 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 414 36 414 37
+let%span smisc'22 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 416 31 416 35
+let%span smisc'23 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 417 31 417 35
+let%span smisc'24 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 418 27 418 29
+let%span smisc'25 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 423 41 423 43
+let%span smisc'26 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 424 44 424 45
+let%span smisc'27 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 425 28 425 30
+let%span smisc'28 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 399 10 406 92
+let%span smisc'29 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 394 0 394 20
+let%span smisc'30 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 395 0 395 20
+let%span smisc'31 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 396 0 396 20
+let%span smisc'32 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 397 0 397 20
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+constant const_F_0_9: UInt64.t = [%#smisc'29] (4606281698874543309: UInt64.t)
+
+type t_F64Bits = { bits: UInt64.t }
+
+constant const_F_0_8: UInt64.t = [%#smisc'30] (4605380978949069210: UInt64.t)
+
+type t_Option_usize = None | Some UInt64.t
+
+constant const_F_0_0: UInt64.t = [%#smisc'31] (0: UInt64.t)
+
+constant const_F_0_7: UInt64.t = [%#smisc'32] (4604480259023595110: UInt64.t)
+
+type t_Cfg = {
+  max_cache_entries: UInt64.t;
+  format_on_init: bool;
+  ssd_eviction_threshold: t_F64Bits;
+  ssd_eviction_low_watermark: t_F64Bits;
+  ssd_eviction_batch_size: UInt64.t;
+  ssd_eviction_interval_secs: UInt64.t;
+  poller_base_cpu: t_Option_usize;
+  max_eviction_attempts: UInt64.t;
+  store_backpressure_ms: UInt64.t;
+  backfill_delay_ms: UInt64.t;
+  metadata_partition_size: UInt64.t;
+  extended_metadata_partition_size: UInt64.t;
+  memory_tier_eviction_threshold: t_F64Bits;
+  memory_tier_eviction_low_watermark: t_F64Bits;
+  memory_tier_eviction_batch_size: UInt64.t;
+  memory_tier_eviction_interval_secs: UInt64.t;
+  cold_staging_slots: UInt64.t;
+  cold_staging_buf_bytes: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let config_default [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 407 0 407 30]
+  (return (x: t_Cfg)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_2 <- { bits = ([%#smisc] const_F_0_9) } ] s1
+    | s1 = [ &_3 <- { bits = ([%#smisc'0] const_F_0_8) } ] s2
+    | s2 = [ &_4 <- None ] s3
+    | s3 = UInt64.mul [%#smisc'3] {[%#smisc'2] (128: UInt64.t)} {[%#smisc'1] (1024: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &_6 <- _x ] s4)
+    | s4 = UInt64.mul [%#smisc'5] {_6} {[%#smisc'4] (1024: UInt64.t)} (fun (_x: UInt64.t) -> [ &_5 <- _x ] s5)
+    | s5 = UInt64.mul [%#smisc'8] {[%#smisc'7] (128: UInt64.t)} {[%#smisc'6] (1024: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &_8 <- _x ] s6)
+    | s6 = UInt64.mul [%#smisc'10] {_8} {[%#smisc'9] (1024: UInt64.t)} (fun (_x: UInt64.t) -> [ &_7 <- _x ] s7)
+    | s7 = [ &_9 <- { bits = ([%#smisc'11] const_F_0_0) } ] s8
+    | s8 = [ &_10 <- { bits = ([%#smisc'12] const_F_0_7) } ] s9
+    | s9 = UInt64.mul [%#smisc'15] {[%#smisc'14] (4: UInt64.t)} {[%#smisc'13] (1024: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &_12 <- _x ] s10)
+    | s10 = UInt64.mul [%#smisc'17] {_12} {[%#smisc'16] (1024: UInt64.t)} (fun (_x: UInt64.t) -> [ &_11 <- _x ] s11)
+    | s11 = [ &_ret <- { max_cache_entries = ([%#smisc'18] (10000: UInt64.t));
+                         format_on_init = ([%#smisc'19] true);
+                         ssd_eviction_threshold = _2;
+                         ssd_eviction_low_watermark = _3;
+                         ssd_eviction_batch_size = ([%#smisc'20] (64: UInt64.t));
+                         ssd_eviction_interval_secs = ([%#smisc'21] (5: UInt64.t));
+                         poller_base_cpu = _4;
+                         max_eviction_attempts = ([%#smisc'22] (2048: UInt64.t));
+                         store_backpressure_ms = ([%#smisc'23] (5000: UInt64.t));
+                         backfill_delay_ms = ([%#smisc'24] (10: UInt64.t));
+                         metadata_partition_size = _5;
+                         extended_metadata_partition_size = _7;
+                         memory_tier_eviction_threshold = _9;
+                         memory_tier_eviction_low_watermark = _10;
+                         memory_tier_eviction_batch_size = ([%#smisc'25] (64: UInt64.t));
+                         memory_tier_eviction_interval_secs = ([%#smisc'26] (2: UInt64.t));
+                         cold_staging_slots = ([%#smisc'27] (64: UInt64.t));
+                         cold_staging_buf_bytes = _11 } ] s12
+    | s12 = return {_ret} ] ]
+  [ & _ret: t_Cfg = Any.any_l ()
+  | & _2: t_F64Bits = Any.any_l ()
+  | & _3: t_F64Bits = Any.any_l ()
+  | & _4: t_Option_usize = Any.any_l ()
+  | & _5: UInt64.t = Any.any_l ()
+  | & _6: UInt64.t = Any.any_l ()
+  | & _7: UInt64.t = Any.any_l ()
+  | & _8: UInt64.t = Any.any_l ()
+  | & _9: t_F64Bits = Any.any_l ()
+  | & _10: t_F64Bits = Any.any_l ()
+  | & _11: UInt64.t = Any.any_l ()
+  | & _12: UInt64.t = Any.any_l () ])
+  [ return (result: t_Cfg) ->
+  {[@stop_split] [@expl:config_default ensures] [%#smisc'28] UInt64.t'int result.max_cache_entries = 10000
+    /\ result.format_on_init
+    /\ UInt64.t'int result.ssd_eviction_threshold.bits = 4606281698874543309
+    /\ UInt64.t'int result.ssd_eviction_low_watermark.bits = 4605380978949069210
+    /\ UInt64.t'int result.ssd_eviction_batch_size = 64
+    /\ UInt64.t'int result.ssd_eviction_interval_secs = 5
+    /\ result.poller_base_cpu = None
+    /\ UInt64.t'int result.max_eviction_attempts = 2048
+    /\ UInt64.t'int result.store_backpressure_ms = 5000
+    /\ UInt64.t'int result.backfill_delay_ms = 10
+    /\ UInt64.t'int result.metadata_partition_size = 128 * 1024 * 1024
+    /\ UInt64.t'int result.extended_metadata_partition_size = 128 * 1024 * 1024
+    /\ UInt64.t'int result.memory_tier_eviction_threshold.bits = 0
+    /\ UInt64.t'int result.memory_tier_eviction_low_watermark.bits = 4604480259023595110
+    /\ UInt64.t'int result.memory_tier_eviction_batch_size = 64
+    /\ UInt64.t'int result.memory_tier_eviction_interval_secs = 2
+    /\ UInt64.t'int result.cold_staging_slots = 64 /\ UInt64.t'int result.cold_staging_buf_bytes = 4 * 1024 * 1024}
+    (! return {result}) ]

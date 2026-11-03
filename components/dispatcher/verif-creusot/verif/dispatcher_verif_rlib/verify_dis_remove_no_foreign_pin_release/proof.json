@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_remove": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_verify_dis_remove_no_foreign_pin_release": {
+        "prover": "alt-ergo",
+        "time": 0.092
+      }
+    }
+  }
+}

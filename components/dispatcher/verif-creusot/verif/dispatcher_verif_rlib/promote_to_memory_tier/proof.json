@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_classify": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_len_Cold": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_promote_cold": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_promote_to_memory_tier": { "prover": "z3", "time": 0.044 }
+    }
+  }
+}

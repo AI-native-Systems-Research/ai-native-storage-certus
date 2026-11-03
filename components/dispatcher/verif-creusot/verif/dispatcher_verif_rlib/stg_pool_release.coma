@@ -1,0 +1,68 @@
+(* #"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 195 0 195 48 *)
+
+let%span svec = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span svec'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sbg = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 196 4 196 20
+let%span sbg'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 197 25 197 38
+let%span sbg'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 193 11 193 58
+let%span sbg'2 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 194 10 194 54
+let%span sbg'3 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 162 16 163 80
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use seq.Seq
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_usize_Global
+
+type t_Stg = { slots: UInt64.t; free: t_Vec_usize_Global; leased: int }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_usize_Global (self: t_Vec_usize_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_usize_Global_spec:
+  forall self: t_Vec_usize_Global [view_Vec_usize_Global self]. [%#svec'0] Seq.length (view_Vec_usize_Global self)
+    <= UInt64.t'int const_MAX
+
+let push_usize (self_: MutBorrow.t t_Vec_usize_Global) (v: UInt64.t) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec] view_Vec_usize_Global self_.final
+    = Seq.snoc (view_Vec_usize_Global self_.current) v}
+    (! return {result}) ]
+
+predicate resolve_refmut_Stg [@inline:trivial] (_1: MutBorrow.t t_Stg) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Stg
+
+predicate stg_inv [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 161 0 161 30] (p: t_Stg) =
+  [%#sbg'3] p.leased >= 0
+  /\ p.leased + Seq.length (view_Vec_usize_Global p.free) = UInt64.t'int p.slots
+  /\ (forall i: int. 0 <= i /\ i < Seq.length (view_Vec_usize_Global p.free)
+    -> UInt64.t'int (Seq.get (view_Vec_usize_Global p.free) i) < UInt64.t'int p.slots)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let stg_pool_release [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 195 0 195 48]
+  (p: MutBorrow.t t_Stg) (idx: UInt64.t) (return (x: ())) =
+{[@stop_split] [@expl:stg_pool_release requires] [%#sbg'1] stg_inv p.current
+  /\ p.current.leased > 0 /\ UInt64.t'int idx < UInt64.t'int p.current.slots}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = MutBorrow.borrow_final <t_Vec_usize_Global> {p.current.free} {MutBorrow.inherit_id (MutBorrow.get_id p) 1}
+        (fun (_bor: MutBorrow.t t_Vec_usize_Global) ->
+          [ &_9 <- _bor ] [ &p <- { p with current = { p.current with free = _bor.final } } ] s1)
+    | s1 = push_usize [%#sbg] {_9} {idx} (fun (_x: ()) -> [ &_8 <- _x ] s2)
+    | s2 = [ &p <- { p with current = { p.current with leased = ([%#sbg'0] p.current.leased - 1) } } ] s3
+    | s3 = -{resolve_refmut_Stg p}- s4
+    | s4 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & p: MutBorrow.t t_Stg = p
+  | & idx: UInt64.t = idx
+  | & _8: () = Any.any_l ()
+  | & _9: MutBorrow.t t_Vec_usize_Global = Any.any_l () ])
+  [ return (result: ()) -> {[@stop_split] [@expl:stg_pool_release ensures] [%#sbg'2] stg_inv p.final
+    /\ p.final.leased = p.current.leased - 1}
+    (! return {result}) ]

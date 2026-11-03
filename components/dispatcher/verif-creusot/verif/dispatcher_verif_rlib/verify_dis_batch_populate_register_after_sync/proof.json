@@ -1,0 +1,26 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_batch_populate": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_verify_dis_batch_populate_register_after_sync": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.034 },
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.06 },
+              { "prover": "alt-ergo", "time": 0.06 },
+              { "prover": "alt-ergo", "time": 0.056 },
+              null,
+              { "prover": "alt-ergo", "time": 0.06 },
+              { "prover": "alt-ergo", "time": 0.062 },
+              { "prover": "alt-ergo", "time": 0.06 }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

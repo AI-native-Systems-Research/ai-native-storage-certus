@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lookup_async": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_verify_dis_lookup_dm_error_key_not_found": {
+        "prover": "alt-ergo",
+        "time": 0.081
+      }
+    }
+  }
+}

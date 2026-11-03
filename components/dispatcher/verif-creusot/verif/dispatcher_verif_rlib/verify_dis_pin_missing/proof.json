@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_pin": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_verify_dis_pin_missing": null
+    }
+  }
+}

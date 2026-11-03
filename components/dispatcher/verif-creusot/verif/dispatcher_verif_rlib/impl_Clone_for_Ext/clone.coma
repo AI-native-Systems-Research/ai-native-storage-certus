@@ -1,0 +1,18 @@
+(* #"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 144 9 144 29 *)
+
+(* <Ext as std::clone::Clone> *)
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_Ext = { key: UInt64.t; off: UInt64.t; size: UInt32.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_Ext [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 144 9 144 29]
+  (self: t_Ext) (return (x: t_Ext)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Ext = Any.any_l () | & self: t_Ext = self ]) [ return (result: t_Ext) -> (! return {result}) ]

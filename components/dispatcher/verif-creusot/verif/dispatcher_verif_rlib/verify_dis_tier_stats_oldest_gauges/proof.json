@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_tier_event_stats": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_verify_dis_tier_stats_oldest_gauges": {
+        "prover": "alt-ergo",
+        "time": 0.063
+      }
+    }
+  }
+}

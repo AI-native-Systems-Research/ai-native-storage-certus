@@ -1,0 +1,25 @@
+(* #"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 251 0 251 41 *)
+
+let%span swell_founded = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span sbg = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 250 10 250 11
+
+use creusot.int.UInt64
+use seq.Seq
+use int.Int
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant s : Seq.seq UInt64.t
+
+constant n : int
+
+function qsum [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/bg.rs" 251 0 251 41] (s: Seq.seq UInt64.t) (n: int) : int
+
+goal vc_qsum: if n <= 0 then true else [@expl:variant decreases] well_founded_relation_Int ([%#sbg] n) ([%#sbg] n - 1)

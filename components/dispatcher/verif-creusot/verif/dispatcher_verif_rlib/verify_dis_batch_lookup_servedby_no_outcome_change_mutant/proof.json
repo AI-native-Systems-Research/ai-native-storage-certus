@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_attribute": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_verify_dis_batch_lookup_servedby_no_outcome_change__mutant": {
+        "tactic": "split_vc",
+        "children": [ { "prover": "alt-ergo", "time": 0.022 }, null ]
+      }
+    }
+  }
+}

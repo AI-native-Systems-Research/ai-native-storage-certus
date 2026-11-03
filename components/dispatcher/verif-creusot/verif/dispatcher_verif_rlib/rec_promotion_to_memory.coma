@@ -1,0 +1,204 @@
+(* #"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 52 0 52 41 *)
+
+let%span sevict = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 53 20 53 84
+let%span sevict'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 51 10 51 108
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use map.Map
+use creusot.prelude.Any
+use int.Int
+
+type t_P = {
+  init: bool;
+  has_dm: bool;
+  has_mt: bool;
+  has_gpu: bool;
+  has_spdk: bool;
+  has_factory: bool;
+  has_rl: bool;
+  has_logger: bool;
+  max_att: UInt64.t;
+  bp_ms: UInt64.t;
+  nd: UInt64.t;
+  writer: bool;
+  ssd_ev: bool;
+  mt_ev: bool;
+  ring: bool;
+  chunk: UInt64.t;
+  stg: bool;
+  stg_bytes: UInt64.t;
+  warm: UInt64.t }
+
+type t_FMap_u64_Ent
+
+type t_FMap_u64_Slot
+
+type t_Ctr = {
+  promo_mem: int;
+  promo_gpu: int;
+  ev_mem: int;
+  ev_ssd: int;
+  hit_dram: int;
+  hit_ssd: int;
+  r_hit: int;
+  r_miss: int;
+  bp: int;
+  drop_full: int;
+  already: int;
+  blk_pin: int;
+  exhausted: int;
+  blk_unp: int }
+
+type t_Job = { key: UInt64.t; size: UInt32.t; dev: UInt64.t }
+
+type t_Option_usize = None | Some UInt64.t
+
+type t_Ev =
+  | H2D UInt64.t UInt64.t UInt64.t UInt64.t
+  | D2H UInt64.t UInt64.t UInt64.t UInt64.t
+  | Sync UInt64.t
+  | MtTouch UInt64.t
+  | MtGet UInt64.t
+  | MtBatchTouch
+  | MtRemove UInt64.t
+  | MtInsert UInt64.t
+  | DmTouch UInt64.t
+  | DmDemote UInt64.t
+  | DmRemove UInt64.t
+  | DmCreate UInt64.t
+  | DmPromote UInt64.t
+  | RelRead UInt64.t int
+  | RelWrite UInt64.t int
+  | Enq t_Job
+  | ExtFree UInt64.t UInt64.t
+  | Recover UInt64.t UInt64.t UInt32.t
+  | EmFormat UInt64.t
+  | EmInit UInt64.t
+  | Checkpoint UInt64.t
+  | DevSignal UInt64.t
+  | DevShutdown UInt64.t
+  | DevDetach UInt64.t
+  | Register
+  | Unregister
+  | Join
+  | Leave
+  | SsdRead UInt64.t UInt64.t
+  | SsdWrite UInt64.t UInt64.t
+  | RemoteFwd UInt64.t UInt32.t
+  | Spawn
+  | Cpu UInt64.t t_Option_usize
+
+type t_Ext = { key'0: UInt64.t; off'0: UInt64.t; size'0: UInt32.t }
+
+type t_W = {
+  dm: t_FMap_u64_Ent;
+  mt: t_FMap_u64_Slot;
+  used: int;
+  cap: int;
+  c: t_Ctr;
+  wq: Seq.seq t_Job;
+  log: Seq.seq t_Ev;
+  tick: int;
+  ob: Map.map int bool;
+  ob2: Map.map int bool;
+  og: Map.map int bool;
+  os: Map.map int bool;
+  ov: Map.map int UInt64.t;
+  ok: Map.map int (Seq.seq UInt64.t);
+  ext: Map.map int (Seq.seq t_Ext);
+  pool: bool;
+  cluster: bool;
+  threads: int;
+  rw: Map.map int UInt64.t;
+  cfree: Map.map int int;
+  wf: Map.map UInt64.t bool }
+
+type t_S = { p: t_P; g: t_W }
+
+predicate resolve_refmut_S [@inline:trivial] (_1: MutBorrow.t t_S) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_S
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let rec_promotion_to_memory [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/evict.rs" 52 0 52 41]
+  (s: MutBorrow.t t_S) (return (x: ())) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &s <- { s with current = { s.current with g = ([%#sevict] { dm = s.current.g.dm;
+                                                                         mt = s.current.g.mt;
+                                                                         used = s.current.g.used;
+                                                                         cap = s.current.g.cap;
+                                                                         c = { promo_mem = s.current.g.c.promo_mem + 1;
+                                                                               promo_gpu = s.current.g.c.promo_gpu;
+                                                                               ev_mem = s.current.g.c.ev_mem;
+                                                                               ev_ssd = s.current.g.c.ev_ssd;
+                                                                               hit_dram = s.current.g.c.hit_dram;
+                                                                               hit_ssd = s.current.g.c.hit_ssd;
+                                                                               r_hit = s.current.g.c.r_hit;
+                                                                               r_miss = s.current.g.c.r_miss;
+                                                                               bp = s.current.g.c.bp;
+                                                                               drop_full = s.current.g.c.drop_full;
+                                                                               already = s.current.g.c.already;
+                                                                               blk_pin = s.current.g.c.blk_pin;
+                                                                               exhausted = s.current.g.c.exhausted;
+                                                                               blk_unp = s.current.g.c.blk_unp };
+                                                                         wq = s.current.g.wq;
+                                                                         log = s.current.g.log;
+                                                                         tick = s.current.g.tick;
+                                                                         ob = s.current.g.ob;
+                                                                         ob2 = s.current.g.ob2;
+                                                                         og = s.current.g.og;
+                                                                         os = s.current.g.os;
+                                                                         ov = s.current.g.ov;
+                                                                         ok = s.current.g.ok;
+                                                                         ext = s.current.g.ext;
+                                                                         pool = s.current.g.pool;
+                                                                         cluster = s.current.g.cluster;
+                                                                         threads = s.current.g.threads;
+                                                                         rw = s.current.g.rw;
+                                                                         cfree = s.current.g.cfree;
+                                                                         wf = s.current.g.wf }) } } ] s1
+    | s1 = -{resolve_refmut_S s}- s2
+    | s2 = return {_ret} ] ] [ & _ret: () = Any.any_l () | & s: MutBorrow.t t_S = s ])
+  [ return (result: ()) -> {[@stop_split] [@expl:rec_promotion_to_memory ensures] [%#sevict'0] s.final.p = s.current.p
+    /\ s.final.g
+    = { dm = s.current.g.dm;
+        mt = s.current.g.mt;
+        used = s.current.g.used;
+        cap = s.current.g.cap;
+        c = { promo_mem = s.current.g.c.promo_mem + 1;
+              promo_gpu = s.current.g.c.promo_gpu;
+              ev_mem = s.current.g.c.ev_mem;
+              ev_ssd = s.current.g.c.ev_ssd;
+              hit_dram = s.current.g.c.hit_dram;
+              hit_ssd = s.current.g.c.hit_ssd;
+              r_hit = s.current.g.c.r_hit;
+              r_miss = s.current.g.c.r_miss;
+              bp = s.current.g.c.bp;
+              drop_full = s.current.g.c.drop_full;
+              already = s.current.g.c.already;
+              blk_pin = s.current.g.c.blk_pin;
+              exhausted = s.current.g.c.exhausted;
+              blk_unp = s.current.g.c.blk_unp };
+        wq = s.current.g.wq;
+        log = s.current.g.log;
+        tick = s.current.g.tick;
+        ob = s.current.g.ob;
+        ob2 = s.current.g.ob2;
+        og = s.current.g.og;
+        os = s.current.g.os;
+        ov = s.current.g.ov;
+        ok = s.current.g.ok;
+        ext = s.current.g.ext;
+        pool = s.current.g.pool;
+        cluster = s.current.g.cluster;
+        threads = s.current.g.threads;
+        rw = s.current.g.rw;
+        cfree = s.current.g.cfree;
+        wf = s.current.g.wf }}
+    (! return {result}) ]

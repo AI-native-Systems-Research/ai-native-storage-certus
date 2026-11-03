@@ -1,0 +1,14 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_chan_pool_checkout": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_chan_pool_return": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_verify_dis_inv_channel_exclusive": {
+        "prover": "alt-ergo",
+        "time": 0.044
+      }
+    }
+  }
+}

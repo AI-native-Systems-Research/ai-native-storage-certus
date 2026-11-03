@@ -1,0 +1,253 @@
+(* #"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 777 0 777 80 *)
+
+let%span score = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/core.rs" 519 10 519 27
+let%span svec = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'2 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'3 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span svec'4 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span sslice = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+let%span sbatch = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 778 32 778 42
+let%span sbatch'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 779 23 779 24
+let%span sbatch'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 782 14 782 27
+let%span sbatch'2 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 781 16 781 142
+let%span sbatch'3 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 780 16 780 56
+let%span sbatch'4 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 783 44 783 47
+let%span sbatch'5 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 783 21 783 48
+let%span sbatch'6 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 785 32 785 35
+let%span sbatch'7 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 794 8 794 47
+let%span sbatch'8 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 795 13 795 14
+let%span sbatch'9 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 795 8 795 14
+let%span sbatch'10 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 773 11 773 40
+let%span sbatch'11 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 774 10 774 41
+let%span sbatch'12 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 775 10 776 64
+let%span sbatch'13 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 765 16 770 5
+
+use seq.Seq
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_Outcome_Global
+
+type t_ServedBy = Dram | Ssd | Remote | Miss | SizeMismatch | Error
+
+type t_Ni = Dispatcher | DispatchMap | MemoryTier | Gpu | Spdk | Logger | Ring
+
+type t_IoK =
+  | Partition'0 UInt64.t UInt64.t UInt64.t
+  | Drive'0 UInt64.t
+  | Gpu'0
+  | Sync'0
+  | Ssd'0
+  | Promote'0
+  | Dm'0
+  | Remote'0
+  | Stream'0
+  | Channel'0
+  | Other'0
+
+type t_DE = NotInit t_Ni | InvalidParam | KeyNotFound UInt64.t | AlreadyExists UInt64.t | Alloc | Io t_IoK | Timeout
+
+type t_Result_unit_DE = Ok () | Err t_DE
+
+type t_Outcome = { served_by: t_ServedBy; result: t_Result_unit_DE }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_Outcome_Global (self: t_Vec_Outcome_Global) : Seq.seq t_Outcome
+
+axiom view_Vec_Outcome_Global_spec:
+  forall self: t_Vec_Outcome_Global [view_Vec_Outcome_Global self]. [%#svec'1] Seq.length (view_Vec_Outcome_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_Outcome (return (x: t_Vec_Outcome_Global)) = any
+  [ return (result'0: t_Vec_Outcome_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_Outcome_Global result'0) = 0}
+    (! return {result'0}) ]
+
+type t_Vec_Option_Result_unit_DE_Global
+
+type t_Option_Result_unit_DE = None | Some t_Result_unit_DE
+
+function view_Vec_Option_Result_unit_DE_Global (self: t_Vec_Option_Result_unit_DE_Global) : Seq.seq t_Option_Result_unit_DE
+
+axiom view_Vec_Option_Result_unit_DE_Global_spec:
+  forall self: t_Vec_Option_Result_unit_DE_Global [view_Vec_Option_Result_unit_DE_Global self]. [%#svec'1] Seq.length (view_Vec_Option_Result_unit_DE_Global self)
+    <= UInt64.t'int const_MAX
+
+let len_Option_Result_unit_DE (self_: t_Vec_Option_Result_unit_DE_Global) (return (x: UInt64.t)) = any
+  [ return (result'0: UInt64.t) -> {[@stop_split] [@expl:len ensures] [%#svec'0] UInt64.t'int result'0
+    = Seq.length (view_Vec_Option_Result_unit_DE_Global self_)}
+    (! return {result'0}) ]
+
+type t_Option_ServedBy = None'0 | Some'0 t_ServedBy
+
+function attr [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 764 0 764 63] (r: t_Result_unit_DE) (t: t_Option_ServedBy) : t_ServedBy
+ = [%#sbatch'13] match r with
+    | Ok () -> match t with
+      | Some'0 x -> x
+      | None'0 -> Error
+      end
+    | Err (KeyNotFound _) -> Miss
+    | Err (InvalidParam) -> SizeMismatch
+    | Err _ -> Error
+    end
+
+type t_Vec_Option_ServedBy_Global
+
+function view_Vec_Option_ServedBy_Global (self: t_Vec_Option_ServedBy_Global) : Seq.seq t_Option_ServedBy
+
+axiom view_Vec_Option_ServedBy_Global_spec:
+  forall self: t_Vec_Option_ServedBy_Global [view_Vec_Option_ServedBy_Global self]. [%#svec'1] Seq.length (view_Vec_Option_ServedBy_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_Option_Result_unit_DE) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize
+
+predicate has_value_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_Option_Result_unit_DE) (out: t_Option_Result_unit_DE) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize
+
+let index_Vec_Option_Result_unit_DE_Global (self_: t_Vec_Option_Result_unit_DE_Global) (ix: UInt64.t)
+  (return (x: t_Option_Result_unit_DE)) =
+{[@stop_split] [@expl:index requires] [%#svec'2] in_bounds_usize ix (view_Vec_Option_Result_unit_DE_Global self_)}
+  any
+  [ return (result'0: t_Option_Result_unit_DE) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'3] has_value_usize ix (view_Vec_Option_Result_unit_DE_Global self_) result'0}
+    (! return {result'0}) ]
+
+let unwrap_or_panic_Result_unit_DE (o: t_Option_Result_unit_DE) (return (x: t_Result_unit_DE)) = any
+  [ return (result'0: t_Result_unit_DE) -> {[@stop_split] [@expl:unwrap_or_panic ensures] [%#score] o = Some result'0}
+    (! return {result'0}) ]
+
+let elim_Err (_x: t_Result_unit_DE) (return (f0: t_DE)) = any
+  [ _k (f0: t_DE) -> {Err f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Err] match _x with
+      | Err _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+predicate in_bounds_usize'0 [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_Option_ServedBy) =
+  [%#sslice] UInt64.t'int self < Seq.length seq
+
+meta "rewrite_def" predicate in_bounds_usize'0
+
+predicate has_value_usize'0 [@inline:trivial] (self: UInt64.t) (seq: Seq.seq t_Option_ServedBy) (out: t_Option_ServedBy) =
+  [%#sslice'0] Seq.get seq (UInt64.t'int self) = out
+
+meta "rewrite_def" predicate has_value_usize'0
+
+let index_Vec_Option_ServedBy_Global (self_: t_Vec_Option_ServedBy_Global) (ix: UInt64.t)
+  (return (x: t_Option_ServedBy)) =
+{[@stop_split] [@expl:index requires] [%#svec'2] in_bounds_usize'0 ix (view_Vec_Option_ServedBy_Global self_)}
+  any
+  [ return (result'0: t_Option_ServedBy) ->
+  {[@stop_split] [@expl:index ensures] [%#svec'3] has_value_usize'0 ix (view_Vec_Option_ServedBy_Global self_) result'0}
+    (! return {result'0}) ]
+
+let elim_Some (_x: t_Option_ServedBy) (return (f0: t_ServedBy)) = any
+  [ _k (f0: t_ServedBy) -> {Some'0 f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Some] match _x with
+      | Some'0 _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+let push_Outcome (self_: MutBorrow.t t_Vec_Outcome_Global) (v: t_Outcome) (return (x: ())) = any
+  [ return (result'0: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'4] view_Vec_Outcome_Global self_.final
+    = Seq.snoc (view_Vec_Outcome_Global self_.current) v}
+    (! return {result'0}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let attribute [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/batch.rs" 777 0 777 80]
+  (results: t_Vec_Option_Result_unit_DE_Global) (tier: t_Vec_Option_ServedBy_Global)
+  (return (x: t_Vec_Outcome_Global)) =
+{[@stop_split] [@expl:attribute requires] [%#sbatch'10] Seq.length (view_Vec_Option_Result_unit_DE_Global results)
+  = Seq.length (view_Vec_Option_ServedBy_Global tier)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = new_Outcome [%#sbatch] (fun (_x: t_Vec_Outcome_Global) -> [ &out <- _x ] s1)
+    | s1 = [ &i <- [%#sbatch'0] (0: UInt64.t) ] s2
+    | s2 = bb2 ]
+  | bb2 = bb2
+    [ bb2 = {[@expl:loop invariant #0] [%#sbatch'3] UInt64.t'int i
+        <= Seq.length (view_Vec_Option_Result_unit_DE_Global results)
+      /\ Seq.length (view_Vec_Outcome_Global out) = UInt64.t'int i}
+      {[@expl:loop invariant #1] [%#sbatch'2] forall j: int. 0 <= j /\ j < UInt64.t'int i
+        -> Seq.get (view_Vec_Option_Result_unit_DE_Global results) j
+          = Some ((Seq.get (view_Vec_Outcome_Global out) j).result)
+        /\ (Seq.get (view_Vec_Outcome_Global out) j).served_by
+        = attr (Seq.get (view_Vec_Outcome_Global out) j).result (Seq.get (view_Vec_Option_ServedBy_Global tier) j)}
+      (! s0)
+      [ s0 = len_Option_Result_unit_DE [%#sbatch'1] {results} (fun (_x: UInt64.t) -> [ &_27 <- _x ] s1)
+      | s1 = [ &_25 <- UInt64.lt i _27 ] s2
+      | s2 = any [ br0 -> {_25 = false} (! bb25) | br1 -> {_25} (! bb5) ] ]
+      [ bb5 = s0
+        [ s0 = index_Vec_Option_Result_unit_DE_Global [%#sbatch'4] {results} {i}
+            (fun (_x: t_Option_Result_unit_DE) -> [ &_31 <- _x ] s1)
+        | s1 = unwrap_or_panic_Result_unit_DE [%#sbatch'5] {_31} (fun (_x: t_Result_unit_DE) -> [ &result'0 <- _x ] s2)
+        | s2 = any [ br0 (x0: ()) -> {result'0 = Ok x0} (! bb16) | br1 (x0: t_DE) -> {result'0 = Err x0} (! bb10) ] ]
+      | bb10 = elim_Err {result'0}
+          (fun (r0: t_DE) ->
+            any
+            [ br0 (x0: t_Ni) -> {r0 = NotInit x0} (! bb11)
+            | br1 -> {r0 = InvalidParam} (! bb14)
+            | br2 (x0: UInt64.t) -> {r0 = KeyNotFound x0} (! bb15)
+            | br3 (x0: UInt64.t) -> {r0 = AlreadyExists x0} (! bb11)
+            | br4 -> {r0 = Alloc} (! bb11)
+            | br5 (x0: t_IoK) -> {r0 = Io x0} (! bb11)
+            | br6 -> {r0 = Timeout} (! bb11) ])
+      | bb11 = s0 [ s0 = [ &served_by'0 <- Error ] s1 | s1 = bb23 ]
+      | bb15 = s0 [ s0 = [ &served_by'0 <- Miss ] s1 | s1 = bb23 ]
+      | bb14 = s0 [ s0 = [ &served_by'0 <- SizeMismatch ] s1 | s1 = bb23 ]
+      | bb16 = s0
+        [ s0 = index_Vec_Option_ServedBy_Global [%#sbatch'6] {tier} {i}
+            (fun (_x: t_Option_ServedBy) -> [ &_37 <- _x ] s1)
+        | s1 = any [ br0 -> {_37 = None'0} (! bb20) | br1 (x0: t_ServedBy) -> {_37 = Some'0 x0} (! bb21) ] ]
+      | bb21 = s0
+        [ s0 = elim_Some {_37} (fun (r0: t_ServedBy) -> [ &t <- r0 ] s1) | s1 = [ &served_by'0 <- t ] s2 | s2 = bb23 ]
+      | bb20 = s0 [ s0 = [ &served_by'0 <- Error ] s1 | s1 = bb23 ]
+      | bb23 = s0
+        [ s0 = [ &_44 <- { served_by = served_by'0; result = result'0 } ] s1
+        | s1 = MutBorrow.borrow_mut <t_Vec_Outcome_Global> {out}
+            (fun (_bor: MutBorrow.t t_Vec_Outcome_Global) -> [ &_43 <- _bor ] [ &out <- _bor.final ] s2)
+        | s2 = push_Outcome [%#sbatch'7] {_43} {_44} (fun (_x: ()) -> [ &_42 <- _x ] s3)
+        | s3 = UInt64.add [%#sbatch'9] {i} {[%#sbatch'8] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s4)
+        | s4 = bb2 ] ] ]
+  | bb25 = s0 [ s0 = [ &_ret <- out ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Vec_Outcome_Global = Any.any_l ()
+  | & results: t_Vec_Option_Result_unit_DE_Global = results
+  | & tier: t_Vec_Option_ServedBy_Global = tier
+  | & out: t_Vec_Outcome_Global = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _25: bool = Any.any_l ()
+  | & _27: UInt64.t = Any.any_l ()
+  | & result'0: t_Result_unit_DE = Any.any_l ()
+  | & _31: t_Option_Result_unit_DE = Any.any_l ()
+  | & served_by'0: t_ServedBy = Any.any_l ()
+  | & _37: t_Option_ServedBy = Any.any_l ()
+  | & t: t_ServedBy = Any.any_l ()
+  | & _42: () = Any.any_l ()
+  | & _43: MutBorrow.t t_Vec_Outcome_Global = Any.any_l ()
+  | & _44: t_Outcome = Any.any_l () ])
+  [ return (result'0: t_Vec_Outcome_Global) ->
+  {[@stop_split] [@expl:attribute ensures] ([@stop_split] [@expl:attribute ensures #0] [%#sbatch'11] Seq.length (view_Vec_Outcome_Global result'0)
+      = Seq.length (view_Vec_Option_Result_unit_DE_Global results))
+    /\ ([@stop_split] [@expl:attribute ensures #1] [%#sbatch'12] forall i: int. 0 <= i
+        /\ i < Seq.length (view_Vec_Option_Result_unit_DE_Global results)
+      -> Seq.get (view_Vec_Option_Result_unit_DE_Global results) i
+        = Some ((Seq.get (view_Vec_Outcome_Global result'0) i).result)
+      /\ (Seq.get (view_Vec_Outcome_Global result'0) i).served_by
+      = attr (Seq.get (view_Vec_Outcome_Global result'0) i).result (Seq.get (view_Vec_Option_ServedBy_Global tier) i))}
+    (! return {result'0}) ]

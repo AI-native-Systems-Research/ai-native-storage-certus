@@ -1,0 +1,15 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_chanpool_new": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_create_data_drives": { "prover": "z3", "time": 1.4 },
+      "vc_create_drive": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_em_format": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_em_initialize": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_parse_pci": { "prover": "alt-ergo", "time": 0.011 },
+      "vc_part_init": { "prover": "alt-ergo", "time": 0.015 }
+    }
+  }
+}

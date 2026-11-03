@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lookup_async": { "prover": "alt-ergo", "time": 0.035 },
+      "vc_p_zero": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_refute_dis_lookup_cold_promotes": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.049 },
+          { "prover": "z3", "time": 0.038 },
+          null
+        ]
+      }
+    }
+  }
+}

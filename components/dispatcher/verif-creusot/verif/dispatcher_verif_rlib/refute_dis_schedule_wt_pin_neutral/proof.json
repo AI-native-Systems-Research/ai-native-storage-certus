@@ -1,0 +1,23 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_p_zero": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_refute_dis_schedule_wt_pin_neutral": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.048 },
+              { "prover": "alt-ergo", "time": 0.191 },
+              null
+            ]
+          }
+        ]
+      },
+      "vc_schedule_write_through": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_writer_step": { "prover": "alt-ergo", "time": 0.033 }
+    }
+  }
+}

@@ -1,0 +1,34 @@
+(* #"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 433 0 433 45 *)
+
+let%span smisc = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 436 69 436 74
+let%span smisc'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 435 61 435 65
+let%span smisc'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 432 10 432 116
+
+use creusot.prelude.Any
+
+type t_ServedBy = Dram | Ssd | Remote | Miss | SizeMismatch | Error
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let served_by_is_hit [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/misc.rs" 433 0 433 45]
+  (sb: t_ServedBy) (return (x: bool)) = (! bb0
+  [ bb0 = any
+    [ br0 -> {sb = Dram} (! bb4)
+    | br1 -> {sb = Ssd} (! bb4)
+    | br2 -> {sb = Remote} (! bb4)
+    | br3 -> {sb = Miss} (! bb3)
+    | br4 -> {sb = SizeMismatch} (! bb3)
+    | br5 -> {sb = Error} (! bb3) ]
+  | bb3 = s0 [ s0 = [ &_ret <- [%#smisc] false ] s1 | s1 = return {_ret} ]
+  | bb4 = s0 [ s0 = [ &_ret <- [%#smisc'0] true ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l () | & sb: t_ServedBy = sb ])
+  [ return (result: bool) -> {[@stop_split] [@expl:served_by_is_hit ensures] [%#smisc'1] result
+    = match sb with
+      | Dram -> true
+      | Ssd -> true
+      | Remote -> true
+      | _ -> false
+      end}
+    (! return {result}) ]

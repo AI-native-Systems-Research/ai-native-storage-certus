@@ -1,0 +1,18 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lookup_async": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_verify_dis_lookup_async_dma_error": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.028 },
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "z3", "time": 0.037 }, null ]
+          }
+        ]
+      }
+    }
+  }
+}

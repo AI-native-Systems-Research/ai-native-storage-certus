@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_bd_detach": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_detach_all": { "prover": "alt-ergo", "time": 0.523 }
+    }
+  }
+}

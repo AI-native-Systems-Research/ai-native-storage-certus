@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lookup": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_p_zero": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_refute_dis_lookup_size_mismatch": {
+        "tactic": "split_vc",
+        "children": [ { "prover": "alt-ergo", "time": 0.047 }, null ]
+      }
+    }
+  }
+}

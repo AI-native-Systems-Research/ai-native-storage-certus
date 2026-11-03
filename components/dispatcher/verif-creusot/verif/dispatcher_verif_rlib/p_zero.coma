@@ -1,0 +1,92 @@
+(* #"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 13 0 13 20 *)
+
+let%span sdrivers = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 14 14 14 19
+let%span sdrivers'0 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 14 29 14 34
+let%span sdrivers'1 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 14 44 14 49
+let%span sdrivers'2 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 14 60 14 65
+let%span sdrivers'3 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 14 77 14 82
+let%span sdrivers'4 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 14 97 14 102
+let%span sdrivers'5 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 14 112 14 117
+let%span sdrivers'6 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 15 20 15 25
+let%span sdrivers'7 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 15 36 15 37
+let%span sdrivers'8 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 15 46 15 47
+let%span sdrivers'9 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 15 53 15 54
+let%span sdrivers'10 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 15 64 15 69
+let%span sdrivers'11 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 15 79 15 84
+let%span sdrivers'12 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 15 93 15 98
+let%span sdrivers'13 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 15 106 15 111
+let%span sdrivers'14 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 16 15 16 16
+let%span sdrivers'15 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 16 23 16 28
+let%span sdrivers'16 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 16 41 16 42
+let%span sdrivers'17 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 16 50 16 51
+let%span sdrivers'18 = "/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 9 10 12 50
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_P = {
+  init: bool;
+  has_dm: bool;
+  has_mt: bool;
+  has_gpu: bool;
+  has_spdk: bool;
+  has_factory: bool;
+  has_rl: bool;
+  has_logger: bool;
+  max_att: UInt64.t;
+  bp_ms: UInt64.t;
+  nd: UInt64.t;
+  writer: bool;
+  ssd_ev: bool;
+  mt_ev: bool;
+  ring: bool;
+  chunk: UInt64.t;
+  stg: bool;
+  stg_bytes: UInt64.t;
+  warm: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let p_zero [#"/home/cornel/repair-dispatcher-remove/components/dispatcher/verif-creusot/src/drivers.rs" 13 0 13 20]
+  (return (x: t_P)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_ret <- { init = ([%#sdrivers] false);
+                        has_dm = ([%#sdrivers'0] false);
+                        has_mt = ([%#sdrivers'1] false);
+                        has_gpu = ([%#sdrivers'2] false);
+                        has_spdk = ([%#sdrivers'3] false);
+                        has_factory = ([%#sdrivers'4] false);
+                        has_rl = ([%#sdrivers'5] false);
+                        has_logger = ([%#sdrivers'6] false);
+                        max_att = ([%#sdrivers'7] (0: UInt64.t));
+                        bp_ms = ([%#sdrivers'8] (0: UInt64.t));
+                        nd = ([%#sdrivers'9] (0: UInt64.t));
+                        writer = ([%#sdrivers'10] false);
+                        ssd_ev = ([%#sdrivers'11] false);
+                        mt_ev = ([%#sdrivers'12] false);
+                        ring = ([%#sdrivers'13] false);
+                        chunk = ([%#sdrivers'14] (0: UInt64.t));
+                        stg = ([%#sdrivers'15] false);
+                        stg_bytes = ([%#sdrivers'16] (0: UInt64.t));
+                        warm = ([%#sdrivers'17] (0: UInt64.t)) } ] s1
+    | s1 = return {_ret} ] ] [ & _ret: t_P = Any.any_l () ])
+  [ return (result: t_P) -> {[@stop_split] [@expl:p_zero ensures] [%#sdrivers'18] not result.init
+    /\ not result.has_dm
+    /\ not result.has_mt
+    /\ not result.has_gpu
+    /\ not result.has_spdk
+    /\ not result.has_factory
+    /\ not result.has_rl
+    /\ not result.has_logger
+    /\ UInt64.t'int result.max_att = 0
+    /\ UInt64.t'int result.bp_ms = 0
+    /\ UInt64.t'int result.nd = 0
+    /\ not result.writer
+    /\ not result.ssd_ev
+    /\ not result.mt_ev
+    /\ not result.ring
+    /\ UInt64.t'int result.chunk = 0
+    /\ not result.stg /\ UInt64.t'int result.stg_bytes = 0 /\ UInt64.t'int result.warm = 0}
+    (! return {result}) ]

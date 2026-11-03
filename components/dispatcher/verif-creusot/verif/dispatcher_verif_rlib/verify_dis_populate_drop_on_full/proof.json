@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_populate": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_verify_dis_populate_drop_on_full": {
+        "prover": "alt-ergo",
+        "time": 0.066
+      }
+    }
+  }
+}
