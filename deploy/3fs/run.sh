@@ -2,6 +2,7 @@
 # run.sh — start the single-node 3FS cluster container and export its mount (ROOT).
 #
 #   sudo ./run.sh                    # defaults below; detaches, waits until mounted
+#   sudo IB_DEVICE=mlx5_1 ./run.sh   # pick the RDMA port (its netdev is detected)
 #   sudo DATA_DIR=/other/xfs ./run.sh
 #   sudo STORE_DIR=/home/podman-3fs-root ./run.sh   # root's image store in this folder
 #   sudo BUILD_STORE_DIR=/home/dwaddington/podman-3fs STORE_DIR=… ./run.sh  # if build.sh used STORE_DIR
@@ -21,8 +22,40 @@ IMAGE="${IMAGE:-localhost/certus-3fs-cluster:latest}"
 NAME="${NAME:-certus-3fs}"
 DATA_DIR="${DATA_DIR:-/cache/3fs}"       # on nvme0n1 (XFS). FDB + storage targets + logs + state
 MOUNT="${MOUNT:-/mnt/3fs}"               # host mountpoint for the 3FS FUSE client
-NET_IFACE="${NET_IFACE:-ens6f0np0}"      # RoCE netdev of IB_DEVICE (port ACTIVE)
-IB_DEVICE="${IB_DEVICE:-mlx5_0}"
+# RDMA port: IB_DEVICE (e.g. mlx5_0) and NET_IFACE, its RoCE netdev (e.g. ens3f0np0).
+# Unset ones are detected: the first RDMA device whose port 1 is ACTIVE and whose
+# netdev has an IPv4 address (3FS addresses its services by that IP). Netdev names
+# differ between hosts, so set both explicitly only to pick a different port.
+detect_rdma_port() {  # prints "<ib_device> <netdev>" or nothing
+  local d dev nd
+  for d in /sys/class/infiniband/*; do
+    [[ -e "$d" ]] || continue
+    dev=$(basename "$d")
+    [[ -z "${IB_DEVICE:-}" || "$dev" == "$IB_DEVICE" ]] || continue
+    [[ "$(cat "$d/ports/1/state" 2>/dev/null)" == *ACTIVE* ]] || continue
+    for nd in $(ls "$d/device/net" 2>/dev/null); do
+      [[ -z "${NET_IFACE:-}" || "$nd" == "$NET_IFACE" ]] || continue
+      ip -4 -o addr show dev "$nd" 2>/dev/null | grep -q inet || continue
+      echo "$dev $nd"; return 0
+    done
+  done
+}
+if [[ -z "${NET_IFACE:-}" || -z "${IB_DEVICE:-}" ]]; then
+  read -r _ib _nd < <(detect_rdma_port) || true
+  [[ -n "${_ib:-}" ]] || {
+    echo "error: no ACTIVE RDMA port with an IPv4 address${IB_DEVICE:+ on $IB_DEVICE}${NET_IFACE:+ via $NET_IFACE}." >&2
+    for d in /sys/class/infiniband/*; do
+      [[ -e "$d" ]] && echo "       $(basename "$d"): netdev $(ls "$d/device/net" 2>/dev/null | tr '\n' ' ')state $(cat "$d/ports/1/state" 2>/dev/null)" >&2
+    done
+    echo "       Set IB_DEVICE and NET_IFACE, and give the netdev an IPv4 address." >&2
+    exit 1
+  }
+  IB_DEVICE="$_ib" NET_IFACE="$_nd"
+  echo "[run] RDMA port: $IB_DEVICE via $NET_IFACE ($(ip -4 -o addr show dev "$NET_IFACE" | awk '{print $4}'))"
+fi
+[[ -d "/sys/class/infiniband/$IB_DEVICE" ]] || { echo "error: no RDMA device $IB_DEVICE" >&2; exit 1; }
+ip -4 -o addr show dev "$NET_IFACE" 2>/dev/null | grep -q inet \
+  || { echo "error: $NET_IFACE does not exist or has no IPv4 address (3FS needs it)" >&2; exit 1; }
 NETWORK="${NETWORK:-RDMA}"
 # 3FS storage moves file data ONLY by RDMA (the server RDMA-reads/writes the client's
 # registered buffer): over TCP, writes fail "update no RDMA socket" and reads "batch
@@ -38,7 +71,7 @@ OWNER="${OWNER:-${SUDO_USER:-root}}"
 
 # Root's store is separate from the builder's rootless store: copy the image across
 # when root has none, or when the builder's image is newer (different id after a rebuild).
-mapfile -t BUILD_FLAGS < <(store_flags "${BUILD_STORE_DIR:-}")
+mapfile -t BUILD_FLAGS < <(store_flags "${BUILD_STORE_DIR:-}" rootless)
 BUILT_ID=""
 if [[ -n "${SUDO_USER:-}" ]]; then
   BUILT_ID=$(sudo -u "$SUDO_USER" podman "${BUILD_FLAGS[@]}" image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null || true)
