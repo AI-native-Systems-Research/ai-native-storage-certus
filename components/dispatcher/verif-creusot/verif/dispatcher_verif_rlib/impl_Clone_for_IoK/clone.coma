@@ -1,4 +1,4 @@
-(* #"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 88 9 88 29 *)
+(* #"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 88 9 88 29 *)
 
 (* <IoK as std::clone::Clone> *)
 
@@ -22,7 +22,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_IoK [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 88 9 88 29] (self: t_IoK)
+let clone_IoK [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 88 9 88 29] (self: t_IoK)
   (return (x: t_IoK)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_IoK = Any.any_l () | & self: t_IoK = self ]) [ return (result: t_IoK) -> (! return {result}) ]

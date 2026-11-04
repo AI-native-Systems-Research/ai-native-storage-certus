@@ -1,7 +1,7 @@
-(* #"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/bg.rs" 247 0 247 30 *)
+(* #"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/bg.rs" 247 0 247 30 *)
 
-let%span sbg = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/bg.rs" 245 11 245 26
-let%span sbg'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/bg.rs" 246 10 246 26
+let%span sbg = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/bg.rs" 245 11 245 26
+let%span sbg'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/bg.rs" 246 10 246 26
 
 use int.ComputerDivision
 use int.Int
@@ -14,7 +14,7 @@ constant a : int
 
 constant b : int
 
-function div_mul [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/bg.rs" 247 0 247 30] (a: int) (b: int) : ()
+function div_mul [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/bg.rs" 247 0 247 30] (a: int) (b: int) : ()
 
 goal vc_div_mul: ([%#sbg] b > 0 /\ a >= 0)
   -> ([@stop_split] [@expl:div_mul ensures] [%#sbg'0] ComputerDivision.div (a * b) b = a)

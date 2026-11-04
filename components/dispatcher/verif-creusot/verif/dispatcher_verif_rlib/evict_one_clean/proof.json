@@ -2,17 +2,17 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_dm_try_evict": { "prover": "alt-ergo", "time": 0.028 },
-      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.028 },
-      "vc_evict_one_clean": { "prover": "z3", "time": 26.0 },
-      "vc_index_Vec_u64_Global": { "prover": "alt-ergo", "time": 0.029 },
-      "vc_len_u64'0": { "prover": "alt-ergo", "time": 0.024 },
-      "vc_mt_oldest": { "prover": "alt-ergo", "time": 0.024 },
-      "vc_mt_remove": { "prover": "alt-ergo", "time": 0.029 },
-      "vc_rec_blocked_by_pin": { "prover": "alt-ergo", "time": 0.028 },
-      "vc_rec_blocked_unpersisted": { "prover": "alt-ergo", "time": 0.028 },
-      "vc_rec_eviction_from_memory": { "prover": "alt-ergo", "time": 0.029 },
-      "vc_rec_scan_exhausted": { "prover": "alt-ergo", "time": 0.027 }
+      "vc_dm_try_evict": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_evict_one_clean": { "prover": "z3", "time": 27.0 },
+      "vc_index_Vec_u64_Global": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_len_u64'0": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_mt_oldest": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_mt_remove": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_rec_blocked_by_pin": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_rec_blocked_unpersisted": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_rec_eviction_from_memory": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_rec_scan_exhausted": { "prover": "alt-ergo", "time": 0.022 }
     }
   }
 }

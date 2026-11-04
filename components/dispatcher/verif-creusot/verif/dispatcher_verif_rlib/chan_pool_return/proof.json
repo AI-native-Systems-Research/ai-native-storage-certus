@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_chan_pool_return": { "prover": "alt-ergo", "time": 0.037 },
-      "vc_push_u64": { "prover": "alt-ergo", "time": 0.021 }
+      "vc_chan_pool_return": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_push_u64": { "prover": "alt-ergo", "time": 0.012 }
     }
   }
 }

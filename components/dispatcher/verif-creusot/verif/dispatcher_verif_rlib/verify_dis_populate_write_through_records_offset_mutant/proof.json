@@ -2,13 +2,13 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_process_write_job": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_process_write_job": { "prover": "alt-ergo", "time": 0.024 },
       "vc_verify_dis_populate_write_through_records_offset__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.036 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.037 }, null ]
           }
         ]
       }

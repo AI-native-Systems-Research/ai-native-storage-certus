@@ -9,10 +9,10 @@
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.031 },
+              { "prover": "alt-ergo", "time": 0.043 },
               {
                 "tactic": "split_vc",
-                "children": [ null, { "prover": "alt-ergo", "time": 0.14 } ]
+                "children": [ null, { "prover": "alt-ergo", "time": 0.124 } ]
               }
             ]
           }

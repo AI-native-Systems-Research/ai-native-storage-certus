@@ -1,6 +1,6 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_pre_mono": { "prover": "alt-ergo", "time": 0.022 } }
+    "Coma": { "vc_pre_mono": { "prover": "alt-ergo", "time": 0.028 } }
   }
 }

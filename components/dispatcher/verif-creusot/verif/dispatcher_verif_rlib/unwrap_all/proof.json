@@ -4,12 +4,12 @@
     "Coma": {
       "vc_index_Vec_Option_Result_unit_DE_Global": {
         "prover": "alt-ergo",
-        "time": 0.023
+        "time": 0.02
       },
-      "vc_len_Option_Result_unit_DE": { "prover": "alt-ergo", "time": 0.023 },
-      "vc_new_Result_unit_DE": { "prover": "alt-ergo", "time": 0.031 },
-      "vc_push_Result_unit_DE": { "prover": "alt-ergo", "time": 0.023 },
-      "vc_unwrap_all": { "prover": "alt-ergo", "time": 0.035 },
+      "vc_len_Option_Result_unit_DE": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_new_Result_unit_DE": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_push_Result_unit_DE": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_unwrap_all": { "prover": "alt-ergo", "time": 0.043 },
       "vc_unwrap_or_panic_Result_unit_DE": {
         "prover": "alt-ergo",
         "time": 0.023

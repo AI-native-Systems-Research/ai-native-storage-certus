@@ -4,10 +4,10 @@
     "Coma": {
       "vc_chan_pool_checkout": { "prover": "alt-ergo", "time": 0.021 },
       "vc_chan_pool_return": { "prover": "alt-ergo", "time": 0.02 },
-      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_dis_inv_channel_exclusive": {
         "prover": "alt-ergo",
-        "time": 0.054
+        "time": 0.052
       }
     }
   }

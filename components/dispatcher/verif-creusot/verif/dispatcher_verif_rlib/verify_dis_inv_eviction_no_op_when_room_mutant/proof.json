@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_evict_for_space": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_evict_for_space": { "prover": "alt-ergo", "time": 0.026 },
       "vc_verify_dis_inv_eviction_no_op_when_room__mutant": null
     }
   }

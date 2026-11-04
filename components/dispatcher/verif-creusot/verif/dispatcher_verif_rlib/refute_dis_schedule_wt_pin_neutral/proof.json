@@ -2,22 +2,22 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_p_zero": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_p_zero": { "prover": "alt-ergo", "time": 0.027 },
       "vc_refute_dis_schedule_wt_pin_neutral": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.059 },
-              { "prover": "z3", "time": 0.028 },
+              { "prover": "alt-ergo", "time": 0.065 },
+              { "prover": "z3", "time": 0.024 },
               null
             ]
           }
         ]
       },
-      "vc_schedule_write_through": { "prover": "alt-ergo", "time": 0.043 },
-      "vc_writer_step": { "prover": "alt-ergo", "time": 0.06 }
+      "vc_schedule_write_through": { "prover": "alt-ergo", "time": 0.038 },
+      "vc_writer_step": { "prover": "alt-ergo", "time": 0.049 }
     }
   }
 }

@@ -1,0 +1,79 @@
+(* #"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1205 0 1205 58 *)
+
+let%span swell_founded = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span sbatch = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1204 10 1204 11
+let%span sbatch'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1201 11 1201 33
+let%span sbatch'1 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1202 11 1202 65
+let%span sbatch'2 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1203 10 1203 32
+let%span sbatch'3 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1194 10 1194 11
+let%span sbatch'4 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1196 16 1196 108
+
+use creusot.int.UInt64
+use seq.Seq
+use int.Int
+
+type t_ServedBy = Dram | Ssd | Remote | Miss | SizeMismatch | Error
+
+type t_Ni = Dispatcher | DispatchMap | MemoryTier | Gpu | Spdk | Logger | Ring
+
+type t_IoK =
+  | Partition'0 UInt64.t UInt64.t UInt64.t
+  | Drive'0 UInt64.t
+  | Gpu'0
+  | Sync'0
+  | Ssd'0
+  | Promote'0
+  | Dm'0
+  | Remote'0
+  | Stream'0
+  | Channel'0
+  | Other'0
+
+type t_DE = NotInit t_Ni | InvalidParam | KeyNotFound UInt64.t | AlreadyExists UInt64.t | Alloc | Io t_IoK | Timeout
+
+type t_Result_unit_DE = Ok () | Err t_DE
+
+type t_Outcome = { served_by: t_ServedBy; result: t_Result_unit_DE }
+
+function count_sb [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1195 0 1195 60] (o: Seq.seq t_Outcome) (n: int) (x: t_ServedBy) : int
+
+axiom count_sb_def: forall o: Seq.seq t_Outcome, n: int, x: t_ServedBy [count_sb o n x]. count_sb o n x
+    = ([%#sbatch'4] if n <= 0 then 0 else count_sb o (n - 1) x + (if (Seq.get o (n - 1)).served_by = x then 1 else 0))
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant o : Seq.seq t_Outcome
+
+constant n : int
+
+constant x : t_ServedBy
+
+function count_sb_none [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1205 0 1205 58] (o: Seq.seq t_Outcome) (n: int) (x: t_ServedBy) : ()
+
+goal vc_count_sb_none: ([%#sbatch'0] 0 <= n /\ n <= Seq.length o)
+  -> ([%#sbatch'1] forall i: int. 0 <= i /\ i < n -> (Seq.get o i).served_by <> x)
+  -> (if n > 0 then
+    (([@stop_split] [@expl:count_sb_none requires] ([@stop_split] [@expl:count_sb_none requires #0] [%#sbatch'0] 0
+            <= n - 1
+          /\ n - 1 <= Seq.length o)
+        /\ ([@stop_split] [@expl:count_sb_none requires #1] [%#sbatch'1] forall i: int. 0 <= i /\ i < n - 1
+          -> (Seq.get o i).served_by <> x))
+      /\ ([@expl:variant decreases] well_founded_relation_Int ([%#sbatch] n) ([%#sbatch] n - 1)))
+    /\ (([@stop_split] [@expl:count_sb_none ensures] [%#sbatch'2] count_sb o (n - 1) x = 0)
+    -> (let _ = count_sb_none o (n - 1) x in if (Seq.get o (n - 1)).served_by = x then
+      count_sb o n x = count_sb o (n - 1) x + 1
+      && ([@stop_split] [@expl:count_sb_none ensures] [%#sbatch'2] count_sb o n x = 0)
+    else
+      count_sb o n x = count_sb o (n - 1) x + 0
+      && ([@stop_split] [@expl:count_sb_none ensures] [%#sbatch'2] count_sb o n x = 0)
+    ))
+  else
+    [@stop_split] [@expl:count_sb_none ensures] [%#sbatch'2] count_sb o n x = 0
+  )

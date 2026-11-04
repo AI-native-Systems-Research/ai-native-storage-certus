@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_flush_to_ssd": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_flush_to_ssd": { "prover": "alt-ergo", "time": 0.017 },
       "vc_verify_dis_flush_persists_all": {
         "prover": "alt-ergo",
-        "time": 0.162
+        "time": 0.157
       }
     }
   }

@@ -5,7 +5,7 @@
       "vc_process_write_job": { "prover": "alt-ergo", "time": 0.023 },
       "vc_verify_dis_populate_no_lru_refresh_by_writer": {
         "prover": "alt-ergo",
-        "time": 0.06
+        "time": 0.052
       }
     }
   }

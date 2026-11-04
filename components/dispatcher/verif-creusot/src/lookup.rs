@@ -126,6 +126,19 @@ pub fn rd_ctr(a: Ctr, b: Ctr) -> bool {
         && a.ev_mem <= b.ev_mem && a.blk_pin <= b.blk_pin && a.exhausted <= b.exhausted && a.blk_unp <= b.blk_unp }
 }
 
+/// As `rd_ctr`, but the route-partition hit counters may also move up: the
+/// lookup path records the route of every key it served (`record_local_hits`,
+/// FR-058 / SC-017 — DIS-TIER-STATS-ROUTE-PARTITION), so unlike the helpers
+/// below it, `lookup_async` may raise `hit_dram` / `hit_ssd`.
+#[logic(open)]
+pub fn rd_ctr_hits(a: Ctr, b: Ctr) -> bool {
+    pearlite! { a.ev_ssd == b.ev_ssd && a.r_hit == b.r_hit && a.r_miss == b.r_miss
+        && a.bp == b.bp && a.drop_full == b.drop_full
+        && a.hit_dram <= b.hit_dram && a.hit_ssd <= b.hit_ssd
+        && a.promo_mem <= b.promo_mem && a.promo_gpu <= b.promo_gpu && a.already <= b.already
+        && a.ev_mem <= b.ev_mem && a.blk_pin <= b.blk_pin && a.exhausted <= b.exhausted && a.blk_unp <= b.blk_unp }
+}
+
 #[derive(::core::clone::Clone, ::core::marker::Copy)]
 pub enum Path {
     /// evict_and_insert failed and no staging fallback applied
@@ -302,10 +315,25 @@ pub struct LaG {
 #[ensures((^s).p == s.p)]
 #[ensures(match result.0 { Ok(_) => s.p.has_gpu, Err(_) => true })]
 #[ensures(!s.p.init ==> result.0 == Err(DE::NotInit(Ni::Dispatcher)) && *(^s).g == *s.g)]
-#[ensures(rd_ctr((*s.g).c, (*(^s).g).c) && log_ext(*s.g, *(^s).g) && same_env(*s.g, *(^s).g) && (*(^s).g).wq == (*s.g).wq)]
+#[ensures(rd_ctr_hits((*s.g).c, (*(^s).g).c) && log_ext(*s.g, *(^s).g) && same_env(*s.g, *(^s).g) && (*(^s).g).wq == (*s.g).wq)]
 #[ensures(match result.1.path {
     LPath::Warm => match result.0 { Ok(st) => st@ == result.1.warm@, _ => true },
     _ => match result.0 { Ok(st) => st@ == 0, _ => true } })]
+// DIS-TIER-STATS-ROUTE-PARTITION (finding route-partition-does-not-add-up):
+// the single-key path records the route of every key it served, beside the
+// promotions_to_gpu bump — a warm serve is a DRAM-route hit, a cold
+// promote-and-serve is an SSD-route hit, and nothing is recorded on a miss or
+// a failure. (The concurrent-promotion recovery a cold lookup can take in the
+// real code is abstracted out of this model's cold arm, which returns
+// AlreadyExists; the real recovery records a DRAM-route hit, the taxonomy
+// batch_lookup uses for the same race.)
+#[ensures(s.p.init && s.p.has_gpu ==> match result.1.path {
+    LPath::Warm => (*(^s).g).c.hit_dram == (*s.g).c.hit_dram + (if result.1.sv.gpu_ok { 1 } else { 0 })
+        && (*(^s).g).c.hit_ssd == (*s.g).c.hit_ssd,
+    LPath::Cold => (*(^s).g).c.hit_ssd == (*s.g).c.hit_ssd + (if result.0 == Ok(0u64) { 1 } else { 0 })
+        && (*(^s).g).c.hit_dram == (*s.g).c.hit_dram,
+    _ => (*(^s).g).c.hit_dram == (*s.g).c.hit_dram && (*(^s).g).c.hit_ssd == (*s.g).c.hit_ssd,
+})]
 #[ensures(s.p.init && s.p.has_gpu ==> match result.1.path {
     LPath::Early => false,
     LPath::Miss => !has(*s.g, key) && result.0 == Err(DE::KeyNotFound(key)) && *(^s).g == W { tick: (*(^s).g).tick, ..*s.g },
@@ -408,6 +436,10 @@ pub fn lookup_async(s: &mut S, key: u64, h: Ipc) -> (Result<u64, DE>, Snapshot<L
             match r {
                 Ok(()) => {
                     rec_promotions_to_gpu(s, 1);
+                    // Route partition (FR-058 / SC-017): a warm serve is a
+                    // DRAM-route hit, recorded where this path derives its
+                    // route, beside the promotions_to_gpu bump above.
+                    rec_local_hits(s, 1, 0);
                     (Ok(stream_raw), snapshot!(LaG { path: LPath::Warm, after_lookup: *g1, warm: stream_raw, dev: device, sv: *sv, ps: *dps }))
                 }
                 Err(e) => (Err(e), snapshot!(LaG { path: LPath::Warm, after_lookup: *g1, warm: stream_raw, dev: device, sv: *sv, ps: *dps })),
@@ -423,6 +455,10 @@ pub fn lookup_async(s: &mut S, key: u64, h: Ipc) -> (Result<u64, DE>, Snapshot<L
                     let b0 = snapshot!(*s.g);
                     proof_assert!(promote_post(*g0, *g2, *b0, s.p, key, h, Ok(0u64), *ps));
                     rec_promotions_to_gpu(s, 1);
+                    // Route partition (FR-058 / SC-017): a cold serve read a
+                    // data drive (or stood in for one), so it is an SSD-route
+                    // hit.
+                    rec_local_hits(s, 0, 1);
                     proof_assert!(s.g.dm == b0.dm && s.g.mt == b0.mt && s.g.log == b0.log && s.g.tick == b0.tick);
                     (Ok(null_stream), snapshot!(LaG { path: LPath::Cold, after_lookup: *g2, warm: stream_raw, dev: device, sv: *dsv, ps: *ps }))
                 }

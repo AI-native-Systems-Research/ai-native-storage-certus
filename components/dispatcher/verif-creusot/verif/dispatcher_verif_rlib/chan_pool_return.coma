@@ -1,11 +1,11 @@
-(* #"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/bg.rs" 145 0 145 52 *)
+(* #"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/bg.rs" 145 0 145 52 *)
 
-let%span svec = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
-let%span svec'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
-let%span sbg = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/bg.rs" 146 4 146 16
-let%span sbg'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/bg.rs" 143 11 143 85
-let%span sbg'1 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/bg.rs" 144 10 144 59
-let%span sbg'2 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/bg.rs" 115 16 115 86
+let%span svec = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span svec'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sbg = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/bg.rs" 146 4 146 16
+let%span sbg'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/bg.rs" 143 11 143 85
+let%span sbg'1 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/bg.rs" 144 10 144 59
+let%span sbg'2 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/bg.rs" 115 16 115 86
 
 use creusot.prelude.MutBorrow
 use creusot.int.UInt64
@@ -32,14 +32,14 @@ predicate resolve_refmut_Vec_u64_Global [@inline:trivial] (_1: MutBorrow.t t_Vec
 
 meta "rewrite_def" predicate resolve_refmut_Vec_u64_Global
 
-predicate nodup [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/bg.rs" 114 0 114 33] (v: Seq.seq UInt64.t) =
+predicate nodup [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/bg.rs" 114 0 114 33] (v: Seq.seq UInt64.t) =
   [%#sbg'2] forall i: int, j: int. 0 <= i /\ i < j /\ j < Seq.length v -> Seq.get v i <> Seq.get v j
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let chan_pool_return [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/bg.rs" 145 0 145 52]
+let chan_pool_return [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/bg.rs" 145 0 145 52]
   (free: MutBorrow.t t_Vec_u64_Global) (c: UInt64.t) (return (x: ())) =
 {[@stop_split] [@expl:chan_pool_return requires] [%#sbg'0] nodup (view_Vec_u64_Global free.current)
   /\ (forall i: int. 0 <= i /\ i < Seq.length (view_Vec_u64_Global free.current)

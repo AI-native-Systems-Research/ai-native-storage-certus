@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_count_ok_route_split": { "prover": "alt-ergo", "time": 0.114 }
+    }
+  }
+}

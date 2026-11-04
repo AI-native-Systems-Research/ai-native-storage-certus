@@ -2,29 +2,29 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_batch_lookup": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_batch_lookup": { "prover": "alt-ergo", "time": 0.03 },
       "vc_verify_dis_batch_lookup_transient_retry__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.05 },
+              { "prover": "alt-ergo", "time": 0.051 },
               {
                 "tactic": "split_vc",
                 "children": [
                   {
                     "tactic": "split_vc",
                     "children": [
-                      { "prover": "z3", "time": 0.048 },
-                      { "prover": "z3", "time": 0.046 },
-                      { "prover": "z3", "time": 0.049 },
-                      { "prover": "z3", "time": 0.048 },
+                      { "prover": "z3", "time": 0.057 },
+                      { "prover": "z3", "time": 0.05 },
+                      { "prover": "z3", "time": 0.047 },
+                      { "prover": "z3", "time": 0.052 },
                       null,
                       null
                     ]
                   },
-                  { "prover": "z3", "time": 0.044 }
+                  { "prover": "z3", "time": 0.045 }
                 ]
               }
             ]

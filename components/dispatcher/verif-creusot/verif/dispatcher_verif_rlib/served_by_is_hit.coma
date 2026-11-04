@@ -1,8 +1,8 @@
-(* #"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 457 0 457 45 *)
+(* #"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/misc.rs" 457 0 457 45 *)
 
-let%span smisc = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 460 69 460 74
-let%span smisc'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 459 61 459 65
-let%span smisc'1 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 456 10 456 116
+let%span smisc = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/misc.rs" 460 69 460 74
+let%span smisc'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/misc.rs" 459 61 459 65
+let%span smisc'1 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/misc.rs" 456 10 456 116
 
 use creusot.prelude.Any
 
@@ -12,7 +12,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let served_by_is_hit [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 457 0 457 45]
+let served_by_is_hit [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/misc.rs" 457 0 457 45]
   (sb: t_ServedBy) (return (x: bool)) = (! bb0
   [ bb0 = any
     [ br0 -> {sb = Dram} (! bb4)

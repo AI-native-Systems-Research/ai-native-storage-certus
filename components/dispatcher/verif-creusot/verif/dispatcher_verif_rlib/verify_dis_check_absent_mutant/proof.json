@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_check'": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_check'": { "prover": "alt-ergo", "time": 0.021 },
       "vc_verify_dis_check_absent__mutant": null
     }
   }

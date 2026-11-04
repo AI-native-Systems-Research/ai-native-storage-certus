@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_bd_detach": { "prover": "alt-ergo", "time": 0.03 },
-      "vc_detach_all": { "prover": "alt-ergo", "time": 0.896 }
+      "vc_bd_detach": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_detach_all": { "prover": "alt-ergo", "time": 0.658 }
     }
   }
 }

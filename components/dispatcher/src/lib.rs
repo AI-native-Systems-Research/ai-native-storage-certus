@@ -84,6 +84,8 @@ mod repair_test_eviction_errors_counted_unpersisted;
 #[cfg(test)]
 #[path = "repair_test_nvme_timeout_fails_whole_drive.rs"]
 mod repair_test_nvme_timeout_fails_whole_drive;
+#[path = "repair_test_route_partition_does_not_add_up.rs"]
+mod repair_test_route_partition_does_not_add_up;
 
 use parking_lot::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -3451,6 +3453,13 @@ impl IDispatcher for DispatcherComponent {
                         mt.touch(key);
                         if r.is_ok() {
                             self.tier_counters.record_promotion_to_gpu();
+                            // The local half of the route partition (FR-058,
+                            // SC-017): a memory-tier serve is a DRAM-route hit,
+                            // recorded where this path derives its route so the
+                            // counters cannot disagree with the per-key
+                            // `ServedBy` the batch path attributes to the same
+                            // hit.
+                            self.tier_counters.record_local_hits(1, 0);
                         }
                         r.map(|()| GpuStream(stream_raw as *mut std::ffi::c_void))
                     }
@@ -3459,6 +3468,7 @@ impl IDispatcher for DispatcherComponent {
                         // what stops a concurrent remove or SSD eviction deleting the
                         // entry, or freeing the fresh slot, while the SSD read and the
                         // in-place promotion are still running.
+                        let mut recovered_warm = false;
                         let r = match self.promote_and_serve(
                             key,
                             offset,
@@ -3471,19 +3481,33 @@ impl IDispatcher for DispatcherComponent {
                             // A concurrent cold lookup of this key won the mt.insert
                             // race: a hit, not a failure — serve it warm once that
                             // promotion lands, as batch_lookup's recovery pass does.
-                            Err(DispatcherError::AlreadyExists(_)) => self
-                                .serve_concurrently_promoted(
+                            Err(DispatcherError::AlreadyExists(_)) => {
+                                recovered_warm = true;
+                                self.serve_concurrently_promoted(
                                     &dm,
                                     &gpu,
                                     key,
                                     std::slice::from_ref(&ipc_handle),
                                     warm_raw,
-                                ),
+                                )
+                            }
                             r => r,
                         };
                         let _ = dm.release_read(key);
                         r?;
                         self.tier_counters.record_promotion_to_gpu();
+                        // The local half of the route partition (FR-058, SC-017),
+                        // with the same taxonomy batch_lookup derives: a cold
+                        // serve read a data drive (SSD route), but the
+                        // concurrent-promotion recovery served the key out of
+                        // DRAM after the winner's promotion (DRAM route, no
+                        // drive read) — the two must not drift apart, or the
+                        // same hit would be counted differently by the two
+                        // lookup paths.
+                        self.tier_counters.record_local_hits(
+                            u64::from(recovered_warm),
+                            u64::from(!recovered_warm),
+                        );
                         Ok(null_stream)
                     }
                 }

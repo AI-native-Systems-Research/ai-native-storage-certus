@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_initialize": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_initialize": { "prover": "alt-ergo", "time": 0.023 },
       "vc_verify_dis_initialize_mt_evictor_start__mutant": {
         "tactic": "compute_specified",
         "children": [

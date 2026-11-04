@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_bd_shutdown": { "prover": "alt-ergo", "time": 0.03 },
-      "vc_shutdown_all_rev": { "prover": "alt-ergo", "time": 0.751 }
+      "vc_bd_shutdown": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_shutdown_all_rev": { "prover": "alt-ergo", "time": 0.696 }
     }
   }
 }

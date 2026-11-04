@@ -5,7 +5,7 @@
       "vc_initialize": { "prover": "alt-ergo", "time": 0.021 },
       "vc_verify_dis_initialize_channel_pool_empty": {
         "prover": "z3",
-        "time": 0.02
+        "time": 0.021
       }
     }
   }

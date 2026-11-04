@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_shutdown": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_shutdown": { "prover": "alt-ergo", "time": 0.021 },
       "vc_verify_dis_shutdown_no_threads__mutant": {
         "tactic": "compute_specified",
         "children": [

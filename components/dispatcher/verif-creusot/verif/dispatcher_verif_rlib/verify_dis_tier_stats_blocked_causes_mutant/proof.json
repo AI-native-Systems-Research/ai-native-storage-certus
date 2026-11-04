@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_evict_one_clean": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_evict_one_clean": { "prover": "alt-ergo", "time": 0.02 },
       "vc_verify_dis_tier_stats_blocked_causes__mutant": null
     }
   }

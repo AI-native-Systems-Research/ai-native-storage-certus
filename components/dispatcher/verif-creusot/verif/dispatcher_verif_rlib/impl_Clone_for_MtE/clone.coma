@@ -1,4 +1,4 @@
-(* #"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 67 9 67 29 *)
+(* #"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 67 9 67 29 *)
 
 (* <MtE as std::clone::Clone> *)
 
@@ -10,7 +10,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_MtE [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 67 9 67 29] (self: t_MtE)
+let clone_MtE [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 67 9 67 29] (self: t_MtE)
   (return (x: t_MtE)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_MtE = Any.any_l () | & self: t_MtE = self ]) [ return (result: t_MtE) -> (! return {result}) ]

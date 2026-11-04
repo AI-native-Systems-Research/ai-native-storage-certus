@@ -1236,6 +1236,37 @@ pub fn count_sb(o: Seq<Outcome>, n: Int, x: ServedBy) -> Int {
     pearlite! { if n <= 0 { 0 } else { count_sb(o, n - 1, x) + if o[n - 1].served_by == x { 1 } else { 0 } } }
 }
 
+/// `count_sb` of a route that no outcome of `o` carries is zero.
+#[logic]
+#[requires(0 <= n && n <= o.len())]
+#[requires(forall<i: Int> 0 <= i && i < n ==> o[i].served_by != x)]
+#[ensures(count_sb(o, n, x) == 0)]
+#[variant(n)]
+pub fn count_sb_none(o: Seq<Outcome>, n: Int, x: ServedBy) {
+    if n > 0 {
+        count_sb_none(o, n - 1, x);
+        proof_assert!(count_sb(o, n, x) == count_sb(o, n - 1, x) + (if o[n - 1].served_by == x { 1 } else { 0 }));
+    }
+}
+
+/// DIS-TIER-STATS-ROUTE-PARTITION, counting half: when every served outcome of
+/// `o` carries exactly one of the three route attributions and no unserved
+/// outcome carries one, the per-route counts sum to the served count — the
+/// three route counters partition the served keys.
+#[logic]
+#[requires(0 <= n && n <= o.len())]
+#[requires(forall<i: Int> 0 <= i && i < n ==>
+    ((match o[i].result { Ok(()) => true, _ => false }) == (o[i].served_by == ServedBy::Dram || o[i].served_by == ServedBy::Ssd || o[i].served_by == ServedBy::Remote)))]
+#[ensures(count_ok(o, n) == count_sb(o, n, ServedBy::Dram) + count_sb(o, n, ServedBy::Ssd) + count_sb(o, n, ServedBy::Remote))]
+#[variant(n)]
+pub fn count_ok_route_split(o: Seq<Outcome>, n: Int) {
+    if n > 0 {
+        count_ok_route_split(o, n - 1);
+        proof_assert!(count_ok(o, n) == count_ok(o, n - 1) + (if match o[n - 1].result { Ok(()) => true, _ => false } { 1 } else { 0 }));
+        proof_assert!(forall<x: ServedBy> count_sb(o, n, x) == count_sb(o, n - 1, x) + (if o[n - 1].served_by == x { 1 } else { 0 }));
+    }
+}
+
 /// `out.iter().filter(pred).count()` for the three tallies.
 #[ensures(result.0@ == count_ok(out@, out@.len()) && result.1@ == count_sb(out@, out@.len(), ServedBy::Dram)
     && result.2@ == count_sb(out@, out@.len(), ServedBy::Ssd))]

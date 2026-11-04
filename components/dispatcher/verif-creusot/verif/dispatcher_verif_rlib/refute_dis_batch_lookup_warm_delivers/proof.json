@@ -7,7 +7,7 @@
         "prover": "z3",
         "time": 0.036
       },
-      "vc_serve_memory_tier_to_gpu": { "prover": "alt-ergo", "time": 0.057 }
+      "vc_serve_memory_tier_to_gpu": { "prover": "alt-ergo", "time": 0.047 }
     }
   }
 }

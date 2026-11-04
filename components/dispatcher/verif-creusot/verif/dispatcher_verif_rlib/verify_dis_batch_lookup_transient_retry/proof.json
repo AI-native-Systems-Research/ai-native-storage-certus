@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_batch_lookup": { "prover": "alt-ergo", "time": 0.036 },
-      "vc_lookup_retry": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_batch_lookup": { "prover": "alt-ergo", "time": 0.035 },
+      "vc_lookup_retry": { "prover": "alt-ergo", "time": 0.024 },
       "vc_verify_dis_batch_lookup_transient_retry": {
         "prover": "z3",
-        "time": 0.072
+        "time": 0.071
       }
     }
   }

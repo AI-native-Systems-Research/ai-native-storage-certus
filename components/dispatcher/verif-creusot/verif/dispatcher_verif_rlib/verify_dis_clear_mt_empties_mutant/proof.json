@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_clear_memory_tier": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_clear_memory_tier": { "prover": "alt-ergo", "time": 0.02 },
       "vc_verify_dis_clear_mt_empties__mutant": null
     }
   }

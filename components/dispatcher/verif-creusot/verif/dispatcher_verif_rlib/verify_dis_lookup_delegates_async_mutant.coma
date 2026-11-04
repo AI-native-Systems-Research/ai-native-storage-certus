@@ -1,16 +1,16 @@
-(* #"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/drivers.rs" 806 0 806 134 *)
+(* #"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 806 0 806 134 *)
 
-let%span score = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 620 16 620 102
-let%span slookup = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/lookup.rs" 498 11 498 20
-let%span slookup'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/lookup.rs" 499 10 499 23
-let%span slookup'1 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/lookup.rs" 500 10 500 105
-let%span slookup'2 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/lookup.rs" 501 10 501 131
-let%span slookup'3 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/lookup.rs" 502 10 502 34
-let%span slookup'4 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/lookup.rs" 503 10 503 53
-let%span slookup'5 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/lookup.rs" 482 8 485 9
-let%span sdrivers = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/drivers.rs" 807 4 807 21
-let%span sdrivers'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/drivers.rs" 804 11 804 32
-let%span sdrivers'1 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/drivers.rs" 805 10 805 82
+let%span score = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 620 16 620 102
+let%span slookup = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 534 11 534 20
+let%span slookup'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 535 10 535 23
+let%span slookup'1 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 536 10 536 105
+let%span slookup'2 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 537 10 537 131
+let%span slookup'3 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 538 10 538 34
+let%span slookup'4 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 539 10 539 53
+let%span slookup'5 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 518 8 521 9
+let%span sdrivers = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 807 4 807 21
+let%span sdrivers'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 804 11 804 32
+let%span sdrivers'1 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 805 10 805 82
 
 use creusot.prelude.MutBorrow
 use creusot.int.UInt64
@@ -167,10 +167,10 @@ type tup3_Result_u64_DE_LaG_W = { f0: t_Result_u64_DE; f1: t_LaG; f2: t_W }
 
 type tup2_Result_unit_DE_Snapshot_tup3_Result_u64_DE_LaG_W = { f0'0: t_Result_unit_DE; f1'0: tup3_Result_u64_DE_LaG_W }
 
-predicate pinv [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 619 0 619 25] (p'0: t_P) =
+predicate pinv [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 619 0 619 25] (p'0: t_P) =
   [%#score] (p'0.init -> p'0.has_dm /\ p'0.has_mt /\ p'0.writer) /\ (not p'0.init -> not p'0.ssd_ev /\ not p'0.mt_ev)
 
-predicate ret_stream_ok [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/lookup.rs" 480 0 480 56] (r: t_Result_u64_DE) (g'0: t_LaG) =
+predicate ret_stream_ok [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 516 0 516 56] (r: t_Result_u64_DE) (g'0: t_LaG) =
   [%#slookup'5] match g'0.path'0 with
     | Warm'0 -> match r with
       | Ok'0 st -> UInt64.t'int st = UInt64.t'int g'0.warm'0
@@ -208,7 +208,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let verify_dis_lookup_delegates_async__mutant [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/drivers.rs" 806 0 806 134]
+let verify_dis_lookup_delegates_async__mutant [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 806 0 806 134]
   (s: MutBorrow.t t_S) (key'1: UInt64.t) (h: t_Ipc)
   (return (x: tup2_Result_unit_DE_Snapshot_tup3_Result_u64_DE_LaG_W)) =
 {[@stop_split] [@expl:verify_dis_lookup_delegates_async__mutant requires] [%#sdrivers'0] pinv s.current.p

@@ -5,7 +5,7 @@
       "vc_lookup_async": { "prover": "alt-ergo", "time": 0.027 },
       "vc_verify_dis_lookup_warm_releases_pin": {
         "prover": "z3",
-        "time": 0.047
+        "time": 0.044
       }
     }
   }

@@ -1051,6 +1051,60 @@ pub fn verify_dis_tier_stats_promotions_to_gpu__mutant(s: &mut S, key: u64, h: I
     proof_assert!(bg.ready ==> s2.g.c.promo_gpu == g2.c.promo_gpu + count_ok(out@, entries@.len()));
 }
 
+// DIS-TIER-STATS-ROUTE-PARTITION (finding route-partition-does-not-add-up):
+// over any interval, lookup_hits_dram + lookup_hits_ssd + remote_lookup_hits
+// increases by exactly the number of keys the lookup paths served. The
+// single-key path (`lookup`/`lookup_async`) records its half where it derives
+// the route — a warm serve is a DRAM-route hit, a cold promote-and-serve an
+// SSD-route hit — beside the promotions_to_gpu bump it already made; the batch
+// path derives its half from the per-key attributions it returns. The batch
+// half is driven with no remote receptacle bound: FR-058 counts a remote hit
+// when the peer answers rather than when local delivery lands, so with remote
+// traffic the remote counter is proved by DIS-TIER-STATS-REMOTE-ACCOUNTING and
+// the local half below is the part the partition has to add up.
+#[requires(pinv(s.p) && s.p.init)]
+#[requires(s.p.has_gpu)]
+#[requires(pinv(s2.p) && s2.p.init && s2.p.has_dm && s2.p.has_mt && s2.p.has_gpu && !s2.p.has_rl)]
+#[requires(a_fr039(entries@) && entries@.len() > 0)]
+pub fn verify_dis_tier_stats_route_partition(s: &mut S, key: u64, h: Ipc, s2: &mut S, entries: &[Be]) {
+    let g0 = snapshot!(*s.g);
+    let (r, _g) = lookup_async(s, key, h);
+    // Single-key half: +1 on the route of the key served, +0 on a miss or failure.
+    proof_assert!((*s.g).c.hit_dram + (*s.g).c.hit_ssd + (*s.g).c.r_hit
+        == g0.c.hit_dram + g0.c.hit_ssd + g0.c.r_hit + (if (match r { Ok(_) => true, _ => false }) { 1 } else { 0 }));
+    // Batch half: every served key is attributed exactly one route, the local
+    // counters take exactly those attributions, and with no remote receptacle
+    // bound no key is attributed Remote (a Miss-class key without a remote
+    // pass answers KeyNotFound), so the three sum to the served count.
+    let g2 = snapshot!(*s2.g);
+    let (out, bg) = batch_lookup(s2, entries);
+    proof_assert!(bg.ready);
+    proof_assert!(forall<i: Int> 0 <= i && i < entries@.len() ==>
+        (match out@[i].result { Ok(()) => true, _ => false }) == (out@[i].served_by == ServedBy::Dram || out@[i].served_by == ServedBy::Ssd || out@[i].served_by == ServedBy::Remote));
+    proof_assert!(forall<i: Int> 0 <= i && i < entries@.len() ==> out@[i].served_by != ServedBy::Remote);
+    proof_assert!(count_sb_none(out@, entries@.len(), ServedBy::Remote) == ());
+    proof_assert!(count_ok_route_split(out@, entries@.len()) == ());
+    proof_assert!(count_rl(bg.rem.ans, bg.rem.ans.len(), Rl::Ok) == 0);
+    proof_assert!((*s2.g).c.hit_dram + (*s2.g).c.hit_ssd + (*s2.g).c.r_hit
+        == g2.c.hit_dram + g2.c.hit_ssd + g2.c.r_hit + count_ok(out@, entries@.len()));
+}
+
+#[requires(pinv(s.p) && s.p.init)]
+#[requires(s.p.has_gpu)]
+#[requires(pinv(s2.p) && s2.p.init && s2.p.has_dm && s2.p.has_mt && s2.p.has_gpu && !s2.p.has_rl)]
+#[requires(a_fr039(entries@) && entries@.len() > 0)]
+pub fn verify_dis_tier_stats_route_partition__mutant(s: &mut S, key: u64, h: Ipc, s2: &mut S, entries: &[Be]) {
+    let g0 = snapshot!(*s.g);
+    let (r, _g) = lookup_async(s, key, h);
+    // Wrong on every path but a served key: a miss moves no route counter.
+    proof_assert!((*s.g).c.hit_dram + (*s.g).c.hit_ssd + (*s.g).c.r_hit == g0.c.hit_dram + g0.c.hit_ssd + g0.c.r_hit + 1);
+    let g2 = snapshot!(*s2.g);
+    let (out, bg) = batch_lookup(s2, entries);
+    proof_assert!(bg.ready ==>
+        (*s2.g).c.hit_dram + (*s2.g).c.hit_ssd + (*s2.g).c.r_hit
+        == g2.c.hit_dram + g2.c.hit_ssd + g2.c.r_hit + count_ok(out@, entries@.len()));
+}
+
 #[requires(pinv(s.p))]
 #[requires(a_fr039(entries@))]
 pub fn verify_dis_batch_lookup_concurrent_promote_hit(s: &mut S, entries: &[Be], s2: &mut S, key: u64, regions: &Vec<Ipc>, warm: u64) {

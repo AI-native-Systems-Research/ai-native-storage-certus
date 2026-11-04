@@ -1,9 +1,9 @@
-(* #"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/drivers.rs" 2452 0 2452 55 *)
+(* #"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 2448 0 2448 55 *)
 
-let%span smisc = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 456 10 456 116
-let%span sdrivers = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/drivers.rs" 2453 4 2453 24
-let%span sdrivers'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/drivers.rs" 2450 10 2450 91
-let%span sdrivers'1 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/drivers.rs" 2451 10 2451 101
+let%span smisc = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/misc.rs" 456 10 456 116
+let%span sdrivers = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 2449 4 2449 24
+let%span sdrivers'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 2446 10 2446 91
+let%span sdrivers'1 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 2447 10 2447 101
 
 use creusot.prelude.Any
 
@@ -23,7 +23,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let verify_dis_servedby_is_hit [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/drivers.rs" 2452 0 2452 55]
+let verify_dis_servedby_is_hit [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 2448 0 2448 55]
   (sb: t_ServedBy) (return (x: bool)) = (! bb0
   [ bb0 = s0 [ s0 = served_by_is_hit [%#sdrivers] {sb} (fun (_x: bool) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ] ]
   [ & _ret: bool = Any.any_l () | & sb: t_ServedBy = sb ])

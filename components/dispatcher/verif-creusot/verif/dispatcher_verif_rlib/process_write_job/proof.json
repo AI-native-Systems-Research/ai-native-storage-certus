@@ -2,14 +2,14 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_dm_convert_to_storage": { "prover": "alt-ergo", "time": 0.015 },
-      "vc_dm_release_read": { "prover": "alt-ergo", "time": 0.014 },
-      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.026 },
-      "vc_elim_Some'0": { "prover": "alt-ergo", "time": 0.018 },
-      "vc_em_reserve": { "prover": "alt-ergo", "time": 0.018 },
-      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.026 },
-      "vc_process_write_job": { "prover": "cvc4", "time": 19.2 },
-      "vc_ssd_write": { "prover": "alt-ergo", "time": 0.016 }
+      "vc_dm_convert_to_storage": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_dm_release_read": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_elim_Some'0": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_em_reserve": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_process_write_job": { "prover": "cvc4", "time": 16.7 },
+      "vc_ssd_write": { "prover": "alt-ergo", "time": 0.02 }
     }
   }
 }

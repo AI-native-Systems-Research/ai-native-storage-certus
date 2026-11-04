@@ -2,13 +2,13 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_read_write_stats": { "prover": "alt-ergo", "time": 0.035 },
+      "vc_read_write_stats": { "prover": "alt-ergo", "time": 0.034 },
       "vc_verify_dis_read_write_stats_sum__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.026 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.034 }, null ]
           }
         ]
       }

@@ -1,6 +1,6 @@
-(* #"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/methods.rs" 8 0 8 50 *)
+(* #"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/methods.rs" 8 0 8 50 *)
 
-let%span smethods = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/methods.rs" 7 10 7 102
+let%span smethods = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/methods.rs" 7 10 7 102
 
 use creusot.int.UInt64
 use creusot.int.UInt32
@@ -142,7 +142,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let ensure_initialized [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/methods.rs" 8 0 8 50]
+let ensure_initialized [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/methods.rs" 8 0 8 50]
   (s: t_S) (return (x: t_Result_unit_DE)) = (! bb0
   [ bb0 = any [ br0 -> {s.p.init = false} (! bb1) | br1 -> {s.p.init} (! bb2) ]
   | bb2 = s0 [ s0 = [ &_ret <- Ok _9 ] s1 | s1 = return {_ret} ]

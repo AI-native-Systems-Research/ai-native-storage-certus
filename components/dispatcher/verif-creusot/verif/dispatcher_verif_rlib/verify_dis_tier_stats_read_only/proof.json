@@ -5,7 +5,7 @@
       "vc_tier_event_stats": { "prover": "alt-ergo", "time": 0.038 },
       "vc_verify_dis_tier_stats_read_only": {
         "prover": "alt-ergo",
-        "time": 0.157
+        "time": 0.165
       }
     }
   }

@@ -1,7 +1,7 @@
-(* #"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 411 0 411 53 *)
+(* #"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/evict.rs" 411 0 411 53 *)
 
-let%span sevict = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 412 20 412 117
-let%span sevict'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 410 10 410 144
+let%span sevict = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/evict.rs" 412 20 412 117
+let%span sevict'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/evict.rs" 410 10 410 144
 
 use creusot.prelude.MutBorrow
 use creusot.int.UInt64
@@ -130,7 +130,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let rec_local_hits [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 411 0 411 53]
+let rec_local_hits [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/evict.rs" 411 0 411 53]
   (s: MutBorrow.t t_S) (dram: UInt64.t) (ssd: UInt64.t) (return (x: ())) = (! bb0
   [ bb0 = s0
     [ s0 = [ &s <- { s with current = { s.current with g = ([%#sevict] { dm = s.current.g.dm;

@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_clear_memory_tier": { "prover": "alt-ergo", "time": 0.043 },
-      "vc_p_zero": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_clear_memory_tier": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_p_zero": { "prover": "alt-ergo", "time": 0.027 },
       "vc_refute_dis_clear_mt_pin_safe": {
         "tactic": "compute_specified",
         "children": [
@@ -14,8 +14,8 @@
                 "tactic": "split_vc",
                 "children": [
                   null,
-                  { "prover": "z3", "time": 0.018 },
-                  { "prover": "z3", "time": 0.023 }
+                  { "prover": "z3", "time": 0.024 },
+                  { "prover": "z3", "time": 0.02 }
                 ]
               }
             ]
