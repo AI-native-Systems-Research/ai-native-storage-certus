@@ -1,10 +1,43 @@
 {
-  "applied": "2026-10-31T06:30:00Z",
-  "branch": "specsync-b",
-  "backup": "backups/20261031T054807Z",
-  "applied_ids": [],
+  "applied": "2026-11-04T01:26:34Z",
+  "changes": [
+    {
+      "spec": "001-gpudirect-cold-path",
+      "requirement": "FR-005",
+      "change": "Modified"
+    },
+    {
+      "spec": "001-gpudirect-cold-path",
+      "requirement": "FR-015",
+      "change": "Modified"
+    },
+    {
+      "spec": "001-gpudirect-cold-path",
+      "requirement": "FR-034",
+      "change": "Added"
+    },
+    {
+      "spec": "001-gpudirect-cold-path",
+      "requirement": "FR-035",
+      "change": "Added"
+    },
+    {
+      "spec": "001-gpudirect-cold-path",
+      "requirement": "FR-036",
+      "change": "Added"
+    },
+    {
+      "spec": "001-gpudirect-cold-path",
+      "requirement": "research.md R3",
+      "change": "Annotated"
+    },
+    {
+      "spec": "001-gpudirect-cold-path",
+      "requirement": "tasks.md T014",
+      "change": "Annotated"
+    }
+  ],
+  "align_tasks": 0,
   "not_applied": [],
-  "source_files_changed": [],
-  "specs_updated": [],
-  "previous": "backups/20261031T054807Z/apply-report.json.prev"
+  "backup": ".specify/sync/backups/"
 }

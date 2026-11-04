@@ -28,6 +28,13 @@
 3. Sync both streams every `ring_size/2` completions before recycling
 4. Finalize: sync both streams after all chunks complete
 
+> **Superseded 2026-11-03 (spec FR-005).** Steps 2–3 assumed completions arrive in submission
+> order and picked the slot by completion count. NVMe completes out of order, so segments were
+> copied from another read's slot. Reads are now tagged by work index, a `SlotTracker` records
+> each read's slot, and a slot is reused only after its copy's stream has synced (when half the
+> partition awaits a sync, or no slot is free). The rationale below — overlap reads with D2D
+> copies across streams — still holds.
+
 **Rationale**: Overlapping NVMe reads with D2D copies maximizes throughput. Alternating streams allows one copy to proceed while the next read lands. Periodic sync prevents overrunning slots that haven't finished copying.
 
 **Alternatives considered**:
