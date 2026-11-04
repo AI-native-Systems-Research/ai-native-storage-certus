@@ -14,6 +14,8 @@
 
 **Last-Synced**: 2026-10-10 (Spec-Sync on branch `fix/dispatcher-p2p-clean-eviction` — FR-009 downgraded to MAY / off by default, FR-014 records the deployed default 0; FR-032, FR-033 added as future work. Then FR-030 clean eviction and FR-031 store backpressure BACKFILL, FR-027/FR-028 anchors refreshed, backfill narrative annotated.)
 
+**Last-Synced**: 2026-11-03 (Spec-Sync on branch `feat/dispatcher-p2p-mr-pool` — FR-005 BACKFILL: tag-tracked ring slots replace FIFO recycling (a corruption fix); FR-034 multi-region blocks, FR-035 null-stream store sync, FR-036 per-reader channel pool (#583) added; FR-015 function name refreshed.)
+
 **Input**: User description: "GPUDirect Storage cold-read path for dispatcher-p2p. NVMe DMA reads directly into GPU BAR1 staging buffers, then D2D copies to client GPU destination, eliminating host DRAM bounce."
 
 ## User Scenarios & Testing *(mandatory)*
@@ -112,7 +114,7 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
 - **FR-002**: System MUST copy data from staging buffers to the client's GPU destination.
 - **FR-003**: System MUST pre-allocate a fixed ring of 64 GPU staging buffers at initialization via `cudaMalloc` + GDRCopy BAR1 mapping (`gdr_pin_buffer` + `gdr_map`) + `spdk_mem_register`. Each slot's size is dynamically determined from the drive's `max_transfer_size()` (typically 128 KiB MDTS). The ring includes 4 pre-allocated CUDA streams (minimum 2 on constrained hardware). The ring is shared across all cold lookup threads.
 - **FR-004**: System MUST partition the staging ring for concurrent thread access using `ThreadPartition` (non-overlapping slot ranges, effective QD capped at 16 per thread to prevent NVMe qpair saturation). With `MAX_QUEUES_PER_DRIVE=1`, the ring is partitioned into one 16-slot region per drive, maximizing per-drive NVMe queue depth.
-- **FR-005**: System MUST pipeline SSD reads with D2D GPU copies using FIFO completion ordering. D2D copies are distributed round-robin across 4 CUDA streams for maximum PCIe overlap. Stream synchronization occurs once per ring partition wrap (sync interval = ring_size) to bound GPU queue depth and ensure slots are safe to reuse. A final stream sync is performed after all chunks complete.
+- **FR-005** *(Sync 2026-11-03 — BACKFILL, code authoritative; the FIFO rule this replaces was a data-corruption bug.)*: System MUST pipeline SSD reads with D2D GPU copies **without assuming completion order**. NVMe completes reads in any order, so each read is tagged with its work index and a `SlotTracker` records the ring slot it was issued into; the D2D copy for a completion reads from *that* slot, never from one derived from a completion count. A slot MUST NOT receive a new read until the stream holding its D2D copy has synchronized. D2D copies are distributed round-robin across the ring's CUDA streams. The streams are synchronized when half the partition's slots await a sync, or when no slot is free and reads remain, so the other half keeps the NVMe queue fed; a final stream sync is performed after all chunks complete. On a read failure, timeout or send failure the reads already in flight are drained before the call returns, so none lands in a slot after the ring is handed back. The single-object `pipelined_ssd_to_gpu_p2p` is a one-job call of `pipelined_multi_object_p2p`, so both paths share this discipline. *(Previously: "FIFO completion ordering … sync once per ring partition wrap". Both cold loops chose the slot by completion count and issued the next read into a slot chosen the same way; out-of-order completions copied segments from another read's slot — on unstable `dc564aa3`, 128/128 pages wrong in `roundtrip_chunk_hw.py`'s flush-and-clear case.)* (`src/pipeline.rs:838` `SlotTracker`, `src/pipeline.rs:905` `pipelined_multi_object_p2p`, `src/pipeline.rs:707` wrapper.) Tests: `slot_tracker_tests` (in-order, newest-first and scrambled completions; slot held until released; unknown tag rejected).
 - **FR-006**: The `batch_lookup` path MUST panic if the P2P ring was not initialized (GDRCopy unavailable, GPU memory insufficient). Initialization logs a diagnostic warning but does not fail, allowing hot-only testing without P2P hardware. The single-key `lookup()` path does NOT panic — it silently falls back to the DRAM path when the P2P ring is unavailable (for test/staging environments). Use the `full.yaml` profile (standard dispatcher) for production DRAM-only deployments.
 - **FR-007**: The P2P ring is allocated once at initialization and is immutable for the component's lifetime. In production (full-p2p profile via `batch_lookup`), the P2P path is always used for cold reads and panics if unavailable. The single-key `lookup()` DRAM fallback path exists for test/staging environments where GDRCopy is unavailable.
 - **FR-008**: System MUST implement the same interface as the standard dispatcher, serving as a drop-in replacement. This includes the `IRemoteLookup` fallback for entries missed locally: the dispatcher calls `IRemoteLookup::batch_lookup` with `(key, size)` pairs (not `IpcHandle` — remote-lookup works only in DRAM), and on a successful remote fetch (the value becomes resident in the local memory tier) performs the DRAM→GPU delivery itself using the memory-tier→device copy.
@@ -122,7 +124,7 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
 - **FR-012**: Performance measurement is handled by external benchmarking tools (e.g., `certus-api-bench_v2.py`) rather than built-in hooks, to avoid instrumentation overhead in the production path.
 - **FR-013**: System MUST implement `promote_to_memory_tier(keys)` to asynchronously read cold entries from NVMe into the memory-tier without GPU involvement, enabling future lookups to take the hot DRAM→GPU path. This uses the `pipelined_ssd_to_dram_only` pipeline function (one thread per drive, no P2P ring involvement).
 - **FR-014**: System MUST support configurable DRAM backfill throttling via `backfill_delay_ms` in `DispatcherConfig`. Component default (`DispatcherConfig::default()`): 10ms. *(Sync 2026-10-10.)* The deployed default is **0 (off)**: `certus-server-yaml --backfill-delay-ms` defaults to 0 (`apps/certus-server-yaml/src/main.rs`). Rationale: backfilling every cold block competes with stores for memory-tier slots and SSD bandwidth; on `full-p2p` (4 NVMe, A30, 4 GiB tier, certus-connector-bench scheduler-step) it ran 26.9 steps/s with ~1,200 store-backpressure retries per run against 92.6 steps/s and zero retries with backfill off, and helped only repeat cold reads of the same keys (~10%). When set to 0, no background DRAM backfill occurs and cold-promoted keys remain as BlockDevice indefinitely (repeat lookups always use P2P). When > 0, the `DramBackfillWorker` sleeps for that duration between jobs to avoid contending with active P2P cold reads for NVMe bandwidth.
-- **FR-015**: The component's `IGpuServices` receptacle MUST expose multi-GPU device selection — `set_device(device)` to bind the active CUDA device and `device_of_ptr(ptr)` to resolve the GPU a device pointer resides on — so that cold-path staging-ring D2D copies and CUDA streams can be directed to the client destination's GPU in multi-GPU deployments. NOTE (as of 2026-07-21): this is an interface keep-up — the receptacle exposes these methods to satisfy the expanded `IGpuServices` trait (currently implemented only by the component's test mock), and the production cold path does NOT yet route transfers by device. The capability is present in the receptacle/mock; per-device routing (`device_of_ptr` → `set_device` before staging-ring copies/streams) is not yet wired into `pipelined_ssd_to_gpu_p2p`.
+- **FR-015**: The component's `IGpuServices` receptacle MUST expose multi-GPU device selection — `set_device(device)` to bind the active CUDA device and `device_of_ptr(ptr)` to resolve the GPU a device pointer resides on — so that cold-path staging-ring D2D copies and CUDA streams can be directed to the client destination's GPU in multi-GPU deployments. NOTE (as of 2026-07-21): this is an interface keep-up — the receptacle exposes these methods to satisfy the expanded `IGpuServices` trait (currently implemented only by the component's test mock), and the production cold path does NOT yet route transfers by device. The capability is present in the receptacle/mock; per-device routing (`device_of_ptr` → `set_device` before staging-ring copies/streams) is not yet wired into the P2P pipeline (`pipelined_multi_object_p2p`, which `pipelined_ssd_to_gpu_p2p` now wraps; sync 2026-11-03).
 - **FR-016**: System MUST maintain a persistent per-drive cold-path worker pool (`P2pColdReadPool`) that, at initialization (after the P2P ring is available), pre-allocates one long-lived OS thread plus a pre-connected `ClientChannels` for each (drive, queue-slot) pair (`MAX_QUEUES_PER_DRIVE` slots per drive), eliminating the per-batch `connect_client()` + scoped-thread setup previously required for every cold `batch_lookup`. Cold-read jobs are dispatched to the worker for the target drive over a bounded (depth-1) channel, and the worker executes the P2P pipeline (`pipelined_multi_object_p2p`) and returns per-job results. If pool creation fails at initialization (e.g., `connect_client()` error), the system MUST log a non-fatal diagnostic and fall back, for the remaining lifetime of the component, to the pre-existing inline per-batch path (connect + run the pipeline on the calling thread for each drive/chunk). The pool MUST be signaled to stop and its worker threads released as part of component shutdown, before the P2P ring itself is destroyed.
 - **FR-017**: System MUST provide an eviction-event notification channel for observability of memory-tier evictions. `create_eviction_channel(capacity)` registers a bounded `crossbeam_channel::Receiver<EvictionEvent>` for the component (single active subscriber). Every memory-tier eviction performed while serving a lookup or write (`evict_for_space_emit`, `evict_and_insert`, and the cold-promotion threads) attempts to publish an `EvictionEvent { key, reason }` to the registered channel using a non-blocking `try_send`. *(Sync 2026-10-09 — code authoritative.)* That foreground path has one outcome only, `EvictionReason::Demoted`: it never removes an entry (#220), so `EvictionReason::Removed` is published only by the SSD `BackgroundEvictor` (FR-019). The DRAM-backfill worker's evictions are internal and publish nothing. Eviction event delivery MUST NOT block, delay, or fail the eviction operation: if the channel is full or no subscriber has been registered, the event MUST be silently dropped and counted, and the running drop count MUST be readable and reset via `eviction_dropped_count()`.
 - **FR-018**: System MUST provide a parallel write-through persistence path from the memory tier to SSD using one dedicated writer thread per drive (`ParallelBackgroundWriter`). Each `WriteJob` is routed to the writer owning its target drive (`device_index % num_drives`) and processed asynchronously so that write-through across multiple NVMe devices proceeds concurrently. The writer pool MUST expose in-flight accounting, a `flush()` that blocks until all per-drive queues are drained, and a `shutdown()` that drains remaining jobs and joins all threads (also invoked on drop).
@@ -284,6 +286,51 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
   contention mode stores still take ~640 backpressure retries per run with backfill off. Needs
   its own spec (staging, extent allocation, acknowledgement point, crash consistency) before
   implementation.
+- **FR-034** *(New 2026-11-03 — BACKFILL; supersedes the "rejects multi-region (N>1) blocks"
+  limitation recorded by the 2026-10-31 sync.)* System MUST store, warm-load, remote-deliver and
+  cold-load a block handed as **N ≥ 1 GPU regions**, as `dispatcher` does (its multi-region
+  support, commit `30c6a83b`). vLLM 0.23+'s default layout (LBHNC) hands a block as one region
+  per layer — 32 regions of 64 KiB per 2 MiB block — and a multi-block key
+  (`LookupChunks` / `CopyToStoreChunks`) arrives as `blocks_per_key × layers` regions.
+  - **Layout.** A block's regions are laid out back to back in its memory-tier slot and in its
+    SSD extent: region `L` holds object bytes `[sum(sizes[0..L]), sum(sizes[0..=L]))`.
+  - **Store** (`copy_gpu_to_memory_async`) gathers the regions into the slot at those offsets
+    (`src/lib.rs:2673`). It MUST reject an empty region list, and a region set whose total
+    exceeds the reserved slot, rather than write past it (`src/lib.rs:2636-2657`).
+  - **Warm load and remote delivery** scatter the slot back to the regions on the warm stream
+    (`scatter_slot_to_regions`, `src/lib.rs:238`); a zero-size region is skipped and a scatter
+    stops at the end of the slot. With N > 1 and no warm stream they MUST return an error rather
+    than a partial copy; N = 1 keeps the synchronous fallback (`src/lib.rs:1922`, `2228`).
+  - **Cold load** splits each ring segment at region boundaries: a 128 KiB segment over 64 KiB
+    regions is two D2D copies (`segment_copies`, `src/pipeline.rs:761`;
+    `copy_segment_to_regions`, `src/pipeline.rs:793`).
+  - `batch_lookup` MUST reject an entry with no regions (`src/lib.rs:1895`).
+  - Tests: `segment_copy_tests` (one region; a segment straddling two; every byte lands once for
+    128/100/4/2048 KiB segments; uneven and zero-size regions; a segment past the end).
+    Hardware (A30, 4 NVMe, `full-p2p`): `certus-shmq-connector/tests/roundtrip_chunk_hw.py`
+    byte-exact over all cases including flush-and-clear and tier overflow, at 4 blocks/key ×
+    32 regions, 1 × 32 and 1 × 1.
+- **FR-035** *(New 2026-11-03 — BACKFILL; same contract as `dispatcher` FR-056, commit
+  `f3967e82`, which this component never received.)* `copy_gpu_to_memory_async` called with the
+  **null stream** MUST have completed the copy when it returns. The shm-queue CopyToStore
+  handler passes the null stream and has no stream to sync on, and its CommitStore
+  (`copy_gpu_to_memory_completed`) enqueues the SSD write-through at once, so an unsynced copy
+  let the background writer persist a slot the copy had not reached: whole keys read back as
+  zeros from SSD, intermittently. A caller-owned stream remains the caller's to synchronize. On a
+  sync failure the reserved slot is removed and the error returned. (`src/lib.rs:2658-2671`,
+  `2694`, `2728`.) Test: `null_stream_store_is_synced_before_return` (N = 1 and N > 1, null and
+  caller-owned streams).
+- **FR-036** *(New 2026-11-03 — BACKFILL; issue #583; same design as `dispatcher`'s
+  `ChannelPool`, commit `327306b1`.)* Every thread that reads a drive outside the cold pool MUST
+  use a client channel no other thread is using at the same time. A `ClientChannels` is an SPSC
+  pair, and the single `cached_channels` per drive was shared by `promote_and_serve` and the
+  scoped threads of `promote_to_memory_tier`, so one reader could dequeue another's completion
+  and leave it waiting on `completion_rx` forever. Each `DataDrive` now holds a `ChannelPool`
+  (`src/lib.rs:157-229`): a reader checks out a `ChannelLease`, which connects a fresh channel
+  when the pool is empty and returns the channel on drop; a checkout first discards completions
+  a previous user left behind, so tags from an old operation are never matched against a new
+  one. The cold pool of FR-016 already gave each worker its own channel and is unchanged.
+  (`src/lib.rs:620`, `2928-2938`.) Tests: `channel_pool_tests`.
 
 ## ROOT CAUSE FOUND 2026-09-30: the cold path panics when the P2P ring is absent
 
