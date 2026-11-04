@@ -5,7 +5,7 @@
       "vc_evict_for_space": { "prover": "alt-ergo", "time": 0.029 },
       "vc_verify_dis_inv_eviction_bounded_fails": {
         "prover": "z3",
-        "time": 0.02
+        "time": 0.024
       }
     }
   }

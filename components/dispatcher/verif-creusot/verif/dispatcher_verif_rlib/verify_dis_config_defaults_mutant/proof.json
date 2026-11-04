@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_config_default": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_config_default": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_dis_config_defaults__mutant": null
     }
   }

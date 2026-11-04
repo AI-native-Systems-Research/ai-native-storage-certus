@@ -5,7 +5,7 @@
       "vc_evict_for_space": { "prover": "alt-ergo", "time": 0.029 },
       "vc_verify_dis_inv_eviction_no_op_when_room": {
         "prover": "alt-ergo",
-        "time": 0.067
+        "time": 0.046
       }
     }
   }

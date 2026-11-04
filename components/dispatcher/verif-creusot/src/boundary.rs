@@ -577,6 +577,11 @@ pub fn bd_rw_base(s: &mut S) -> u64 {
 
 /// One job of `scatter_gather_multi_drive_zero_copy` (pipeline.rs:771): its NVMe segments, and
 /// for a single-region object (`dst != 0`) the one coalesced H2D of the whole slot.
+/// Per-job boundary of the multiplexed scatter-gather loop: a job's outcome is its own read's
+/// outcome alone. In particular an NVMe read TIMEOUT — the actor forgets the op, so its
+/// `ReadDone` never arrives — fails exactly the job whose segments did not complete
+/// (DIS-BATCH-LOOKUP-ERROR-ISOLATION, US-11 AS-4); the loop keeps submitting and draining the
+/// drive's other jobs, which is why this boundary is per job and not per drive.
 #[trusted]
 #[ensures((^s).p == s.p)]
 #[ensures(result && dst@ != 0 ==> *(^s).g == lg(lg(nx(*s.g), Ev::SsdRead { drive, key }), Ev::H2D { src: buf, dst, len, stream: 1u64 }))]

@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_read_write_stats": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_read_write_stats": { "prover": "alt-ergo", "time": 0.035 },
       "vc_verify_dis_read_write_stats_sum": {
         "prover": "alt-ergo",
-        "time": 0.038
+        "time": 0.047
       }
     }
   }

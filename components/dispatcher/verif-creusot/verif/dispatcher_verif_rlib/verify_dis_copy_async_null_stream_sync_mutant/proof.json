@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_copy_gpu_to_memory_async": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_copy_gpu_to_memory_async": { "prover": "alt-ergo", "time": 0.021 },
       "vc_verify_dis_copy_async_null_stream_sync__mutant": null
     }
   }

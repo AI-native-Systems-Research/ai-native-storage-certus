@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_initialize": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_initialize": { "prover": "alt-ergo", "time": 0.021 },
       "vc_verify_dis_initialize_joins_cluster": {
         "prover": "z3",
         "time": 0.023

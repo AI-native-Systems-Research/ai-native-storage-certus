@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_checkpoint_all": { "prover": "alt-ergo", "time": 0.857 },
-      "vc_em_checkpoint": { "prover": "alt-ergo", "time": 0.029 }
+      "vc_checkpoint_all": { "prover": "alt-ergo", "time": 0.871 },
+      "vc_em_checkpoint": { "prover": "alt-ergo", "time": 0.03 }
     }
   }
 }

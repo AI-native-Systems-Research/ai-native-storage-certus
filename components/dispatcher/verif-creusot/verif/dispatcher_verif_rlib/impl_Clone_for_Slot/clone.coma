@@ -1,4 +1,4 @@
-(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 36 9 36 29 *)
+(* #"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 36 9 36 29 *)
 
 (* <Slot as std::clone::Clone> *)
 
@@ -12,7 +12,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_Slot [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 36 9 36 29]
+let clone_Slot [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 36 9 36 29]
   (self: t_Slot) (return (x: t_Slot)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_Slot = Any.any_l () | & self: t_Slot = self ]) [ return (result: t_Slot) -> (! return {result}) ]

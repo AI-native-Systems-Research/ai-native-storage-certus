@@ -4,7 +4,7 @@
     "Coma": {
       "vc_copy_gpu_to_memory_completed": {
         "prover": "alt-ergo",
-        "time": 0.014
+        "time": 0.02
       },
       "vc_verify_dis_copy_completed_precondition_size__mutant": {
         "tactic": "compute_specified",
@@ -12,10 +12,10 @@
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.03 },
+              { "prover": "alt-ergo", "time": 0.039 },
               {
                 "tactic": "split_vc",
-                "children": [ null, { "prover": "alt-ergo", "time": 0.142 } ]
+                "children": [ null, { "prover": "alt-ergo", "time": 0.157 } ]
               }
             ]
           }

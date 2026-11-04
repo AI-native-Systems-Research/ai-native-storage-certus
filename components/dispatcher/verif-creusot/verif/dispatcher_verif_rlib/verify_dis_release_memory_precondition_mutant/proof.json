@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_release_memory": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_release_memory": { "prover": "alt-ergo", "time": 0.014 },
       "vc_verify_dis_release_memory_precondition__mutant": null
     }
   }

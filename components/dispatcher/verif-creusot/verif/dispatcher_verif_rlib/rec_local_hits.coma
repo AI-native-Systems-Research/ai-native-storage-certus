@@ -1,7 +1,7 @@
-(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 362 0 362 53 *)
+(* #"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 411 0 411 53 *)
 
-let%span sevict = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 363 20 363 117
-let%span sevict'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 361 10 361 144
+let%span sevict = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 412 20 412 117
+let%span sevict'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 410 10 410 144
 
 use creusot.prelude.MutBorrow
 use creusot.int.UInt64
@@ -83,6 +83,7 @@ type t_Ev =
   | DevShutdown UInt64.t
   | DevDetach UInt64.t
   | Register
+  | RegWarn
   | Unregister
   | Join
   | Leave
@@ -114,6 +115,7 @@ type t_W = {
   cluster: bool;
   threads: int;
   rw: Map.map int UInt64.t;
+  rw_base: int;
   cfree: Map.map int int;
   wf: Map.map UInt64.t bool;
   sdev: Map.map UInt64.t Int32.t }
@@ -128,7 +130,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let rec_local_hits [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 362 0 362 53]
+let rec_local_hits [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 411 0 411 53]
   (s: MutBorrow.t t_S) (dram: UInt64.t) (ssd: UInt64.t) (return (x: ())) = (! bb0
   [ bb0 = s0
     [ s0 = [ &s <- { s with current = { s.current with g = ([%#sevict] { dm = s.current.g.dm;
@@ -165,6 +167,7 @@ let rec_local_hits [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-c
                                                                          cluster = s.current.g.cluster;
                                                                          threads = s.current.g.threads;
                                                                          rw = s.current.g.rw;
+                                                                         rw_base = s.current.g.rw_base;
                                                                          cfree = s.current.g.cfree;
                                                                          wf = s.current.g.wf;
                                                                          sdev = s.current.g.sdev }) } } ] s1
@@ -205,6 +208,7 @@ let rec_local_hits [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-c
         cluster = s.current.g.cluster;
         threads = s.current.g.threads;
         rw = s.current.g.rw;
+        rw_base = s.current.g.rw_base;
         cfree = s.current.g.cfree;
         wf = s.current.g.wf;
         sdev = s.current.g.sdev }}

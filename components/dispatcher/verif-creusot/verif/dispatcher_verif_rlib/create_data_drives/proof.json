@@ -2,14 +2,14 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_chanpool_new": { "prover": "alt-ergo", "time": 0.028 },
-      "vc_create_data_drives": { "prover": "z3", "time": 2.6 },
-      "vc_create_drive": { "prover": "alt-ergo", "time": 0.025 },
-      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.026 },
-      "vc_em_format": { "prover": "alt-ergo", "time": 0.028 },
-      "vc_em_initialize": { "prover": "alt-ergo", "time": 0.028 },
-      "vc_parse_pci": { "prover": "alt-ergo", "time": 0.025 },
-      "vc_part_init": { "prover": "alt-ergo", "time": 0.026 }
+      "vc_chanpool_new": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_create_data_drives": { "prover": "z3", "time": 2.3 },
+      "vc_create_drive": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_em_format": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_em_initialize": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_parse_pci": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_part_init": { "prover": "alt-ergo", "time": 0.027 }
     }
   }
 }

@@ -1,14 +1,14 @@
-(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2020 0 2020 99 *)
+(* #"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/drivers.rs" 2236 0 2236 99 *)
 
-let%span score = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 611 16 611 102
-let%span score'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 305 16 305 50
-let%span smethods = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 424 11 424 20
-let%span smethods'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 425 10 425 23
-let%span smethods'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 426 10 426 85
-let%span smethods'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 427 10 429 120
-let%span sdrivers = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2021 4 2021 40
-let%span sdrivers'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2018 11 2018 32
-let%span sdrivers'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2019 10 2019 35
+let%span score = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 620 16 620 102
+let%span score'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 314 16 314 50
+let%span smethods = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/methods.rs" 424 11 424 20
+let%span smethods'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/methods.rs" 425 10 425 23
+let%span smethods'1 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/methods.rs" 426 10 426 85
+let%span smethods'2 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/methods.rs" 427 10 429 120
+let%span sdrivers = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/drivers.rs" 2237 4 2237 40
+let%span sdrivers'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/drivers.rs" 2234 11 2234 32
+let%span sdrivers'1 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/drivers.rs" 2235 10 2235 35
 
 use creusot.prelude.MutBorrow
 use creusot.int.UInt64
@@ -89,6 +89,7 @@ type t_Ev =
   | DevShutdown UInt64.t
   | DevDetach UInt64.t
   | Register
+  | RegWarn
   | Unregister
   | Join
   | Leave
@@ -120,6 +121,7 @@ type t_W = {
   cluster: bool;
   threads: int;
   rw: Map.map int UInt64.t;
+  rw_base: int;
   cfree: Map.map int int;
   wf: Map.map UInt64.t bool;
   sdev: Map.map UInt64.t Int32.t }
@@ -145,10 +147,10 @@ type t_DE = NotInit t_Ni | InvalidParam | KeyNotFound UInt64.t | AlreadyExists U
 
 type t_Result_unit_DE = Ok () | Err t_DE
 
-predicate pinv [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 610 0 610 25] (p'0: t_P) =
+predicate pinv [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 619 0 619 25] (p'0: t_P) =
   [%#score] (p'0.init -> p'0.has_dm /\ p'0.has_mt /\ p'0.writer) /\ (not p'0.init -> not p'0.ssd_ev /\ not p'0.mt_ev)
 
-function lg [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 304 0 304 27] (w: t_W) (e: t_Ev) : t_W
+function lg [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 313 0 313 27] (w: t_W) (e: t_Ev) : t_W
  = [%#score'0] { dm = w.dm;
                  mt = w.mt;
                  used = w.used;
@@ -168,11 +170,12 @@ function lg [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/
                  cluster = w.cluster;
                  threads = w.threads;
                  rw = w.rw;
+                 rw_base = w.rw_base;
                  cfree = w.cfree;
                  wf = w.wf;
                  sdev = w.sdev }
 
-function di [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 628 0 628 36] (k: UInt64.t) (n: UInt64.t) : UInt64.t
+function di [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 637 0 637 36] (k: UInt64.t) (n: UInt64.t) : UInt64.t
 
 let schedule_write_through (s: MutBorrow.t t_S) (key'1: UInt64.t) (size'1: UInt32.t) (return (x: t_Result_unit_DE)) =
 {[@stop_split] [@expl:schedule_write_through requires] [%#smethods] pinv s.current.p}
@@ -210,6 +213,7 @@ let schedule_write_through (s: MutBorrow.t t_S) (key'1: UInt64.t) (size'1: UInt3
            cluster = s.current.g.cluster;
            threads = s.current.g.threads;
            rw = s.current.g.rw;
+           rw_base = s.current.g.rw_base;
            cfree = s.current.g.cfree;
            wf = s.current.g.wf;
            sdev = s.current.g.sdev } (Enq { key = key'1;
@@ -229,7 +233,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let verify_dis_schedule_wt_nonblocking__mutant [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2020 0 2020 99]
+let verify_dis_schedule_wt_nonblocking__mutant [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/drivers.rs" 2236 0 2236 99]
   (s: MutBorrow.t t_S) (key'1: UInt64.t) (size'1: UInt32.t) (return (x: t_Result_unit_DE)) =
 {[@stop_split] [@expl:verify_dis_schedule_wt_nonblocking__mutant requires] [%#sdrivers'0] pinv s.current.p
   /\ s.current.p.init}

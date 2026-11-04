@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_pin": { "prover": "alt-ergo", "time": 0.032 },
+      "vc_pin": { "prover": "alt-ergo", "time": 0.027 },
       "vc_verify_dis_pin_missing": null
     }
   }

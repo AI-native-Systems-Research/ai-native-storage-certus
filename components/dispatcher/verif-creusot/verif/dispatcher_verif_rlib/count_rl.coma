@@ -1,7 +1,7 @@
-(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 816 0 816 49 *)
+(* #"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/batch.rs" 1024 0 1024 49 *)
 
-let%span swell_founded = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
-let%span sbatch = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 815 10 815 11
+let%span swell_founded = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span sbatch = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/batch.rs" 1023 10 1023 11
 
 use seq.Seq
 use int.Int
@@ -23,7 +23,7 @@ constant n : int
 
 constant x : t_Rl
 
-function count_rl [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 816 0 816 49] (a: Seq.seq t_Rl) (n: int) (x: t_Rl) : int
+function count_rl [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/batch.rs" 1024 0 1024 49] (a: Seq.seq t_Rl) (n: int) (x: t_Rl) : int
 
 goal vc_count_rl: if n <= 0 then
     true

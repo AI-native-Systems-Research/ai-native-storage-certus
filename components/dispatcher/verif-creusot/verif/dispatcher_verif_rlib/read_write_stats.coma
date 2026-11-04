@@ -1,24 +1,30 @@
-(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/misc.rs" 293 0 293 41 *)
+(* #"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 293 0 293 41 *)
 
-let%span score = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 664 10 664 11
-let%span score'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 666 16 666 68
-let%span score'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 515 10 515 52
-let%span smapping = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
-let%span sboundary = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/boundary.rs" 561 10 561 73
-let%span smisc = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/misc.rs" 294 23 294 24
-let%span smisc'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/misc.rs" 295 23 295 24
-let%span smisc'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/misc.rs" 296 23 296 27
-let%span smisc'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/misc.rs" 297 23 297 26
-let%span smisc'3 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/misc.rs" 298 16 298 86
-let%span smisc'4 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/misc.rs" 300 16 300 33
-let%span smisc'5 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/misc.rs" 301 14 301 28
-let%span smisc'6 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/misc.rs" 302 13 302 14
-let%span smisc'7 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/misc.rs" 302 8 302 14
-let%span smisc'8 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/misc.rs" 291 10 291 42
-let%span smisc'9 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/misc.rs" 292 10 292 46
+let%span score = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 673 10 673 11
+let%span score'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 675 16 675 68
+let%span score'1 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 524 10 524 52
+let%span score'2 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 691 10 691 54
+let%span score'3 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 692 34 692 36
+let%span smapping = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
+let%span sboundary = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/boundary.rs" 573 10 573 71
+let%span sboundary'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/boundary.rs" 564 10 564 73
+let%span smisc = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 294 15 294 28
+let%span smisc'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 295 23 295 24
+let%span smisc'1 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 296 23 296 24
+let%span smisc'2 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 297 23 297 27
+let%span smisc'3 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 298 23 298 26
+let%span smisc'4 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 299 16 299 86
+let%span smisc'5 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 301 16 301 33
+let%span smisc'6 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 302 14 302 28
+let%span smisc'7 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 303 13 303 14
+let%span smisc'8 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 303 8 303 14
+let%span smisc'9 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 306 18 306 50
+let%span smisc'10 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 307 4 307 21
+let%span smisc'11 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 291 10 291 42
+let%span smisc'12 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 292 10 292 44
 
-use creusot.int.UInt64
 use creusot.prelude.MutBorrow
+use creusot.int.UInt64
 use creusot.int.UInt32
 use seq.Seq
 use map.Map
@@ -97,6 +103,7 @@ type t_Ev =
   | DevShutdown UInt64.t
   | DevDetach UInt64.t
   | Register
+  | RegWarn
   | Unregister
   | Join
   | Leave
@@ -128,24 +135,30 @@ type t_W = {
   cluster: bool;
   threads: int;
   rw: Map.map int UInt64.t;
+  rw_base: int;
   cfree: Map.map int int;
   wf: Map.map UInt64.t bool;
   sdev: Map.map UInt64.t Int32.t }
 
 type t_S = { p: t_P; g: t_W }
 
+let bd_rw_base (s: MutBorrow.t t_S) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:bd_rw_base ensures] [%#sboundary] s.final.p = s.current.p
+    /\ s.final.g = s.current.g /\ UInt64.t'int result = s.current.g.rw_base}
+    (! return {result}) ]
+
 function index_Mapping_Int_u64 [@inline:trivial] (self: Map.map int UInt64.t) (a: int) : UInt64.t =
   [%#smapping] Map.get self a
 
 meta "rewrite_def" function index_Mapping_Int_u64
 
-function rwsum [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 665 0 665 49] (m: Map.map int UInt64.t) (n: int) : int
+function rwsum [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 674 0 674 49] (m: Map.map int UInt64.t) (n: int) : int
 
 axiom rwsum_def: forall m: Map.map int UInt64.t, n: int [rwsum m n]. rwsum m n
     = ([%#score'0] if n <= 0 then 0 else rwsum m (n - 1) + UInt64.t'int (index_Mapping_Int_u64 m (n - 1)))
 
 let bd_rw_stats (s: MutBorrow.t t_S) (drive: UInt64.t) (return (x: UInt64.t)) = any
-  [ return (result: UInt64.t) -> {[@stop_split] [@expl:bd_rw_stats ensures] [%#sboundary] s.final.p = s.current.p
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:bd_rw_stats ensures] [%#sboundary'0] s.final.p = s.current.p
     /\ s.final.g = s.current.g /\ result = index_Mapping_Int_u64 s.current.g.rw (UInt64.t'int drive)}
     (! return {result}) ]
 
@@ -161,51 +174,67 @@ predicate resolve_refmut_S [@inline:trivial] (_1: MutBorrow.t t_S) = _1.final = 
 
 meta "rewrite_def" predicate resolve_refmut_S
 
+function rw_total [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 684 0 684 36] (w: t_W) (n: int) : int
+
+function rw_total_def [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 692 0 692 33] (w: t_W) (n: int) : ()
+ = [%#score'3] ()
+
+axiom rw_total_def_spec: forall w: t_W, n: int. [%#score'2] rw_total w n = w.rw_base + rwsum w.rw n
+
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let read_write_stats [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/misc.rs" 293 0 293 41]
+let read_write_stats [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/misc.rs" 293 0 293 41]
   (s: MutBorrow.t t_S) (return (x: UInt64.t)) = (! bb0
   [ bb0 = s0
-    [ s0 = [ &agg <- [%#smisc] (0: UInt64.t) ] s1
-    | s1 = [ &i <- [%#smisc'0] (0: UInt64.t) ] s2
-    | s2 = [ &g0 <- [%#smisc'1] s.current.g ] s3
-    | s3 = [ &p0 <- [%#smisc'2] s.current.p ] s4
-    | s4 = [ &_old <- s.final ] s5
-    | s5 = bb3 ]
-  | bb3 = bb3
-    [ bb3 = {[@expl:inferred invariant: unchanged value] _old = s.final}
-      {[@expl:loop invariant] [%#smisc'3] s.current.p = p0
+    [ s0 = MutBorrow.borrow_mut <t_S> {s.current}
+        (fun (_bor: MutBorrow.t t_S) -> [ &_8 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
+    | s1 = bd_rw_base [%#smisc] {_8} (fun (_x: UInt64.t) -> [ &base <- _x ] s2)
+    | s2 = [ &agg <- [%#smisc'0] (0: UInt64.t) ] s3
+    | s3 = [ &i <- [%#smisc'1] (0: UInt64.t) ] s4
+    | s4 = [ &g0 <- [%#smisc'2] s.current.g ] s5
+    | s5 = [ &p0 <- [%#smisc'3] s.current.p ] s6
+    | s6 = [ &_old <- s.final ] s7
+    | s7 = bb4 ]
+  | bb4 = bb4
+    [ bb4 = {[@expl:inferred invariant: unchanged value] _old = s.final}
+      {[@expl:loop invariant] [%#smisc'4] s.current.p = p0
       /\ s.current.g = g0
       /\ UInt64.t'int i <= UInt64.t'int s.current.p.nd /\ UInt64.t'int agg = rwsum g0.rw (UInt64.t'int i)}
       (! s0)
-      [ s0 = [ &_25 <- UInt64.lt i s.current.p.nd ] s1
-      | s1 = any [ br0 -> {_25 = false} (! bb8) | br1 -> {_25} (! bb5) ] ]
-      [ bb5 = s0
+      [ s0 = [ &_27 <- UInt64.lt i s.current.p.nd ] s1
+      | s1 = any [ br0 -> {_27 = false} (! bb9) | br1 -> {_27} (! bb6) ] ]
+      [ bb6 = s0
         [ s0 = MutBorrow.borrow_mut <t_S> {s.current}
-            (fun (_bor: MutBorrow.t t_S) -> [ &_29 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
-        | s1 = bd_rw_stats [%#smisc'4] {_29} {i} (fun (_x: UInt64.t) -> [ &v <- _x ] s2)
-        | s2 = padd64 [%#smisc'5] {agg} {v} (fun (_x: UInt64.t) -> [ &_31 <- _x ] s3)
-        | s3 = [ &agg <- _31 ] s4
-        | s4 = UInt64.add [%#smisc'7] {i} {[%#smisc'6] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s5)
-        | s5 = bb3 ] ] ]
-  | bb8 = s0 [ s0 = -{resolve_refmut_S s}- s1 | s1 = [ &_ret <- agg ] s2 | s2 = return {_ret} ] ]
+            (fun (_bor: MutBorrow.t t_S) -> [ &_31 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
+        | s1 = bd_rw_stats [%#smisc'5] {_31} {i} (fun (_x: UInt64.t) -> [ &v <- _x ] s2)
+        | s2 = padd64 [%#smisc'6] {agg} {v} (fun (_x: UInt64.t) -> [ &_33 <- _x ] s3)
+        | s3 = [ &agg <- _33 ] s4
+        | s4 = UInt64.add [%#smisc'8] {i} {[%#smisc'7] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s5)
+        | s5 = bb4 ] ] ]
+  | bb9 = s0
+    [ s0 = -{resolve_refmut_S s}- s1
+    | s1 = {[@expl:assertion] [%#smisc'9] rw_total_def g0 (UInt64.t'int s.current.p.nd) = ()} s2
+    | s2 = padd64 [%#smisc'10] {base} {agg} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s3)
+    | s3 = return {_ret} ] ]
   [ & _ret: UInt64.t = Any.any_l ()
   | & s: MutBorrow.t t_S = s
+  | & base: UInt64.t = Any.any_l ()
+  | & _8: MutBorrow.t t_S = Any.any_l ()
   | & agg: UInt64.t = Any.any_l ()
   | & i: UInt64.t = Any.any_l ()
   | & g0: t_W = Any.any_l ()
   | & p0: t_P = Any.any_l ()
-  | & _25: bool = Any.any_l ()
+  | & _27: bool = Any.any_l ()
   | & v: UInt64.t = Any.any_l ()
-  | & _29: MutBorrow.t t_S = Any.any_l ()
-  | & _31: UInt64.t = Any.any_l ()
+  | & _31: MutBorrow.t t_S = Any.any_l ()
+  | & _33: UInt64.t = Any.any_l ()
   | & _old: t_S = Any.any_l () ])
   [ return (result: UInt64.t) ->
-  {[@stop_split] [@expl:read_write_stats ensures] ([@stop_split] [@expl:read_write_stats ensures #0] [%#smisc'8] s.final.p
+  {[@stop_split] [@expl:read_write_stats ensures] ([@stop_split] [@expl:read_write_stats ensures #0] [%#smisc'11] s.final.p
         = s.current.p
       /\ s.final.g = s.current.g)
-    /\ ([@stop_split] [@expl:read_write_stats ensures #1] [%#smisc'9] UInt64.t'int result
-    = rwsum s.current.g.rw (UInt64.t'int s.current.p.nd))}
+    /\ ([@stop_split] [@expl:read_write_stats ensures #1] [%#smisc'12] UInt64.t'int result
+    = rw_total s.current.g (UInt64.t'int s.current.p.nd))}
     (! return {result}) ]

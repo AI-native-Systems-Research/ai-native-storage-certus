@@ -6,10 +6,10 @@
         "prover": "alt-ergo",
         "time": 0.056
       },
-      "vc_p_zero": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_p_zero": { "prover": "alt-ergo", "time": 0.026 },
       "vc_refute_dis_copy_completed_already_exists": {
-        "prover": "z3",
-        "time": 0.025
+        "prover": "alt-ergo",
+        "time": 0.171
       }
     }
   }

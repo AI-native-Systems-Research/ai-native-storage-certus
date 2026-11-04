@@ -1,83 +1,93 @@
-(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 90 0 90 54 *)
+(* #"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 126 0 126 54 *)
 
-let%span score = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 494 16 498 63
-let%span score'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 699 16 699 97
-let%span score'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 710 16 710 31
-let%span score'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 704 16 704 52
-let%span score'3 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 341 16 341 30
-let%span score'4 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 295 16 295 43
-let%span score'5 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 387 16 387 32
-let%span score'6 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 487 16 489 24
-let%span score'7 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 427 16 427 111
-let%span score'8 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 462 16 463 117
-let%span score'9 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 433 16 434 86
-let%span score'10 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 685 16 686 91
-let%span score'11 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 692 16 693 65
-let%span score'12 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 447 16 448 73
-let%span score'13 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 454 16 455 72
-let%span score'14 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 336 16 336 32
-let%span score'15 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 361 16 361 89
-let%span score'16 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 305 16 305 50
-let%span score'17 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 374 16 377 5
-let%span smapping = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
-let%span sboundary = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/boundary.rs" 325 10 325 46
-let%span sboundary'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/boundary.rs" 326 10 326 66
-let%span sboundary'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/boundary.rs" 327 10 327 81
-let%span sboundary'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/boundary.rs" 328 10 328 66
-let%span sboundary'3 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/boundary.rs" 177 10 177 23
-let%span sboundary'4 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/boundary.rs" 178 10 186 1
-let%span sboundary'5 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/boundary.rs" 299 10 299 23
-let%span sboundary'6 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/boundary.rs" 300 10 305 1
-let%span sfmap = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 62 14 62 70
-let%span sfmap'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 63 14 63 88
-let%span sfmap'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 77 14 77 67
-let%span sfmap'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 78 14 78 84
-let%span sfmap'3 = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 96 8 96 34
-let%span sfmap'4 = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 54 14 54 25
-let%span sfmap'5 = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
-let%span sfmap'6 = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
-let%span soption = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/std/option.rs" 796 15 796 27
-let%span soption'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/std/option.rs" 798 8 801 9
-let%span slogic = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic.rs" 39 11 39 28
-let%span slogic'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic.rs" 40 10 40 19
-let%span svec = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
-let%span svec'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
-let%span svec'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
-let%span svec'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
-let%span sslice = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
-let%span sslice'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
-let%span sevict = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 91 23 91 27
-let%span sevict'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 92 23 92 26
-let%span sevict'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 93 16 93 34
-let%span sevict'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 94 23 94 27
-let%span sevict'3 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 95 23 95 24
-let%span sevict'4 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 101 14 101 25
-let%span sevict'5 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 100 16 100 86
-let%span sevict'6 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 99 16 99 64
-let%span sevict'7 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 98 16 98 97
-let%span sevict'8 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 97 16 97 39
-let%span sevict'9 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 96 16 96 48
-let%span sevict'10 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 102 24 102 27
-let%span sevict'11 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 103 14 103 35
-let%span sevict'12 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 114 16 114 42
-let%span sevict'13 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 111 16 111 37
-let%span sevict'14 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 117 13 117 14
-let%span sevict'15 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 117 8 117 14
-let%span sevict'16 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 105 24 105 42
-let%span sevict'17 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 107 16 107 43
-let%span sevict'18 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 108 23 108 27
-let%span sevict'19 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 119 4 119 25
-let%span sevict'20 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 120 4 120 9
-let%span sevict'21 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 82 10 82 23
-let%span sevict'22 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 83 10 83 69
-let%span sevict'23 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 84 10 84 109
-let%span sevict'24 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 85 10 85 110
-let%span sevict'25 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 86 10 89 145
-let%span sevict'26 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 72 16 75 113
-let%span sevict'27 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 15 10 15 104
-let%span sevict'28 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 9 10 9 104
-let%span sevict'29 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 27 10 27 102
-let%span sevict'30 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 21 10 21 108
+let%span score = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 503 16 507 89
+let%span score'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 740 16 740 97
+let%span score'1 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 751 16 751 31
+let%span score'2 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 745 16 745 52
+let%span score'3 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 350 16 350 30
+let%span score'4 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 304 16 304 43
+let%span score'5 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 396 16 396 32
+let%span score'6 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 345 16 345 32
+let%span score'7 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 370 16 370 89
+let%span score'8 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 496 16 498 24
+let%span score'9 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 436 16 436 111
+let%span score'10 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 471 16 472 117
+let%span score'11 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 442 16 443 86
+let%span score'12 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 726 16 727 91
+let%span score'13 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 733 16 734 65
+let%span score'14 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 456 16 457 73
+let%span score'15 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 463 16 464 72
+let%span score'16 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 314 16 314 50
+let%span score'17 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 383 16 386 5
+let%span smapping = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
+let%span sboundary = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/boundary.rs" 325 10 325 46
+let%span sboundary'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/boundary.rs" 326 10 326 66
+let%span sboundary'1 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/boundary.rs" 327 10 327 81
+let%span sboundary'2 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/boundary.rs" 328 10 328 66
+let%span sboundary'3 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/boundary.rs" 177 10 177 23
+let%span sboundary'4 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/boundary.rs" 178 10 186 1
+let%span sboundary'5 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/boundary.rs" 299 10 299 23
+let%span sboundary'6 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/boundary.rs" 300 10 305 1
+let%span sfmap = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 62 14 62 70
+let%span sfmap'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 63 14 63 88
+let%span sfmap'1 = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 77 14 77 67
+let%span sfmap'2 = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 78 14 78 84
+let%span sfmap'3 = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 96 8 96 34
+let%span sfmap'4 = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 54 14 54 25
+let%span sfmap'5 = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sfmap'6 = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+let%span soption = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/std/option.rs" 796 15 796 27
+let%span soption'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/std/option.rs" 798 8 801 9
+let%span slogic = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/logic.rs" 39 11 39 28
+let%span slogic'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/logic.rs" 40 10 40 19
+let%span svec = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'1 = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'2 = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span sslice = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+let%span sevict = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 127 23 127 27
+let%span sevict'0 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 128 23 128 26
+let%span sevict'1 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 129 16 129 34
+let%span sevict'2 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 130 23 130 27
+let%span sevict'3 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 131 23 131 24
+let%span sevict'4 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 143 14 143 25
+let%span sevict'5 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 142 16 142 119
+let%span sevict'6 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 141 16 141 123
+let%span sevict'7 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 140 16 140 118
+let%span sevict'8 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 139 16 139 106
+let%span sevict'9 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 136 16 136 86
+let%span sevict'10 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 135 16 135 64
+let%span sevict'11 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 134 16 134 97
+let%span sevict'12 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 133 16 133 39
+let%span sevict'13 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 132 16 132 48
+let%span sevict'14 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 144 24 144 27
+let%span sevict'15 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 145 14 145 35
+let%span sevict'16 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 156 16 156 42
+let%span sevict'17 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 153 16 153 37
+let%span sevict'18 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 164 13 164 14
+let%span sevict'19 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 164 8 164 14
+let%span sevict'20 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 147 24 147 42
+let%span sevict'21 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 149 16 149 43
+let%span sevict'22 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 150 23 150 27
+let%span sevict'23 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 166 4 166 25
+let%span sevict'24 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 167 4 167 9
+let%span sevict'25 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 103 10 103 23
+let%span sevict'26 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 104 10 104 69
+let%span sevict'27 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 105 10 105 109
+let%span sevict'28 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 106 10 106 110
+let%span sevict'29 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 107 10 110 145
+let%span sevict'30 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 117 10 119 46
+let%span sevict'31 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 120 10 122 46
+let%span sevict'32 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 123 10 125 46
+let%span sevict'33 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 100 16 100 78
+let%span sevict'34 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 92 16 94 43
+let%span sevict'35 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 85 16 86 82
+let%span sevict'36 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 72 16 75 113
+let%span sevict'37 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 15 10 15 104
+let%span sevict'38 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 9 10 9 104
+let%span sevict'39 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 27 10 27 102
+let%span sevict'40 = "/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 21 10 21 108
 
 use creusot.prelude.MutBorrow
 use creusot.int.UInt64
@@ -159,6 +169,7 @@ type t_Ev =
   | DevShutdown UInt64.t
   | DevDetach UInt64.t
   | Register
+  | RegWarn
   | Unregister
   | Join
   | Leave
@@ -190,6 +201,7 @@ type t_W = {
   cluster: bool;
   threads: int;
   rw: Map.map int UInt64.t;
+  rw_base: int;
   cfree: Map.map int int;
   wf: Map.map UInt64.t bool;
   sdev: Map.map UInt64.t Int32.t }
@@ -198,7 +210,7 @@ type t_S = { p: t_P; g: t_W }
 
 type t_Vec_u64_Global
 
-function nx [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 294 0 294 20] (w: t_W) : t_W
+function nx [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 303 0 303 20] (w: t_W) : t_W
  = [%#score'4] { dm = w.dm;
                  mt = w.mt;
                  used = w.used;
@@ -218,6 +230,7 @@ function nx [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/
                  cluster = w.cluster;
                  threads = w.threads;
                  rw = w.rw;
+                 rw_base = w.rw_base;
                  cfree = w.cfree;
                  wf = w.wf;
                  sdev = w.sdev }
@@ -250,7 +263,7 @@ predicate contains_u64 [@inline:trivial] (self: t_FMap_u64_Slot) (k: UInt64.t) =
 
 meta "rewrite_def" predicate contains_u64
 
-predicate mt_has [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 386 0 386 35] (w: t_W) (k: UInt64.t) =
+predicate mt_has [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 395 0 395 35] (w: t_W) (k: UInt64.t) =
   [%#score'5] contains_u64 w.mt k
 
 function len_u64 (self: t_FMap_u64_Slot) : int
@@ -295,14 +308,11 @@ predicate contains_u64'0 [@inline:trivial] (self: t_FMap_u64_Ent) (k: UInt64.t) 
 
 meta "rewrite_def" predicate contains_u64'0
 
-predicate has [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 335 0 335 32] (w: t_W) (k: UInt64.t) =
-  [%#score'14] contains_u64'0 w.dm k
+predicate has [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 344 0 344 32] (w: t_W) (k: UInt64.t) =
+  [%#score'6] contains_u64'0 w.dm k
 
-predicate persisted [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 360 0 360 32] (l: t_Loc) =
-  [%#score'15] match l with
-    | Mem _ _ ssd -> ssd <> None'1
-    | Blk _ -> false
-    end
+predicate list_unregistered [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 99 0 99 55] (w: t_W) (cands: Seq.seq UInt64.t) =
+  [%#sevict'33] forall j: int. 0 <= j /\ j < Seq.length cands -> not has w (Seq.get cands j)
 
 predicate index_Mapping_Ent_bool [@inline:trivial] (self: Map.map t_Ent bool) (a: t_Ent) = [%#smapping] Map.get self a
 
@@ -324,17 +334,34 @@ function lookup_u64 [@inline:trivial] (self: t_FMap_u64_Ent) (k: UInt64.t) : t_E
 
 meta "rewrite_def" function lookup_u64
 
-function ent [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 340 0 340 31] (w: t_W) (k: UInt64.t) : t_Ent
+function ent [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 349 0 349 31] (w: t_W) (k: UInt64.t) : t_Ent
  = [%#score'3] lookup_u64 w.dm k
 
-function demoted_loc [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 373 0 373 33] (l: t_Loc) : t_Loc
+predicate persisted [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 369 0 369 32] (l: t_Loc) =
+  [%#score'7] match l with
+    | Mem _ _ ssd -> ssd <> None'1
+    | Blk _ -> false
+    end
+
+predicate list_unpersisted [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 91 0 91 54] (w: t_W) (cands: Seq.seq UInt64.t) =
+  [%#sevict'34] forall j: int. 0 <= j /\ j < Seq.length cands
+    -> has w (Seq.get cands j)
+    /\ UInt32.t'int (ent w (Seq.get cands j)).rr = 0
+    /\ UInt32.t'int (ent w (Seq.get cands j)).wr = 0 /\ not persisted (ent w (Seq.get cands j)).loc
+
+predicate list_pinned [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 84 0 84 49] (w: t_W) (cands: Seq.seq UInt64.t) =
+  [%#sevict'35] forall j: int. 0 <= j /\ j < Seq.length cands
+    -> has w (Seq.get cands j)
+    /\ (UInt32.t'int (ent w (Seq.get cands j)).rr > 0 \/ UInt32.t'int (ent w (Seq.get cands j)).wr > 0)
+
+function demoted_loc [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 382 0 382 33] (l: t_Loc) : t_Loc
  = [%#score'17] match l with
     | Mem _ _ (Some'1 o) -> Blk o
     | _ -> l
     end
 
-predicate demoted_k [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 486 0 486 44] (a: t_W) (b: t_W) (k: UInt64.t) =
-  [%#score'6] has a k
+predicate demoted_k [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 495 0 495 44] (a: t_W) (b: t_W) (k: UInt64.t) =
+  [%#score'8] has a k
   /\ persisted (ent a k).loc
   /\ UInt32.t'int (ent a k).rr = 0
   /\ UInt32.t'int (ent a k).wr = 0
@@ -342,55 +369,55 @@ predicate demoted_k [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-
     = Some'2 { loc = demoted_loc (ent a k).loc; es = (ent a k).es; rr = (ent a k).rr; wr = (ent a k).wr }
   /\ not mt_has b k
 
-predicate log_ext [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 426 0 426 34] (a: t_W) (b: t_W) =
-  [%#score'7] Seq.length a.log <= Seq.length b.log
+predicate log_ext [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 435 0 435 34] (a: t_W) (b: t_W) =
+  [%#score'9] Seq.length a.log <= Seq.length b.log
   /\ (forall i: int. 0 <= i /\ i < Seq.length a.log -> Seq.get b.log i = Seq.get a.log i)
 
-predicate demote_before_free [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 461 0 461 45] (a: t_W) (b: t_W) =
-  [%#score'8] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
+predicate demote_before_free [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 470 0 470 45] (a: t_W) (b: t_W) =
+  [%#score'10] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
     -> match Seq.get b.log i with
       | MtRemove key'1 -> i > Seq.length a.log /\ Seq.get b.log (i - 1) = DmDemote key'1
       | _ -> true
       end
 
-predicate no_dma [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 432 0 432 33] (a: t_W) (b: t_W) =
-  [%#score'9] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
+predicate no_dma [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 441 0 441 33] (a: t_W) (b: t_W) =
+  [%#score'11] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
     -> match Seq.get b.log i with
       | H2D _ _ _ _ -> false
       | D2H _ _ _ _ -> false
       | _ -> true
       end
 
-predicate no_reg [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 684 0 684 33] (a: t_W) (b: t_W) =
-  [%#score'10] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
+predicate no_reg [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 725 0 725 33] (a: t_W) (b: t_W) =
+  [%#score'12] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
     -> match Seq.get b.log i with
       | DmCreate _ -> false
       | Enq _ -> false
       | _ -> true
       end
 
-predicate no_ssd [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 691 0 691 33] (a: t_W) (b: t_W) =
-  [%#score'11] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
+predicate no_ssd [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 732 0 732 33] (a: t_W) (b: t_W) =
+  [%#score'13] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
     -> match Seq.get b.log i with
       | SsdRead _ _ -> false
       | _ -> true
       end
 
-predicate own_writes [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 446 0 446 37] (a: t_W) (b: t_W) =
-  [%#score'12] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
+predicate own_writes [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 455 0 455 37] (a: t_W) (b: t_W) =
+  [%#score'14] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
     -> match Seq.get b.log i with
       | RelWrite _ own -> own > 0
       | _ -> true
       end
 
-predicate own_reads [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 453 0 453 36] (a: t_W) (b: t_W) =
-  [%#score'13] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
+predicate own_reads [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 462 0 462 36] (a: t_W) (b: t_W) =
+  [%#score'15] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
     -> match Seq.get b.log i with
       | RelRead _ own -> own > 0
       | _ -> true
       end
 
-predicate evict_frame [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 493 0 493 38] (a: t_W) (b: t_W) =
+predicate evict_frame [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 502 0 502 38] (a: t_W) (b: t_W) =
   [%#score] (forall k: UInt64.t. get_u64'0 b.dm k = get_u64'0 a.dm k /\ get_u64 b.mt k = get_u64 a.mt k
       \/ demoted_k a b k)
   /\ b.cap = a.cap
@@ -408,10 +435,12 @@ predicate evict_frame [#"/home/cornel/repair-j33-rc24/components/dispatcher/veri
   /\ b.tick >= a.tick
   /\ b.ob = a.ob
   /\ b.ob2 = a.ob2
-  /\ b.og = a.og /\ b.os = a.os /\ b.ov = a.ov /\ b.ok = a.ok /\ b.ext = a.ext /\ b.rw = a.rw /\ b.cfree = a.cfree
+  /\ b.og = a.og
+  /\ b.os = a.os
+  /\ b.ov = a.ov /\ b.ok = a.ok /\ b.ext = a.ext /\ b.rw = a.rw /\ b.rw_base = a.rw_base /\ b.cfree = a.cfree
 
-predicate ev_ctr [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 71 0 71 37] (a: t_Ctr) (b: t_Ctr) =
-  [%#sevict'26] a.promo_mem = b.promo_mem
+predicate ev_ctr [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 71 0 71 37] (a: t_Ctr) (b: t_Ctr) =
+  [%#sevict'36] a.promo_mem = b.promo_mem
   /\ a.promo_gpu = b.promo_gpu
   /\ a.ev_ssd = b.ev_ssd
   /\ a.hit_dram = b.hit_dram
@@ -423,11 +452,11 @@ predicate ev_ctr [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-cre
   /\ a.already = b.already
   /\ a.ev_mem <= b.ev_mem /\ a.blk_pin <= b.blk_pin /\ a.exhausted <= b.exhausted /\ a.blk_unp <= b.blk_unp
 
-predicate evictable [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 698 0 698 38] (w: t_W) (c'0: UInt64.t) =
+predicate evictable [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 739 0 739 38] (w: t_W) (c'0: UInt64.t) =
   [%#score'0] has w c'0
   /\ persisted (ent w c'0).loc /\ UInt32.t'int (ent w c'0).rr = 0 /\ UInt32.t'int (ent w c'0).wr = 0
 
-function cand0 [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 709 0 709 25] (w: t_W) : UInt64.t
+function cand0 [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 750 0 750 25] (w: t_W) : UInt64.t
  = [%#score'1] Seq.get (index_Mapping_Int_Seq_u64 w.ok w.tick) 0
 
 predicate in_bounds_usize [@inline:trivial] (self: UInt64.t) (seq: Seq.seq UInt64.t) =
@@ -461,7 +490,7 @@ type t_DmE =
 
 type t_Result_unit_DmE = Ok () | Err t_DmE
 
-function lg [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 304 0 304 27] (w: t_W) (e: t_Ev) : t_W
+function lg [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 313 0 313 27] (w: t_W) (e: t_Ev) : t_W
  = [%#score'16] { dm = w.dm;
                   mt = w.mt;
                   used = w.used;
@@ -481,6 +510,7 @@ function lg [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/
                   cluster = w.cluster;
                   threads = w.threads;
                   rw = w.rw;
+                  rw_base = w.rw_base;
                   cfree = w.cfree;
                   wf = w.wf;
                   sdev = w.sdev }
@@ -531,6 +561,7 @@ let dm_try_evict (s: MutBorrow.t t_S) (k: UInt64.t) (return (x: t_Result_unit_Dm
              cluster = s.current.g.cluster;
              threads = s.current.g.threads;
              rw = s.current.g.rw;
+             rw_base = s.current.g.rw_base;
              cfree = s.current.g.cfree;
              wf = s.current.g.wf;
              sdev = s.current.g.sdev } (DmDemote k)
@@ -553,7 +584,7 @@ let elim_Err (_x: t_Result_unit_DmE) (return (f0: t_DmE)) = any
     any) ]
 
 let rec_blocked_unpersisted (s: MutBorrow.t t_S) (return (x: ())) = any
-  [ return (result: ()) -> {[@stop_split] [@expl:rec_blocked_unpersisted ensures] [%#sevict'27] s.final.p = s.current.p
+  [ return (result: ()) -> {[@stop_split] [@expl:rec_blocked_unpersisted ensures] [%#sevict'37] s.final.p = s.current.p
     /\ s.final.g
     = { dm = s.current.g.dm;
         mt = s.current.g.mt;
@@ -587,13 +618,14 @@ let rec_blocked_unpersisted (s: MutBorrow.t t_S) (return (x: ())) = any
         cluster = s.current.g.cluster;
         threads = s.current.g.threads;
         rw = s.current.g.rw;
+        rw_base = s.current.g.rw_base;
         cfree = s.current.g.cfree;
         wf = s.current.g.wf;
         sdev = s.current.g.sdev }}
     (! return {result}) ]
 
 let rec_blocked_by_pin (s: MutBorrow.t t_S) (return (x: ())) = any
-  [ return (result: ()) -> {[@stop_split] [@expl:rec_blocked_by_pin ensures] [%#sevict'28] s.final.p = s.current.p
+  [ return (result: ()) -> {[@stop_split] [@expl:rec_blocked_by_pin ensures] [%#sevict'38] s.final.p = s.current.p
     /\ s.final.g
     = { dm = s.current.g.dm;
         mt = s.current.g.mt;
@@ -627,6 +659,7 @@ let rec_blocked_by_pin (s: MutBorrow.t t_S) (return (x: ())) = any
         cluster = s.current.g.cluster;
         threads = s.current.g.threads;
         rw = s.current.g.rw;
+        rw_base = s.current.g.rw_base;
         cfree = s.current.g.cfree;
         wf = s.current.g.wf;
         sdev = s.current.g.sdev }}
@@ -697,6 +730,7 @@ let mt_remove (s: MutBorrow.t t_S) (k: UInt64.t) (return (x: t_Result_unit_MtE))
              cluster = s.current.g.cluster;
              threads = s.current.g.threads;
              rw = s.current.g.rw;
+             rw_base = s.current.g.rw_base;
              cfree = s.current.g.cfree;
              wf = s.current.g.wf;
              sdev = s.current.g.sdev } (MtRemove k)
@@ -706,7 +740,7 @@ let mt_remove (s: MutBorrow.t t_S) (k: UInt64.t) (return (x: t_Result_unit_MtE))
     (! return {result}) ]
 
 let rec_eviction_from_memory (s: MutBorrow.t t_S) (return (x: ())) = any
-  [ return (result: ()) -> {[@stop_split] [@expl:rec_eviction_from_memory ensures] [%#sevict'29] s.final.p = s.current.p
+  [ return (result: ()) -> {[@stop_split] [@expl:rec_eviction_from_memory ensures] [%#sevict'39] s.final.p = s.current.p
     /\ s.final.g
     = { dm = s.current.g.dm;
         mt = s.current.g.mt;
@@ -740,6 +774,7 @@ let rec_eviction_from_memory (s: MutBorrow.t t_S) (return (x: ())) = any
         cluster = s.current.g.cluster;
         threads = s.current.g.threads;
         rw = s.current.g.rw;
+        rw_base = s.current.g.rw_base;
         cfree = s.current.g.cfree;
         wf = s.current.g.wf;
         sdev = s.current.g.sdev }}
@@ -750,7 +785,7 @@ predicate resolve_refmut_S [@inline:trivial] (_1: MutBorrow.t t_S) = _1.final = 
 meta "rewrite_def" predicate resolve_refmut_S
 
 let rec_scan_exhausted (s: MutBorrow.t t_S) (return (x: ())) = any
-  [ return (result: ()) -> {[@stop_split] [@expl:rec_scan_exhausted ensures] [%#sevict'30] s.final.p = s.current.p
+  [ return (result: ()) -> {[@stop_split] [@expl:rec_scan_exhausted ensures] [%#sevict'40] s.final.p = s.current.p
     /\ s.final.g
     = { dm = s.current.g.dm;
         mt = s.current.g.mt;
@@ -784,93 +819,102 @@ let rec_scan_exhausted (s: MutBorrow.t t_S) (return (x: ())) = any
         cluster = s.current.g.cluster;
         threads = s.current.g.threads;
         rw = s.current.g.rw;
+        rw_base = s.current.g.rw_base;
         cfree = s.current.g.cfree;
         wf = s.current.g.wf;
         sdev = s.current.g.sdev }}
     (! return {result}) ]
 
-function dem_ent [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 703 0 703 29] (e: t_Ent) : t_Ent
+function dem_ent [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/core.rs" 744 0 744 29] (e: t_Ent) : t_Ent
  = [%#score'2] { loc = demoted_loc e.loc; es = e.es; rr = e.rr; wr = e.wr }
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let evict_one_clean [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 90 0 90 54]
+let evict_one_clean [#"/home/cornel/repair-j35-rc8/components/dispatcher/verif-creusot/src/evict.rs" 126 0 126 54]
   (s: MutBorrow.t t_S) (scan: UInt64.t) (return (x: bool)) = (! bb0
   [ bb0 = s0
     [ s0 = [ &g0 <- [%#sevict] s.current.g ] s1
     | s1 = [ &p0 <- [%#sevict'0] s.current.p ] s2
     | s2 = MutBorrow.borrow_mut <t_S> {s.current}
-        (fun (_bor: MutBorrow.t t_S) -> [ &_21 <- _bor ] [ &s <- { s with current = _bor.final } ] s3)
-    | s3 = mt_oldest [%#sevict'1] {_21} {scan} (fun (_x: t_Vec_u64_Global) -> [ &cands <- _x ] s4)
+        (fun (_bor: MutBorrow.t t_S) -> [ &_27 <- _bor ] [ &s <- { s with current = _bor.final } ] s3)
+    | s3 = mt_oldest [%#sevict'1] {_27} {scan} (fun (_x: t_Vec_u64_Global) -> [ &cands <- _x ] s4)
     | s4 = [ &g1 <- [%#sevict'2] s.current.g ] s5
     | s5 = [ &i <- [%#sevict'3] (0: UInt64.t) ] s6
     | s6 = [ &_old <- s.final ] s7
     | s7 = bb5 ]
   | bb5 = bb5
     [ bb5 = {[@expl:inferred invariant: unchanged value] _old = s.final}
-      {[@expl:loop invariant #0] [%#sevict'9] s.current.p = p0
+      {[@expl:loop invariant #0] [%#sevict'13] s.current.p = p0
       /\ UInt64.t'int i <= Seq.length (view_Vec_u64_Global cands)}
-      {[@expl:loop invariant #1] [%#sevict'8] UInt64.t'int i = 0 -> s.current.g = g1}
-      {[@expl:loop invariant #2] [%#sevict'7] UInt64.t'int scan >= 1
+      {[@expl:loop invariant #1] [%#sevict'12] UInt64.t'int i = 0 -> s.current.g = g1}
+      {[@expl:loop invariant #2] [%#sevict'11] UInt64.t'int scan >= 1
         /\ Seq.length (index_Mapping_Int_Seq_u64 g0.ok g0.tick) >= 1 /\ evictable g0 (cand0 g0) -> UInt64.t'int i = 0}
-      {[@expl:loop invariant #3] [%#sevict'6] evict_frame g0 s.current.g /\ ev_ctr g0.c s.current.g.c}
-      {[@expl:loop invariant #4] [%#sevict'5] s.current.g.c.ev_mem = g0.c.ev_mem
+      {[@expl:loop invariant #3] [%#sevict'10] evict_frame g0 s.current.g /\ ev_ctr g0.c s.current.g.c}
+      {[@expl:loop invariant #4] [%#sevict'9] s.current.g.c.ev_mem = g0.c.ev_mem
       /\ s.current.g.c.exhausted = g0.c.exhausted}
+      {[@expl:loop invariant #5] [%#sevict'8] s.current.g.dm = g0.dm
+      /\ s.current.g.mt = g0.mt /\ s.current.g.used = g0.used /\ s.current.g.cap = g0.cap}
+      {[@expl:loop invariant #6] [%#sevict'7] list_pinned g0 (view_Vec_u64_Global cands)
+      -> s.current.g.c.blk_pin = g0.c.blk_pin + UInt64.t'int i /\ s.current.g.c.blk_unp = g0.c.blk_unp}
+      {[@expl:loop invariant #7] [%#sevict'6] list_unpersisted g0 (view_Vec_u64_Global cands)
+      -> s.current.g.c.blk_unp = g0.c.blk_unp + UInt64.t'int i /\ s.current.g.c.blk_pin = g0.c.blk_pin}
+      {[@expl:loop invariant #8] [%#sevict'5] list_unregistered g0 (view_Vec_u64_Global cands)
+      -> s.current.g.c.blk_pin = g0.c.blk_pin /\ s.current.g.c.blk_unp = g0.c.blk_unp}
       (! s0)
-      [ s0 = len_u64'0 [%#sevict'4] {cands} (fun (_x: UInt64.t) -> [ &_51 <- _x ] s1)
-      | s1 = [ &_49 <- UInt64.lt i _51 ] s2
-      | s2 = any [ br0 -> {_49 = false} (! bb23) | br1 -> {_49} (! bb8) ] ]
+      [ s0 = len_u64'0 [%#sevict'4] {cands} (fun (_x: UInt64.t) -> [ &_74 <- _x ] s1)
+      | s1 = [ &_72 <- UInt64.lt i _74 ] s2
+      | s2 = any [ br0 -> {_72 = false} (! bb25) | br1 -> {_72} (! bb8) ] ]
       [ bb8 = s0
-        [ s0 = index_Vec_u64_Global [%#sevict'10] {cands} {i} (fun (_x: UInt64.t) -> [ &_54 <- _x ] s1)
-        | s1 = [ &cand <- _54 ] s2
+        [ s0 = index_Vec_u64_Global [%#sevict'14] {cands} {i} (fun (_x: UInt64.t) -> [ &_77 <- _x ] s1)
+        | s1 = [ &cand <- _77 ] s2
         | s2 = MutBorrow.borrow_mut <t_S> {s.current}
-            (fun (_bor: MutBorrow.t t_S) -> [ &_59 <- _bor ] [ &s <- { s with current = _bor.final } ] s3)
-        | s3 = dm_try_evict [%#sevict'11] {_59} {cand} (fun (_x: t_Result_unit_DmE) -> [ &_58 <- _x ] s4)
-        | s4 = any [ br0 (x0: ()) -> {_58 = Ok x0} (! bb17) | br1 (x0: t_DmE) -> {_58 = Err x0} (! bb13) ] ]
-      | bb13 = elim_Err {_58}
+            (fun (_bor: MutBorrow.t t_S) -> [ &_82 <- _bor ] [ &s <- { s with current = _bor.final } ] s3)
+        | s3 = dm_try_evict [%#sevict'15] {_82} {cand} (fun (_x: t_Result_unit_DmE) -> [ &_81 <- _x ] s4)
+        | s4 = any [ br0 (x0: ()) -> {_81 = Ok x0} (! bb19) | br1 (x0: t_DmE) -> {_81 = Err x0} (! bb13) ] ]
+      | bb13 = elim_Err {_81}
           (fun (r0: t_DmE) ->
             any
-            [ br0 -> {r0 = KeyNotFound} (! bb14)
-            | br1 -> {r0 = AlreadyExists} (! bb14)
-            | br2 -> {r0 = ActiveRefs} (! bb16)
-            | br3 -> {r0 = Timeout} (! bb14)
-            | br4 -> {r0 = InvalidSize} (! bb14)
-            | br5 -> {r0 = Underflow} (! bb14)
-            | br6 -> {r0 = Overflow} (! bb14)
-            | br7 -> {r0 = NoWrite} (! bb14)
-            | br8 -> {r0 = InvalidState} (! bb14)
-            | br9 -> {r0 = Other} (! bb14) ])
-      | bb14 = s0
+            [ br0 -> {r0 = KeyNotFound} (! bb24)
+            | br1 -> {r0 = AlreadyExists} (! bb24)
+            | br2 -> {r0 = ActiveRefs} (! bb18)
+            | br3 -> {r0 = Timeout} (! bb24)
+            | br4 -> {r0 = InvalidSize} (! bb24)
+            | br5 -> {r0 = Underflow} (! bb24)
+            | br6 -> {r0 = Overflow} (! bb24)
+            | br7 -> {r0 = NoWrite} (! bb24)
+            | br8 -> {r0 = InvalidState} (! bb17)
+            | br9 -> {r0 = Other} (! bb24) ])
+      | bb17 = s0
         [ s0 = MutBorrow.borrow_mut <t_S> {s.current}
-            (fun (_bor: MutBorrow.t t_S) -> [ &_72 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
-        | s1 = rec_blocked_unpersisted [%#sevict'12] {_72} (fun (_x: ()) -> [ &_71 <- _x ] s2)
-        | s2 = bb22 ]
-      | bb16 = s0
+            (fun (_bor: MutBorrow.t t_S) -> [ &_95 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
+        | s1 = rec_blocked_unpersisted [%#sevict'16] {_95} (fun (_x: ()) -> [ &_94 <- _x ] s2)
+        | s2 = bb24 ]
+      | bb18 = s0
         [ s0 = MutBorrow.borrow_mut <t_S> {s.current}
-            (fun (_bor: MutBorrow.t t_S) -> [ &_70 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
-        | s1 = rec_blocked_by_pin [%#sevict'13] {_70} (fun (_x: ()) -> [ &_69 <- _x ] s2)
-        | s2 = bb22 ]
-      | bb22 = s0
-        [ s0 = UInt64.add [%#sevict'15] {i} {[%#sevict'14] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s1)
+            (fun (_bor: MutBorrow.t t_S) -> [ &_93 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
+        | s1 = rec_blocked_by_pin [%#sevict'17] {_93} (fun (_x: ()) -> [ &_92 <- _x ] s2)
+        | s2 = bb24 ]
+      | bb24 = s0
+        [ s0 = UInt64.add [%#sevict'19] {i} {[%#sevict'18] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s1)
         | s1 = bb5 ] ] ]
-  | bb17 = s0
+  | bb19 = s0
     [ s0 = MutBorrow.borrow_mut <t_S> {s.current}
-        (fun (_bor: MutBorrow.t t_S) -> [ &_65 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
-    | s1 = mt_remove [%#sevict'16] {_65} {cand} (fun (_x: t_Result_unit_MtE) -> [ &_64 <- _x ] s2)
+        (fun (_bor: MutBorrow.t t_S) -> [ &_88 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
+    | s1 = mt_remove [%#sevict'20] {_88} {cand} (fun (_x: t_Result_unit_MtE) -> [ &_87 <- _x ] s2)
     | s2 = MutBorrow.borrow_final <t_S> {s.current} {MutBorrow.get_id s}
-        (fun (_bor: MutBorrow.t t_S) -> [ &_68 <- _bor ] [ &s <- { s with current = _bor.final } ] s3)
-    | s3 = rec_eviction_from_memory [%#sevict'17] {_68} (fun (_x: ()) -> [ &_67 <- _x ] s4)
+        (fun (_bor: MutBorrow.t t_S) -> [ &_91 <- _bor ] [ &s <- { s with current = _bor.final } ] s3)
+    | s3 = rec_eviction_from_memory [%#sevict'21] {_91} (fun (_x: ()) -> [ &_90 <- _x ] s4)
     | s4 = -{resolve_refmut_S s}- s5
-    | s5 = [ &_ret <- [%#sevict'18] true ] s6
+    | s5 = [ &_ret <- [%#sevict'22] true ] s6
     | s6 = return {_ret} ]
-  | bb23 = s0
+  | bb25 = s0
     [ s0 = MutBorrow.borrow_final <t_S> {s.current} {MutBorrow.get_id s}
-        (fun (_bor: MutBorrow.t t_S) -> [ &_75 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
-    | s1 = rec_scan_exhausted [%#sevict'19] {_75} (fun (_x: ()) -> [ &_74 <- _x ] s2)
+        (fun (_bor: MutBorrow.t t_S) -> [ &_98 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
+    | s1 = rec_scan_exhausted [%#sevict'23] {_98} (fun (_x: ()) -> [ &_97 <- _x ] s2)
     | s2 = -{resolve_refmut_S s}- s3
-    | s3 = [ &_ret <- [%#sevict'20] false ] s4
+    | s3 = [ &_ret <- [%#sevict'24] false ] s4
     | s4 = return {_ret} ] ]
   [ & _ret: bool = Any.any_l ()
   | & s: MutBorrow.t t_S = s
@@ -878,45 +922,57 @@ let evict_one_clean [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-
   | & g0: t_W = Any.any_l ()
   | & p0: t_P = Any.any_l ()
   | & cands: t_Vec_u64_Global = Any.any_l ()
-  | & _21: MutBorrow.t t_S = Any.any_l ()
+  | & _27: MutBorrow.t t_S = Any.any_l ()
   | & g1: t_W = Any.any_l ()
   | & i: UInt64.t = Any.any_l ()
-  | & _49: bool = Any.any_l ()
-  | & _51: UInt64.t = Any.any_l ()
+  | & _72: bool = Any.any_l ()
+  | & _74: UInt64.t = Any.any_l ()
   | & cand: UInt64.t = Any.any_l ()
-  | & _54: UInt64.t = Any.any_l ()
-  | & _58: t_Result_unit_DmE = Any.any_l ()
-  | & _59: MutBorrow.t t_S = Any.any_l ()
-  | & _64: t_Result_unit_MtE = Any.any_l ()
-  | & _65: MutBorrow.t t_S = Any.any_l ()
-  | & _67: () = Any.any_l ()
-  | & _68: MutBorrow.t t_S = Any.any_l ()
-  | & _69: () = Any.any_l ()
-  | & _70: MutBorrow.t t_S = Any.any_l ()
-  | & _71: () = Any.any_l ()
-  | & _72: MutBorrow.t t_S = Any.any_l ()
-  | & _74: () = Any.any_l ()
-  | & _75: MutBorrow.t t_S = Any.any_l ()
+  | & _77: UInt64.t = Any.any_l ()
+  | & _81: t_Result_unit_DmE = Any.any_l ()
+  | & _82: MutBorrow.t t_S = Any.any_l ()
+  | & _87: t_Result_unit_MtE = Any.any_l ()
+  | & _88: MutBorrow.t t_S = Any.any_l ()
+  | & _90: () = Any.any_l ()
+  | & _91: MutBorrow.t t_S = Any.any_l ()
+  | & _92: () = Any.any_l ()
+  | & _93: MutBorrow.t t_S = Any.any_l ()
+  | & _94: () = Any.any_l ()
+  | & _95: MutBorrow.t t_S = Any.any_l ()
+  | & _97: () = Any.any_l ()
+  | & _98: MutBorrow.t t_S = Any.any_l ()
   | & _old: t_S = Any.any_l () ])
   [ return (result: bool) ->
-  {[@stop_split] [@expl:evict_one_clean ensures] ([@stop_split] [@expl:evict_one_clean ensures #0] [%#sevict'21] s.final.p
+  {[@stop_split] [@expl:evict_one_clean ensures] ([@stop_split] [@expl:evict_one_clean ensures #0] [%#sevict'25] s.final.p
       = s.current.p)
-    /\ ([@stop_split] [@expl:evict_one_clean ensures #1] [%#sevict'22] evict_frame s.current.g s.final.g
+    /\ ([@stop_split] [@expl:evict_one_clean ensures #1] [%#sevict'26] evict_frame s.current.g s.final.g
       /\ ev_ctr s.current.g.c s.final.g.c)
-    /\ ([@stop_split] [@expl:evict_one_clean ensures #2] [%#sevict'23] result
+    /\ ([@stop_split] [@expl:evict_one_clean ensures #2] [%#sevict'27] result
       -> s.final.g.c.ev_mem = s.current.g.c.ev_mem + 1 /\ s.final.g.c.exhausted = s.current.g.c.exhausted)
-    /\ ([@stop_split] [@expl:evict_one_clean ensures #3] [%#sevict'24] not result
+    /\ ([@stop_split] [@expl:evict_one_clean ensures #3] [%#sevict'28] not result
       -> s.final.g.c.ev_mem = s.current.g.c.ev_mem /\ s.final.g.c.exhausted = s.current.g.c.exhausted + 1)
-    /\ ([@stop_split] [@expl:evict_one_clean ensures #4] [%#sevict'25] UInt64.t'int scan >= 1
-      /\ Seq.length (index_Mapping_Int_Seq_u64 s.current.g.ok s.current.g.tick) >= 1
-      /\ evictable s.current.g (cand0 s.current.g)
-    -> result
-    /\ s.final.g.dm = insert_u64 s.current.g.dm (cand0 s.current.g) (dem_ent (ent s.current.g (cand0 s.current.g)))
-    /\ s.final.g.mt = remove_u64 s.current.g.mt (cand0 s.current.g)
-    /\ s.final.g.used
-    = (if s.current.g.used >= UInt32.t'int (lookup_u64'0 s.current.g.mt (cand0 s.current.g)).size'1 then
-      s.current.g.used - UInt32.t'int (lookup_u64'0 s.current.g.mt (cand0 s.current.g)).size'1
-    else
-      0
-    ))}
+    /\ ([@stop_split] [@expl:evict_one_clean ensures #4] [%#sevict'29] UInt64.t'int scan >= 1
+        /\ Seq.length (index_Mapping_Int_Seq_u64 s.current.g.ok s.current.g.tick) >= 1
+        /\ evictable s.current.g (cand0 s.current.g)
+      -> result
+      /\ s.final.g.dm = insert_u64 s.current.g.dm (cand0 s.current.g) (dem_ent (ent s.current.g (cand0 s.current.g)))
+      /\ s.final.g.mt = remove_u64 s.current.g.mt (cand0 s.current.g)
+      /\ s.final.g.used
+      = (if s.current.g.used >= UInt32.t'int (lookup_u64'0 s.current.g.mt (cand0 s.current.g)).size'1 then
+        s.current.g.used - UInt32.t'int (lookup_u64'0 s.current.g.mt (cand0 s.current.g)).size'1
+      else
+        0
+      ))
+    /\ ([@stop_split] [@expl:evict_one_clean ensures #5] [%#sevict'30] list_pinned s.current.g (index_Mapping_Int_Seq_u64 s.current.g.ok s.current.g.tick)
+      -> not result
+      /\ s.final.g.c.blk_pin
+        = s.current.g.c.blk_pin + Seq.length (index_Mapping_Int_Seq_u64 s.current.g.ok s.current.g.tick)
+      /\ s.final.g.c.blk_unp = s.current.g.c.blk_unp)
+    /\ ([@stop_split] [@expl:evict_one_clean ensures #6] [%#sevict'31] list_unpersisted s.current.g (index_Mapping_Int_Seq_u64 s.current.g.ok s.current.g.tick)
+      -> not result
+      /\ s.final.g.c.blk_unp
+        = s.current.g.c.blk_unp + Seq.length (index_Mapping_Int_Seq_u64 s.current.g.ok s.current.g.tick)
+      /\ s.final.g.c.blk_pin = s.current.g.c.blk_pin)
+    /\ ([@stop_split] [@expl:evict_one_clean ensures #7] [%#sevict'32] list_unregistered s.current.g (index_Mapping_Int_Seq_u64 s.current.g.ok s.current.g.tick)
+    -> not result /\ s.final.g.c.blk_pin = s.current.g.c.blk_pin /\ s.final.g.c.blk_unp = s.current.g.c.blk_unp)}
     (! return {result}) ]

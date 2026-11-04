@@ -3,17 +3,17 @@
   "proofs": {
     "Coma": {
       "vc_batch_lookup": { "prover": "alt-ergo", "time": 0.034 },
-      "vc_lookup_async": { "prover": "alt-ergo", "time": 0.033 },
+      "vc_lookup_async": { "prover": "alt-ergo", "time": 0.019 },
       "vc_verify_dis_tier_stats_promotions_to_gpu__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
             "children": [
-              { "prover": "alt-ergo", "time": 0.03 },
+              { "prover": "alt-ergo", "time": 0.05 },
               null,
-              { "prover": "alt-ergo", "time": 0.132 },
-              { "prover": "alt-ergo", "time": 0.171 }
+              { "prover": "alt-ergo", "time": 0.124 },
+              { "prover": "alt-ergo", "time": 0.159 }
             ]
           }
         ]
