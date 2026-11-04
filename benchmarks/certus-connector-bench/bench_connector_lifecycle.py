@@ -2458,6 +2458,9 @@ def main():
                              "for .csv; repeatable)")
     parser.add_argument("--tag", type=str, default="",
                         help="Tag column for CSV (e.g. branch name)")
+    parser.add_argument("--target-ssd", type=str, default="",
+                        help="Comma-separated PCI BDFs of NVMe drives under test "
+                             "(recorded in params, not used by the bench itself)")
     parser.add_argument("--no-cold", action="store_true",
                         help="Skip the cold-load benchmark (SSD→DRAM→GPU)")
     parser.add_argument("--no-eviction", action="store_true",
@@ -2837,6 +2840,8 @@ def main():
         "working_set": args.working_set,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
+    if args.target_ssd:
+        extra["target_ssd"] = [b.strip() for b in args.target_ssd.split(",")]
     # Layout and cold shape: recorded only when not the default, so default
     # output keeps today's fields.
     if args.pieces_per_block > 1:
