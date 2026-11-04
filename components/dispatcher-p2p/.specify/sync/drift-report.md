@@ -1,11 +1,23 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-31T06:35:50Z
-spec_sync_git_commit: 50a0f2bf
-spec_sync_inputs_sha256: bde3368fb95ee4c6b340a59d3fd656b1ad071f3915e940b321f98eb4446c8acb
+spec_sync_synced_at: 2026-11-04T01:26:34Z
+spec_sync_git_commit: 6e2d2816
+spec_sync_inputs_sha256: e7c35a4aacc54d7db9ef279cad2f2344420872781c65629ffaa06b518eb651f8
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-11-03 (branch `feat/dispatcher-p2p-mr-pool`, base unstable `dc564aa3`) — own code changed; 5 drifts, all BACKFILL, approved and applied.** Unstable's stamp (`bde3368f`) was current, and this branch changes only `src/lib.rs` and `src/pipeline.rs` (no `specs/`, no `components/interfaces`), so the analysis is the 43 requirements against that diff.
+>
+> - **FR-005 (major)** — spec said FIFO completion ordering with a sync per partition wrap. Code now tracks each read's slot by tag (`SlotTracker`, `src/pipeline.rs:838`) and reuses a slot only after its copy's stream syncs. FIFO was a corruption bug: unstable returned 128/128 wrong pages after flush-and-clear (`roundtrip_chunk_hw.py`). Spec updated; `research.md` R3 and `tasks.md` T014 marked superseded.
+> - **FR-034 (new, major)** — multi-region (N>1) blocks, which the 2026-10-31 sync recorded as rejected: gather on store (`src/lib.rs:2673`), scatter on warm/remote load (`src/lib.rs:238`), cold segments split at region boundaries (`src/pipeline.rs:761`).
+> - **FR-035 (new, major)** — null-stream `copy_gpu_to_memory_async` syncs before returning (`src/lib.rs:2658-2671`), as `dispatcher` FR-056; without it the write-through persisted unfilled slots (keys read back as zeros from SSD).
+> - **FR-036 (new, moderate)** — per-reader `ChannelPool` replaces the shared `cached_channels` (#583, `src/lib.rs:157-229`).
+> - **FR-015 (minor)** — function name refreshed; device routing still not wired, unchanged.
+>
+> Aligned and untouched by the diff: the other 38, including the edge cases "slot recycled after a read failure" and "ring partitioned under 4+ clients", which the new loop keeps. Tests: `cargo test -p dispatcher-p2p --lib` 92 pass (adds `slot_tracker_tests`, `segment_copy_tests`, `null_stream_store_is_synced_before_return`, `channel_pool_tests`); hardware round trip byte-exact on the merged build. Details: `drift-report.json`, `proposals.md`, `apply-report.md`.
+>
+> **Stamped: `clean`.**
+
 > **Sync 2026-10-31 (branch `specsync-b`: optimizer session `s20261029-094947` merged onto unstable, plus `55a4ddd4` clippy) — transitive plus a test-only change. Not stamped here: the final pass stamps every component.** Base `a0292be6`, HEAD `0a71990e`. This component's only change is in its `#[cfg(test)]` mock (`src/lib.rs:3033` `mod tests`): `memcpy_batch_async` (`src/lib.rs:3809-3820`), added because the method is now required by `IGpuServices` (`components/interfaces/src/igpu_services.rs:765`); it loops `memcpy_h2d_async`. The production code does not call it (`grep memcpy_batch_async src/` hits only the mock), keeps its own `pipeline.rs` with the old `ColdReadJob` (`src/pipeline.rs:415`), and still rejects multi-region (N>1) blocks (`src/lib.rs:1779-1784`, spec FR-015 / dispatcher spec 002 FR-015), so neither the batched piece copies nor the in-loop cold delivery apply here. `specs/` unchanged. The interfaces changes (`memcpy_batch_async`; doc backticks, `#[must_use]`, `SAFETY` comments, `GpuDmaBuffer`'s `Debug` now `finish_non_exhaustive()`) change no type or behaviour this component's spec describes; no spec here quotes `Debug` output. `research.md:72` lists the `IGpuServices` methods the cold path uses; still true. `cargo check -p dispatcher-p2p --tests` passes; the test binary cannot link here (no `libgdrapi`). No analysis below changes.
 >
 > **Status I would stamp: `clean`.**

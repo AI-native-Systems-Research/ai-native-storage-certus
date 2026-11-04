@@ -58,7 +58,7 @@
 
 ### Implementation for User Story 1
 
-- [x] T014 [US1] Implement `pipelined_ssd_to_gpu_p2p` function in src/pipeline.rs: prime NVMe reads into P2P ring slots, on completion issue D2D copy on alternating stream, submit next read, sync every ring_size/2 completions in src/pipeline.rs
+- [x] T014 [US1] Implement `pipelined_ssd_to_gpu_p2p` function in src/pipeline.rs: prime NVMe reads into P2P ring slots, on completion issue D2D copy on alternating stream, submit next read, sync every ring_size/2 completions in src/pipeline.rs *(2026-11-03: completion-order slot choice replaced by tag-tracked slots, spec FR-005; now a one-job call of `pipelined_multi_object_p2p`)*
 - [x] T015 [US1] Implement `lookup` method (IDispatcher) cold-path branch in src/lib.rs: when dispatch_map returns BlockDevice, compute ThreadPartition, call pipelined_ssd_to_gpu_p2p, then promote entry to memory-tier in src/lib.rs
 - [x] T016 [US1] Implement `lookup_async` method returning GpuStream for async cold lookups in src/lib.rs
 - [x] T017 [US1] Implement `batch_lookup` method with concurrent cold lookups using thread partitioning in src/lib.rs

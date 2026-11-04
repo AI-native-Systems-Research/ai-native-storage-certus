@@ -1,51 +1,62 @@
 {
-  "generated": "2026-10-31T06:30:00Z",
+  "generated": "2026-11-04T01:26:34Z",
   "project": "dispatcher-p2p",
-  "branch": "specsync-b",
-  "head": "0a71990e",
-  "base": "a0292be6 (origin/unstable; fresh stamp)",
-  "scope": "delta: git diff a0292be6 HEAD -- components/dispatcher-p2p components/interfaces/src",
+  "branch": "feat/dispatcher-p2p-mr-pool",
+  "head": "6e2d2816",
+  "base": "dc564aa3",
+  "scope": "src/lib.rs, src/pipeline.rs changed vs origin/unstable dc564aa3 (whose stamp bde3368f was current); no specs/ or components/interfaces change",
   "summary": {
     "specs_analyzed": 1,
-    "requirements_checked": 4,
-    "aligned": 4,
-    "drifted": 0,
+    "requirements_checked": 43,
+    "aligned": 38,
+    "drifted": 5,
     "not_implemented": 0,
-    "unspecced_features": 0
+    "unspecced_features": 3
   },
   "items": [
     {
-      "requirement": "test mock memcpy_batch_async",
-      "code": "src/lib.rs:3809-3820 (cfg(test))",
-      "verdict": "test-only; required by IGpuServices",
-      "resolution": "none"
+      "requirement": "FR-005",
+      "spec_text": "FIFO completion ordering; stream sync once per ring partition wrap (sync interval = ring_size)",
+      "actual": "tag-tracked slots (SlotTracker); slot reused only after its copy's stream syncs; sync at half the partition or when starved",
+      "location": "src/pipeline.rs:838, src/pipeline.rs:905",
+      "severity": "major",
+      "direction": "BACKFILL"
     },
     {
-      "requirement": "FR-015 (IGpuServices receptacle keep-up)",
-      "spec": "spec.md:125",
-      "code": "mock only; production does not call memcpy_batch_async",
-      "verdict": "aligned",
-      "resolution": "none"
+      "requirement": "FR-034 (new)",
+      "spec_text": "(unspecced; 2026-10-31 sync recorded N>1 blocks rejected)",
+      "actual": "N-region store gather, warm/remote scatter, cold segment split at region boundaries",
+      "location": "src/lib.rs:238, src/lib.rs:2673, src/pipeline.rs:761",
+      "severity": "major",
+      "direction": "BACKFILL"
     },
     {
-      "requirement": "dispatcher 002 FR-015 (N>1 rejected)",
-      "code": "src/lib.rs:1779-1784",
-      "verdict": "aligned",
-      "resolution": "none"
+      "requirement": "FR-035 (new)",
+      "spec_text": "(unspecced)",
+      "actual": "null-stream copy_gpu_to_memory_async syncs before returning (dispatcher FR-056)",
+      "location": "src/lib.rs:2658-2671",
+      "severity": "major",
+      "direction": "BACKFILL"
     },
     {
-      "requirement": "research.md:72 IGpuServices methods used",
-      "code": "src/pipeline.rs",
-      "verdict": "aligned",
-      "resolution": "none"
+      "requirement": "FR-036 (new)",
+      "spec_text": "(unspecced)",
+      "actual": "per-drive ChannelPool replaces shared cached_channels (#583)",
+      "location": "src/lib.rs:157-229",
+      "severity": "moderate",
+      "direction": "BACKFILL"
+    },
+    {
+      "requirement": "FR-015",
+      "spec_text": "names pipelined_ssd_to_gpu_p2p as the cold pipeline",
+      "actual": "that function now wraps pipelined_multi_object_p2p; device routing still not wired (unchanged)",
+      "location": "src/pipeline.rs:707",
+      "severity": "minor",
+      "direction": "BACKFILL"
     }
   ],
-  "not_reverified": "all other FR/SC: src/ and specs/ unchanged on this branch; prior verdicts stand",
   "unspecced": [],
   "conflicts": [],
-  "notes": [
-    "cargo check -p dispatcher-p2p --tests passes; test binary does not link here (no libgdrapi)."
-  ],
-  "drift_status": "clean (not stamped this run)",
-  "previous": "backups/20261031T054807Z/drift-report.json.prev"
+  "drift_status": "clean",
+  "notes": "All 5 resolved by approved BACKFILL in this sync; research.md R3 and tasks.md T014 annotated. 38 requirements untouched by the diff remain as last verified."
 }

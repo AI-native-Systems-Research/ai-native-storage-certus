@@ -1938,7 +1938,15 @@ def main():
           f"fs_threads=r{args.fs_read_threads}/w{args.fs_write_threads}  "
           f"eviction_policy={args.eviction_policy}  lookup_order={args.lookup_order}")
 
-    max_blocks = max(args.num_blocks, args.working_set, args.bs)
+    # GPU KV buffers sized by the largest single transfer: every job addresses GPU
+    # blocks 0..n-1 of its own batch (_gpu_spec). --working-set only sets how many
+    # keys cycle through the CPU tier (in --bs batches), so sizing by it reserved
+    # GPU memory no transfer touches -- 32 GiB at --working-set 16384, 2 MiB
+    # blocks -- as certus-connector-bench did before 4e612f8a. A scheduler-step
+    # request transfers at most its prefix (shared pool) plus its suffix.
+    kpr = max(4, args.num_blocks // args.requests_per_step)
+    step_request = min((kpr // 2) * 4, args.num_blocks * 2) + (kpr - kpr // 2)
+    max_blocks = max(args.num_blocks, args.bs, step_request)
     if mode == "pattern":
         max_blocks = max(max_blocks, *(ks["cardinality"] for ks in pattern.keyspaces.values()))
     stack = CputierStack(args, block_bytes, max_blocks, fs_root, gpus)

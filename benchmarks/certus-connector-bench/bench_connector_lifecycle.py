@@ -2607,10 +2607,14 @@ def main():
     # --working-set allocated 2 x working_set x block_bytes of GPU memory: a
     # 16 GiB working set at 2 MiB blocks asked for 64 GiB on a 40 GB GPU.
     # The scheduler-step mode batches a whole step's loads: up to
-    # requests_per_step x (prefix pool + suffix) keys.
-    kpr = max(4, args.num_blocks // args.requests_per_step)
-    step_keys = args.requests_per_step * (min((kpr // 2) * 4, args.num_blocks * 2) + (kpr - kpr // 2))
-    max_blocks = max(args.num_blocks, args.bs, step_keys)
+    # requests_per_step x (prefix pool + suffix) keys. Only that mode needs it:
+    # under --preset longdocqa it is 6,240 blocks (2 x 12.2 GiB), more than a
+    # 24 GiB GPU holds, so sizing every run by it made the other modes OOM.
+    max_blocks = max(args.num_blocks, args.bs)
+    if args.mode in ("scheduler-step", "all"):
+        kpr = max(4, args.num_blocks // args.requests_per_step)
+        step_keys = args.requests_per_step * (min((kpr // 2) * 4, args.num_blocks * 2) + (kpr - kpr // 2))
+        max_blocks = max(max_blocks, step_keys)
     if not cold_shape_is_default(args):
         # Tier fill stores --bs keys per call at block ids 0..bs-1; in-flight
         # slots each take one load unit's range.
