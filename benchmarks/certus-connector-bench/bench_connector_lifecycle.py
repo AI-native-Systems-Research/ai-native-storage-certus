@@ -957,7 +957,7 @@ INFLIGHT_SHAPES = {
 INFLIGHT_MODES = ("warm-inflight", "store-inflight", "mixed-inflight")
 # What the in-flight modes use when a flag is not given: 32 pieces per block as vLLM 0.30 lays
 # out Llama-3-8B (a block is 16 tokens x 128 KiB), and 4,000 blocks (7.8 GiB at 2 MiB), which fit
-# the 12 GiB tier at its 0.8 eviction threshold and make 62 jobs of 64 blocks.
+# the 12 GiB tier at its 0.8 eviction threshold and make 63 jobs (62 of 64 blocks and one of 32) of 64 blocks.
 INFLIGHT_DEFAULTS = {"pieces_per_block": 32, "num_blocks": 4000}
 
 
@@ -3185,7 +3185,7 @@ def main():
                         help="Total blocks per iteration: the size of the working set, the "
                              "distinct blocks (keys) a pass cycles through. The *-inflight "
                              "modes cut it into jobs of --job-blocks (default there: 4000, "
-                             "62 jobs of 64) and need at least --inflight jobs")
+                             "63 jobs: 62 of 64 blocks and a last one of 32; the last job takes the remainder, so it need not divide evenly) and need at least --inflight jobs")
     parser.add_argument("--block-bytes", type=int, default=DEFAULT_BLOCK_BYTES,
                         help=f"Per-block size in bytes (default: {DEFAULT_BLOCK_BYTES})")
     parser.add_argument("--pieces-per-block", type=int, default=1,
