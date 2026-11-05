@@ -307,10 +307,10 @@ modes drive the connector that way. They are separate `--mode` values, not part 
 `--mode all`, so every existing pass and its output are unchanged.
 
 - `--mode warm-inflight`: warm load. `--num-blocks` keys (they must fit the memory
-  tier at its eviction threshold) are stored once in jobs of `--store-job-blocks`
-  (default `--job-blocks`) and written through; the tier is never flushed or
-  cleared. Then the keys are loaded as `--job-blocks`-key jobs, `--inflight`
-  outstanding, in a shuffled order per pass.
+  tier at its eviction threshold, see "Memory tier size") are stored once in jobs of
+  `--job-blocks` and written through; the tier is never flushed or cleared. Then the keys
+  are loaded as `--job-blocks`-key jobs, `--inflight` outstanding, in a shuffled order
+  per pass.
 - `--mode store-inflight`: store, `--inflight` jobs of `--job-blocks` outstanding.
   Each job is prepared (`prepare_store`, then `touch`, as vLLM's `_build_store_jobs`)
   in one tick and submitted in the next (`prepare_store_kv` defers it). As in the
@@ -324,7 +324,25 @@ modes drive the connector that way. They are separate `--mode` values, not part 
 
 Job size and jobs in flight are independent knobs because both vary by workload: a
 vLLM load job is one request's prefix hit, a store job one request's chunk per step.
-The defaults are 64 blocks per job, 4 in flight, 32 pieces per block and 4,000 blocks (7.8 GiB at 2 MiB, inside the 12 GiB tier at its 0.8 eviction threshold). They come from the 2026-11-05 sweeps on latest unstable: at 2 or more jobs in flight warm load reaches 22.7 GB/s (93% of the 24.4 GB/s host-to-device ceiling) from 16 to 128 blocks per job, store and cold load reach their plateau only at 4 in flight, and 32 pieces per block is what vLLM 0.30 gives Llama-3-8B. LongDocQA's own job is 625 blocks and its client runs 4 requests (about 2 measured), so pass `--job-blocks 625` to match it.
+
+**Defaults.** With no shape flags the three modes use the values below; an explicit
+flag always wins, and the other modes keep their own defaults. They come from the
+2026-11-05 sweeps on latest unstable (Llama-3-8B, 2 MiB blocks, 12 GiB tier, 4 NVMe
+drives).
+
+| flag | default | why |
+|---|---|---|
+| `--job-blocks` | 64 | from 16 to 128 blocks the plateau at 2+ jobs in flight is the same (warm 22.7 GB/s, 93% of the 24.4 GB/s host-to-device ceiling); 64 keeps the per-job host cost small |
+| `--inflight` | 4 | store and cold load reach their plateau only at 4 (store 14.6 vs 13.1 GB/s at 2); LongDocQA's client runs 4 requests (about 2 measured) |
+| `--pieces-per-block` | 32 | what vLLM 0.30 gives Llama-3-8B (LBHNC); the 3fs, lmcache and cputier benchmarks use 32 layers per block too. At 4 in flight 1 and 32 pieces measure the same; at 1 in flight a 1-piece store is 19% faster |
+| `--num-blocks` | 90% of what the tier holds, at most 4000 | 4,000 blocks (7.8 GiB at 2 MiB) on a 12 GiB tier, 1,474 on 4 GiB, 4,000 on 32 GiB (see below) |
+| `--store-job-blocks`, `--store-inflight` | 32, 1 (`mixed-inflight` only) | loads are the larger stream in serving (multi-turn moved 3.3x more bytes loaded than stored) |
+| `--step-us` | 100 | removes the GIL stalls (job p99 6.3 ms vs up to 27 ms) |
+| `--workers` | 4 | production's pool size |
+| `--tier-gib`, `--eviction-threshold` | 12, 0.8 | what the targets start the server with |
+
+LongDocQA's own job is 625 blocks, so pass `--job-blocks 625` to match it.
+
 `--step-us N` (default 100) is how long every mode waits between polls for finished transfers (every pass slept 100 µs there before the flag existed, so the default changes nothing); the in-flight passes use it as their scheduler tick. `--step-us 0` is a
 tight loop that releases the GIL each tick (`time.sleep(0)`), so the pool threads, which
 run the connector's ring I/O in Python, are not starved as they would be by a loop that
@@ -398,14 +416,33 @@ Output goes to `bench-results/` in the repo root. The lifecycle benchmark writes
 ### Memory tier size
 
 The numbers depend on the server's memory tier. A warm load is only warm while its keys stay in
-the tier; a working set larger than `tier × eviction threshold` is evicted to the drives and
+the tier; a working set larger than `tier x eviction threshold` is evicted to the drives and
 promoted back, and nothing in the pass's own output shows it: with 4,000 blocks (7.8 GiB) on a
-4 GiB tier, `warm-inflight` ran, reported 24.45 GB/s and "0 blocks not loaded" (2026-11-05). The
-benchmark cannot read the tier size from the server, so you state it: `--tier-gib` and
-`--eviction-threshold` default to 12 and 0.8, what the targets start the server with, and
-`warm-inflight` and `mixed-inflight` refuse a `--num-blocks` that does not fit, naming the largest that does
-(`tier × threshold / block bytes`: 4,915 at 12 GiB and 2 MiB blocks, 1,638 at 4 GiB). The cold pass takes
-`--tier-fill-blocks` from the same numbers unless you give it. A wrong `--tier-gib` is not detected, so each
-in-flight run prints `Tier assumed: ...` at the top of its output. `store-inflight` may exceed the tier (the
-stores then wait for the write-through); its header says so. Reading the tier size and the tier's promotion
-and eviction counters from the server would make the check exact; there is no such call yet.
+4 GiB tier, `warm-inflight` ran, reported 24.45 GB/s and "0 blocks not loaded" (2026-11-05).
+
+The benchmark cannot read the tier size from the server, so you state it: `--tier-gib` and
+`--eviction-threshold` default to 12 and 0.8, what the targets start the server with. Pass
+`--tier-gib` whenever the server's `--memory-tier-size` differs. Then:
+
+- `warm-inflight` and `mixed-inflight` refuse a `--num-blocks` that does not fit, at argument
+  validation, naming the largest that does (`tier x threshold / block bytes`).
+- Without `--num-blocks` they use 90% of that, at most 4,000.
+- The cold pass takes `--tier-fill-blocks` from the same numbers unless you give it.
+- Every in-flight run prints `Tier assumed: ...` first, so a wrong `--tier-gib` is visible in
+  the results; it is not detected.
+- `store-inflight` may exceed the tier (the stores then wait for the write-through); its header
+  says so.
+
+| server tier | usable (x 0.8) | default `--num-blocks` (2 MiB) | cold tier fill | measured (warm / store / mixed load+store / cold) |
+|---|---|---|---|---|
+| 4 GiB | 3.2 GiB, 1,638 blocks | 1,474 (2.9 GiB) | 1,638 blocks | 23.3 / 14.3 / 16.4+5.9 / 21.4 GB/s |
+| 12 GiB | 9.6 GiB, 4,915 blocks | 4,000 (7.8 GiB) | 4,915 blocks | 23.3 / 14.6 / 14.5+6.0 / 21.0 GB/s |
+| 32 GiB | 25.6 GiB, 13,107 blocks | 4,000 (7.8 GiB) | 13,107 blocks | 23.3 / 14.6 / 13.2+6.5 / 22.6 GB/s |
+
+The defaults carry over to bigger and smaller tiers. The cost of a bigger tier is the cold pass:
+each pass empties the tier and refills it (`--tier-fill-blocks`), so cold at 32 GiB rewrites 25.6 GiB
+around every pass: one whole cold run (the store and warm passes of default mode included) took 166 s
+against 84 s at 12 GiB. A 32 GiB tier also needs that much
+pinned hugepage memory on the GPU's NUMA node. Larger blocks shrink every block count here in
+proportion (8 MiB blocks: a quarter as many). Reading the tier size and the tier's promotion and
+eviction counters from the server would make the check exact; there is no such call yet.

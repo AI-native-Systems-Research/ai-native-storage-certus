@@ -958,7 +958,15 @@ INFLIGHT_MODES = ("warm-inflight", "store-inflight", "mixed-inflight")
 # What the in-flight modes use when a flag is not given: 32 pieces per block as vLLM 0.30 lays
 # out Llama-3-8B (a block is 16 tokens x 128 KiB), and 4,000 blocks (7.8 GiB at 2 MiB), which fit
 # the 12 GiB tier at its 0.8 eviction threshold and make 63 jobs (62 of 64 blocks and one of 32) of 64 blocks.
-INFLIGHT_DEFAULTS = {"pieces_per_block": 32, "num_blocks": 4000}
+INFLIGHT_DEFAULTS = {"pieces_per_block": 32}
+# --num-blocks when not given: 90% of what the memory tier holds before evicting, at most this
+# many (4,000 blocks is 7.8 GiB at 2 MiB, 62.5 jobs of 64; it is the whole default on a 12 GiB tier).
+INFLIGHT_MAX_BLOCKS = 4000
+INFLIGHT_TIER_SHARE = 0.9
+# mixed-inflight's store side when not given: 32-block jobs, one in flight. Loads are the larger
+# stream in serving (multi-turn moved 3.3x more bytes loaded than stored); in the 2026-11-05 mixed
+# sweep 64 x 4 loads against 32 x 1 stores came closest at 4 loads in flight (2.4x).
+MIXED_STORE_DEFAULTS = {"store_job_blocks": 32, "store_inflight": 1}
 
 
 class _ByteVerifier:
@@ -3184,8 +3192,11 @@ def main():
     parser.add_argument("--num-blocks", type=int, default=128,
                         help="Total blocks per iteration: the size of the working set, the "
                              "distinct blocks (keys) a pass cycles through. The *-inflight "
-                             "modes cut it into jobs of --job-blocks (default there: 4000, "
-                             "63 jobs: 62 of 64 blocks and a last one of 32; the last job takes the remainder, so it need not divide evenly) and need at least --inflight jobs")
+                             "modes cut it into jobs of --job-blocks (the last job takes the "
+                             "remainder, so it need not divide evenly) and need at least "
+                             "--inflight jobs; default there: 90%% of what the tier holds before "
+                             "evicting (--tier-gib, --eviction-threshold), at most 4000 "
+                             "(4000 on a 12 GiB tier)")
     parser.add_argument("--block-bytes", type=int, default=DEFAULT_BLOCK_BYTES,
                         help=f"Per-block size in bytes (default: {DEFAULT_BLOCK_BYTES})")
     parser.add_argument("--pieces-per-block", type=int, default=1,
@@ -3295,10 +3306,11 @@ def main():
                              "and LongDocQA's client runs 4 (about 2 measured); needs server "
                              "channels > the jobs in flight")
     parser.add_argument("--store-job-blocks", type=int, default=None,
-                        help="(mixed-inflight) blocks per store job (default --job-blocks); "
-                             "warm-inflight populates its working set in jobs of this size")
+                        help="(mixed-inflight) blocks per store job (default 32); "
+                             "warm-inflight populates its working set in jobs of --job-blocks")
     parser.add_argument("--store-inflight", type=int, default=None,
-                        help="(mixed-inflight) store jobs outstanding (default --inflight)")
+                        help="(mixed-inflight) store jobs outstanding (default 1: loads are the "
+                             "larger stream in serving)")
     parser.add_argument("--step-us", type=float, default=100.0,
                         help="poll interval for finished transfers, every mode: N (default 100, "
                              "what every pass always slept) sleeps N us between polls, and is "
@@ -3345,6 +3357,13 @@ def main():
         for key, val in INFLIGHT_DEFAULTS.items():
             if key not in explicit:
                 setattr(args, key, val)
+        if "num_blocks" not in explicit:
+            usable = int(args.tier_gib * 2**30 * args.eviction_threshold // max(args.block_bytes, 1))
+            args.num_blocks = max(1, min(INFLIGHT_MAX_BLOCKS, int(usable * INFLIGHT_TIER_SHARE)))
+        if args.mode == "mixed-inflight":
+            for key, val in MIXED_STORE_DEFAULTS.items():
+                if key not in explicit:
+                    setattr(args, key, val)
         if args.verify and args.pieces_per_block >= 1 and \
                 args.block_bytes // args.pieces_per_block < 64:
             parser.error("--verify needs pieces of at least 64 bytes "
