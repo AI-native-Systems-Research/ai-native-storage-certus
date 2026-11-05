@@ -4,6 +4,45 @@ Benchmarks for the Python connector classes (`certus-shmq-connector`) that vLLM 
 
 Requires a running `certus-server` with shared memory at `/dev/shm/certus-shmq`.
 
+## Quick start
+
+Start the server (the benchmark never starts or stops it), then run a mode. From the repo root:
+
+```bash
+# 1. the server: the settings the benchmark's defaults assume (12 GiB memory tier, evict at 0.8)
+sudo target/release/certus-server \
+    --drive-count 4 --channels 32 \
+    --memory-tier-size 12G --memory-tier-eviction-threshold 0.8 \
+    --format
+
+# 2. the benchmark, in another shell, each with no shape flags:
+export PYTHONPATH=certus-shmq-connector:apps/python:benchmarks/certus-connector-bench
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py --mode warm-inflight
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py --mode store-inflight
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py --mode mixed-inflight
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py   # default mode: store, warm, cold, 16-block batches
+```
+
+With no shape flags the three `*-inflight` modes run 64-block jobs, 4 in flight, 32 pieces per
+2 MiB block, which is vLLM 0.30's default for Llama-3-8B (see "In-flight passes"). Nothing else is
+needed on the command line:
+
+- **`--num-blocks` (the working set) is optional.** The in-flight modes derive it from the tier:
+  90% of what it holds before evicting, at most 4,000.
+- **`--tier-gib` is optional and defaults to 12.** Pass it only when you start the server with a
+  different `--memory-tier-size`, e.g. `--memory-tier-size 32G` and `--tier-gib 32`. The benchmark cannot
+  read the tier size from the server, so a wrong value is not detected; every run prints
+  `Tier assumed: ...` first (see "Memory tier size").
+- `--channels` must exceed the jobs in flight (the modes tell you the number they need; 16 is enough
+  for the defaults).
+
+```bash
+# a server with a 32 GiB tier
+sudo target/release/certus-server --drive-count 4 --channels 32 \
+    --memory-tier-size 32G --memory-tier-eviction-threshold 0.8 --format
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py --mode warm-inflight --tier-gib 32
+```
+
 ## Prerequisites
 
 The benchmark does **not** start or stop the server. You must start it before running any benchmark:
@@ -11,11 +50,14 @@ The benchmark does **not** start or stop the server. You must start it before ru
 ```bash
 sudo target/release/certus-server \
     --drive-count 4 \
-    --channels 16 \
-    --memory-tier-size 4G \
-    --memory-tier-eviction-threshold 0.7 \
+    --channels 32 \
+    --memory-tier-size 12G \
+    --memory-tier-eviction-threshold 0.8 \
     --format
 ```
+
+The tier size and eviction threshold above are what the in-flight modes assume (`--tier-gib 12`,
+`--eviction-threshold 0.8`); if you change them, pass the same values to the benchmark.
 
 Server parameters (not controlled by the benchmark):
 
