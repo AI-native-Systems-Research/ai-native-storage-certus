@@ -178,6 +178,8 @@ python benchmarks/certus-connector-bench/bench_connector_lifecycle.py --mode all
 --lookup-order ORDER   lookup-first (default, vLLM >= 0.21) or touch-first (vLLM <= 0.20)
 --pieces-per-block N   GPU tensors per block (default: 1; 32 = Llama-3-8B under LBHNC), see below
 --cold-tier-state S    empty (default) or full, with --tier-fill-blocks N; see "Cold-load shape"
+--tier-gib G            the server's --memory-tier-size in GiB (default 12); see "Memory tier size"
+--eviction-threshold T  the server's --memory-tier-eviction-threshold (default 0.8)
 --store-order O        batch (default) or interleaved
 --load-unit U          batch (default) or request
 --requests R           requests for interleaved/request (default: 16)
@@ -392,3 +394,18 @@ python benchmarks/certus-connector-bench/bench_connector_race.py \
 ## Results
 
 Output goes to `bench-results/` in the repo root. The lifecycle benchmark writes `connector_lifecycle.csv` with per-phase throughput, IOPS, and latency percentiles (p50/p99/mean) for every sub-operation. The `mode` column identifies which benchmark mode produced each row.
+
+### Memory tier size
+
+The numbers depend on the server's memory tier. A warm load is only warm while its keys stay in
+the tier; a working set larger than `tier × eviction threshold` is evicted to the drives and
+promoted back, and nothing in the pass's own output shows it: with 4,000 blocks (7.8 GiB) on a
+4 GiB tier, `warm-inflight` ran, reported 24.45 GB/s and "0 blocks not loaded" (2026-11-05). The
+benchmark cannot read the tier size from the server, so you state it: `--tier-gib` and
+`--eviction-threshold` default to 12 and 0.8, what the targets start the server with, and
+`warm-inflight` and `mixed-inflight` refuse a `--num-blocks` that does not fit, naming the largest that does
+(`tier × threshold / block bytes`: 4,915 at 12 GiB and 2 MiB blocks, 1,638 at 4 GiB). The cold pass takes
+`--tier-fill-blocks` from the same numbers unless you give it. A wrong `--tier-gib` is not detected, so each
+in-flight run prints `Tier assumed: ...` at the top of its output. `store-inflight` may exceed the tier (the
+stores then wait for the write-through); its header says so. Reading the tier size and the tier's promotion
+and eviction counters from the server would make the check exact; there is no such call yet.

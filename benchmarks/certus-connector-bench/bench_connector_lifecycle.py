@@ -3198,10 +3198,17 @@ def main():
                         help="memory tier at the start of each cold pass: empty (cleared, "
                              "the default) or full (refilled with --tier-fill-blocks "
                              "other blocks, outside the timing, so cold reads must evict)")
+    parser.add_argument("--tier-gib", type=float, default=12.0,
+                        help="the server's --memory-tier-size in GiB (default 12, what the targets "
+                             "start it with). The benchmark cannot read it from the server, so a "
+                             "wrong value is not detected: it is used to refuse a working set that "
+                             "cannot stay resident and to size --tier-fill-blocks")
+    parser.add_argument("--eviction-threshold", type=float, default=0.8,
+                        help="the server's --memory-tier-eviction-threshold (default 0.8)")
     parser.add_argument("--tier-fill-blocks", type=int, default=0,
-                        help="blocks that fill the tier to its eviction threshold "
-                             "(tier size x threshold / block bytes); required with "
-                             "--cold-tier-state full")
+                        help="blocks that fill the tier to its eviction threshold; default with "
+                             "--cold-tier-state full: --tier-gib x --eviction-threshold / block "
+                             "bytes")
     parser.add_argument("--store-order", choices=("batch", "interleaved"), default="batch",
                         help="batch: store --bs blocks per call in key order (default); "
                              "interleaved: --requests requests store one block per call "
@@ -3368,9 +3375,21 @@ def main():
     if args.block_bytes % args.pieces_per_block:
         parser.error(f"--block-bytes {args.block_bytes} is not divisible by "
                      f"--pieces-per-block {args.pieces_per_block}")
+    if not (0.0 < args.eviction_threshold <= 1.0) or args.tier_gib <= 0:
+        parser.error("--tier-gib must be > 0 and --eviction-threshold in (0, 1]")
+    tier_usable_blocks = int(args.tier_gib * 2**30 * args.eviction_threshold // args.block_bytes)
     if args.cold_tier_state == "full" and args.tier_fill_blocks <= 0:
-        parser.error("--cold-tier-state full needs --tier-fill-blocks "
-                     "(tier size x eviction threshold / block bytes)")
+        args.tier_fill_blocks = tier_usable_blocks   # tier size x threshold / block bytes
+    if args.mode in ("warm-inflight", "mixed-inflight") and args.num_blocks > tier_usable_blocks:
+        # A warm load is only warm while its keys stay in the memory tier. A larger set is
+        # evicted to the drives and promoted back, and nothing in the pass's own output shows it
+        # (4,000 blocks in a 4 GiB tier: 24.45 GB/s, 0 blocks not loaded, 2026-11-05).
+        parser.error(
+            f"--num-blocks {args.num_blocks} is {args.num_blocks * args.block_bytes / 2**30:.1f} GiB, "
+            f"more than the {args.tier_gib * args.eviction_threshold:.1f} GiB the tier holds before "
+            f"evicting (--tier-gib {args.tier_gib:g} x --eviction-threshold {args.eviction_threshold:g}): "
+            f"loads would come from the drives. Use --num-blocks <= {tier_usable_blocks}, or set "
+            f"--tier-gib to the server's --memory-tier-size")
     if args.cold_inflight < 1 or args.cold_inflight > args.workers:
         parser.error(f"--cold-inflight {args.cold_inflight} needs 1 <= N <= --workers "
                      f"({args.workers}), or jobs would queue in the executor unseen")
@@ -3621,6 +3640,12 @@ def main():
             results.append(r)
 
         elif mode in INFLIGHT_MODES:
+            set_gib = args.num_blocks * args.block_bytes / 2**30
+            print(f"\n  Tier assumed: {args.tier_gib:g} GiB x {args.eviction_threshold:g} = "
+                  f"{args.tier_gib * args.eviction_threshold:.1f} GiB usable; working set "
+                  f"{args.num_blocks} blocks = {set_gib:.1f} GiB"
+                  + ("" if args.num_blocks * args.block_bytes <= args.tier_gib * 2**30 * args.eviction_threshold
+                     else "  (larger than the tier: the stores wait for the write-through)"))
             # Each in-flight pass leaves its working set on the server; remove it even
             # when the pass fails, so a next process on the same server (a grid's next
             # cell, same key seed) does not find it resident and skip its stores.
