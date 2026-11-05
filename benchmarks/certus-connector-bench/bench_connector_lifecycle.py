@@ -973,9 +973,9 @@ class _ByteVerifier:
         return t.view(-1, piece)[base:base + n]
 
     def _pattern(self, keys, layer, piece, device):
-        """Each piece: the whole key, then the layer index, then a fill byte from a
-        hash of (key, layer). Needs pieces of at least len(key) + 1 bytes."""
-        head = [bytes(k) + bytes([layer % 256]) for k in keys]
+        """Each piece: the whole key, then the layer index (4 bytes), then a fill byte
+        from a hash of (key, layer). Needs pieces of at least len(key) + 4 bytes."""
+        head = [bytes(k) + int(layer).to_bytes(4, "little") for k in keys]
         fill = torch.tensor([hashlib.blake2b(h, digest_size=1).digest()[0] for h in head],
                             dtype=torch.uint8, device=device)
         pat = fill.unsqueeze(1).expand(len(keys), piece).clone()
@@ -1181,6 +1181,7 @@ class _StepLoop:
         finished = self.worker.get_finished()
         self.phases["get_finished"].record(time.perf_counter() - t0)
         done, failed = [], []
+        error = None   # the first exception; every job of the batch is still completed
         now = time.perf_counter()
         if finished:
             self.sample(now)
@@ -1190,9 +1191,15 @@ class _StepLoop:
             stats.job.record(now - t_sub)
             if getattr(res, "transfer_time", None) is not None:
                 stats.transfer.record(res.transfer_time)
-            if res.success and kind == "load" and self.verifier is not None:
-                self.verifier.check(keys, slot * self.load_job_blocks)   # before unpin
-            self._complete(kind, keys, bool(res.success))
+            try:
+                if res.success and kind == "load" and self.verifier is not None:
+                    self.verifier.check(keys, slot * self.load_job_blocks)   # before unpin
+            except BaseException as e:  # noqa: BLE001 - re-raised after the batch
+                error = error or e
+            try:
+                self._complete(kind, keys, bool(res.success))
+            except BaseException as e:  # noqa: BLE001
+                error = error or e
             if kind == "load":
                 self.free_load.append(slot)
                 self.n_load -= 1
@@ -1205,6 +1212,8 @@ class _StepLoop:
                 done.append((kind, keys, tag))
             else:
                 failed.append(res.job_id)
+        if error is not None:
+            raise error
         if self.drain_events and any(k == "store" for k, _, _ in done):
             t0 = time.perf_counter()
             for ev in self.manager.take_events():
@@ -1242,6 +1251,9 @@ class _StepLoop:
                 except Exception:  # noqa: BLE001
                     pass
             time.sleep(0)
+        if self.pending:
+            print(f"  WARNING: {len(self.pending)} job(s) never reported finished: "
+                  f"{sorted(self.pending)}", file=sys.stderr)
 
     @contextlib.contextmanager
     def cleanup(self):
@@ -1364,11 +1376,19 @@ def _verify_load_back(manager, worker, keys, job_blocks, verifier) -> None:
         verifier.zero(0, len(hits))
         spec = manager.prepare_load(hits)
         job_id += 1
-        worker.submit_load(job_id, spec, _FakeGPUSpec(list(range(len(hits)))))
-        while not worker.get_finished():
-            time.sleep(0.0001)
-        manager.complete_load(hits)
-        verifier.check(hits, 0)
+        res = []
+        try:
+            worker.submit_load(job_id, spec, _FakeGPUSpec(list(range(len(hits)))))
+            while not res:
+                res = worker.get_finished()
+                if not res:
+                    time.sleep(0.0001)
+            if all(r.success for r in res):
+                verifier.check(hits, 0)
+        finally:
+            manager.complete_load(hits)
+        if not all(r.success for r in res):
+            raise RuntimeError(f"--verify load-back job {job_id} failed")
 
 
 def inflight_label(args, direction: str) -> str:
@@ -1439,7 +1459,7 @@ def bench_warm_inflight(manager, worker, keys, block_bytes, min_duration, *, arg
         total_blocks=st.blocks, total_bytes=st.blocks * block_bytes,
         wall_seconds=wall, phases=phases,
     )
-    result.counts = {"load_misses": st.misses}
+    result.counts = {"blocks_not_loaded": st.misses}
     result.print_report()
     _print_inflight_summary(st, wall, "load")
     print(f"  Blocks not loaded (prefix stopped at a lookup miss): {st.misses}  passes: {passes}")
@@ -1586,7 +1606,7 @@ def bench_mixed_inflight(manager, worker, ring, keys, block_bytes, min_duration,
     load_r = BenchResult(label=f"Mixed In-Flight: Load ({label})", total_blocks=lst.blocks,
                          total_bytes=lst.blocks * block_bytes, wall_seconds=wall,
                          phases=load_phases)
-    load_r.counts = {"load_misses": lst.misses, "disk_read_bytes": io["read_bytes"]}
+    load_r.counts = {"blocks_not_loaded": lst.misses, "disk_read_bytes": io["read_bytes"]}
     store_r = BenchResult(label=f"Mixed In-Flight: Store ({label})", total_blocks=sst.blocks,
                           total_bytes=sst.blocks * block_bytes, wall_seconds=wall,
                           phases=store_phases)
@@ -3276,7 +3296,8 @@ def main():
             if key not in ("observation", "assumed") and key not in explicit:
                 setattr(args, key, val)
     if args.mode in INFLIGHT_MODES:
-        if args.verify and args.block_bytes // args.pieces_per_block < 64:
+        if args.verify and args.pieces_per_block >= 1 and \
+                args.block_bytes // args.pieces_per_block < 64:
             parser.error("--verify needs pieces of at least 64 bytes "
                          "(--block-bytes / --pieces-per-block)")
         if args.store_job_blocks is None:
@@ -3549,25 +3570,30 @@ def main():
             )
             results.append(r)
 
-        elif mode == "warm-inflight":
-            print(f"\n  Mode: warm-inflight ({inflight_label(args, 'load')})")
-            results.append(bench_warm_inflight(
-                manager, worker, keys, acct_block_bytes, args.min_duration,
-                args=args, lookup_order=args.lookup_order, verifier=verifier))
-
-        elif mode == "store-inflight":
-            print(f"\n  Mode: store-inflight ({inflight_label(args, 'store')})")
-            _remove_keys(ring, keys, args.tp)
-            results.append(bench_store_inflight(
-                manager, worker, ring, keys, acct_block_bytes, args.min_duration,
-                args=args, world_size=args.tp, verifier=verifier))
-
-        elif mode == "mixed-inflight":
-            print(f"\n  Mode: mixed-inflight ({inflight_label(args, 'mixed')})")
-            results.extend(bench_mixed_inflight(
-                manager, worker, ring, keys, acct_block_bytes, args.min_duration,
-                args=args, world_size=args.tp, lookup_order=args.lookup_order,
-                verifier=verifier))
+        elif mode in INFLIGHT_MODES:
+            # Each in-flight pass leaves its working set on the server; remove it even
+            # when the pass fails, so a next process on the same server (a grid's next
+            # cell, same key seed) does not find it resident and skip its stores.
+            try:
+                if mode == "warm-inflight":
+                    print(f"\n  Mode: warm-inflight ({inflight_label(args, 'load')})")
+                    results.append(bench_warm_inflight(
+                        manager, worker, keys, acct_block_bytes, args.min_duration,
+                        args=args, lookup_order=args.lookup_order, verifier=verifier))
+                elif mode == "store-inflight":
+                    print(f"\n  Mode: store-inflight ({inflight_label(args, 'store')})")
+                    _remove_keys(ring, keys, args.tp)
+                    results.append(bench_store_inflight(
+                        manager, worker, ring, keys, acct_block_bytes, args.min_duration,
+                        args=args, world_size=args.tp, verifier=verifier))
+                else:
+                    print(f"\n  Mode: mixed-inflight ({inflight_label(args, 'mixed')})")
+                    results.extend(bench_mixed_inflight(
+                        manager, worker, ring, keys, acct_block_bytes, args.min_duration,
+                        args=args, world_size=args.tp, lookup_order=args.lookup_order,
+                        verifier=verifier))
+            finally:
+                _remove_keys(ring, keys, args.tp)
 
         else:  # default
             store_result = bench_store_lifecycle(

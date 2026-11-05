@@ -141,6 +141,13 @@ def check_inflight_shapes(obs_by_id: dict, derived_by_dep: dict) -> None:
             ("inflight", "inflight_configured", lambda a, b: a == b),
         )
         assumed = set(shape.get("assumed") or ())
+        # The benchmark reads every one of these for the in-flight modes.
+        required = {"observation", "block_bytes", "pieces_per_block", "job_blocks",
+                    "inflight", "store_job_blocks", "store_inflight"}
+        for key in sorted(required - set(shape)):
+            err(f"{where}: missing {key}")
+        for key in sorted(assumed - set(shape)):
+            err(f"{where}: 'assumed' names {key}, which the shape does not set")
         known = {"observation", "assumed", "block_bytes", "pieces_per_block"} | {c[0] for c in checks}
         for key in shape:
             if key not in known and key not in assumed:
@@ -152,8 +159,7 @@ def check_inflight_shapes(obs_by_id: dict, derived_by_dep: dict) -> None:
                 err(f"{where}: {skey} is checked against {okey}; it cannot be 'assumed'")
                 continue
             if have is None:
-                err(f"{where}: missing {skey}")
-                continue
+                continue          # reported above as missing
             if want is None:
                 err(f"{where}: {skey} {have} but observation {oid} has no {okey}")
             elif not same(have, want):
