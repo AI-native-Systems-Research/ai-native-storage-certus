@@ -323,10 +323,12 @@ modes drive the connector that way. They are separate `--mode` values, not part 
 Job size and jobs in flight are independent knobs because both vary by workload: a
 vLLM load job is one request's prefix hit, a store job one request's chunk per step.
 The defaults, 16 × 4, are for running a pass; they are not a recommended setting.
-`--step-us 0` (default) is a tight scheduler loop that releases the GIL each tick
-(`time.sleep(0)`), so the pool threads, which run the connector's ring I/O in Python,
-are not starved as they would be by a loop that keeps the GIL (`os.sched_yield()`
-does); `--step-us N` sleeps to the next N-µs tick. Each report prints, per direction, the
+`--step-us N` (default 100) sleeps to the next N-µs scheduler tick. `--step-us 0` is a
+tight loop that releases the GIL each tick (`time.sleep(0)`), so the pool threads, which
+run the connector's ring I/O in Python, are not starved as they would be by a loop that
+keeps the GIL (`os.sched_yield()` does); but it still leaves some jobs waiting several
+GIL switch intervals (warm 64 × 1, 10 runs each: job p99 6.4–27.1 ms and 14 % spread at
+0, 6.2–6.4 ms and 8 % at 100, same median), so 100 is the default. Each report prints, per direction, the
 per-job time from submit to reap (`*_job`), the connector's `transfer_time`
 (`*_transfer`, what vLLM logs as `kv_offload_load_time` / `kv_offload_store_time`),
 the mean number of jobs outstanding, and the measured concurrency (summed
@@ -353,7 +355,7 @@ python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
 --inflight N           (*-inflight) jobs outstanding (default: 4)
 --store-job-blocks N   (mixed-inflight) blocks per store job (default: --job-blocks)
 --store-inflight N     (mixed-inflight) store jobs outstanding (default: --inflight)
---step-us US           (*-inflight) scheduler tick; 0 = tight loop (default: 0)
+--step-us US           (*-inflight) scheduler tick; 0 = tight loop (default: 100)
 --shape NAME           (*-inflight) validation shape: longdocqa
 --verify               (*-inflight) byte-compare every loaded block
 ```

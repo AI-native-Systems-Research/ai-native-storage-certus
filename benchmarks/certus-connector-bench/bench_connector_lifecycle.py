@@ -926,9 +926,11 @@ def bench_cold_load_shaped(
 # with job size (--job-blocks) and jobs in flight (--inflight) as independent knobs:
 # neither is fixed by the pass, because both vary by workload. Each tick: submit
 # into free slots, call get_finished() once, complete what finished, then idle
-# (--step-us 0: time.sleep(0), which releases the GIL to the pool threads without
-# waiting; --step-us N: sleep to the next N-us tick boundary). No call waits for a
-# particular job.
+# (--step-us N, default 100: sleep to the next N-us tick boundary; --step-us 0:
+# time.sleep(0), a tight loop that releases the GIL to the pool threads without waiting,
+# but leaves some jobs stalled for several GIL switch intervals: warm 64 x 1 on
+# dc564aa3, 10 runs each, job p99 6.4-27.1 ms and 14 % spread at 0 against 6.2-6.4 ms
+# and 8 % at 100, same median). No call waits for a particular job.
 
 # Named shapes of real workloads, for checking the benchmark against them, not for
 # a target's primary metric (fitting a target to one workload tunes Certus to that
@@ -3263,9 +3265,11 @@ def main():
                              "warm-inflight populates its working set in jobs of this size")
     parser.add_argument("--store-inflight", type=int, default=None,
                         help="(mixed-inflight) store jobs outstanding (default --inflight)")
-    parser.add_argument("--step-us", type=float, default=0.0,
-                        help="(*-inflight) scheduler tick: 0 (default) is a tight loop that "
-                             "yields the CPU each tick; N sleeps to the next N-us boundary")
+    parser.add_argument("--step-us", type=float, default=100.0,
+                        help="(*-inflight) scheduler tick: N (default 100) sleeps to the next "
+                             "N-us boundary; 0 is a tight loop that yields the CPU each tick "
+                             "(it stalls some jobs on the GIL: p99 up to 27 ms vs 6.4 ms at "
+                             "100, warm 64x1, 2026-11-05)")
     parser.add_argument("--verify", action="store_true",
                         help="(*-inflight) stamp every stored block and compare every loaded "
                              "block byte for byte (adds GPU work: timings are not comparable)")
