@@ -3182,7 +3182,10 @@ def main():
     parser.add_argument("--bs", type=int, default=16,
                         help="Batch size (blocks per batch)")
     parser.add_argument("--num-blocks", type=int, default=128,
-                        help="Total blocks per iteration")
+                        help="Total blocks per iteration: the size of the working set, the "
+                             "distinct blocks (keys) a pass cycles through. The *-inflight "
+                             "modes cut it into jobs of --job-blocks (default there: 4000, "
+                             "62 jobs of 64) and need at least --inflight jobs")
     parser.add_argument("--block-bytes", type=int, default=DEFAULT_BLOCK_BYTES,
                         help=f"Per-block size in bytes (default: {DEFAULT_BLOCK_BYTES})")
     parser.add_argument("--pieces-per-block", type=int, default=1,
@@ -3350,6 +3353,16 @@ def main():
             parser.error(f"--mode {args.mode} supports TP=1 only")
         if not cold_shape_is_default(args):
             parser.error(f"--mode {args.mode} does not use the cold-shape flags or --preset")
+        if args.mode in ("warm-inflight", "mixed-inflight"):
+            # The working set (--num-blocks) is cut into jobs of --job-blocks; --inflight of them
+            # must exist at once. Checked here, before the server is touched.
+            jobs = -(-args.num_blocks // args.job_blocks)
+            if jobs < args.inflight:
+                parser.error(
+                    f"--num-blocks {args.num_blocks} makes only {jobs} job(s) of --job-blocks "
+                    f"{args.job_blocks}, but --inflight {args.inflight} needs at least "
+                    f"{args.inflight}: use --num-blocks >= {args.inflight * args.job_blocks}, "
+                    f"or a smaller --job-blocks or --inflight")
     if args.pieces_per_block < 1:
         parser.error(f"--pieces-per-block must be >= 1, got {args.pieces_per_block}")
     if args.block_bytes % args.pieces_per_block:
