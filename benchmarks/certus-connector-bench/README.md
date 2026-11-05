@@ -323,7 +323,7 @@ modes drive the connector that way. They are separate `--mode` values, not part 
 Job size and jobs in flight are independent knobs because both vary by workload: a
 vLLM load job is one request's prefix hit, a store job one request's chunk per step.
 The defaults, 16 × 4, are for running a pass; they are not a recommended setting.
-`--step-us N` (default 100) sleeps to the next N-µs scheduler tick. `--step-us 0` is a
+`--step-us N` (default 100) is how long every mode waits between polls for finished transfers (every pass slept 100 µs there before the flag existed, so the default changes nothing); the in-flight passes use it as their scheduler tick. `--step-us 0` is a
 tight loop that releases the GIL each tick (`time.sleep(0)`), so the pool threads, which
 run the connector's ring I/O in Python, are not starved as they would be by a loop that
 keeps the GIL (`os.sched_yield()` does); but it still leaves some jobs waiting several
@@ -355,7 +355,7 @@ python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
 --inflight N           (*-inflight) jobs outstanding (default: 4)
 --store-job-blocks N   (mixed-inflight) blocks per store job (default: --job-blocks)
 --store-inflight N     (mixed-inflight) store jobs outstanding (default: --inflight)
---step-us US           (*-inflight) scheduler tick; 0 = tight loop (default: 100)
+--step-us US           poll interval for finished transfers, every mode; the in-flight passes' tick; 0 = tight loop (default: 100)
 --shape NAME           (*-inflight) validation shape: longdocqa
 --verify               (*-inflight) byte-compare every loaded block
 ```

@@ -555,7 +555,7 @@ def bench_store_lifecycle(
             # 4. get_finished (reap completed futures)
             t0 = time.perf_counter()
             while not worker.get_finished():
-                time.sleep(0.0001)
+                _poll_wait()
             phases["get_finished"].record(time.perf_counter() - t0)
 
             # 5. complete_store (commit)
@@ -684,7 +684,7 @@ def bench_load_lifecycle(
             # 6. get_finished
             t0 = time.perf_counter()
             while not worker.get_finished():
-                time.sleep(0.0001)
+                _poll_wait()
             phases["get_finished"].record(time.perf_counter() - t0)
 
             # 7. complete_load (unpin)
@@ -878,7 +878,7 @@ def bench_cold_load_shaped(
                 slot_of[job_id] = slot
             finished = worker.get_finished()
             if not finished:
-                time.sleep(0.0001)
+                _poll_wait()
                 continue
             failed = []
             for res in finished:
@@ -899,7 +899,7 @@ def bench_cold_load_shaped(
                     for res in worker.get_finished():
                         hits, _ = pending.pop(res.job_id)
                         manager.complete_load(hits)
-                    time.sleep(0.0001)
+                    _poll_wait()
                 raise RuntimeError(f"cold load job(s) {failed} failed")
         timed += time.perf_counter() - t_pass
         passes += 1
@@ -1019,6 +1019,22 @@ class _ByteVerifier:
               f"  (timings above include the verification work)")
         if self.bad:
             raise RuntimeError(f"--verify: {self.bad} of {self.checked} loaded blocks wrong")
+
+
+# How long every pass waits between polls for finished transfers (--step-us; the
+# in-flight passes use it as their scheduler tick). The old passes always slept 100 us
+# here, which is the default, so their behaviour is unchanged unless --step-us is set.
+# --step-us 0 polls without sleeping (time.sleep(0), releasing the GIL).
+_POLL_S = 100e-6
+
+
+def set_poll_us(step_us: float) -> None:
+    global _POLL_S
+    _POLL_S = max(0.0, float(step_us)) / 1e6
+
+
+def _poll_wait() -> None:
+    time.sleep(_POLL_S)
 
 
 def _step_idle(step_us: float, t_tick: float) -> None:
@@ -1348,7 +1364,7 @@ def _populate_jobs(manager, worker, keys, job_blocks, verifier=None) -> None:
             while not res:
                 res = worker.get_finished()
                 if not res:
-                    time.sleep(0.0001)
+                    _poll_wait()
             ok = all(r.success for r in res)
         finally:
             manager.complete_store(stored, success=ok)
@@ -1384,7 +1400,7 @@ def _verify_load_back(manager, worker, keys, job_blocks, verifier) -> None:
             while not res:
                 res = worker.get_finished()
                 if not res:
-                    time.sleep(0.0001)
+                    _poll_wait()
             if all(r.success for r in res):
                 verifier.check(hits, 0)
         finally:
@@ -1732,7 +1748,7 @@ def bench_mixed_eviction(
 
             t0 = time.perf_counter()
             while not worker.get_finished():
-                time.sleep(0.0001)
+                _poll_wait()
             phases["store_finish"].record(time.perf_counter() - t0)
 
             t0 = time.perf_counter()
@@ -1783,7 +1799,7 @@ def bench_mixed_eviction(
 
             t0 = time.perf_counter()
             while not worker.get_finished():
-                time.sleep(0.0001)
+                _poll_wait()
             phases["load_finish"].record(time.perf_counter() - t0)
 
             t0 = time.perf_counter()
@@ -1935,7 +1951,7 @@ def bench_pipelined(
                                 manager.complete_load(done_keys)
                             phases["complete"].record(time.perf_counter() - t_c)
                     else:
-                        time.sleep(0.0001)
+                        _poll_wait()
                 phases["pipeline_drain"].record(time.perf_counter() - t0)
 
         # Drain remaining in-flight jobs.
@@ -1953,7 +1969,7 @@ def bench_pipelined(
                             manager.complete_load(done_keys)
                         phases["complete"].record(time.perf_counter() - t_c)
                 else:
-                    time.sleep(0.0001)
+                    _poll_wait()
             phases["pipeline_drain"].record(time.perf_counter() - t0)
 
         iteration += 1
@@ -2070,7 +2086,7 @@ def bench_prefix_miss(
                 job_id += 1
                 worker.submit_load(job_id, load_spec, _FakeGPUSpec(gpu_ids))
                 while not worker.get_finished():
-                    time.sleep(0.0001)
+                    _poll_wait()
                 manager.complete_load(prefix_hits)
                 phases["load"].record(time.perf_counter() - t0)
                 total_blocks += len(prefix_hits)
@@ -2213,7 +2229,7 @@ def bench_contention(
 
             t0 = time.perf_counter()
             while not worker_store.get_finished():
-                time.sleep(0.0001)
+                _poll_wait()
             store_phases["get_finished"].record(time.perf_counter() - t0)
 
             t0 = time.perf_counter()
@@ -2259,7 +2275,7 @@ def bench_contention(
 
         t0 = time.perf_counter()
         while not worker_load.get_finished():
-            time.sleep(0.0001)
+            _poll_wait()
         phases["get_finished"].record(time.perf_counter() - t0)
 
         t0 = time.perf_counter()
@@ -2293,7 +2309,7 @@ def bench_contention(
         worker_store.submit_store(job_id, _FakeGPUSpec(list(range(len(result.keys_to_store)))),
                                   result.store_spec)
         while not worker_store.get_finished():
-            time.sleep(0.0001)
+            _poll_wait()
         manager_store.complete_store(result.keys_to_store, success=True)
         return list(result.keys_to_store)
 
@@ -2476,7 +2492,7 @@ def bench_scheduler_step(
                 finished = worker.get_finished()
                 if finished:
                     break
-                time.sleep(0.0001)
+                _poll_wait()
             manager.complete_store(prev_stored_keys, success=True)
             total_blocks += len(prev_stored_keys)
             prev_store_pending = False
@@ -2570,7 +2586,7 @@ def bench_scheduler_step(
             if finished:
                 drained += len(finished)
             else:
-                time.sleep(0.0001)
+                _poll_wait()
         phases["drain_workers"].record(time.perf_counter() - t0)
 
         # Complete load.
@@ -2605,7 +2621,7 @@ def bench_scheduler_step(
             finished = worker.get_finished()
             if finished:
                 break
-            time.sleep(0.0001)
+            _poll_wait()
         manager.complete_store(prev_stored_keys, success=True)
         total_blocks += len(prev_stored_keys)
 
@@ -2781,7 +2797,7 @@ def _bench_pattern_store(manager, worker, keys, batch_size, block_bytes, min_dur
 
             t0 = time.perf_counter()
             while not worker.get_finished():
-                time.sleep(0.0001)
+                _poll_wait()
             phases["get_finished"].record(time.perf_counter() - t0)
 
             t0 = time.perf_counter()
@@ -2862,7 +2878,7 @@ def _bench_pattern_load(manager, worker, keys, batch_size, block_bytes, min_dura
 
             t0 = time.perf_counter()
             while not worker.get_finished():
-                time.sleep(0.0001)
+                _poll_wait()
             phases["get_finished"].record(time.perf_counter() - t0)
 
             t0 = time.perf_counter()
@@ -2912,7 +2928,7 @@ def _populate_int_keys(manager, worker, keys, batch_size, ring, tp):
         job_id += 1
         worker.submit_store(job_id, _FakeGPUSpec(gpu_ids), result.store_spec)
         while not worker.get_finished():
-            time.sleep(0.0001)
+            _poll_wait()
         manager.complete_store(stored, success=True)
 
 
@@ -3106,7 +3122,7 @@ def _populate_keys(
         job_id += 1
         worker.submit_store(job_id, _FakeGPUSpec(gpu_ids), result.store_spec)
         while not worker.get_finished():
-            time.sleep(0.0001)
+            _poll_wait()
         manager.complete_store(stored, success=True)
 
 
@@ -3266,8 +3282,10 @@ def main():
     parser.add_argument("--store-inflight", type=int, default=None,
                         help="(mixed-inflight) store jobs outstanding (default --inflight)")
     parser.add_argument("--step-us", type=float, default=100.0,
-                        help="(*-inflight) scheduler tick: N (default 100) sleeps to the next "
-                             "N-us boundary; 0 is a tight loop that yields the CPU each tick "
+                        help="poll interval for finished transfers, every mode: N (default 100, "
+                             "what every pass always slept) sleeps N us between polls, and is "
+                             "the in-flight passes' scheduler tick; 0 polls without sleeping, a "
+                             "tight loop that yields the CPU each tick "
                              "(it stalls some jobs on the GIL: p99 up to 27 ms vs 6.4 ms at "
                              "100, warm 64x1, 2026-11-05)")
     parser.add_argument("--verify", action="store_true",
@@ -3299,6 +3317,9 @@ def main():
         for key, val in shape.items():
             if key not in ("observation", "assumed") and key not in explicit:
                 setattr(args, key, val)
+    if args.step_us < 0:
+        parser.error("--step-us must be >= 0")
+    set_poll_us(args.step_us)   # every mode's poll for finished transfers
     if args.mode in INFLIGHT_MODES:
         if args.verify and args.pieces_per_block >= 1 and \
                 args.block_bytes // args.pieces_per_block < 64:
@@ -3311,8 +3332,6 @@ def main():
         for name in ("job_blocks", "inflight", "store_job_blocks", "store_inflight"):
             if getattr(args, name) < 1:
                 parser.error(f"--{name.replace('_', '-')} must be >= 1")
-        if args.step_us < 0:
-            parser.error("--step-us must be >= 0")
         if args.tp != 1 or args.gpus:
             parser.error(f"--mode {args.mode} supports TP=1 only")
         if not cold_shape_is_default(args):
