@@ -294,6 +294,69 @@ python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --preset longdocqa --tier-fill-blocks 4915 --working-set 2500
 ```
 
+#### In-flight passes (vLLM 0.30's step loop)
+
+The default-mode warm load and store run one 16-block job at a time and sleep-poll
+`get_finished()` until it is done. vLLM 0.30 does neither: its offloading worker
+(`offloading/worker.py`) submits each step's new loads and the stores deferred from
+the previous step without waiting, and reaps whatever finished with one non-blocking
+`get_finished()` per step, so several requests' jobs are outstanding at once. Three
+modes drive the connector that way. They are separate `--mode` values, not part of
+`--mode all`, so every existing pass and its output are unchanged.
+
+- `--mode warm-inflight`: warm load. `--num-blocks` keys (they must fit the memory
+  tier at its eviction threshold) are stored once in jobs of `--store-job-blocks`
+  (default `--job-blocks`) and written through; the tier is never flushed or
+  cleared. Then the keys are loaded as `--job-blocks`-key jobs, `--inflight`
+  outstanding, in a shuffled order per pass.
+- `--mode store-inflight`: store, `--inflight` jobs of `--job-blocks` outstanding.
+  Each job is prepared (`prepare_store`, then `touch`, as vLLM's `_build_store_jobs`)
+  in one tick and submitted in the next (`prepare_store_kv` defers it). As in the
+  default store pass, each pass's write-through drain and key removal are outside
+  the timing; the sustained figure including them is printed too.
+- `--mode mixed-inflight`: `--inflight` load jobs of `--job-blocks` and
+  `--store-inflight` store jobs of `--store-job-blocks` fresh keys, together on one
+  worker, as in serving. Nothing is excluded: the write-through and any eviction run
+  inside the window. Load misses and store drops are counted. The existing
+  `--mode contention` (one store thread against one load thread) is unchanged.
+
+Job size and jobs in flight are independent knobs because both vary by workload: a
+vLLM load job is one request's prefix hit, a store job one request's chunk per step.
+The defaults, 16 × 4, are for running a pass; they are not a recommended setting.
+`--step-us 0` (default) is a tight scheduler loop that yields the CPU each tick
+(`os.sched_yield()`, as vLLM's own busy loops do, so the pool threads get the GIL);
+`--step-us N` sleeps to the next N-µs tick. Each report prints, per direction, the
+per-job time from submit to reap (`*_job`), the connector's `transfer_time`
+(`*_transfer`, what vLLM logs as `kv_offload_load_time` / `kv_offload_store_time`),
+the mean number of jobs outstanding, and the measured concurrency (summed
+`transfer_time` over wall time, the formula behind LongDocQA's 2.91 in
+`knowledge/serving/observations.yaml`). `--verify` stamps every stored block and
+compares every loaded block byte for byte (its timings include that work). The
+modes need TP=1 and the server needs `min(--workers, jobs in flight) + 1` channels.
+
+`--shape longdocqa` sets LongDocQA's job shape (625-block loads × 4, 105-block
+stores × 4, 2 MiB blocks in 32 pieces); explicit flags override it. Shapes are for
+checking the benchmark against a measured workload, not for a target's primary
+metric. `knowledge/serving/check.py` fails if a shape disagrees with the
+observation it names.
+
+```bash
+# 12 GiB tier (threshold 0.8): 4,000 blocks of 2 MiB fit
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
+    --mode warm-inflight --job-blocks 64 --inflight 4 --num-blocks 4000 \
+    --block-bytes 2097152 --pieces-per-block 32 --workers 4
+```
+
+```
+--job-blocks N         (*-inflight) blocks per job (default: 16)
+--inflight N           (*-inflight) jobs outstanding (default: 4)
+--store-job-blocks N   (mixed-inflight) blocks per store job (default: --job-blocks)
+--store-inflight N     (mixed-inflight) store jobs outstanding (default: --inflight)
+--step-us US           (*-inflight) scheduler tick; 0 = tight loop (default: 0)
+--shape NAME           (*-inflight) validation shape: longdocqa
+--verify               (*-inflight) byte-compare every loaded block
+```
+
 #### Per-mode options
 
 ```

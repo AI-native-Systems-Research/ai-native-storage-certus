@@ -60,6 +60,19 @@ connector sends N regions per block.
 --pieces-per-block N reproduces that: N GPU tensors of [blocks, block_bytes / N].
 The default, 1, is one contiguous region per block (vLLM 0.20/0.22).
 
+In-flight passes (--mode warm-inflight / store-inflight / mixed-inflight) drive the
+connector as vLLM 0.30's offloading worker does: several jobs outstanding, submitted
+without waiting and reaped by one get_finished() per scheduler tick, never a
+sleep-poll for one job. Job size (--job-blocks) and jobs in flight (--inflight) are
+independent; the defaults (16 x 4) are for running the pass, not a recommendation.
+    python bench_connector_lifecycle.py --mode warm-inflight --job-blocks 64 --inflight 4 \
+        --block-bytes 2097152 --pieces-per-block 32 --num-blocks 4000 --workers 4
+    python bench_connector_lifecycle.py --mode store-inflight --job-blocks 105 --inflight 2
+    python bench_connector_lifecycle.py --mode mixed-inflight --job-blocks 64 --inflight 4
+    # LongDocQA's job shape, for checking the benchmark against that workload only
+    python bench_connector_lifecycle.py --mode warm-inflight --shape longdocqa --num-blocks 4000
+    # --verify compares every loaded byte (timings then include the check)
+
 Cold-load shape (default mode only): --cold-tier-state, --store-order,
 --load-unit, --cold-inflight and --preset change how the cold pass is set up
 and driven, to match serving conditions (see knowledge/serving/). Their
@@ -764,6 +777,41 @@ def populate_shaped(manager, worker, keys, batch_size, store_order, requests):
             _populate_keys(manager, worker, [p[step]], 1)
 
 
+def _start_load_job(manager, worker, unit, gpu_base, job_id, phases, *,
+                    touch_first: bool, prefix_stop: bool) -> list[bytes]:
+    """One load job as vLLM's scheduler and worker start it: lookup the unit's keys
+    (stopping at the first miss when ``prefix_stop``, as a request's prefix does),
+    touch them (before the lookups with ``touch_first``), pin the hits
+    (prepare_load) and submit them to GPU blocks ``gpu_base..``. Returns the hits;
+    nothing is pinned or submitted when there are none. Phases "touch", "lookup",
+    "prepare_load" and "submit_load" are recorded. Shared by the shaped cold pass
+    and the in-flight passes."""
+    if touch_first:
+        t0 = time.perf_counter(); manager.touch(unit)
+        phases["touch"].record(time.perf_counter() - t0)
+    t0 = time.perf_counter()
+    hits = []
+    for k in unit:
+        if not manager.lookup(k):
+            if prefix_stop:
+                break
+            continue
+        hits.append(k)
+    phases["lookup"].record(time.perf_counter() - t0)
+    if not touch_first:
+        t0 = time.perf_counter(); manager.touch(unit)
+        phases["touch"].record(time.perf_counter() - t0)
+    if not hits:
+        return hits
+    t0 = time.perf_counter()
+    spec = manager.prepare_load(hits)
+    phases["prepare_load"].record(time.perf_counter() - t0)
+    t0 = time.perf_counter()
+    worker.submit_load(job_id, spec, _FakeGPUSpec(list(range(gpu_base, gpu_base + len(hits)))))
+    phases["submit_load"].record(time.perf_counter() - t0)
+    return hits
+
+
 def bench_cold_load_shaped(
     manager: ShmqCertusOffloadingManager,
     worker,
@@ -813,32 +861,14 @@ def bench_cold_load_shaped(
         while units or pending:
             while units and len(pending) < args.cold_inflight:
                 unit = units.pop(0)
-                if touch_first:
-                    t0 = time.perf_counter(); manager.touch(unit)
-                    phases["touch"].record(time.perf_counter() - t0)
-                t0 = time.perf_counter()
-                hits = []
-                for k in unit:
-                    if not manager.lookup(k):
-                        if args.load_unit == "request":
-                            break          # vLLM stops a prefix at the first miss
-                        continue
-                    hits.append(k)
-                phases["lookup"].record(time.perf_counter() - t0)
-                if not touch_first:
-                    t0 = time.perf_counter(); manager.touch(unit)
-                    phases["touch"].record(time.perf_counter() - t0)
+                hits = _start_load_job(
+                    manager, worker, unit, slots[0] * unit_len, job_id + 1, phases,
+                    touch_first=touch_first,
+                    prefix_stop=args.load_unit == "request")  # vLLM stops a prefix at the first miss
                 if not hits:
                     continue
-                t0 = time.perf_counter()
-                spec = manager.prepare_load(hits)
-                phases["prepare_load"].record(time.perf_counter() - t0)
                 slot = slots.pop(0)
-                base = slot * unit_len
                 job_id += 1
-                t0 = time.perf_counter()
-                worker.submit_load(job_id, spec, _FakeGPUSpec(list(range(base, base + len(hits)))))
-                phases["submit_load"].record(time.perf_counter() - t0)
                 pending[job_id] = (hits, time.perf_counter())
                 slot_of[job_id] = slot
             finished = worker.get_finished()
@@ -878,6 +908,614 @@ def bench_cold_load_shaped(
         wall_seconds=timed,
         phases=phases,
     )
+
+
+# ── in-flight passes: vLLM 0.30's step loop (warm load, store, mixed) ─────
+#
+# vLLM 0.30's offloading worker (offloading/worker.py) never waits for a transfer:
+# each engine step it submits the step's new load jobs and the stores deferred from
+# the previous step (start_kv_transfers), and reaps whatever has finished with one
+# non-blocking get_finished() call. Several requests' jobs are outstanding at once.
+# The default-mode passes instead run one job at a time and sleep-poll
+# get_finished() for it. The passes below drive the connector the way vLLM does,
+# with job size (--job-blocks) and jobs in flight (--inflight) as independent knobs:
+# neither is fixed by the pass, because both vary by workload. Each tick: submit
+# into free slots, call get_finished() once, complete what finished, then idle
+# (--step-us 0: os.sched_yield(), as vLLM's own busy loops do, so the pool threads
+# get the GIL; --step-us N: sleep to the next N-us tick boundary). No call waits
+# for a particular job.
+
+# Named shapes of real workloads, for checking the benchmark against them, not for
+# a target's primary metric (fitting a target to one workload tunes Certus to that
+# workload). "observation" names the knowledge/serving/observations.yaml entry;
+# knowledge/serving/check.py fails if a shape and its observation disagree.
+INFLIGHT_SHAPES = {
+    # LongDocQA, Llama-3-8B, vLLM 0.30, LBHNC: one 625-block load job per document
+    # (10,000 tokens / 16), 4 requests in flight; stores of ~105 blocks per job
+    # (67.5 GB over 306 jobs: one job per request per 2,048-token prefill chunk).
+    "longdocqa": {
+        "observation": "ldq-llama-3-8b-lbhnc-2026-10-26",
+        "block_bytes": 2097152,
+        "pieces_per_block": 32,
+        "job_blocks": 625,
+        "inflight": 4,
+        "store_job_blocks": 105,
+        "store_inflight": 4,
+    },
+}
+
+INFLIGHT_MODES = ("warm-inflight", "store-inflight", "mixed-inflight")
+
+
+class _ByteVerifier:
+    """--verify for the in-flight passes: every block a store job sends is first
+    written with its key's pattern, every load job's GPU blocks are zeroed before it
+    is submitted and compared with its keys' patterns when it is reaped. A block's
+    pattern is, in each of its pieces, the key's first 8 bytes followed by a fill byte
+    of (key[0] + piece index) mod 256, so a block or piece delivered to the wrong
+    place, or not at all, fails. Adds GPU work to the timed loop: timings taken with
+    --verify are not comparable with timings taken without it."""
+
+    def __init__(self, tensors: list):
+        self.tensors = tensors
+        self.checked = 0
+        self.bad = 0
+
+    def _rows(self, t, base, n, piece):
+        return t.view(-1, piece)[base:base + n]
+
+    def _pattern(self, keys, layer, piece, device):
+        fill = torch.tensor([(k[0] + layer) % 256 for k in keys], dtype=torch.uint8, device=device)
+        pat = fill.unsqueeze(1).expand(len(keys), piece).clone()
+        pat[:, :8] = torch.tensor([list(k[:8]) for k in keys], dtype=torch.uint8, device=device)
+        return pat
+
+    def _piece(self):
+        return self.tensors[0].numel() // self._blocks
+
+    def bind(self, num_blocks: int):
+        self._blocks = num_blocks
+        return self
+
+    def write(self, keys, base):
+        piece = self._piece()
+        for layer, t in enumerate(self.tensors):
+            self._rows(t, base, len(keys), piece).copy_(self._pattern(keys, layer, piece, t.device))
+        torch.cuda.synchronize()
+
+    def zero(self, base, n):
+        piece = self._piece()
+        for t in self.tensors:
+            self._rows(t, base, n, piece).zero_()
+        torch.cuda.synchronize()
+
+    def check(self, keys, base) -> None:
+        torch.cuda.synchronize()
+        piece = self._piece()
+        bad = torch.zeros(len(keys), dtype=torch.bool, device=self.tensors[0].device)
+        for layer, t in enumerate(self.tensors):
+            got = self._rows(t, base, len(keys), piece)
+            bad |= (got != self._pattern(keys, layer, piece, t.device)).any(dim=1)
+        self.checked += len(keys)
+        self.bad += int(bad.sum().item())
+
+    def report(self, what: str) -> None:
+        print(f"  Verify ({what}): {self.checked} blocks compared, {self.bad} wrong"
+              f"  (timings above include the verification work)")
+        if self.bad:
+            raise RuntimeError(f"--verify: {self.bad} of {self.checked} loaded blocks wrong")
+
+
+def _step_idle(step_us: float, t_tick: float) -> None:
+    """End of one step-loop tick: yield (step_us <= 0) or sleep to the tick boundary."""
+    if step_us <= 0:
+        os.sched_yield()
+        return
+    rest = t_tick + step_us / 1e6 - time.perf_counter()
+    if rest > 0:
+        time.sleep(rest)
+
+
+class _InflightStats:
+    """Per-direction accounting for the in-flight passes: per-job times (submit to
+    reap, and the connector's TransferResult.transfer_time, which is what vLLM logs
+    as kv_offload_load_time / kv_offload_store_time), blocks moved and the
+    time-weighted number of jobs outstanding."""
+
+    def __init__(self, prefix: str):
+        self.job = PhaseTiming(f"{prefix}job")
+        self.transfer = PhaseTiming(f"{prefix}transfer")
+        self.blocks = 0
+        self.jobs = 0
+        self.misses = 0      # loads: keys whose lookup missed; stores: keys not reserved
+        self._area = 0.0     # integral of jobs outstanding over time
+        self._t_last = None
+
+    def sample(self, outstanding: int, now: float) -> None:
+        if self._t_last is not None:
+            self._area += outstanding * (now - self._t_last)
+        self._t_last = now
+
+    def outstanding_mean(self, wall: float) -> float:
+        return self._area / wall if wall > 0 else 0.0
+
+    def concurrency(self, wall: float) -> float:
+        """Summed transfer time over wall time: the formula the LongDocQA observation
+        uses for its measured load concurrency (2.91 with 4 configured)."""
+        return sum(self.transfer.samples) / wall if wall > 0 else 0.0
+
+
+def _print_inflight_summary(stats: _InflightStats, wall: float, what: str) -> None:
+    print(f"  {what} jobs={stats.jobs}  per-job submit->reap mean={stats.job.mean_us:.1f}us "
+          f"p50={stats.job.p50_us:.1f}us p99={stats.job.p99_us:.1f}us  "
+          f"transfer_time mean={stats.transfer.mean_us:.1f}us  "
+          f"outstanding mean={stats.outstanding_mean(wall):.2f}  "
+          f"concurrency (sum transfer / wall)={stats.concurrency(wall):.2f}")
+
+
+class _StepLoop:
+    """The shared step loop: one worker, load and store jobs outstanding together,
+    each in its own GPU block slot, reaped by one get_finished() per tick.
+
+    Loads are started in the tick they are scheduled (lookup -> touch ->
+    prepare_load -> submit_load, as vLLM's get_num_new_matched_tokens /
+    update_state_after_alloc / start_kv_transfers do). Stores are prepared in one
+    tick (prepare_store, then touch, as _build_store_jobs does) and submitted at the
+    start of the next (prepare_store_kv defers them past the step's sampling).
+    Finished jobs are completed (complete_load / complete_store) when reaped. A
+    failed job is completed too, then every outstanding job is drained and
+    completed before RuntimeError is raised, so no key stays pinned or reserved."""
+
+    def __init__(self, manager, worker, phases, *, touch_first: bool,
+                 load_slots: int = 0, load_job_blocks: int = 0,
+                 store_slots: int = 0, store_job_blocks: int = 0,
+                 drain_events: bool = False, verifier: "_ByteVerifier | None" = None):
+        self.manager, self.worker, self.phases = manager, worker, phases
+        self.verifier = verifier
+        self.touch_first = touch_first
+        self.load_job_blocks = load_job_blocks
+        self.store_job_blocks = store_job_blocks
+        # GPU block ranges: load slots first, then store slots, never overlapping.
+        self.free_load = list(range(load_slots))
+        self.free_store = list(range(store_slots))
+        self.store_base = load_slots * load_job_blocks
+        self.load_stats = _InflightStats("load_")
+        self.store_stats = _InflightStats("store_")
+        self.pending: dict[int, tuple] = {}   # job_id -> (kind, keys, slot, t_submit, tag)
+        self.deferred: list[tuple] = []       # prepared stores: (keys, spec, slot, tag)
+        self.n_load = 0
+        self.n_store = 0                      # submitted + deferred stores
+        self.job_id = 3_000_000
+        self.drain_events = drain_events
+        self.events = 0
+
+    # ── scheduling ──
+
+    def load_slot_free(self) -> bool:
+        return bool(self.free_load)
+
+    def store_slot_free(self) -> bool:
+        return bool(self.free_store)
+
+    def start_load(self, unit, tag=None) -> bool:
+        """Start one load job for ``unit`` (a request's keys, prefix order). False when
+        no key hit (nothing pinned or submitted)."""
+        slot = self.free_load[0]
+        self.job_id += 1
+        if self.verifier is not None:
+            self.verifier.zero(slot * self.load_job_blocks, self.load_job_blocks)
+        hits = _start_load_job(self.manager, self.worker, unit, slot * self.load_job_blocks,
+                               self.job_id, self.phases, touch_first=self.touch_first,
+                               prefix_stop=True)
+        self.load_stats.misses += len(unit) - len(hits)
+        if not hits:
+            return False
+        self.sample(time.perf_counter())
+        self.free_load.pop(0)
+        self.pending[self.job_id] = ("load", hits, slot, time.perf_counter(), tag)
+        self.n_load += 1
+        return True
+
+    def prepare_store(self, unit, tag=None) -> bool:
+        """Prepare one store job for ``unit``; it is submitted by the next tick's
+        submit_deferred(). False when nothing was reserved."""
+        m, ph = self.manager, self.phases
+        t0 = time.perf_counter()
+        out = m.prepare_store(unit)
+        ph["prepare_store"].record(time.perf_counter() - t0)
+        stored = list(out.keys_to_store) if out is not None else []
+        self.store_stats.misses += len(unit) - len(stored)
+        if not stored:
+            return False
+        t0 = time.perf_counter()
+        m.touch(unit)
+        ph["store_touch" if "store_touch" in ph else "touch"].record(time.perf_counter() - t0)
+        self.sample(time.perf_counter())
+        slot = self.free_store.pop(0)
+        self.deferred.append((stored, out.store_spec, slot, tag))
+        self.n_store += 1
+        return True
+
+    def submit_deferred(self) -> None:
+        for stored, spec, slot, tag in self.deferred:
+            base = self.store_base + slot * self.store_job_blocks
+            self.job_id += 1
+            if self.verifier is not None:
+                self.verifier.write(stored, base)
+            t0 = time.perf_counter()
+            self.worker.submit_store(self.job_id, _FakeGPUSpec(list(range(base, base + len(stored)))),
+                                     spec)
+            self.phases["submit_store"].record(time.perf_counter() - t0)
+            self.pending[self.job_id] = ("store", stored, slot, time.perf_counter(), tag)
+        self.deferred = []
+
+    # ── reaping ──
+
+    def reap(self) -> list[tuple]:
+        """One get_finished() call; completes each finished job. Returns
+        (kind, keys, tag) per finished job."""
+        t0 = time.perf_counter()
+        finished = self.worker.get_finished()
+        self.phases["get_finished"].record(time.perf_counter() - t0)
+        done, failed = [], []
+        now = time.perf_counter()
+        if finished:
+            self.sample(now)
+        for res in finished:
+            kind, keys, slot, t_sub, tag = self.pending.pop(res.job_id)
+            stats = self.load_stats if kind == "load" else self.store_stats
+            stats.job.record(now - t_sub)
+            if getattr(res, "transfer_time", None) is not None:
+                stats.transfer.record(res.transfer_time)
+            self._complete(kind, keys, bool(res.success))
+            if kind == "load":
+                self.free_load.append(slot)
+                self.n_load -= 1
+            else:
+                self.free_store.append(slot)
+                self.n_store -= 1
+            if res.success:
+                if kind == "load" and self.verifier is not None:
+                    self.verifier.check(keys, slot * self.load_job_blocks)
+                stats.blocks += len(keys)
+                stats.jobs += 1
+                done.append((kind, keys, tag))
+            else:
+                failed.append(res.job_id)
+        if self.drain_events and any(k == "store" for k, _, _ in done):
+            t0 = time.perf_counter()
+            for ev in self.manager.take_events():
+                self.events += len(getattr(ev, "keys", ()) or ())
+            self.phases["take_events"].record(time.perf_counter() - t0)
+        if failed:
+            self._abort()
+            raise RuntimeError(f"in-flight transfer job(s) {failed} failed")
+        return done
+
+    def _complete(self, kind, keys, success) -> None:
+        t0 = time.perf_counter()
+        if kind == "load":
+            self.manager.complete_load(keys)
+            self.phases["complete_load"].record(time.perf_counter() - t0)
+        else:
+            self.manager.complete_store(keys, success=success)
+            self.phases["complete_store"].record(time.perf_counter() - t0)
+
+    def _abort(self) -> None:
+        """Abort prepared stores and drain every outstanding job, completing each."""
+        for stored, _spec, _slot, _tag in self.deferred:
+            self.manager.complete_store(stored, success=False)
+        self.deferred = []
+        while self.pending:
+            for res in self.worker.get_finished():
+                kind, keys, _slot, _t, _tag = self.pending.pop(res.job_id)
+                self._complete(kind, keys, bool(res.success))
+            os.sched_yield()
+
+    def sample(self, now: float) -> None:
+        self.load_stats.sample(self.n_load, now)
+        self.store_stats.sample(self.n_store, now)
+
+    def drain(self, step_us: float) -> None:
+        """Run ticks (submit deferred, reap) until nothing is outstanding."""
+        while self.deferred or self.pending:
+            t_tick = time.perf_counter()
+            self.submit_deferred()
+            self.reap()
+            _step_idle(step_us, t_tick)
+        self.sample(time.perf_counter())
+
+
+def _inflight_phases(*names) -> dict[str, PhaseTiming]:
+    return {n: PhaseTiming(n) for n in names}
+
+
+def _job_units(keys: list[bytes], job_blocks: int) -> list[list[bytes]]:
+    return [keys[i:i + job_blocks] for i in range(0, len(keys), job_blocks)]
+
+
+def _populate_jobs(manager, worker, keys, job_blocks, verifier=None) -> None:
+    """Store ``keys`` as job_blocks-key jobs (outside any timing), so each job's keys
+    form one commit group, as one vLLM store job's do. With a verifier each job's
+    GPU blocks are first written with its keys' patterns."""
+    if verifier is None:
+        _populate_keys(manager, worker, keys, job_blocks)
+        return
+    job_id = 4_000_000
+    for i in range(0, len(keys), job_blocks):
+        batch = keys[i:i + job_blocks]
+        out = manager.prepare_store(batch)
+        if out is None or not out.keys_to_store:
+            continue
+        stored = list(out.keys_to_store)
+        manager.touch(batch)
+        verifier.write(stored, 0)
+        job_id += 1
+        worker.submit_store(job_id, _FakeGPUSpec(list(range(len(stored)))), out.store_spec)
+        while not worker.get_finished():
+            time.sleep(0.0001)
+        manager.complete_store(stored, success=True)
+
+
+def _verify_load_back(manager, worker, keys, job_blocks, verifier) -> None:
+    """--verify for the store pass: load ``keys`` back one job at a time (outside the
+    timing) and compare every block."""
+    job_id = 4_500_000
+    for unit in _job_units(keys, job_blocks):
+        hits = [k for k in unit if manager.lookup(k)]
+        if len(hits) != len(unit):
+            verifier.bad += len(unit) - len(hits)
+            verifier.checked += len(unit) - len(hits)
+        if not hits:
+            continue
+        verifier.zero(0, len(hits))
+        spec = manager.prepare_load(hits)
+        job_id += 1
+        worker.submit_load(job_id, spec, _FakeGPUSpec(list(range(len(hits)))))
+        while not worker.get_finished():
+            time.sleep(0.0001)
+        manager.complete_load(hits)
+        verifier.check(hits, 0)
+
+
+def inflight_label(args, direction: str) -> str:
+    if direction == "mixed":
+        s = (f"load {args.job_blocks}x{args.inflight} "
+             f"store {args.store_job_blocks}x{args.store_inflight}")
+    elif direction == "store":
+        s = f"job_blocks={args.job_blocks} inflight={args.inflight}"
+    else:
+        s = f"job_blocks={args.job_blocks} inflight={args.inflight}"
+    s += f" step_us={args.step_us:g}"
+    if args.pieces_per_block > 1:
+        s += f" pieces={args.pieces_per_block}"
+    if args.shape:
+        s += f" shape={args.shape}"
+    return s
+
+
+def bench_warm_inflight(manager, worker, keys, block_bytes, min_duration, *, args,
+                        lookup_order: str = LOOKUP_FIRST, verifier=None) -> BenchResult:
+    """Warm load with jobs in flight: the working set (``keys``, which must fit the
+    memory tier) is stored once as store jobs of --store-job-blocks (default
+    --job-blocks) keys, its write-through drained (it stays resident; nothing is
+    flushed out or cleared), then loaded as --job-blocks-key jobs with up to
+    --inflight outstanding, in a shuffled order per pass over the working set, by
+    the step loop. A job whose keys are still in flight is skipped for that turn.
+    Timed from the first submit to the last reap; at least two passes and
+    --min-duration seconds."""
+    touch_first = lookup_order == TOUCH_FIRST
+    phases = _inflight_phases("touch", "lookup", "prepare_load", "submit_load",
+                              "get_finished", "complete_load")
+    units = _job_units(keys, args.job_blocks)
+    if len(units) <= args.inflight:
+        raise ValueError(f"warm-inflight: {len(keys)} keys make {len(units)} jobs of "
+                         f"{args.job_blocks}; need more than --inflight {args.inflight}")
+    _populate_jobs(manager, worker, keys, args.store_job_blocks or args.job_blocks, verifier)
+    manager._ring.flush_to_ssd()   # the write-through must not overlap the timed loads
+    loop = _StepLoop(manager, worker, phases, touch_first=touch_first,
+                     load_slots=args.inflight, load_job_blocks=args.job_blocks,
+                     verifier=verifier)
+    rng = random.Random(args.seed)
+    busy: set[int] = set()
+    order: list[int] = []
+    passes = 0
+    t_start = time.perf_counter()
+    loop.sample(t_start)
+    while True:
+        t_tick = time.perf_counter()
+        # Stop starting jobs at a pass boundary once --min-duration and 2 passes are done.
+        running = not (t_tick - t_start >= min_duration and passes >= 2 and not order)
+        while running and loop.load_slot_free():
+            if not order:
+                order = list(range(len(units)))
+                rng.shuffle(order)
+                passes += 1
+            idx = next((i for i in order if i not in busy), None)
+            if idx is None:
+                break
+            order.remove(idx)
+            if loop.start_load(units[idx], tag=idx):
+                busy.add(idx)
+        for _kind, _keys, idx in loop.reap():
+            busy.discard(idx)
+        if not running and not loop.pending:
+            break
+        _step_idle(args.step_us, t_tick)
+    wall = time.perf_counter() - t_start
+    loop.sample(t_start + wall)
+    st = loop.load_stats
+    phases["load_job"], phases["load_transfer"] = st.job, st.transfer
+    result = BenchResult(
+        label=f"Warm Load In-Flight ({inflight_label(args, 'load')})",
+        total_blocks=st.blocks, total_bytes=st.blocks * block_bytes,
+        wall_seconds=wall, phases=phases,
+    )
+    result.counts = {"load_misses": st.misses}
+    result.print_report()
+    _print_inflight_summary(st, wall, "load")
+    print(f"  Load misses: {st.misses}  passes: {passes}")
+    if verifier is not None:
+        verifier.report("warm-inflight loads")
+    return result
+
+
+def bench_store_inflight(manager, worker, ring, keys, block_bytes, min_duration, *, args,
+                         world_size: int, verifier=None) -> BenchResult:
+    """Store with jobs in flight: per pass every key is stored once as --job-blocks
+    jobs with up to --inflight outstanding (prepared in one tick, submitted the next,
+    reaped by the step loop); then, as in the default store pass and outside the
+    timing, the pass's write-through is drained and its keys removed. The headline
+    is the GPU->DRAM store path; the figure including the drains is printed below.
+    Each pass ends by reaping its last jobs, so its final jobs run with fewer than
+    --inflight outstanding."""
+    phases = _inflight_phases("prepare_store", "touch", "submit_store", "get_finished",
+                              "complete_store", "take_events", "reset")
+    units = _job_units(keys, args.job_blocks)
+    loop = _StepLoop(manager, worker, phases, touch_first=False,
+                     store_slots=args.inflight, store_job_blocks=args.job_blocks,
+                     drain_events=True, verifier=verifier)
+    timed, excluded, passes = 0.0, 0.0, 0
+    t_all = time.perf_counter()
+    while timed < min_duration or passes < 2:
+        todo = list(units)
+        t_pass = time.perf_counter()
+        loop.sample(t_pass)
+        while todo or loop.deferred or loop.pending:
+            t_tick = time.perf_counter()
+            loop.submit_deferred()
+            while todo and loop.store_slot_free():
+                loop.prepare_store(todo.pop(0))
+            loop.reap()
+            _step_idle(args.step_us, t_tick)
+        now = time.perf_counter()
+        loop.sample(now)
+        timed += now - t_pass
+        passes += 1
+        t0 = time.perf_counter()
+        if verifier is not None:
+            _verify_load_back(manager, worker, keys, args.job_blocks, verifier)
+        manager._ring.flush_to_ssd()
+        _remove_keys(ring, keys, world_size)
+        phases["reset"].record(time.perf_counter() - t0)
+        excluded += time.perf_counter() - t0
+    elapsed = time.perf_counter() - t_all
+    st = loop.store_stats
+    phases["store_job"], phases["store_transfer"] = st.job, st.transfer
+    result = BenchResult(
+        label=f"Store In-Flight ({inflight_label(args, 'store')})",
+        total_blocks=st.blocks, total_bytes=st.blocks * block_bytes,
+        wall_seconds=timed, phases=phases,
+    )
+    result.sustained = (result.total_bytes / elapsed / 1e9, elapsed)
+    result.counts = {"store_drops": st.misses}
+    result.print_report()
+    gbs, secs = result.sustained
+    print(f"  Sustained incl. SSD write-through drain: {gbs:.2f} GB/s over {secs:.3f}s")
+    # Outstanding/concurrency over the timed passes only (the drains are excluded).
+    _print_inflight_summary(st, timed, "store")
+    print(f"  Store drops: {st.misses}  passes: {passes}")
+    if verifier is not None:
+        verifier.report("store-inflight, each pass loaded back")
+    return result
+
+
+def bench_mixed_inflight(manager, worker, ring, keys, block_bytes, min_duration, *, args,
+                         world_size: int, lookup_order: str = LOOKUP_FIRST,
+                         verifier=None) -> list[BenchResult]:
+    """Loads and stores in flight together on one worker, as in serving: the load
+    working set (``keys``) is stored and written through first, then for the timed
+    window --inflight load jobs of --job-blocks keys (the working set, shuffled per
+    pass) and --store-inflight store jobs of --store-job-blocks fresh keys run
+    together through the step loop. Nothing is excluded: the stores' write-through
+    to SSD and any eviction it forces run inside the window, as do take_events
+    drains. A load key evicted by then misses (counted). Stored keys are removed
+    after the window. One pool serves both directions (vLLM's single worker), so
+    with more jobs than --workers threads, jobs queue in the pool: the per-job
+    submit-to-reap time includes that wait, transfer_time does not."""
+    touch_first = lookup_order == TOUCH_FIRST
+    phases = _inflight_phases("touch", "lookup", "prepare_load", "submit_load",
+                              "prepare_store", "store_touch", "submit_store", "get_finished",
+                              "complete_load", "complete_store", "take_events")
+    units = _job_units(keys, args.job_blocks)
+    if len(units) <= args.inflight:
+        raise ValueError(f"mixed-inflight: {len(keys)} keys make {len(units)} load jobs "
+                         f"of {args.job_blocks}; need more than --inflight {args.inflight}")
+    _populate_jobs(manager, worker, keys, args.store_job_blocks, verifier)
+    manager._ring.flush_to_ssd()
+    io_before = manager._ring.get_io_stats()
+    loop = _StepLoop(manager, worker, phases, touch_first=touch_first,
+                     load_slots=args.inflight, load_job_blocks=args.job_blocks,
+                     store_slots=args.store_inflight, store_job_blocks=args.store_job_blocks,
+                     drain_events=True, verifier=verifier)
+    rng = random.Random(args.seed)
+    busy: set[int] = set()
+    order: list[int] = []
+    stored_all: list[bytes] = []
+    gen = 0
+    passes = 0
+    base_seed = 50_000_000 + args.seed * 100_000
+    t_start = time.perf_counter()
+    loop.sample(t_start)
+    while True:
+        t_tick = time.perf_counter()
+        # Stop starting jobs at a pass boundary once --min-duration and 2 passes are done.
+        running = not (t_tick - t_start >= min_duration and passes >= 2 and not order)
+        loop.submit_deferred()
+        while running and loop.load_slot_free():
+            if not order:
+                order = list(range(len(units)))
+                rng.shuffle(order)
+                passes += 1
+            idx = next((i for i in order if i not in busy), None)
+            if idx is None:
+                break
+            order.remove(idx)
+            if loop.start_load(units[idx], tag=idx):
+                busy.add(idx)
+        while running and loop.store_slot_free():
+            gen += 1
+            fresh = make_content_keys(args.store_job_blocks, seed=base_seed + gen)
+            stored_all.extend(fresh)
+            loop.prepare_store(fresh)
+        for kind, _keys, idx in loop.reap():
+            if kind == "load":
+                busy.discard(idx)
+        if not running and not loop.pending and not loop.deferred:
+            break
+        _step_idle(args.step_us, t_tick)
+    wall = time.perf_counter() - t_start
+    loop.sample(t_start + wall)
+    io = manager._ring.get_io_stats()
+    io = {k: io[k] - io_before.get(k, 0) for k in io}
+    _remove_keys(ring, stored_all, world_size)
+    lst, sst = loop.load_stats, loop.store_stats
+    load_phases = {k: phases[k] for k in ("touch", "lookup", "prepare_load", "submit_load",
+                                          "get_finished", "complete_load")}
+    load_phases["load_job"], load_phases["load_transfer"] = lst.job, lst.transfer
+    store_phases = {k: phases[k] for k in ("prepare_store", "store_touch", "submit_store",
+                                           "complete_store", "take_events")}
+    store_phases["store_job"], store_phases["store_transfer"] = sst.job, sst.transfer
+    label = inflight_label(args, "mixed")
+    load_r = BenchResult(label=f"Mixed In-Flight: Load ({label})", total_blocks=lst.blocks,
+                         total_bytes=lst.blocks * block_bytes, wall_seconds=wall,
+                         phases=load_phases)
+    load_r.counts = {"load_misses": lst.misses, "disk_read_bytes": io["read_bytes"]}
+    store_r = BenchResult(label=f"Mixed In-Flight: Store ({label})", total_blocks=sst.blocks,
+                          total_bytes=sst.blocks * block_bytes, wall_seconds=wall,
+                          phases=store_phases)
+    store_r.counts = {"store_drops": sst.misses}
+    load_r.print_report()
+    _print_inflight_summary(lst, wall, "load")
+    store_r.print_report()
+    _print_inflight_summary(sst, wall, "store")
+    print(f"  Mixed: load+store {(lst.blocks + sst.blocks) * block_bytes / wall / 1e9:.2f} GB/s  "
+          f"load misses={lst.misses}  store drops={sst.misses}  eviction events={loop.events}  "
+          f"SSD writes={io['write_bytes'] / 1e6:.0f} MB reads={io['read_bytes'] / 1e6:.0f} MB"
+          + ("" if io["write_bytes"] else "  (SSD 0: certus-server built without rw-telemetry)"))
+    if verifier is not None:
+        verifier.report("mixed-inflight loads")
+    return [load_r, store_r]
 
 
 # ── mixed store+load under eviction pressure ───────────────────────────────
@@ -2366,6 +3004,22 @@ def _populate_keys(
 
 # ── main ────────────────────────────────────────────────────────────────────
 
+def _explicit_flags(parser) -> dict:
+    """The flags given on the command line (a --preset or --shape fills only the
+    others). Re-parses with every default suppressed: comparing against the default
+    would miss a flag set to its default value."""
+    given = argparse.ArgumentParser(add_help=False)
+    for action in parser._actions:
+        if action.option_strings and action.dest != "help":
+            kw = {"dest": action.dest, "default": argparse.SUPPRESS}
+            if isinstance(action, argparse._StoreTrueAction):
+                kw["action"] = "store_true"
+            elif action.nargs is not None:
+                kw["nargs"] = action.nargs
+            given.add_argument(*action.option_strings, **kw)
+    return vars(given.parse_known_args()[0])
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="End-to-end connector lifecycle benchmark",
@@ -2378,6 +3032,10 @@ def main():
             "  prefix-miss    Vary prefix hit ratio to measure _maximal_prefix_lookup cost\n"
             "  contention     Concurrent store + load threads on the same ring\n"
             "  scheduler-step Full scheduler step simulation with multi-request prefix sharing\n"
+            "  warm-inflight  Warm load, --inflight jobs of --job-blocks outstanding, vLLM step loop\n"
+            "  store-inflight Store, --inflight jobs of --job-blocks outstanding, vLLM step loop\n"
+            "  mixed-inflight Loads and stores in flight together, write-through live\n"
+            "                 (the *-inflight modes are not part of 'all')\n"
             "\n"
             "Without --mode, runs the default 4-phase lifecycle (or --pattern if given).\n"
             "\n"
@@ -2467,7 +3125,7 @@ def main():
                         help="Skip the eviction-pressure benchmark")
     parser.add_argument("--mode", type=str, default=None,
                         choices=["default", "pipelined", "prefix-miss",
-                                 "contention", "scheduler-step", "all"],
+                                 "contention", "scheduler-step", *INFLIGHT_MODES, "all"],
                         help="Benchmark mode (omit for default 4-phase or --pattern; "
                              "'all' runs every mode sequentially)")
     parser.add_argument("--pipeline-depth", type=int, default=4,
@@ -2485,28 +3143,61 @@ def main():
                         help="Order of lookup() and touch() for the same keys, in every "
                              "mode that does both: lookup-first (default) is vLLM >= 0.21 "
                              "(vLLM PR #41228, still so in 0.30); touch-first is vLLM <= 0.20")
+    # ── in-flight passes (--mode warm-inflight / store-inflight / mixed-inflight) ──
+    parser.add_argument("--job-blocks", type=int, default=16,
+                        help="(*-inflight) blocks per load or store job (default 16: the "
+                             "default mode's batch, a default for running the pass, not a "
+                             "recommended setting; vLLM's job size is one request's prefix "
+                             "hit for a load, one prefill chunk for a store)")
+    parser.add_argument("--inflight", type=int, default=4,
+                        help="(*-inflight) jobs kept outstanding (default 4); needs "
+                             "server channels > the jobs in flight")
+    parser.add_argument("--store-job-blocks", type=int, default=None,
+                        help="(mixed-inflight) blocks per store job (default --job-blocks); "
+                             "warm-inflight populates its working set in jobs of this size")
+    parser.add_argument("--store-inflight", type=int, default=None,
+                        help="(mixed-inflight) store jobs outstanding (default --inflight)")
+    parser.add_argument("--step-us", type=float, default=0.0,
+                        help="(*-inflight) scheduler tick: 0 (default) is a tight loop that "
+                             "yields the CPU each tick; N sleeps to the next N-us boundary")
+    parser.add_argument("--verify", action="store_true",
+                        help="(*-inflight) stamp every stored block and compare every loaded "
+                             "block byte for byte (adds GPU work: timings are not comparable)")
+    parser.add_argument("--shape", choices=sorted(INFLIGHT_SHAPES), default=None,
+                        help="(*-inflight) named validation shape (sets block bytes, pieces, "
+                             "job sizes and in flight; explicit flags override). For checking "
+                             "the benchmark against a workload, not for a target's metric")
     parser.add_argument("--prefix-sharing", choices=("shared", "private"), default="shared",
                         help="(scheduler-step) shared: sessions take slices of one shared "
                              "prefix pool (default); private: each session has its own "
                              "prefix blocks, none shared between sessions")
     args = parser.parse_args()
     if args.preset:
-        # Explicit flags override the preset. Re-parse with every default
-        # suppressed to learn which flags were given (comparing against the
-        # default would miss a flag set to its default value).
-        given = argparse.ArgumentParser(add_help=False)
-        for action in parser._actions:
-            if action.option_strings and action.dest != "help":
-                kw = {"dest": action.dest, "default": argparse.SUPPRESS}
-                if isinstance(action, argparse._StoreTrueAction):
-                    kw["action"] = "store_true"
-                elif action.nargs is not None:
-                    kw["nargs"] = action.nargs
-                given.add_argument(*action.option_strings, **kw)
-        explicit = vars(given.parse_known_args()[0])
+        explicit = _explicit_flags(parser)
         for key, val in COLD_PRESETS[args.preset].items():
             if key != "observation" and key not in explicit:
                 setattr(args, key, val)
+    if args.shape:
+        if args.mode not in INFLIGHT_MODES:
+            parser.error(f"--shape applies to --mode {'/'.join(INFLIGHT_MODES)}")
+        explicit = _explicit_flags(parser)
+        for key, val in INFLIGHT_SHAPES[args.shape].items():
+            if key != "observation" and key not in explicit:
+                setattr(args, key, val)
+    if args.mode in INFLIGHT_MODES:
+        if args.store_job_blocks is None:
+            args.store_job_blocks = args.job_blocks
+        if args.store_inflight is None:
+            args.store_inflight = args.inflight
+        for name in ("job_blocks", "inflight", "store_job_blocks", "store_inflight"):
+            if getattr(args, name) < 1:
+                parser.error(f"--{name.replace('_', '-')} must be >= 1")
+        if args.step_us < 0:
+            parser.error("--step-us must be >= 0")
+        if args.tp != 1 or args.gpus:
+            parser.error(f"--mode {args.mode} supports TP=1 only")
+        if not cold_shape_is_default(args):
+            parser.error(f"--mode {args.mode} does not use the cold-shape flags or --preset")
     if args.pieces_per_block < 1:
         parser.error(f"--pieces-per-block must be >= 1, got {args.pieces_per_block}")
     if args.block_bytes % args.pieces_per_block:
@@ -2599,6 +3290,15 @@ def main():
                      f"channels, the server has {ring._num_channels}; start "
                      f"certus-server with --channels {need} or more")
 
+    if args.mode in INFLIGHT_MODES:
+        # Jobs beyond the pool's threads queue in the executor (as in vLLM, whose
+        # pool has 4 threads); each running job holds a channel, the main thread one.
+        need = min(args.workers, args.inflight + (args.store_inflight
+                                                  if args.mode == "mixed-inflight" else 0)) + 1
+        if ring._num_channels < need:
+            sys.exit(f"error: --mode {args.mode} needs {need} shmq channels, the server "
+                     f"has {ring._num_channels}; start certus-server with --channels {need}")
+
     manager = ShmqCertusOffloadingManager(
         ring, block_size_bytes=args.block_bytes, world_size=args.tp,
     )
@@ -2623,8 +3323,18 @@ def main():
         # slots each take one load unit's range.
         unit = args.num_blocks // args.requests if args.load_unit == "request" else args.bs
         max_blocks = max(max_blocks, args.bs, args.cold_inflight * unit)
+    if args.mode in INFLIGHT_MODES:
+        # GPU blocks: one slot range per job in flight (loads first, then stores), and
+        # the populate jobs' ids; not --num-blocks, which is the tier working set.
+        slots = args.inflight * args.job_blocks
+        if args.mode == "mixed-inflight":
+            slots += args.store_inflight * args.store_job_blocks
+        max_blocks = max(args.bs, slots, args.store_job_blocks)
     store_regions, store_tensors = make_kv_regions(args.gpu, args.block_bytes, max_blocks, args.pieces_per_block)
-    load_regions, load_tensors = make_kv_regions(args.gpu, args.block_bytes, max_blocks, args.pieces_per_block)
+    if args.mode in INFLIGHT_MODES:
+        load_regions, load_tensors = store_regions, store_tensors   # one worker, as in vLLM
+    else:
+        load_regions, load_tensors = make_kv_regions(args.gpu, args.block_bytes, max_blocks, args.pieces_per_block)
 
     executor = ThreadPoolExecutor(max_workers=args.workers, thread_name_prefix="bench-shmq")
 
@@ -2639,6 +3349,8 @@ def main():
                               rank=0, world_size=args.tp)
 
     worker = make_worker(store_regions, executor)
+    verifier = (_ByteVerifier(store_tensors).bind(max_blocks)
+                if args.mode in INFLIGHT_MODES and args.verify else None)
 
     keys = make_content_keys(args.num_blocks)
 
@@ -2742,6 +3454,26 @@ def main():
                 prefix_sharing=args.prefix_sharing,
             )
             results.append(r)
+
+        elif mode == "warm-inflight":
+            print(f"\n  Mode: warm-inflight ({inflight_label(args, 'load')})")
+            results.append(bench_warm_inflight(
+                manager, worker, keys, acct_block_bytes, args.min_duration,
+                args=args, lookup_order=args.lookup_order, verifier=verifier))
+
+        elif mode == "store-inflight":
+            print(f"\n  Mode: store-inflight ({inflight_label(args, 'store')})")
+            _remove_keys(ring, keys, args.tp)
+            results.append(bench_store_inflight(
+                manager, worker, ring, keys, acct_block_bytes, args.min_duration,
+                args=args, world_size=args.tp, verifier=verifier))
+
+        elif mode == "mixed-inflight":
+            print(f"\n  Mode: mixed-inflight ({inflight_label(args, 'mixed')})")
+            results.extend(bench_mixed_inflight(
+                manager, worker, ring, keys, acct_block_bytes, args.min_duration,
+                args=args, world_size=args.tp, lookup_order=args.lookup_order,
+                verifier=verifier))
 
         else:  # default
             store_result = bench_store_lifecycle(
@@ -2862,6 +3594,13 @@ def main():
         extra["direction"] = args.direction
     elif mode == "prefix-miss":
         extra["hit_ratio"] = args.hit_ratio
+    elif mode in INFLIGHT_MODES:
+        extra.update({"shape": args.shape or "", "job_blocks": args.job_blocks,
+                      "inflight": args.inflight, "step_us": args.step_us, "seed": args.seed,
+                      "verify": args.verify})
+        if mode != "store-inflight":
+            extra.update({"store_job_blocks": args.store_job_blocks,
+                          "store_inflight": args.store_inflight})
     elif mode == "scheduler-step":
         extra["requests_per_step"] = args.requests_per_step
         extra["num_sessions"] = args.num_sessions

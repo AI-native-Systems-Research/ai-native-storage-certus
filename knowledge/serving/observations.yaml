@@ -82,6 +82,14 @@ observations:
         value: 67496837120
         basis: measured
         evidence: "sum of vllm:kv_offload_store_bytes over server.log 'KV Transfer metrics:' lines; identical in all 6 runs (306 store jobs)"
+      store_jobs:
+        value: 306
+        basis: measured
+        evidence: "sum of vllm:kv_offload_store_size_count over server.log 'KV Transfer metrics:' lines (base-0: 306; rechecked 2026-11-04)"
+      blocks_per_store_job:
+        value: 105.2
+        basis: computed
+        formula: "store_bytes / store_jobs / block_bytes = 67496837120 / 306 / 2097152 (one store job per request per scheduler step; 2,048-token prefill chunks are 128 blocks, a document's last chunk is shorter)"
       inflight_configured:
         value: 4
         basis: configured
