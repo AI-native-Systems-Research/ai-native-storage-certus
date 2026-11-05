@@ -1,11 +1,23 @@
 ---
 spec_sync_component: spdk-env
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-31T06:35:50Z
-spec_sync_git_commit: 50a0f2bf
-spec_sync_inputs_sha256: 074cf4bd3ba706b2226ae3d7b2702132474b84f9695ed63ad4c65bc4d22d633e
+spec_sync_synced_at: 2026-11-05T10:19:50Z
+spec_sync_git_commit: 32ffa627f
+spec_sync_inputs_sha256: 320a72a0d549ae14b069a0097c23eef16d2335b3c5dfe1bb813159dd04127226
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-11-05 (branch `certus-host-setup`, on unstable `bb0c9b9c`) — delta on a certified baseline, drift resolved.** This component's previous stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's: the fix for two Certus processes per host blocking each other's drives. An independent read-only review checked every changed statement against the code with file:line evidence; all of its findings are applied.
+>
+> - **FR-023 (new) — `ISPDKEnv::init_with_allowed(&[String])`.** Parses each address (`PciAddress::parse`, `src/device.rs:30-65`) and fails with `InitFailed` before `do_init`'s singleton `compare_exchange` (`src/lib.rs:82-94`, `src/env.rs:26-27`); passes the list as `spdk_env_opts.pci_allowed`/`num_pci_addr` only when non-empty (`src/env.rs:101-121`), which SPDK turns into DPDK `--allow` (`deps/spdk/lib/env_dpdk/init.c:462-475`). `init()` and `init_with_allowed(&[])` both run `do_init(self, &[])`.
+> - **FR-002, FR-003, FR-006, FR-014, SC-001, Key Entities — updated** to name `init_with_allowed` and its effect on enumeration and the singleton.
+> - **FR-015 — note corrected.** A device another process holds is not "skipped with a warning": DPDK drops it with an EAL "Device or resource busy" message and it is silently absent. The clarification, US1 scenario 4 and the edge-case bullet that still described the unimplemented skip-and-warn are marked *Future — see FR-015*.
+> - **FR-022 — citations moved** to `src/env.rs:127-137, 152-174` by the new code above them.
+> - **contracts/ispdk-env.md, data-model.md** — new method section; `PciAddress::parse` and its round-trip range; lifecycle and singleton diagrams name both init methods.
+> - **README.md** — init sequence, method table (adds `init_with_allowed` and the missing `fini`), and why several processes on one host need it.
+> - Not changed: `tasks.md` T009 lists 4 methods; it already omitted `fini` and records what was done at the time, so it is left as history.
+>
+> No actionable drift remains for this component.
+
 > **Re-stamp 2026-10-31 (branch `opt/evolve-piece-copy-v1/s20261029-094947`, merged with unstable `a0292be6`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IGpuServices::memcpy_batch_async` added by the optimizer session, the workspace clippy cleanup's doc/attribute-only edits, three fixed doc links, and the `copy_gpu_to_memory_async` doc). The interfaces sync of the same date found none of it changes a contract this component relies on. No analysis below changes.
 > **Re-stamp 2026-10-29 (branch `fix/dispatcher-remove-ssd-extent`, merged with unstable `e35618b2`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (the `IDispatcher::check` doc gains an `# Errors` section, B-17 of the dispatcher sync). No analysis below changes.
 > **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IDispatcher::clear_all`) and the rebase brought unstable's changes. No analysis below changes.

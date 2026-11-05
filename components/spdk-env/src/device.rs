@@ -27,6 +27,43 @@ impl fmt::Display for PciAddress {
     }
 }
 
+impl PciAddress {
+    /// Parse a BDF address in `DDDD:BB:DD.F` or `BB:DD.F` form (hex, any case;
+    /// a missing domain is 0), as the `--device-pci` flags and sysfs spell it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use spdk_env::PciAddress;
+    ///
+    /// let a = PciAddress::parse("0000:c1:00.0").unwrap();
+    /// assert_eq!((a.domain, a.bus, a.dev, a.func), (0, 0xc1, 0, 0));
+    /// assert_eq!(a.to_string(), "0000:c1:00.0");
+    /// assert_eq!(PciAddress::parse("61:00.0"), PciAddress::parse("0000:61:00.0"));
+    /// assert!(PciAddress::parse("not-a-bdf").is_none());
+    /// ```
+    pub fn parse(s: &str) -> Option<Self> {
+        let s = s.trim();
+        let (rest, func) = s.rsplit_once('.')?;
+        let mut parts: Vec<&str> = rest.split(':').collect();
+        let domain = match parts.len() {
+            3 => u32::from_str_radix(parts.remove(0), 16).ok()?,
+            2 => 0,
+            _ => return None,
+        };
+        let bus = u8::from_str_radix(parts[0], 16).ok()?;
+        let dev = u8::from_str_radix(parts[1], 16).ok()?;
+        let func = u8::from_str_radix(func, 16).ok()?;
+        // A PCI device number is 5 bits and a function number 3.
+        (dev < 32 && func < 8).then_some(PciAddress {
+            domain,
+            bus,
+            dev,
+            func,
+        })
+    }
+}
+
 /// PCI vendor/device/class identification for a device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PciId {
@@ -266,6 +303,49 @@ mod tests {
                 ..sample_device()
             };
             assert_eq!(dev.device_type, *dtype);
+        }
+    }
+
+    // --- PciAddress::parse ---
+
+    #[test]
+    fn parse_full_bdf() {
+        let a = PciAddress::parse("0000:c1:00.0").unwrap();
+        assert_eq!((a.domain, a.bus, a.dev, a.func), (0, 0xc1, 0, 0));
+    }
+
+    #[test]
+    fn parse_round_trips_display() {
+        for s in ["0000:61:00.0", "0001:ff:1f.7", "abcd:00:00.1"] {
+            assert_eq!(PciAddress::parse(s).unwrap().to_string(), s);
+        }
+    }
+
+    #[test]
+    fn parse_short_form_and_case() {
+        assert_eq!(
+            PciAddress::parse("C4:00.0"),
+            PciAddress::parse("0000:c4:00.0")
+        );
+        assert_eq!(
+            PciAddress::parse("  0000:62:00.0\n"),
+            PciAddress::parse("0000:62:00.0")
+        );
+    }
+
+    #[test]
+    fn parse_rejects_malformed() {
+        for s in [
+            "",
+            "c1:00",
+            "0000:c1:00",
+            "0000:c1:00.8",
+            "0000:c1:20.0",
+            "0000:zz:00.0",
+            "1:2:3:4.0",
+            "0000:100:00.0",
+        ] {
+            assert!(PciAddress::parse(s).is_none(), "{s:?} should not parse");
         }
     }
 }

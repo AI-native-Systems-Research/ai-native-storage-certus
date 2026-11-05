@@ -1,11 +1,13 @@
 ---
 spec_sync_component: gpu-services
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-31T06:35:50Z
-spec_sync_git_commit: 50a0f2bf
-spec_sync_inputs_sha256: 20ab7a1be693339cca533b48e7ade4695593ca674e2159ffe5464b22cb76ae51
+spec_sync_synced_at: 2026-11-05T10:19:50Z
+spec_sync_git_commit: 32ffa627f
+spec_sync_inputs_sha256: 299729308fc55c12916f5c4450c85fbb75bdf540ba8f4f05d2d4dbb55cb7c767
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-11-05 (branch `certus-host-setup`, on unstable `bb0c9b9c`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them (its previous stamp was re-verified against `git archive origin/unstable`); its digest moves because `components/interfaces` changed (`ISPDKEnv::init_with_allowed`, added for the two-process drive race; see the spdk-env and interfaces syncs of the same date). This component does not implement `ISPDKEnv`. No analysis below changes.
+
 > **Sync 2026-10-31 (branch `specsync-b`: optimizer session `s20261029-094947` merged onto unstable, `7b2b8b04`, `55a4ddd4` clippy) — delta, drift resolved by backfill. Not stamped here: the final pass stamps every component.** Base `a0292be6`, HEAD `0a71990e`. Changed inputs: `src/lib.rs`, `src/cuda_ffi.rs` (and `build.rs`, not hashed), plus `components/interfaces`.
 >
 > - **New method, unspecced → BACKFILL B-1 (FR-026, applied):** `memcpy_batch_async` (`src/lib.rs:973-1038`, commit `4941320a`): `spdk`-gated; without `gpu` returns "GPU support not compiled" (`:981-985`); with `gpu`: init guard (`:989-991`), slice-length check (`:992-999`), empty batch → `Ok(())` (`:1000-1002`), one `cudaMemcpyAttributes` with `src_access_order = CUDA_MEMCPY_SRC_ACCESS_ORDER_STREAM` (`:1004-1007`) applied to all entries (`attrs_idxs = [0]`, `num_attrs = 1`), then `cudaMemcpyBatchAsync` (`:1016-1027`); a CUDA error → "cudaMemcpyBatchAsync failed: …" (`:1029-1034`). FFI: `CUDA_MEMCPY_SRC_ACCESS_ORDER_STREAM = 1`, `#[repr(C)] cudaMemLocation` / `cudaMemcpyAttributes` (`src/cuda_ffi.rs:87-106`), `cudaMemcpyBatchAsync` declared with the CUDA 13.x signature (`:157-167`). Checked against `/usr/local/cuda` = 13.2 headers (`cuda_runtime_api.h:6540`, `driver_types.h:2397-2435`): signature, enum value and struct layout match. The CUDA 12.8 signature has an extra `size_t *failIdx` (`generated_cudart_removed_meta.h:316-326`), and the pip `libcudart.so.12` that `build.rs` also adds to the link path exports the same symbol name, so this binding is correct only against a 13.x runtime; FR-026 now states the requirement. Interface contract `components/interfaces/src/igpu_services.rs:745-768` matches. `spec.md` Assumptions (feature-flag line) and `contracts/igpu_services.md` (new section, B-2) updated. After this, every `IGpuServices` method the component implements is named by an FR (the contract file's trait listing is the original subset; the new section maps the rest to their FRs).

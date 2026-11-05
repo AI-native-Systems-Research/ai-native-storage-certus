@@ -120,6 +120,7 @@ The crate has three Cargo features:
 
 #### FR-003: ISPDKEnv Interface (feature: spdk)
 - **Method**: `init(&self) -> Result<(), SpdkEnvError>` - Initialize SPDK/DPDK environment and discover VFIO devices.
+- **Method**: `init_with_allowed(&self, pci_addrs: &[String]) -> Result<(), SpdkEnvError>` - As `init`, restricted to the named PCI devices (DPDK opens only their VFIO groups); empty means all. For processes sharing a host's drives (spdk-env FR-023).
 - **Method**: `fini(&self)` - Tear down SPDK/DPDK environment.
 - **Method**: `devices(&self) -> Vec<VfioDevice>` - Return all probed VFIO devices.
 - **Method**: `device_count(&self) -> usize` - Return number of discovered devices.

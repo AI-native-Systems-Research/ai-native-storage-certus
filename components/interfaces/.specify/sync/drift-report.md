@@ -1,11 +1,19 @@
 ---
 spec_sync_component: interfaces
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-31T06:35:50Z
-spec_sync_git_commit: 50a0f2bf
-spec_sync_inputs_sha256: 961dca7002f71f03b281f87f75dd1daec95211257a4f792d3c60e3d72cd46029
+spec_sync_synced_at: 2026-11-05T10:19:50Z
+spec_sync_git_commit: 32ffa627f
+spec_sync_inputs_sha256: 06ad9c036940a509c6eb72a4e635007ea1ae9b12e359f63337b3d8baaa400591
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-11-05 (branch `certus-host-setup`, on unstable `bb0c9b9c`) — delta on a certified baseline, drift resolved.** Previous stamp re-verified against `git archive origin/unstable`. One change: `ISPDKEnv::init_with_allowed(&self, pci_addrs: &[String]) -> Result<(), SpdkEnvError>` added to `src/ispdk_env.rs`, textually identical (signature and docs) to spdk-env's local definition (spdk-env FR-018).
+>
+> - **FR-003 ISPDKEnv method list — updated** with the new method.
+> - **plan.md counts — updated:** ISPDKEnv 5 → 6, total 180 → 181 over 20 `define_interface!` blocks (recounted by script, doc-comment mentions excluded).
+> - No `impl ISPDKEnv` besides spdk-env's exists in the workspace (including feature-gated code, tests, benches and examples), so nothing else needed the method.
+>
+> No actionable drift remains for this component.
+
 > **Sync 2026-10-30 (branch `specsync-a`: optimizer session `s20261029-094947` merged onto unstable, plus `55a4ddd4` clippy) — delta, drift resolved by backfill. Not stamped here** (the final pass stamps every component on the merged tree; the frontmatter above is the previous stamp and is stale). Base `a0292be6` (`origin/unstable`, fresh stamp). `git diff a0292be6 HEAD -- components/interfaces` touches only `src/` (10 files, +189/-51), from three commits: `4941320a` (new method), `6a917346` (merge, no own change here) and `55a4ddd4` (clippy). Every changed hunk was read and each spec statement it could affect was checked against the code.
 >
 > - **FR-011 `IGpuServices` method inventory — DRIFTED (moderate), code authoritative.** `4941320a` adds `memcpy_batch_async(dsts, srcs, sizes, stream)` behind `spdk` (`src/igpu_services.rs:745-768`); FR-011 listed 24 methods and not this one. The doc contract (no order among entries, entries must not overlap, pointers valid until sync, host pointers pinned, stream must not be the legacy NULL stream; errors: no GPU support, not initialized, slice lengths differ, CUDA failure) matches the implementation `components/gpu-services/src/lib.rs:973-1038` (length check `:991-999`, empty batch `Ok` `:1000-1002`, `cudaMemcpyBatchAsync` with stream access order `:1004-1026`). The callers honour the NULL-stream rule: `copy_gpu_to_memory_async` falls back to per-region `memcpy_d2h_async` on a null stream (`components/dispatcher/src/lib.rs:3876-3878`); the warm serve batches only when `warm_raw != 0` (`lib.rs:1422-1427`); a one-entry list uses the single memcpy (`components/dispatcher/src/pipeline.rs:120-127`). **Backfilled** (FR-011 entry, P-1).

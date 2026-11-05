@@ -1,11 +1,13 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-11-04T01:26:34Z
-spec_sync_git_commit: 6e2d2816
-spec_sync_inputs_sha256: e7c35a4aacc54d7db9ef279cad2f2344420872781c65629ffaa06b518eb651f8
+spec_sync_synced_at: 2026-11-05T10:19:50Z
+spec_sync_git_commit: 32ffa627f
+spec_sync_inputs_sha256: fafa185c7204757b4eeb9856948f77b7b1f8e666b1f1c436e889c7cbe784ebb7
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-11-05 (branch `certus-host-setup`, on unstable `bb0c9b9c`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them (its previous stamp was re-verified against `git archive origin/unstable`); its digest moves because `components/interfaces` changed (`ISPDKEnv::init_with_allowed`, added for the two-process drive race; see the spdk-env and interfaces syncs of the same date). This component does not implement `ISPDKEnv`. No analysis below changes.
+
 > **Sync 2026-11-03 (branch `feat/dispatcher-p2p-mr-pool`, base unstable `dc564aa3`) — own code changed; 5 drifts, all BACKFILL, approved and applied.** Unstable's stamp (`bde3368f`) was current, and this branch changes only `src/lib.rs` and `src/pipeline.rs` (no `specs/`, no `components/interfaces`), so the analysis is the 43 requirements against that diff.
 >
 > - **FR-005 (major)** — spec said FIFO completion ordering with a sync per partition wrap. Code now tracks each read's slot by tag (`SlotTracker`, `src/pipeline.rs:838`) and reuses a slot only after its copy's stream syncs. FIFO was a corruption bug: unstable returned 128/128 wrong pages after flush-and-clear (`roundtrip_chunk_hw.py`). Spec updated; `research.md` R3 and `tasks.md` T014 marked superseded.

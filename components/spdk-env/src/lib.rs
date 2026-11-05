@@ -37,6 +37,14 @@ define_interface! {
         /// and discover VFIO-attached devices.
         fn init(&self) -> Result<(), SpdkEnvError>;
 
+        /// Initialize like [`init`](Self::init), but open and enumerate only
+        /// the PCI devices named in `pci_addrs` (`DDDD:BB:DD.F`). Two processes
+        /// sharing a host's drives must each pass their own: DPDK opens a
+        /// device's VFIO group exclusively, so one that enumerates every drive
+        /// can hold another's while that one starts. An empty slice is the same
+        /// as `init`. A malformed address is an `InitFailed` error.
+        fn init_with_allowed(&self, pci_addrs: &[String]) -> Result<(), SpdkEnvError>;
+
         /// Tear down the SPDK/DPDK environment explicitly.
         ///
         /// Must be called after all NVMe controllers have been detached and all
@@ -68,7 +76,21 @@ define_component! {
 
 impl ISPDKEnv for SPDKEnvComponent {
     fn init(&self) -> Result<(), SpdkEnvError> {
-        env::do_init(self)
+        env::do_init(self, &[])
+    }
+
+    fn init_with_allowed(&self, pci_addrs: &[String]) -> Result<(), SpdkEnvError> {
+        let allowed = pci_addrs
+            .iter()
+            .map(|s| {
+                PciAddress::parse(s).ok_or_else(|| {
+                    SpdkEnvError::InitFailed(format!(
+                        "not a PCI address: {s:?} (expected DDDD:BB:DD.F)"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        env::do_init(self, &allowed)
     }
 
     fn fini(&self) {

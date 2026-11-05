@@ -79,7 +79,7 @@ CERTUS_PROFILE=full-fs-block cargo build -p certus-server-yaml \
 | Flag | Description |
 |------|-------------|
 | `--drive-count N` | Use first N discovered NVMe drives (or N filesystem drives) |
-| `--device-pci ADDR` | Explicit PCI address (repeatable, mutually exclusive with `--drive-count`) |
+| `--device-pci ADDR` | Explicit PCI address (repeatable, mutually exclusive with `--drive-count`). SPDK then opens only these drives, so a second instance on the same host can own the rest |
 | `--memory-tier-size SIZE` | DRAM cache pool size (e.g. `256M`, `2G`). Default: 2G |
 | `--format` | Format extent managers on startup (destroys existing data) |
 | `--shm-path PATH` | Shared-memory queue (shmq) mailbox path. Default: `/dev/shm/certus-shmq` |

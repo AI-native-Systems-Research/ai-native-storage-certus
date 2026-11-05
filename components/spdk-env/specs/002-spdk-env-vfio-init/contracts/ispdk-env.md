@@ -28,6 +28,23 @@ Initialize the SPDK/DPDK environment, perform pre-flight checks, and discover de
 - `SpdkEnvError::HugepagesNotConfigured` — no hugepages available
 - `SpdkEnvError::InitFailed` — SPDK env init returned non-zero
 
+### `fn init_with_allowed(&self, pci_addrs: &[String]) -> Result<(), SpdkEnvError>`
+
+Initialize as `init()` does, but restrict DPDK to the named PCI devices (spec.md FR-023).
+
+**Preconditions**: as `init()`. Each address is `DDDD:BB:DD.F` or `BB:DD.F`, hex.
+
+**Postconditions**:
+- as `init()`, except that DPDK opened only the named devices' VFIO groups and `devices()`
+  returns only them (those of them bound to VFIO and NVMe-class)
+- an empty `pci_addrs` is exactly `init()`
+
+**Errors**: as `init()`, plus `SpdkEnvError::InitFailed` for a malformed address, returned
+before any SPDK call and without taking the singleton flag.
+
+**Use it** when more than one process on a host uses its drives: give each process only
+its own, so that one process cannot hold another's VFIO groups open while it starts.
+
 ### `fn fini(&self)`
 
 Explicitly tear down the SPDK/DPDK environment: calls `spdk_env_fini()` and
