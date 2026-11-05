@@ -85,6 +85,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import contextlib
 import csv
 import ctypes
 import hashlib
@@ -807,7 +808,11 @@ def _start_load_job(manager, worker, unit, gpu_base, job_id, phases, *,
     spec = manager.prepare_load(hits)
     phases["prepare_load"].record(time.perf_counter() - t0)
     t0 = time.perf_counter()
-    worker.submit_load(job_id, spec, _FakeGPUSpec(list(range(gpu_base, gpu_base + len(hits)))))
+    try:
+        worker.submit_load(job_id, spec, _FakeGPUSpec(list(range(gpu_base, gpu_base + len(hits)))))
+    except BaseException:
+        manager.complete_load(hits)   # not submitted: unpin before the error propagates
+        raise
     phases["submit_load"].record(time.perf_counter() - t0)
     return hits
 
@@ -921,9 +926,9 @@ def bench_cold_load_shaped(
 # with job size (--job-blocks) and jobs in flight (--inflight) as independent knobs:
 # neither is fixed by the pass, because both vary by workload. Each tick: submit
 # into free slots, call get_finished() once, complete what finished, then idle
-# (--step-us 0: os.sched_yield(), as vLLM's own busy loops do, so the pool threads
-# get the GIL; --step-us N: sleep to the next N-us tick boundary). No call waits
-# for a particular job.
+# (--step-us 0: time.sleep(0), which releases the GIL to the pool threads without
+# waiting; --step-us N: sleep to the next N-us tick boundary). No call waits for a
+# particular job.
 
 # Named shapes of real workloads, for checking the benchmark against them, not for
 # a target's primary metric (fitting a target to one workload tunes Certus to that
@@ -933,6 +938,8 @@ INFLIGHT_SHAPES = {
     # LongDocQA, Llama-3-8B, vLLM 0.30, LBHNC: one 625-block load job per document
     # (10,000 tokens / 16), 4 requests in flight; stores of ~105 blocks per job
     # (67.5 GB over 306 jobs: one job per request per 2,048-token prefill chunk).
+    # Store jobs in flight were not measured: 4 (one per request in flight) is an
+    # assumption, listed in "assumed" so check.py does not treat it as checked.
     "longdocqa": {
         "observation": "ldq-llama-3-8b-lbhnc-2026-10-26",
         "block_bytes": 2097152,
@@ -941,6 +948,7 @@ INFLIGHT_SHAPES = {
         "inflight": 4,
         "store_job_blocks": 105,
         "store_inflight": 4,
+        "assumed": ("store_inflight",),
     },
 }
 
@@ -965,9 +973,14 @@ class _ByteVerifier:
         return t.view(-1, piece)[base:base + n]
 
     def _pattern(self, keys, layer, piece, device):
-        fill = torch.tensor([(k[0] + layer) % 256 for k in keys], dtype=torch.uint8, device=device)
+        """Each piece: the whole key, then the layer index, then a fill byte from a
+        hash of (key, layer). Needs pieces of at least len(key) + 1 bytes."""
+        head = [bytes(k) + bytes([layer % 256]) for k in keys]
+        fill = torch.tensor([hashlib.blake2b(h, digest_size=1).digest()[0] for h in head],
+                            dtype=torch.uint8, device=device)
         pat = fill.unsqueeze(1).expand(len(keys), piece).clone()
-        pat[:, :8] = torch.tensor([list(k[:8]) for k in keys], dtype=torch.uint8, device=device)
+        n = len(head[0])
+        pat[:, :n] = torch.tensor([list(h) for h in head], dtype=torch.uint8, device=device)
         return pat
 
     def _piece(self):
@@ -1007,9 +1020,14 @@ class _ByteVerifier:
 
 
 def _step_idle(step_us: float, t_tick: float) -> None:
-    """End of one step-loop tick: yield (step_us <= 0) or sleep to the tick boundary."""
+    """End of one step-loop tick: release the GIL (step_us <= 0) or sleep to the tick
+    boundary. time.sleep(0) drops and retakes the GIL, so the pool threads (which run
+    the connector's ring I/O in Python) get it every tick, as they do while a vLLM
+    engine step runs; os.sched_yield() keeps the GIL and starved them (measured: a
+    pure-Python pool thread ran 1.8x slower beside a sched_yield loop, unchanged
+    beside a sleep(0) loop)."""
     if step_us <= 0:
-        os.sched_yield()
+        time.sleep(0)
         return
     rest = t_tick + step_us / 1e6 - time.perf_counter()
     if rest > 0:
@@ -1128,7 +1146,11 @@ class _StepLoop:
         if not stored:
             return False
         t0 = time.perf_counter()
-        m.touch(unit)
+        try:
+            m.touch(unit)
+        except BaseException:
+            m.complete_store(stored, success=False)   # reserved, never submitted
+            raise
         ph["store_touch" if "store_touch" in ph else "touch"].record(time.perf_counter() - t0)
         self.sample(time.perf_counter())
         slot = self.free_store.pop(0)
@@ -1137,7 +1159,8 @@ class _StepLoop:
         return True
 
     def submit_deferred(self) -> None:
-        for stored, spec, slot, tag in self.deferred:
+        while self.deferred:
+            stored, spec, slot, tag = self.deferred[0]
             base = self.store_base + slot * self.store_job_blocks
             self.job_id += 1
             if self.verifier is not None:
@@ -1146,8 +1169,8 @@ class _StepLoop:
             self.worker.submit_store(self.job_id, _FakeGPUSpec(list(range(base, base + len(stored)))),
                                      spec)
             self.phases["submit_store"].record(time.perf_counter() - t0)
+            self.deferred.pop(0)
             self.pending[self.job_id] = ("store", stored, slot, time.perf_counter(), tag)
-        self.deferred = []
 
     # ── reaping ──
 
@@ -1167,6 +1190,8 @@ class _StepLoop:
             stats.job.record(now - t_sub)
             if getattr(res, "transfer_time", None) is not None:
                 stats.transfer.record(res.transfer_time)
+            if res.success and kind == "load" and self.verifier is not None:
+                self.verifier.check(keys, slot * self.load_job_blocks)   # before unpin
             self._complete(kind, keys, bool(res.success))
             if kind == "load":
                 self.free_load.append(slot)
@@ -1175,8 +1200,6 @@ class _StepLoop:
                 self.free_store.append(slot)
                 self.n_store -= 1
             if res.success:
-                if kind == "load" and self.verifier is not None:
-                    self.verifier.check(keys, slot * self.load_job_blocks)
                 stats.blocks += len(keys)
                 stats.jobs += 1
                 done.append((kind, keys, tag))
@@ -1188,7 +1211,6 @@ class _StepLoop:
                 self.events += len(getattr(ev, "keys", ()) or ())
             self.phases["take_events"].record(time.perf_counter() - t0)
         if failed:
-            self._abort()
             raise RuntimeError(f"in-flight transfer job(s) {failed} failed")
         return done
 
@@ -1202,15 +1224,33 @@ class _StepLoop:
             self.phases["complete_store"].record(time.perf_counter() - t0)
 
     def _abort(self) -> None:
-        """Abort prepared stores and drain every outstanding job, completing each."""
+        """Abort prepared stores and drain every outstanding job, completing each, so
+        no key stays pinned or reserved. Gives up on jobs the worker never reports
+        after 120 s (the run is failing anyway)."""
         for stored, _spec, _slot, _tag in self.deferred:
-            self.manager.complete_store(stored, success=False)
+            try:
+                self.manager.complete_store(stored, success=False)
+            except Exception:  # noqa: BLE001 - best effort while failing
+                pass
         self.deferred = []
-        while self.pending:
+        deadline = time.monotonic() + 120.0
+        while self.pending and time.monotonic() < deadline:
             for res in self.worker.get_finished():
                 kind, keys, _slot, _t, _tag = self.pending.pop(res.job_id)
-                self._complete(kind, keys, bool(res.success))
-            os.sched_yield()
+                try:
+                    self._complete(kind, keys, bool(res.success))
+                except Exception:  # noqa: BLE001
+                    pass
+            time.sleep(0)
+
+    @contextlib.contextmanager
+    def cleanup(self):
+        """On any exception inside the block, abort and drain (_abort), then re-raise."""
+        try:
+            yield
+        except BaseException:
+            self._abort()
+            raise
 
     def sample(self, now: float) -> None:
         self.load_stats.sample(self.n_load, now)
@@ -1226,6 +1266,43 @@ class _StepLoop:
         self.sample(time.perf_counter())
 
 
+class _LoadScheduler:
+    """Which load job to start next: the working set's jobs in a shuffled order per
+    pass, skipping a job whose keys are still in flight. ``fill`` starts jobs into the
+    free slots, trying each job of the current order at most once per tick, so a tick
+    always ends (to reap and idle) even when every lookup misses."""
+
+    def __init__(self, units, seed: int):
+        self.units = units
+        self.rng = random.Random(seed)
+        self.order: list[int] = []
+        self.busy: set[int] = set()
+        self.passes = 0
+
+    def fill(self, loop: "_StepLoop") -> None:
+        tried = 0
+        while loop.load_slot_free() and tried < len(self.units):
+            if not self.order:
+                self.order = list(range(len(self.units)))
+                self.rng.shuffle(self.order)
+                self.passes += 1
+            idx = next((i for i in self.order if i not in self.busy), None)
+            if idx is None:
+                return
+            self.order.remove(idx)
+            tried += 1
+            if loop.start_load(self.units[idx], tag=idx):
+                self.busy.add(idx)
+
+    def done(self, finished) -> None:
+        for kind, _keys, idx in finished:
+            if kind == "load":
+                self.busy.discard(idx)
+
+    def at_pass_boundary(self) -> bool:
+        return not self.order
+
+
 def _inflight_phases(*names) -> dict[str, PhaseTiming]:
     return {n: PhaseTiming(n) for n in names}
 
@@ -1238,23 +1315,39 @@ def _populate_jobs(manager, worker, keys, job_blocks, verifier=None) -> None:
     """Store ``keys`` as job_blocks-key jobs (outside any timing), so each job's keys
     form one commit group, as one vLLM store job's do. With a verifier each job's
     GPU blocks are first written with its keys' patterns."""
-    if verifier is None:
-        _populate_keys(manager, worker, keys, job_blocks)
-        return
     job_id = 4_000_000
+    stored_n = 0
     for i in range(0, len(keys), job_blocks):
         batch = keys[i:i + job_blocks]
         out = manager.prepare_store(batch)
         if out is None or not out.keys_to_store:
             continue
         stored = list(out.keys_to_store)
-        manager.touch(batch)
-        verifier.write(stored, 0)
-        job_id += 1
-        worker.submit_store(job_id, _FakeGPUSpec(list(range(len(stored)))), out.store_spec)
-        while not worker.get_finished():
-            time.sleep(0.0001)
-        manager.complete_store(stored, success=True)
+        ok = False
+        try:
+            manager.touch(batch)
+            if verifier is not None:
+                verifier.write(stored, 0)
+            job_id += 1
+            worker.submit_store(job_id, _FakeGPUSpec(list(range(len(stored)))), out.store_spec)
+            res = []
+            while not res:
+                res = worker.get_finished()
+                if not res:
+                    time.sleep(0.0001)
+            ok = all(r.success for r in res)
+        finally:
+            manager.complete_store(stored, success=ok)
+        if not ok:
+            raise RuntimeError(f"populate: store job {job_id} failed")
+        stored_n += len(stored)
+    if stored_n < len(keys):
+        # A key already present is not re-stored; any other shortfall means the tier
+        # refused reservations and the working set does not fit.
+        missing = sum(1 for k in keys if not manager.lookup(k))
+        if missing:
+            raise RuntimeError(f"populate: {missing} of {len(keys)} working-set keys not "
+                               f"resident (memory tier too small for --num-blocks?)")
 
 
 def _verify_load_back(manager, worker, keys, job_blocks, verifier) -> None:
@@ -1308,40 +1401,35 @@ def bench_warm_inflight(manager, worker, keys, block_bytes, min_duration, *, arg
     phases = _inflight_phases("touch", "lookup", "prepare_load", "submit_load",
                               "get_finished", "complete_load")
     units = _job_units(keys, args.job_blocks)
-    if len(units) <= args.inflight:
+    if len(units) < args.inflight:
         raise ValueError(f"warm-inflight: {len(keys)} keys make {len(units)} jobs of "
-                         f"{args.job_blocks}; need more than --inflight {args.inflight}")
+                         f"{args.job_blocks}; need at least --inflight {args.inflight}")
     _populate_jobs(manager, worker, keys, args.store_job_blocks or args.job_blocks, verifier)
     manager._ring.flush_to_ssd()   # the write-through must not overlap the timed loads
     loop = _StepLoop(manager, worker, phases, touch_first=touch_first,
                      load_slots=args.inflight, load_job_blocks=args.job_blocks,
                      verifier=verifier)
-    rng = random.Random(args.seed)
-    busy: set[int] = set()
-    order: list[int] = []
-    passes = 0
+    sched = _LoadScheduler(units, args.seed)
     t_start = time.perf_counter()
     loop.sample(t_start)
-    while True:
-        t_tick = time.perf_counter()
-        # Stop starting jobs at a pass boundary once --min-duration and 2 passes are done.
-        running = not (t_tick - t_start >= min_duration and passes >= 2 and not order)
-        while running and loop.load_slot_free():
-            if not order:
-                order = list(range(len(units)))
-                rng.shuffle(order)
-                passes += 1
-            idx = next((i for i in order if i not in busy), None)
-            if idx is None:
+    with loop.cleanup():
+        while True:
+            t_tick = time.perf_counter()
+            # Stop starting jobs at a pass boundary once --min-duration and 2 passes are done.
+            running = not (t_tick - t_start >= min_duration and sched.passes >= 2
+                           and sched.at_pass_boundary())
+            if running:
+                sched.fill(loop)
+            sched.done(loop.reap())
+            if not running and not loop.pending:
                 break
-            order.remove(idx)
-            if loop.start_load(units[idx], tag=idx):
-                busy.add(idx)
-        for _kind, _keys, idx in loop.reap():
-            busy.discard(idx)
-        if not running and not loop.pending:
-            break
-        _step_idle(args.step_us, t_tick)
+            _step_idle(args.step_us, t_tick)
+    passes = sched.passes
+    if loop.load_stats.misses:
+        # The working set was populated and checked resident, and nothing is stored or
+        # evicted during the pass: a warm lookup that misses is a fault, not a result.
+        raise RuntimeError(f"warm-inflight: {loop.load_stats.misses} working-set blocks "
+                           f"missed at lookup ({loop.load_stats.blocks} loaded)")
     wall = time.perf_counter() - t_start
     loop.sample(t_start + wall)
     st = loop.load_stats
@@ -1354,7 +1442,7 @@ def bench_warm_inflight(manager, worker, keys, block_bytes, min_duration, *, arg
     result.counts = {"load_misses": st.misses}
     result.print_report()
     _print_inflight_summary(st, wall, "load")
-    print(f"  Load misses: {st.misses}  passes: {passes}")
+    print(f"  Blocks not loaded (prefix stopped at a lookup miss): {st.misses}  passes: {passes}")
     if verifier is not None:
         verifier.report("warm-inflight loads")
     return result
@@ -1381,13 +1469,15 @@ def bench_store_inflight(manager, worker, ring, keys, block_bytes, min_duration,
         todo = list(units)
         t_pass = time.perf_counter()
         loop.sample(t_pass)
-        while todo or loop.deferred or loop.pending:
-            t_tick = time.perf_counter()
-            loop.submit_deferred()
-            while todo and loop.store_slot_free():
-                loop.prepare_store(todo.pop(0))
-            loop.reap()
-            _step_idle(args.step_us, t_tick)
+        with loop.cleanup():
+            while todo or loop.deferred or loop.pending:
+                t_tick = time.perf_counter()
+                loop.submit_deferred()
+                while todo and loop.store_slot_free():
+                    loop.prepare_store(todo.pop(0))   # nothing reserved: counted as dropped
+                loop.reap()
+                if todo or loop.deferred or loop.pending:
+                    _step_idle(args.step_us, t_tick)
         now = time.perf_counter()
         loop.sample(now)
         timed += now - t_pass
@@ -1401,6 +1491,8 @@ def bench_store_inflight(manager, worker, ring, keys, block_bytes, min_duration,
         excluded += time.perf_counter() - t0
     elapsed = time.perf_counter() - t_all
     st = loop.store_stats
+    if st.blocks == 0:
+        raise RuntimeError(f"store-inflight: nothing stored ({st.misses} keys not reserved)")
     phases["store_job"], phases["store_transfer"] = st.job, st.transfer
     result = BenchResult(
         label=f"Store In-Flight ({inflight_label(args, 'store')})",
@@ -1438,9 +1530,9 @@ def bench_mixed_inflight(manager, worker, ring, keys, block_bytes, min_duration,
                               "prepare_store", "store_touch", "submit_store", "get_finished",
                               "complete_load", "complete_store", "take_events")
     units = _job_units(keys, args.job_blocks)
-    if len(units) <= args.inflight:
+    if len(units) < args.inflight:
         raise ValueError(f"mixed-inflight: {len(keys)} keys make {len(units)} load jobs "
-                         f"of {args.job_blocks}; need more than --inflight {args.inflight}")
+                         f"of {args.job_blocks}; need at least --inflight {args.inflight}")
     _populate_jobs(manager, worker, keys, args.store_job_blocks, verifier)
     manager._ring.flush_to_ssd()
     io_before = manager._ring.get_io_stats()
@@ -1448,47 +1540,41 @@ def bench_mixed_inflight(manager, worker, ring, keys, block_bytes, min_duration,
                      load_slots=args.inflight, load_job_blocks=args.job_blocks,
                      store_slots=args.store_inflight, store_job_blocks=args.store_job_blocks,
                      drain_events=True, verifier=verifier)
-    rng = random.Random(args.seed)
-    busy: set[int] = set()
-    order: list[int] = []
+    sched = _LoadScheduler(units, args.seed)
     stored_all: list[bytes] = []
     gen = 0
-    passes = 0
     base_seed = 50_000_000 + args.seed * 100_000
     t_start = time.perf_counter()
     loop.sample(t_start)
-    while True:
-        t_tick = time.perf_counter()
-        # Stop starting jobs at a pass boundary once --min-duration and 2 passes are done.
-        running = not (t_tick - t_start >= min_duration and passes >= 2 and not order)
-        loop.submit_deferred()
-        while running and loop.load_slot_free():
-            if not order:
-                order = list(range(len(units)))
-                rng.shuffle(order)
-                passes += 1
-            idx = next((i for i in order if i not in busy), None)
-            if idx is None:
-                break
-            order.remove(idx)
-            if loop.start_load(units[idx], tag=idx):
-                busy.add(idx)
-        while running and loop.store_slot_free():
-            gen += 1
-            fresh = make_content_keys(args.store_job_blocks, seed=base_seed + gen)
-            stored_all.extend(fresh)
-            loop.prepare_store(fresh)
-        for kind, _keys, idx in loop.reap():
-            if kind == "load":
-                busy.discard(idx)
-        if not running and not loop.pending and not loop.deferred:
-            break
-        _step_idle(args.step_us, t_tick)
+    try:
+        with loop.cleanup():
+            while True:
+                t_tick = time.perf_counter()
+                # Stop starting jobs at a pass boundary once --min-duration and 2 passes
+                # are done.
+                running = not (t_tick - t_start >= min_duration and sched.passes >= 2
+                               and sched.at_pass_boundary())
+                loop.submit_deferred()
+                if running:
+                    sched.fill(loop)
+                    # One reservation attempt per free slot per tick; a refused one
+                    # (tier full) is counted as dropped and tried again next tick.
+                    for _ in range(len(loop.free_store)):
+                        gen += 1
+                        fresh = make_content_keys(args.store_job_blocks, seed=base_seed + gen)
+                        stored_all.extend(fresh)
+                        loop.prepare_store(fresh)
+                sched.done(loop.reap())
+                if not running and not loop.pending and not loop.deferred:
+                    break
+                _step_idle(args.step_us, t_tick)
+    finally:
+        _remove_keys(ring, stored_all, world_size)
+    passes = sched.passes
     wall = time.perf_counter() - t_start
     loop.sample(t_start + wall)
     io = manager._ring.get_io_stats()
     io = {k: io[k] - io_before.get(k, 0) for k in io}
-    _remove_keys(ring, stored_all, world_size)
     lst, sst = loop.load_stats, loop.store_stats
     load_phases = {k: phases[k] for k in ("touch", "lookup", "prepare_load", "submit_load",
                                           "get_finished", "complete_load")}
@@ -1510,7 +1596,7 @@ def bench_mixed_inflight(manager, worker, ring, keys, block_bytes, min_duration,
     store_r.print_report()
     _print_inflight_summary(sst, wall, "store")
     print(f"  Mixed: load+store {(lst.blocks + sst.blocks) * block_bytes / wall / 1e9:.2f} GB/s  "
-          f"load misses={lst.misses}  store drops={sst.misses}  eviction events={loop.events}  "
+          f"passes={passes}  blocks not loaded={lst.misses}  store drops={sst.misses}  eviction events={loop.events}  "
           f"SSD writes={io['write_bytes'] / 1e6:.0f} MB reads={io['read_bytes'] / 1e6:.0f} MB"
           + ("" if io["write_bytes"] else "  (SSD 0: certus-server built without rw-telemetry)"))
     if verifier is not None:
@@ -3181,10 +3267,18 @@ def main():
         if args.mode not in INFLIGHT_MODES:
             parser.error(f"--shape applies to --mode {'/'.join(INFLIGHT_MODES)}")
         explicit = _explicit_flags(parser)
-        for key, val in INFLIGHT_SHAPES[args.shape].items():
-            if key != "observation" and key not in explicit:
+        shape = dict(INFLIGHT_SHAPES[args.shape])
+        if args.mode == "store-inflight":
+            # The store pass's jobs are store jobs: take the shape's store values.
+            shape["job_blocks"] = shape.pop("store_job_blocks")
+            shape["inflight"] = shape.pop("store_inflight")
+        for key, val in shape.items():
+            if key not in ("observation", "assumed") and key not in explicit:
                 setattr(args, key, val)
     if args.mode in INFLIGHT_MODES:
+        if args.verify and args.block_bytes // args.pieces_per_block < 64:
+            parser.error("--verify needs pieces of at least 64 bytes "
+                         "(--block-bytes / --pieces-per-block)")
         if args.store_job_blocks is None:
             args.store_job_blocks = args.job_blocks
         if args.store_inflight is None:

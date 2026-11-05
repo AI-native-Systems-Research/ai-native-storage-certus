@@ -323,9 +323,10 @@ modes drive the connector that way. They are separate `--mode` values, not part 
 Job size and jobs in flight are independent knobs because both vary by workload: a
 vLLM load job is one request's prefix hit, a store job one request's chunk per step.
 The defaults, 16 × 4, are for running a pass; they are not a recommended setting.
-`--step-us 0` (default) is a tight scheduler loop that yields the CPU each tick
-(`os.sched_yield()`, as vLLM's own busy loops do, so the pool threads get the GIL);
-`--step-us N` sleeps to the next N-µs tick. Each report prints, per direction, the
+`--step-us 0` (default) is a tight scheduler loop that releases the GIL each tick
+(`time.sleep(0)`), so the pool threads, which run the connector's ring I/O in Python,
+are not starved as they would be by a loop that keeps the GIL (`os.sched_yield()`
+does); `--step-us N` sleeps to the next N-µs tick. Each report prints, per direction, the
 per-job time from submit to reap (`*_job`), the connector's `transfer_time`
 (`*_transfer`, what vLLM logs as `kv_offload_load_time` / `kv_offload_store_time`),
 the mean number of jobs outstanding, and the measured concurrency (summed

@@ -133,15 +133,26 @@ def check_inflight_shapes(obs_by_id: dict, derived_by_dep: dict) -> None:
                     f"for {o.get('deployment')}")
         else:
             err(f"{where}: observation {oid!r} has no derivable deployment")
+        # Every key the shape sets must be checked against a measured or computed value,
+        # or named in "assumed" (with no observation to check it against).
         checks = (
             ("job_blocks", "blocks_per_load_job", lambda a, b: a == b),
-            ("store_job_blocks", "blocks_per_store_job", lambda a, b: abs(a - b) < 1),
+            ("store_job_blocks", "blocks_per_store_job", lambda a, b: a == round(b)),
             ("inflight", "inflight_configured", lambda a, b: a == b),
-            ("store_inflight", "inflight_configured", lambda a, b: a == b),
         )
+        assumed = set(shape.get("assumed") or ())
+        known = {"observation", "assumed", "block_bytes", "pieces_per_block"} | {c[0] for c in checks}
+        for key in shape:
+            if key not in known and key not in assumed:
+                err(f"{where}: {key} is neither checked against the observation nor listed "
+                    f"in 'assumed'")
         for skey, okey, same in checks:
             have, want = shape.get(skey), _obs_value(o, okey)
+            if skey in assumed:
+                err(f"{where}: {skey} is checked against {okey}; it cannot be 'assumed'")
+                continue
             if have is None:
+                err(f"{where}: missing {skey}")
                 continue
             if want is None:
                 err(f"{where}: {skey} {have} but observation {oid} has no {okey}")
