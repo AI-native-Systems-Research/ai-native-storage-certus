@@ -955,6 +955,10 @@ INFLIGHT_SHAPES = {
 }
 
 INFLIGHT_MODES = ("warm-inflight", "store-inflight", "mixed-inflight")
+# What the in-flight modes use when a flag is not given: 32 pieces per block as vLLM 0.30 lays
+# out Llama-3-8B (a block is 16 tokens x 128 KiB), and 4,000 blocks (7.8 GiB at 2 MiB), which fit
+# the 12 GiB tier at its 0.8 eviction threshold and make 62 jobs of 64 blocks.
+INFLIGHT_DEFAULTS = {"pieces_per_block": 32, "num_blocks": 4000}
 
 
 class _ByteVerifier:
@@ -3268,14 +3272,18 @@ def main():
                              "mode that does both: lookup-first (default) is vLLM >= 0.21 "
                              "(vLLM PR #41228, still so in 0.30); touch-first is vLLM <= 0.20")
     # ── in-flight passes (--mode warm-inflight / store-inflight / mixed-inflight) ──
-    parser.add_argument("--job-blocks", type=int, default=16,
-                        help="(*-inflight) blocks per load or store job (default 16: the "
-                             "default mode's batch, a default for running the pass, not a "
-                             "recommended setting; vLLM's job size is one request's prefix "
-                             "hit for a load, one prefill chunk for a store)")
+    parser.add_argument("--job-blocks", type=int, default=64,
+                        help="(*-inflight) blocks per load or store job (default 64, 128 MiB at "
+                             "2 MiB blocks). Throughput at 2+ jobs in flight is the same from 16 "
+                             "to 128 blocks (warm 22.7 GB/s, 2026-11-05 sweeps); 64 keeps the "
+                             "per-job host cost small. vLLM's job is one request's prefix hit "
+                             "for a load (625 blocks in LongDocQA), one prefill chunk for a store "
+                             "(about 105)")
     parser.add_argument("--inflight", type=int, default=4,
-                        help="(*-inflight) jobs kept outstanding (default 4); needs "
-                             "server channels > the jobs in flight")
+                        help="(*-inflight) jobs kept outstanding (default 4): store and cold "
+                             "loads reach their plateau only at 4 (store 14.6 vs 13.1 GB/s at 2), "
+                             "and LongDocQA's client runs 4 (about 2 measured); needs server "
+                             "channels > the jobs in flight")
     parser.add_argument("--store-job-blocks", type=int, default=None,
                         help="(mixed-inflight) blocks per store job (default --job-blocks); "
                              "warm-inflight populates its working set in jobs of this size")
@@ -3321,6 +3329,12 @@ def main():
         parser.error("--step-us must be >= 0")
     set_poll_us(args.step_us)   # every mode's poll for finished transfers
     if args.mode in INFLIGHT_MODES:
+        # vLLM 0.30's shape for Llama-3-8B (LBHNC: 32 pieces per 2 MiB block) and a working
+        # set that fits the 12 GiB tier, unless given. The other modes keep their own defaults.
+        explicit = _explicit_flags(parser)
+        for key, val in INFLIGHT_DEFAULTS.items():
+            if key not in explicit:
+                setattr(args, key, val)
         if args.verify and args.pieces_per_block >= 1 and \
                 args.block_bytes // args.pieces_per_block < 64:
             parser.error("--verify needs pieces of at least 64 bytes "

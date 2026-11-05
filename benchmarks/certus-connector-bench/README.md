@@ -165,7 +165,7 @@ python benchmarks/certus-connector-bench/bench_connector_lifecycle.py --mode all
 ```
 --shm-path PATH        certus-server shmq mailbox path (default: /dev/shm/certus-shmq)
 --bs N                 Batch size in blocks (default: 16)
---num-blocks N         Total blocks per iteration (default: 128)
+--num-blocks N         Total blocks per iteration (default: 128; 4000 for the *-inflight modes)
 --block-bytes N        Per-block size in bytes (default: 2097152 = 2 MiB)
 --gpu N                CUDA device index (default: 0)
 --tp N                 Tensor-parallel world size: one worker per GPU (default: 1, see below)
@@ -322,7 +322,7 @@ modes drive the connector that way. They are separate `--mode` values, not part 
 
 Job size and jobs in flight are independent knobs because both vary by workload: a
 vLLM load job is one request's prefix hit, a store job one request's chunk per step.
-The defaults, 16 × 4, are for running a pass; they are not a recommended setting.
+The defaults are 64 blocks per job, 4 in flight, 32 pieces per block and 4,000 blocks (7.8 GiB at 2 MiB, inside the 12 GiB tier at its 0.8 eviction threshold). They come from the 2026-11-05 sweeps on latest unstable: at 2 or more jobs in flight warm load reaches 22.7 GB/s (93% of the 24.4 GB/s host-to-device ceiling) from 16 to 128 blocks per job, store and cold load reach their plateau only at 4 in flight, and 32 pieces per block is what vLLM 0.30 gives Llama-3-8B. LongDocQA's own job is 625 blocks and its client runs 4 requests (about 2 measured), so pass `--job-blocks 625` to match it.
 `--step-us N` (default 100) is how long every mode waits between polls for finished transfers (every pass slept 100 µs there before the flag existed, so the default changes nothing); the in-flight passes use it as their scheduler tick. `--step-us 0` is a
 tight loop that releases the GIL each tick (`time.sleep(0)`), so the pool threads, which
 run the connector's ring I/O in Python, are not starved as they would be by a loop that
@@ -351,7 +351,7 @@ python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
 ```
 
 ```
---job-blocks N         (*-inflight) blocks per job (default: 16)
+--job-blocks N         (*-inflight) blocks per job (default: 64)
 --inflight N           (*-inflight) jobs outstanding (default: 4)
 --store-job-blocks N   (mixed-inflight) blocks per store job (default: --job-blocks)
 --store-inflight N     (mixed-inflight) store jobs outstanding (default: --inflight)
