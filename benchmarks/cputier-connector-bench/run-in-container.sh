@@ -25,7 +25,7 @@
 #                  it at exit (pass --keep-fs to keep it). Must NOT be on the
 #                  container's overlay storage: overlayfs rejects O_DIRECT.
 #   CPU_BYTES      CPU tier size used to size the container's /dev/shm (pass
-#                  the same value to --cpu-bytes). Default 4G.
+#                  the same value to --cpu-bytes). Default 8G, the bench's --cpu-bytes default.
 #   SHM_SIZE       explicit /dev/shm size (default CPU_BYTES + 4G)
 #   CPUS           optional CPU list (e.g. 0-15,32-47) to pin the benchmark to,
 #                  applied with taskset inside the container: rootless podman has
@@ -49,7 +49,7 @@ to_bytes() {
     *)   echo "$v" ;;
   esac
 }
-CPU_BYTES="$(to_bytes "${CPU_BYTES:-4G}")"
+CPU_BYTES="$(to_bytes "${CPU_BYTES:-8G}")"
 SHM_SIZE="${SHM_SIZE:-$(( CPU_BYTES + (4 << 30) ))}"
 
 if ! command podman image exists "$IMAGE"; then

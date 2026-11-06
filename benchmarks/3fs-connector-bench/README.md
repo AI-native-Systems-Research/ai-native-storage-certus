@@ -19,6 +19,9 @@ No engine, model or HTTP front end is started. The connector object is built wit
 - there's no mixed-eviction phase (nothing to evict) and no contention mode;
 - a store reports finished only once its write has landed, so no write-through drain is excluded.
 
+
+How the memory tier size sets `--num-blocks`, and what happens when it is set higher than the tier holds (`--no-warm`, `--allow-warm-overflow`), is summarised for all four benches in [connector-sweep: Memory tier size and `--num-blocks`](../connector-sweep/README.md#memory-tier-size-and---num-blocks).
+
 ## Mock client: code-path tests only
 
 When the 3FS USRBIO client isn't importable (the stock `vllm-openai` image), vLLM quietly swaps in its file-backed **mock** client. The mock uses plain buffered file I/O, so loads can come from the page cache. A mock run is **not** a 3FS measurement. The bench:
@@ -62,11 +65,29 @@ Each run uses its own data file (`/mnt/3fs/vllm/bench-<pid>`, or a temp director
 | Flag | Default | Connector setting |
 |---|---|---|
 | `--file-size` | `64G` | `hf3fs_file_size`: the data file, i.e. the 3FS capacity in use |
+| `--no-warm` | off | skip the warm pass (flag parity with the sibling benches) |
+| `--allow-warm-overflow` | off | accepted for parity: 3FS has no memory tier, so its warm pass never overflows one and is never refused or marked |
+| `--num-blocks` | 2948 / 128 | keys per pass: in the default mode the working set the sibling benches derive from their default 8 GiB tier (2948 at 2 MiB blocks; 3FS has no memory tier to fit), so the arms move the same keys; 128 in the others. To compare at another tier size, pass the siblings' number (4000 at 12 GiB); `run_compare.sh` does that for you |
 | `--numjobs` | `16` | `hf3fs_client_numjobs`: USRBIO clients, which is the I/O parallelism |
 | `--max-device-buffer-count` | `128` | `hf3fs_max_device_buffer_count`: GPU staging buffers per direction |
 | `--block-bytes` / `--layers` | `2M` / `32` | one key is one GPU block across all layers, which is one 3FS page |
 
-The workload flags (`--mode`, `--bs`, `--num-blocks`, `--min-duration`, `--pipeline-depth`, `--hit-ratio`, …) match the sibling benches. `--working-set`, `--no-eviction` and `--lookup-order` are accepted for parity but change nothing.
+The workload flags (`--mode`, `--bs`, `--num-blocks`, `--min-duration`, `--hit-ratio`, …) match the sibling benches. `--working-set`, `--no-eviction` and `--lookup-order` are accepted for parity but change nothing.
+
+## Jobs in flight (default mode)
+
+The default mode drives the connector as vLLM 0.30 does, and as `certus-connector-bench`'s default mode does: its store, warm and cold passes keep up to `--inflight` jobs of `--job-blocks` keys outstanding. Jobs are submitted without waiting. Each tick makes one non-blocking `get_finished` poll (the connector's `get_finished_operations`) and then sleeps to the next `--step-us` boundary. Stores are submitted one tick after they are prepared, as vLLM defers them past the step.
+
+| Flag | Default | |
+|---|---|---|
+| `--job-blocks` | 64 | blocks per load job, and per store job unless `--store-job-blocks` is set; at most the connector's staging buffers (`--max-device-buffer-count`, 128), refused above that at argument validation |
+| `--inflight` | 4 | jobs outstanding (default mode; prefix-miss and scheduler-step do not use it. scheduler-step merges a step's loads and waits inside the step, unlike certus-connector-bench's, so `connector-sweep/run_compare.sh` does not compare it) |
+| `--step-us` | 100 | the scheduler tick in µs; 0 = `time.sleep(0)` each tick |
+| `--store-job-blocks`, `--store-inflight` | `--job-blocks`, `--inflight` | the store pass's jobs |
+
+`--mode pipelined`, `--pipeline-depth` and `--direction` are gone, as are the one-request-at-a-time default passes. Labels and phase names are kept (`Store Lifecycle (...)`, `Warm Load Lifecycle (...)`, `Cold Load Lifecycle (...)`; `get_finished` is now each job's submit-to-reap time, `reap_call` the one poll per tick, and `load_job` / `store_job` repeat the per-job time). Every CSV row records `job_blocks`, `inflight`, `step_us`, `store_job_blocks` and `store_inflight`. Each job in flight has its own GPU block range.
+
+**What jobs in flight mean for 3FS.** `HF3FSKVConnector`'s `AsyncOperationManager` runs one save thread and one load thread, and each handles one job at a time. Jobs beyond the first queue behind that thread. Its parallelism is within a job: `--numjobs` USRBIO clients over 8-page I/O batches. So more jobs in flight mostly overlap the bench's own host work (lookup, submit) with a running job. A small gain from `--inflight` here is a property of the connector, not of the bench. A load job is staged in GPU buffers from one pool of `max(--max-device-buffer-count, --numjobs x 8)`, 128 by default. vLLM's `start_load_kv` splits a request into batches of that size; this bench refuses `--job-blocks` above it instead, because one job that large fails its buffer allocation.
 
 Wrapper environment: `IMAGE`, `GPU`, `H3FS_MOUNT` (`/mnt/3fs`), `MOCK`, `H3FS_DIR` (mock data, `/raid0/h3fs-mock`), `KEEP_DATA`, `CPUS` (pin with `taskset` inside the container).
 

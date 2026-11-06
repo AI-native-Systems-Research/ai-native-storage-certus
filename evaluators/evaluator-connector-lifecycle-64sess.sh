@@ -167,7 +167,10 @@ log "certus-server up (pid ${SERVER_PID}); mailbox ready"
 # ── Step 3: run the connector-lifecycle bench ───────────────────────────────────
 log "running connector-lifecycle bench (--num-sessions ${NUM_SESSIONS} --min-duration ${MIN_DURATION}) -> ${CLIENT_LOG}"
 client_rc=0
+# The bench cannot read the server's tier size: tell it the one started above.
+TIER_GIB=$(python3 -c "import re,sys; m=re.fullmatch(r'(\\d+(?:\\.\\d+)?)([KMGT]?)', sys.argv[1].strip().upper()); print(float(m.group(1)) * (1 << {'':0,'K':10,'M':20,'G':30,'T':40}[m.group(2)]) / 2**30)" "$MEM_TIER_SIZE")
 "$BENCH_PYTHON" "$BENCH_SCRIPT" \
+    --tier-gib "$TIER_GIB" --eviction-threshold "$EVICT_THRESHOLD" \
     --num-sessions "$NUM_SESSIONS" \
     --min-duration "$MIN_DURATION" \
     --shm-path "$SHM_PATH" \
