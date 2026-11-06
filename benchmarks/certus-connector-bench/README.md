@@ -226,8 +226,8 @@ python benchmarks/certus-connector-bench/bench_connector_lifecycle.py --mode all
 ```
 
 Runs default, prefix-miss, contention and scheduler-step in turn, each with its own
-defaults (e.g. 32 pieces and a tier-derived `--num-blocks` for default and contention, 1 piece
-and 128 blocks for the others, unless given). Every mode's arguments are checked before
+defaults (a tier-derived `--num-blocks` for default and contention, 128 blocks for the
+others, unless given; 32 pieces per block in every mode). Every mode's arguments are checked before
 connecting.
 
 `--mode pipelined`, `--pipeline-depth` and `--direction` are gone: the default mode's
@@ -242,7 +242,7 @@ store and warm passes keep `--inflight` jobs outstanding, which is what pipeline
 --num-blocks N         Working set in blocks (default: from the tier, at most 4000, for default and
                        contention; 128 for the others)
 --block-bytes N        Per-block size in bytes (default: 2097152 = 2 MiB)
---pieces-per-block N   KV regions per block (default 32 for default/contention, 1 otherwise);
+--pieces-per-block N   KV regions per block (default 32 in every mode);
                        --layers N is the same flag (the sibling benches' name for it)
 --gpu N                CUDA device index (default: 0)
 --tp N                 Tensor-parallel world size: one worker per GPU (default: 1, see below)
@@ -253,7 +253,7 @@ store and warm passes keep `--inflight` jobs outstanding, which is what pipeline
 --csv PATH             Append results to CSV file
 --tag TEXT             Tag column for CSV (e.g. branch name)
 --lookup-order ORDER   lookup-first (default, vLLM >= 0.21) or touch-first (vLLM <= 0.20)
---pieces-per-block N   GPU tensors per block (default: 32 for default/contention, Llama-3-8B under LBHNC; 1 otherwise), see below
+--pieces-per-block N   GPU tensors per block (default 32 in every mode, Llama-3-8B under LBHNC), see below
 --cold-tier-state S    empty (default) or full, with --tier-fill-blocks N; see "Cold-load shape"
 --tier-gib G            the server's --memory-tier-size in GiB (default 12); see "Memory tier size"
 --eviction-threshold T  the server's --memory-tier-eviction-threshold (default 0.8)
@@ -513,8 +513,29 @@ The benchmark cannot read the tier size from the server, so you state it: `--tie
 | server tier | usable (x 0.8) | default `--num-blocks` (2 MiB) | cold tier fill | measured (warm / store / contention load+store / cold) |
 |---|---|---|---|---|
 | 4 GiB | 3.2 GiB, 1,638 blocks | 1,474 (2.9 GiB) | 1,638 blocks | 23.3 / 14.3 / 16.4+5.9 / 21.4 GB/s |
+| 8 GiB | 6.4 GiB, 3,276 blocks | 2,948 (5.8 GiB) | 3,276 blocks | not measured |
 | 12 GiB | 9.6 GiB, 4,915 blocks | 4,000 (7.8 GiB) | 4,915 blocks | 23.3 / 14.6 / 14.5+6.0 / 21.0 GB/s |
 | 32 GiB | 25.6 GiB, 13,107 blocks | 4,000 (7.8 GiB) | 13,107 blocks | 23.3 / 14.6 / 13.2+6.5 / 22.6 GB/s |
+
+**Running with another tier size, e.g. 8 GiB.** Give the size once to each side; everything
+else (working set, cold fill) follows from it:
+
+```bash
+# certus: the server's tier, and the same number to the benchmark
+sudo target/release/certus-server --drive-count 4 --channels 32 \
+    --memory-tier-size 8G --memory-tier-eviction-threshold 0.8 --format
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py --tier-gib 8
+# the siblings: their tier is their own flag (3fs has no memory tier)
+CPU_BYTES=8G benchmarks/cputier-connector-bench/run-in-container.sh --cpu-bytes 8G
+L1_GB=8 benchmarks/lmcache-connector-bench/run-in-container.sh
+# all four at once: run_compare.sh sets every one of the above from --dram
+benchmarks/connector-sweep/run_compare.sh --out bench-results/compare-8g.html --dram 8G
+```
+
+cputier and LMCache derive their default `--num-blocks` from their own tier by the same rule
+(cputier from `--cpu-bytes`, LMCache from the L1 its server reports), so at 8 GiB all three move
+2,948 blocks; 3FS, which has no tier, takes the 12 GiB figure (4,000). `run_compare.sh` passes
+one `--num-blocks` to every arm (default 1,024), so its arms always match.
 
 The defaults carry over to bigger and smaller tiers. The cost of a bigger tier is the cold pass:
 each pass with `--cold-tier-state full` empties the tier and refills it (`--tier-fill-blocks`), so cold

@@ -2765,9 +2765,9 @@ def build_parser() -> argparse.ArgumentParser:
                         type=int, default=None,
                         help="KV regions per block: N GPU tensors of block_bytes/N "
                              "each, one per distinct layer view as vLLM lays out KV "
-                             "under its default LBHNC layout (default 32 in the default and "
-                             "contention modes, Llama-3-8B under vLLM 0.30; 1 in the others: "
-                             "one contiguous region, as under BLHNC or vLLM 0.20/0.22). "
+                             "under its default LBHNC layout (default 32 in every mode, "
+                             "Llama-3-8B under vLLM 0.30; 1: one contiguous region, as under "
+                             "BLHNC or vLLM 0.20/0.22). "
                              "--layers is the same flag, the name the cputier, lmcache and 3fs "
                              "benches use for it")
     # ── cold-load shape (default mode's cold pass) ──
@@ -2930,8 +2930,8 @@ def resolve_args(parser, argv=None, mode: str | None = None) -> argparse.Namespa
                 if key not in ("observation", "assumed") and key not in explicit:
                     setattr(args, key, val)
     if args.pieces_per_block is None:
-        args.pieces_per_block = (INFLIGHT_DEFAULTS["pieces_per_block"]
-                                 if mode in INFLIGHT_MODES else 1)
+        # Every mode: vLLM's per-layer layout (the siblings' --layers default is 32 too).
+        args.pieces_per_block = INFLIGHT_DEFAULTS["pieces_per_block"]
     if args.step_us < 0:
         parser.error("--step-us must be >= 0")
     if mode == "scheduler-step" and (args.inflight < 1 or args.requests_per_step < 1):
