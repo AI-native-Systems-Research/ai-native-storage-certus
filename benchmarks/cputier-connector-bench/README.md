@@ -102,7 +102,7 @@ podman run --rm -it --pull=never --security-opt label=disable --shm-size 8g \
 
 # then, inside the container:
 python3 benchmarks/cputier-connector-bench/bench_cputier_lifecycle.py --fs-root /fs-tier --help
-python3 benchmarks/cputier-connector-bench/bench_cputier_lifecycle.py --fs-root /fs-tier --mode pipelined
+python3 benchmarks/cputier-connector-bench/bench_cputier_lifecycle.py --fs-root /fs-tier --mode contention
 ```
 
 Edits you make to the script on the host show up in the container straight away, because the repo is mounted.
@@ -149,7 +149,7 @@ These play the role of certus-connector-bench's server flags:
 | `--tp` | 1 | Tensor-parallel world size, one worker per GPU (see below) |
 | `--gpus` | `--gpu..--gpu+tp-1` | Devices for the TP ranks |
 
-The workload flags (`--bs`, `--num-blocks`, `--block-bytes`, `--min-duration`, `--working-set`, `--mode`, `--pipeline-depth`, `--direction`, `--hit-ratio`, `--requests-per-step`, `--num-sessions`, `--pattern`, `--override`, `--csv`, `--tag`, `--no-cold`, `--no-eviction`, `--lookup-order`) mean the same as in certus-connector-bench.
+The workload flags (`--bs`, `--num-blocks`, `--block-bytes`, `--min-duration`, `--working-set`, `--mode`, `--job-blocks`, `--inflight`, `--step-us`, `--store-job-blocks`, `--store-inflight`, `--hit-ratio`, `--requests-per-step`, `--num-sessions`, `--pattern`, `--override`, `--csv`, `--tag`, `--no-cold`, `--no-eviction`, `--lookup-order`) mean the same as in certus-connector-bench.
 
 `--lookup-order` (default `lookup-first`): a request's lookups come first and its `touch` after them, as vLLM's offloading scheduler does since vLLM 0.21 (vLLM PR #41228; still so in 0.30). When a lookup returns `RETRY`/`HIT_PENDING`, the touch follows every lookup pass, because vLLM calls `_touch()` after `_lookup()` even when it defers the request. Exception: `prefix-miss` retries each key in place (unchanged) and touches once after the whole scan. `touch-first` touches once before the lookups, which is vLLM ≤ 0.20's order and this benchmark's behaviour before the option existed. Store-only paths touch before `prepare_store` either way.
 
@@ -179,25 +179,38 @@ GPU=0,1 benchmarks/cputier-connector-bench/run-in-container.sh --tp 2 --mode sch
 ```bash
 B=benchmarks/cputier-connector-bench/run-in-container.sh
 $B                                         # default: store, warm load, cold load, mixed eviction
-$B --mode pipelined --pipeline-depth 4     # N batches in flight before reaping
 $B --mode prefix-miss --hit-ratio 0.5      # maximal-prefix lookup cost
-$B --mode contention                       # store thread + load thread on one CPU tier
+$B --mode contention                       # loads 64 x 4 and stores 32 x 1 in flight together
 $B --mode scheduler-step                   # multi-request steps with shared prefixes
 $B --mode all --csv bench-results/cputier.csv --tag cputier
 $B --pattern cold_prefill_store            # certus_fio YAML pattern
 $B --spec cpu                              # CPU-only offload baseline
 ```
 
-- **default**: four serial phases.
-  1. Store (GPU→CPU, write-through to fs in the background).
-  2. Warm load (CPU→GPU).
-  3. Cold load. The CPU tier is emptied before each pass, so every block is promoted fs→CPU (`lookup_wait`) and then copied to the GPU.
+- **default**: four phases; the first three run jobs in flight (see "Jobs in flight").
+  1. Store (GPU→CPU, write-through to fs in the background): `--store-job-blocks` × `--store-inflight`.
+  2. Warm load (CPU→GPU): `--job-blocks` × `--inflight`. The working set (`--num-blocks` keys, one CPU-tier chunk each) must fit 90% of the CPU tier's chunks (`--cpu-bytes`), as certus-connector-bench's must fit its tier; a larger one is refused before any run.
+  3. Cold load, the same jobs. The CPU tier is emptied before each pass, so every block is promoted fs→CPU (`lookup_wait`, across scheduler steps) and then copied to the GPU.
   4. Mixed store and load under CPU-tier pressure, draining `take_events`. Size `--working-set` against `--cpu-bytes`; the run prints after how many generations the tier fills.
-- **pipelined**: the CPU worker chains transfers in submission order, so this shows how much per-batch scheduler overhead overlaps the DMA.
 - **prefix-miss**: per-key `lookup_hit` and `lookup_miss`. With an fs tier, `lookup_miss` includes the one-step async probe.
-- **contention**: both threads share one manager and worker behind a lock, because vLLM's scheduler is single-threaded. Their GPU→CPU and CPU→GPU copies still overlap on separate CUDA streams. After a dropped store, the store thread backs off for one step (1 ms). The load thread reads only the batch the store committed most recently (a one-entry mailbox; batches replaced before it got to them are reported as `Skipped store batches`), so it does not build up a backlog behind the store; a batch can still be evicted before or while the load reads it (the stack lock serializes single calls, not a whole load), and a slow load still shows as lower load throughput.
+- **contention**: loads and stores in flight together on one manager and worker, single-threaded through the step loop, as vLLM's scheduler and worker are and as certus-connector-bench's contention mode is: `--inflight` load jobs of `--job-blocks` keys over the working set (stored first, shuffled per pass) and `--store-inflight` store jobs of `--store-job-blocks` fresh keys (defaults 32 × 1 here). The fs write-through and any eviction it forces run inside the window. A refused store is counted as dropped and tried again next tick. Labels `Contention: Store Thread (...)` and `Contention: Load Thread (...)` are kept. The two-thread mode (a lock and a one-entry mailbox) is gone; its numbers are not comparable with these.
 - **scheduler-step**: the same call pattern as certus-connector-bench's scheduler-step mode, so the two backends' numbers compare directly. Sessions share one prefix pool and diverge at geometric points. Per request, the bench runs `on_new_request`, maximal-prefix lookup, `touch` (before the lookup with `--lookup-order touch-first`) and an immediate `prepare_load` (as the connector's `update_state_after_alloc` does). Loads and stores are deduplicated across the step. Only the loads are submitted and drained, so `drain_workers` measures load completion. The step ends with `on_schedule_end` and `take_events`. Stores are submitted after that and drained, untimed, at the start of the next step, and a request with a store in flight calls `on_request_finished` only once that store completes. `touch_lookup`, `prepare_load` and `prepare_store` are per-step totals.
 - **--pattern**: reads patterns from `knowledge/workload_patterns/` using certus_fio's `WorkloadPattern`. The CPU-tier geometry is fixed when the stack is built, so all keyspaces use one block size: the largest `object_bytes`, unless `--block-bytes` is given.
+
+## Jobs in flight
+
+The default mode's store, warm and cold passes and the contention mode drive the stack as vLLM 0.30's `OffloadingConnector` does, with certus-connector-bench's knobs and defaults:
+
+| Flag | Default | |
+|---|---|---|
+| `--job-blocks` | 64 | keys per load job (and per default-mode store job) |
+| `--inflight` | 4 | jobs outstanding; prefix-miss and scheduler-step do not use it |
+| `--step-us` | 100 | scheduler tick in µs; 0 = `time.sleep(0)` each tick |
+| `--store-job-blocks`, `--store-inflight` | default mode: `--job-blocks`, `--inflight`; contention: 32, 1 | the store side |
+
+Each tick submits the stores prepared in the previous tick and starts loads into free slots. It then makes one non-blocking `get_finished()`, ends the scheduler step (`on_schedule_end`, as vLLM does every step, which flushes the fs tier's async probes and promotions) and sleeps to the next `--step-us` boundary. A load whose lookup answers RETRY or HIT_PENDING is not spun on. It parks and is looked up again on a later tick, as vLLM defers the request to its next step. The wait is `lookup_wait`. Each job has its own GPU block range (slot × job blocks × `--blocks-per-chunk`). Phases `get_finished` (and `load_job` / `store_job`) are each job's submit-to-reap time, `reap_call` the one poll per tick, `*_transfer` the worker's `transfer_time`. Every CSV row records `job_blocks`, `inflight`, `step_us`, `store_job_blocks` and `store_inflight`. `--mode pipelined`, `--pipeline-depth` and `--direction` are gone, as are the one-batch-at-a-time default passes.
+
+**What jobs in flight mean for cputier.** This is vLLM's own async model for this connector. But `CPUOffloadingWorker` chains its transfers per direction on the GPU: each transfer's CUDA stream waits for the previous transfer's end event. So several loads in flight overlap only their host work (lookups, `prepare_load`, submit) with the running copy, and stores likewise; a load and a store do overlap each other. A small gain from `--inflight` is a property of the connector, not of the benchmark.
 
 ## Side-by-side with certus
 
