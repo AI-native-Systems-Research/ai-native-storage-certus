@@ -17,6 +17,11 @@ Represents a PCI Bus-Device-Function address.
 
 **Display format**: `DDDD:BB:DD.F` (e.g., `0000:01:00.0`)
 
+**Parsing**: `PciAddress::parse(&str) -> Option<PciAddress>` accepts `DDDD:BB:DD.F` or
+`BB:DD.F` (hex, any case, surrounding whitespace ignored; a missing domain is 0) and rejects
+a device number of 32 or more or a function of 8 or more. `parse(a.to_string()) == Some(a)` for any address with `dev < 32` and `func < 8` (the fields
+are public, so an out-of-range address can be built; it does not parse back).
+
 **Uniqueness**: The tuple (domain, bus, dev, func) uniquely identifies a PCI device in the system.
 
 ### PciId
@@ -44,7 +49,7 @@ Represents a discovered VFIO-attached device managed by SPDK.
 
 **Identity**: A VfioDevice is uniquely identified by its `address`.
 
-**Lifecycle**: VfioDevice instances are created during `init()` and are immutable snapshots. They do not track runtime state changes (device removal, etc.).
+**Lifecycle**: VfioDevice instances are created during `init()` (or `init_with_allowed()`, which creates only the allowed devices) and are immutable snapshots. They do not track runtime state changes (device removal, etc.).
 
 ### SpdkEnvError
 
@@ -96,6 +101,7 @@ ISPDKEnv::devices() --returns--> Vec<VfioDevice>
 VfioDevice --contains--> PciAddress
 VfioDevice --contains--> PciId
 ISPDKEnv::init() --may-return--> SpdkEnvError
+ISPDKEnv::init_with_allowed(pci) --is--> init(), restricted to the parsed PciAddress list (empty = all)
 ISPDKEnv::init() --sets--> "SPDK active" flag (interfaces::set_spdk_env_active(true))
 ISPDKEnv::fini() --clears--> "SPDK active" flag (interfaces::set_spdk_env_active(false))
 DmaBuffer::drop() --checks--> "SPDK active" flag
@@ -106,10 +112,11 @@ DmaBuffer::drop() --checks--> "SPDK active" flag
 ### SPDKEnvComponent Lifecycle
 
 ```
-Constructed --> [init()] --> Initialized --> [fini() or drop()] --> Finalized
+Constructed --> [init() / init_with_allowed()] --> Initialized --> [fini() or drop()] --> Finalized
      |                            |
-     |--- [init() fails] ------->| ERROR: (various — VfioNotAvailable, PermissionDenied,
-     |                           |         HugepagesNotConfigured, AlreadyInitialized, InitFailed)
+     |--- [either fails] ------->| ERROR: (various — VfioNotAvailable, PermissionDenied,
+     |                           |         HugepagesNotConfigured, AlreadyInitialized, InitFailed;
+     |                           |         init_with_allowed also: InitFailed for a malformed address)
      |--- [drop() before init()] --> (no-op cleanup)
 ```
 
@@ -120,7 +127,7 @@ Constructed --> [init()] --> Initialized --> [fini() or drop()] --> Finalized
 ### Singleton State (Process-Global)
 
 ```
-Available --> [init() succeeds] --> Occupied --> [drop()] --> Available
+Available --> [init() / init_with_allowed() succeeds] --> Occupied --> [drop()] --> Available
                                        |
-                                       |--- [second init()] --> ERROR: AlreadyInitialized
+                                       |--- [a second of either] --> ERROR: AlreadyInitialized
 ```

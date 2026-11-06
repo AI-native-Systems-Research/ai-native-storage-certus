@@ -39,7 +39,13 @@ pub(crate) fn init_spdk_env(
     iface: &Arc<dyn spdk_env::ISPDKEnv + Send + Sync>,
     config: &StackConfig,
 ) -> Result<(), String> {
-    iface.init().map_err(|e| format!("SPDK init failed: {e}"))?;
+    // With an explicit drive list, open only those drives: a second certus on
+    // the same host (one per NUMA node) owns the others, and enumerating them
+    // could hold their VFIO groups while it starts, leaving it short of drives.
+    // Auto-discovery (--drive-count) needs to see every drive, so it opens all.
+    iface
+        .init_with_allowed(&config.device_pci)
+        .map_err(|e| format!("SPDK init failed: {e}"))?;
 
     // Resolve device addresses: explicit list or auto-discover via SPDK.
     let addrs = if !config.device_pci.is_empty() {

@@ -23,10 +23,20 @@ RUN dnf install -y epel-release && \
     dnf clean all
 
 # CUDA toolkit (build-time only; runtime uses nvidia-container-toolkit to inject host libs)
+#
+# 13.x, not 12.x: gpu-services batches a block's per-layer pieces into one
+# cudaMemcpyBatchAsync only on a 13.0+ runtime, and falls back to one copy per
+# piece below (cuda_ffi.rs, CUDA_MEMCPY_BATCH_MIN_RUNTIME). Under vLLM's default
+# LBHNC layout that is one copy per layer per block. Keep the minor version at
+# or below what the nodes' driver supports (nvidia-smi's "CUDA Version"): a
+# runtime newer than the driver fails at startup. 595.71 supports up to 13.2.
+# CUDA_MINOR is the dnf package suffix, CUDA_VERSION the install directory.
+ARG CUDA_MINOR=13-2
+ARG CUDA_VERSION=13.2
 RUN dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo && \
-    dnf install -y cuda-cudart-devel-12-6 cuda-nvcc-12-6 && \
+    dnf install -y cuda-cudart-devel-${CUDA_MINOR} cuda-nvcc-${CUDA_MINOR} && \
     dnf clean all
-ENV PATH="/usr/local/cuda-12.6/bin:${PATH}"
+ENV PATH="/usr/local/cuda-${CUDA_VERSION}/bin:${PATH}"
 
 # GDRCopy (build-time stub — the real library is on the host)
 RUN mkdir -p /usr/local/gdrcopy/lib && \
@@ -69,6 +79,9 @@ RUN cd deps && bash build_zyre.sh
 # Exposed as build args so build-image-and-push.sh can override them.
 ARG CERTUS_PROFILE=full-transfer
 ARG CERTUS_FEATURES="spdk,rdma"
+# Link the GDRCopy stub above. Without it gpu-services/build.rs searches the
+# in-tree kernel/modules/gdrcopy/src, which has no built library in the image.
+ENV GDRCOPY_LIB_PATH=/usr/local/gdrcopy/lib
 ENV PKG_CONFIG_PATH=/build/deps/zyre-build/lib/pkgconfig:/build/deps/zyre-build/lib64/pkgconfig
 ENV LD_LIBRARY_PATH=/build/deps/zyre-build/lib:/build/deps/zyre-build/lib64
 RUN CERTUS_PROFILE="${CERTUS_PROFILE}" cargo build --release \
@@ -77,6 +90,8 @@ RUN CERTUS_PROFILE="${CERTUS_PROFILE}" cargo build --release \
 
 # --- Runtime stage ---
 FROM rockylinux:9
+# The same CUDA release as the builder: the binary checks the runtime it loads.
+ARG CUDA_MINOR=13-2
 
 RUN dnf install -y epel-release && \
     dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo && \
@@ -87,7 +102,7 @@ RUN dnf install -y epel-release && \
         fuse3-libs \
         rdma-core libibverbs librdmacm \
         pciutils \
-        cuda-cudart-12-6 && \
+        cuda-cudart-${CUDA_MINOR} && \
     dnf clean all
 
 # GDRCopy stub (certus links against it but only calls it when GPU-direct is active)

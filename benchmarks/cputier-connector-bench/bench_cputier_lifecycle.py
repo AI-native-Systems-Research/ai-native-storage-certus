@@ -65,6 +65,7 @@ import math
 import os
 import random
 import shutil
+import signal
 import statistics
 import sys
 import tempfile
@@ -250,6 +251,12 @@ class BenchResult:
     total_bytes: int
     wall_seconds: float
     phases: dict[str, PhaseTiming]
+    # (GB/s, seconds) including time excluded from wall_seconds, e.g. a store
+    # pass's disk write-through drain; None when nothing was excluded.
+    sustained: tuple[float, float] | None = None
+    # Work the backend skipped or did not do; the comparison report flags rows
+    # where these are nonzero: store_drops, load_misses, disk_read_bytes.
+    counts: dict = field(default_factory=dict)
 
     @property
     def throughput_gbs(self) -> float:
@@ -283,7 +290,9 @@ class BenchResult:
             "wall_seconds": f"{self.wall_seconds:.6f}",
             "throughput_gbs": f"{self.throughput_gbs:.4f}",
             "iops": f"{self.iops:.1f}",
+            "sustained_gbs": f"{self.sustained[0]:.4f}" if self.sustained else "",
         }
+        row.update({k: str(v) for k, v in self.counts.items()})
         for name, timing in self.phases.items():
             row[f"{name}_p50_us"] = f"{timing.p50_us:.1f}"
             row[f"{name}_p99_us"] = f"{timing.p99_us:.1f}"
@@ -910,7 +919,7 @@ def bench_store_lifecycle(
     wall_start = time.perf_counter()
     iteration = 0
 
-    while (time.perf_counter() - wall_start) < min_duration or iteration < 2:
+    while (time.perf_counter() - wall_start - excluded) < min_duration or iteration < 2:
         pass_keys = rekey(keys, iteration)
         for i in range(0, len(pass_keys), batch_size):
             s, d = store_batch(stack, pass_keys[i : i + batch_size], phases)
@@ -930,6 +939,8 @@ def bench_store_lifecycle(
         wall_seconds=elapsed - excluded,
         phases=phases,
     )
+    result.sustained = (result.total_bytes / elapsed / 1e9, elapsed)
+    result.counts = {"store_drops": drops}
     result.print_report()
     if stack.has_secondary:
         print(f"  Sustained incl. fs write-through drain: "
@@ -988,6 +999,9 @@ def bench_load_lifecycle(
         wall_seconds=wall,
         phases=phases,
     )
+    result.counts = {"load_misses": misses}
+    if cold:
+        result.counts["disk_read_bytes"] = (stack.counters["promoted"] - promoted_before) * stack.chunk_bytes
     result.print_report()
     if misses or cold:
         print(f"  Load misses: {misses}  "
@@ -1085,6 +1099,8 @@ def bench_mixed_eviction(
         wall_seconds=wall,
         phases=phases,
     )
+    result.counts = {"store_drops": store_drops, "load_misses": load_misses,
+                     "disk_read_bytes": delta["promoted"] * stack.chunk_bytes}
     result.print_report()
     print(f"  CPU evictions (REMOVED): {delta['cpu_removed']}  "
           f"Store drops (tier full): {store_drops}  "
@@ -1145,7 +1161,7 @@ def bench_pipelined(
                 time.sleep(POLL_S)
         _rec(phases, "pipeline_drain", t0)
 
-    while (time.perf_counter() - wall_start) < min_duration or iteration < 2:
+    while (time.perf_counter() - wall_start - excluded) < min_duration or iteration < 2:
         in_flight: collections.deque = collections.deque()
         pass_keys = rekey(keys, iteration) if is_store else keys
 
@@ -1200,6 +1216,8 @@ def bench_pipelined(
         wall_seconds=elapsed - excluded,
         phases=phases,
     )
+    if is_store:
+        result.sustained = (result.total_bytes / elapsed / 1e9, elapsed)
     result.print_report()
     if is_store and stack.has_secondary:
         print(f"  Sustained incl. fs write-through drain: "
@@ -1900,6 +1918,10 @@ def main():
         fs_root = fs_run_dir
         if not args.keep_fs:
             atexit.register(shutil.rmtree, fs_run_dir, True)
+            # atexit does not run on a signal: turn SIGTERM (podman stop, the
+            # connector-sweep interrupt) into a normal exit so the fs tier's
+            # files are removed; they run to hundreds of GB.
+            signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 
     shm = shutil.disk_usage("/dev/shm")
     if args.cpu_bytes > shm.free:
@@ -1916,7 +1938,15 @@ def main():
           f"fs_threads=r{args.fs_read_threads}/w{args.fs_write_threads}  "
           f"eviction_policy={args.eviction_policy}  lookup_order={args.lookup_order}")
 
-    max_blocks = max(args.num_blocks, args.working_set, args.bs)
+    # GPU KV buffers sized by the largest single transfer: every job addresses GPU
+    # blocks 0..n-1 of its own batch (_gpu_spec). --working-set only sets how many
+    # keys cycle through the CPU tier (in --bs batches), so sizing by it reserved
+    # GPU memory no transfer touches -- 32 GiB at --working-set 16384, 2 MiB
+    # blocks -- as certus-connector-bench did before 4e612f8a. A scheduler-step
+    # request transfers at most its prefix (shared pool) plus its suffix.
+    kpr = max(4, args.num_blocks // args.requests_per_step)
+    step_request = min((kpr // 2) * 4, args.num_blocks * 2) + (kpr - kpr // 2)
+    max_blocks = max(args.num_blocks, args.bs, step_request)
     if mode == "pattern":
         max_blocks = max(max_blocks, *(ks["cardinality"] for ks in pattern.keyspaces.values()))
     stack = CputierStack(args, block_bytes, max_blocks, fs_root, gpus)

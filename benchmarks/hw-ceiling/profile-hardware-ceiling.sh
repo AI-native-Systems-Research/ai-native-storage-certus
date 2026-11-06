@@ -399,7 +399,11 @@ else
 import json,sys
 bdf,dev,path=sys.argv[1],sys.argv[2],sys.argv[3]
 try:
-    d=json.load(open(path))
+    txt=open(path).read()
+    # inspect-nvme.py may print progress text before the JSON object; skip it.
+    idx=txt.find("{")
+    if idx<0: raise ValueError("no JSON object")
+    d=json.loads(txt[idx:])
 except Exception:
     print(f"    - bdf: \"{bdf}\"  # {dev}: inspect JSON unreadable"); sys.exit()
 idn=d.get("identify",{})
@@ -1106,6 +1110,53 @@ open(yaml_path,"a").write("\n".join(out)+"\n")
 def fmt(x): return f"{x:.2f}" if isinstance(x,(int,float)) else (x or "")
 if md_path:
     m=["", "## Summary", ""]
+    # Devices under test — so the reader knows exactly what was profiled.
+    gpu_names=[]
+    for g in sorted(static):
+        n=static[g].get("name","unknown")
+        if n not in gpu_names: gpu_names.append(n)
+    nvme_models=[]
+    # Parse nvme drive info from the YAML we already wrote (simple line scan).
+    # Lines look like:  '    - bdf: "0000:41:00.0"'  /  '      model: "PM9A3 ..."'
+    def _yval(line):
+        _,_,v=line.partition(": ")
+        return v.split("#")[0].strip().strip('"')
+    _drv={}  # accumulator for current drive being parsed
+    _in_nvme=False
+    for _ln in open(yaml_path):
+        _s=_ln.strip()
+        if _s.startswith("nvme:"): _in_nvme=True; continue
+        if _in_nvme and _s and not _s.startswith("-") and not _s.startswith("#") and not _ln[0].isspace():
+            _in_nvme=False; break
+        if not _in_nvme: continue
+        if re.match(r'^- bdf:', _s):
+            if _drv.get("bdf"):
+                _lbl=_drv.get("model","unknown")
+                if _drv.get("cap"): _lbl+=f" ({_drv['cap']} TB)"
+                nvme_models.append(f"{_drv['bdf']} — {_lbl}")
+            _drv={"bdf":_yval(_s)}
+        elif re.match(r'^model:', _s) and _drv:
+            _drv["model"]=_yval(_s)
+        elif re.match(r'^capacity_tb:', _s) and _drv:
+            try: _drv["cap"]=f"{float(_yval(_s)):.1f}"
+            except ValueError: pass
+    if _drv.get("bdf"):
+        _lbl=_drv.get("model","unknown")
+        if _drv.get("cap"): _lbl+=f" ({_drv['cap']} TB)"
+        nvme_models.append(f"{_drv['bdf']} — {_lbl}")
+    m.append("### Devices under test")
+    m.append("")
+    if gpu_names:
+        m.append(f"**GPU**: {len(static)}x {', '.join(gpu_names)}")
+    else:
+        m.append("**GPU**: _(not detected)_")
+    if nvme_models:
+        m.append(f"**NVMe**: {len(nvme_models)} drive(s)")
+        for _nm in nvme_models:
+            m.append(f"  - {_nm}")
+    else:
+        m.append("**NVMe**: _(none named via --nvme)_")
+    m.append("")
     # Sub-table 2: warm path (H2D ceiling), per GPU
     bw0=parse_bw(numa_files[0] if numa_files else plain)
     m+=["### Warm path — Memory-Tier (DRAM) --H2D--> GPU", "",

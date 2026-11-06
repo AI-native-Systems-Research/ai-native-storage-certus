@@ -1,0 +1,49 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Aggregated serving with certus, plus fetch: when the router moves a session to
+# another pod, that pod fetches the session's history from the old pod's certus
+# instead of recomputing it. Layered on ../certus, so aggregated certus without
+# fetch is still ../certus alone.
+#
+# The pieces are pd-certus's peer selection, without P/D: every pod publishes KV
+# events and annotates itself with its certus instance; the router's
+# p2p-source-producer names the pod whose certus holds the longest prefix of a
+# turn's prompt; llm-d's routing sidecar, now in front of each aggregated pod,
+# turns that into kv_transfer_params.remote_kv_source on the one request there
+# is (its decoder-only path, as in llm-d's guides/p2p-kv-cache-sharing).
+resources:
+  - ../certus
+  # install.sh copies both in from ../pd-certus: kustomize will not load a file
+  # from outside the overlay.
+  - rbac.yaml
+  - render.yaml
+
+patches:
+  - path: patch.yaml
+  # vLLM moves to 8200 behind the sidecar on 8000, which is where the
+  # InferencePool sends requests (llm-d's P2P guide's port layout). A JSON patch
+  # because ports merge on containerPort: a strategic merge would add 8200
+  # beside 8000 rather than move it. The probes name the port, so they follow.
+  - target: {kind: Deployment, name: optimized-baseline-nvidia-gpu-vllm-decode}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: "--port=8200"
+      - op: replace
+        path: /spec/template/spec/containers/0/ports/0/containerPort
+        value: 8200
+  # pd-certus places the render server on a decode node; aggregated nodes carry
+  # no role label, so drop it. install.sh's site overlay still confines it to
+  # this instance's nodes.
+  - target: {kind: Deployment, name: render}
+    patch: |-
+      - op: remove
+        path: /spec/template/spec/nodeSelector/llm-d.ai~1pd-decode
+
+# render.yaml is this overlay's own resource, so ../certus's image pin does not
+# reach it. Same placeholder and tag as ../certus, rewritten by install.sh.
+images:
+  - name: docker.io/vllm/vllm-openai
+    newName: REGISTRY/REPO/llm-d-vllm-certus
+    newTag: vllm0.30.0-04548e47

@@ -154,7 +154,115 @@ struct DataDrive {
     block_dev_iface: Arc<dyn IBlockDevice + Send + Sync>,
     _extent_mgr_component: Arc<dyn component_core::IUnknown + Send + Sync>,
     extent_mgr: Arc<dyn IExtentManager + Send + Sync>,
-    cached_channels: Option<ClientChannels>,
+    /// Per-reader client channels for the read pipeline; see [`ChannelPool`].
+    channel_pool: ChannelPool,
+}
+
+/// A pool of per-drive client channels for the read pipeline.
+///
+/// Each [`ClientChannels`] is an SPSC pair (single producer / single consumer)
+/// and must be used by exactly one thread at a time. Lookups reach a drive from
+/// several threads at once (the shmq workers, and the scoped threads of
+/// `promote_to_memory_tier`), so a single shared channel would let one thread's
+/// completions be dequeued by another (completion theft: the victim waits on
+/// `completion_rx` forever). Each concurrent reader therefore checks out its own
+/// channel; channels are reused across checkouts and the pool grows on demand up
+/// to peak concurrency. Same design as `dispatcher`'s `ChannelPool`.
+struct ChannelPool {
+    block_dev: Arc<dyn IBlockDevice + Send + Sync>,
+    free: Mutex<Vec<ClientChannels>>,
+}
+
+impl ChannelPool {
+    /// A pool holding `first`, the channel connected at drive start-up (if that
+    /// connect succeeded), so the first reader does not pay for a connect.
+    fn new(block_dev: Arc<dyn IBlockDevice + Send + Sync>, first: Option<ClientChannels>) -> Self {
+        Self {
+            block_dev,
+            free: Mutex::new(first.into_iter().collect()),
+        }
+    }
+
+    /// Check out an exclusive channel, connecting a fresh one if the pool is
+    /// empty. The returned lease returns the channel to the pool on drop.
+    fn checkout(&self) -> Result<ChannelLease<'_>, DispatcherError> {
+        let reused = self.free.lock().unwrap_or_else(|e| e.into_inner()).pop();
+        let channels = match reused {
+            Some(ch) => ch,
+            None => self.block_dev.connect_client().map_err(|e| {
+                DispatcherError::IoError(format!("channel pool connect_client failed: {e}"))
+            })?,
+        };
+        // Discard any late completions left by a prior user that errored out, so
+        // the next pipeline starts from a clean completion stream (tags from an
+        // old op must never be matched against a new op's segments).
+        while channels.completion_rx.try_recv().is_ok() {}
+        Ok(ChannelLease {
+            pool: self,
+            channels: Some(channels),
+        })
+    }
+}
+
+/// RAII guard for a checked-out [`ClientChannels`]; returns it to the pool on drop.
+struct ChannelLease<'a> {
+    pool: &'a ChannelPool,
+    channels: Option<ClientChannels>,
+}
+
+impl ChannelLease<'_> {
+    fn channels(&self) -> &ClientChannels {
+        self.channels
+            .as_ref()
+            .expect("channel lease used after channel taken")
+    }
+}
+
+impl Drop for ChannelLease<'_> {
+    fn drop(&mut self) {
+        if let Some(ch) = self.channels.take() {
+            self.pool
+                .free
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(ch);
+        }
+    }
+}
+
+/// Queue the host-to-device copies that scatter one memory-tier slot to its GPU
+/// regions on `stream` (no sync): region L reads `slot + sum(sizes[0..L])`, each copy
+/// clamped to `slot_size`. A zero-size region gets no bytes but does not end the
+/// scatter; an exhausted slot does. The same layout as `dispatcher`'s
+/// `queue_slot_to_regions` and this crate's store gather.
+fn scatter_slot_to_regions(
+    gpu: &dyn IGpuServices,
+    stream: GpuStream,
+    slot: *mut u8,
+    slot_size: usize,
+    regions: &[IpcHandle],
+) -> Result<(), DispatcherError> {
+    let mut off = 0usize;
+    for region in regions {
+        let rest = slot_size.saturating_sub(off);
+        if rest == 0 {
+            break;
+        }
+        let copy_size = (region.size as usize).min(rest);
+        if copy_size > 0 {
+            gpu.memcpy_h2d_async(
+                (slot as usize + off) as *const std::ffi::c_void,
+                region.address as *mut std::ffi::c_void,
+                copy_size,
+                stream,
+            )
+            .map_err(|e| {
+                DispatcherError::IoError(format!("GPU DMA copy (memory-tier→device) failed: {e}"))
+            })?;
+        }
+        off += region.size as usize;
+    }
+    Ok(())
 }
 
 fn format_bytes(bytes: usize) -> String {
@@ -506,15 +614,11 @@ impl DispatcherP2pComponent {
         let start_lba = offset / block_size as u64;
         let block_dev = Arc::clone(&drive.block_dev_iface);
 
-        let channels = match &drive.cached_channels {
-            Some(ch) => ch,
-            None => {
-                drop(drives);
-                return Err(DispatcherError::IoError(
-                    "no cached channels for drive".into(),
-                ));
-            }
-        };
+        // An exclusive channel pair for this read: concurrent lookups on the same
+        // drive must not share one (see ChannelPool). Returned to the pool when
+        // `lease` drops, after the read.
+        let lease = drive.channel_pool.checkout()?;
+        let channels = lease.channels();
 
         // Choose P2P path (NVMe → GPU BAR1 → D2D) or DRAM path (NVMe → DRAM → H2D).
         let p2p_guard = self.p2p_ring.read();
@@ -527,12 +631,17 @@ impl DispatcherP2pComponent {
                     p2p,
                     &partition,
                     channels,
-                    ipc_handle.address as *mut std::ffi::c_void,
+                    // The single-key lookup takes one IpcHandle (IDispatcher::lookup).
+                    &[pipeline::P2pRegion {
+                        address: ipc_handle.address as *mut std::ffi::c_void,
+                        size: total_bytes,
+                    }],
                     start_lba,
                     total_bytes,
                 )?;
             }
             drop(p2p_guard);
+            drop(lease);
             drop(drives);
 
             // Client is served. Release write lock — key stays as BlockDevice.
@@ -571,6 +680,7 @@ impl DispatcherP2pComponent {
                 )?;
             }
             drop(ring_guard);
+            drop(lease);
             drop(drives);
 
             // DRAM is filled — register as MemoryTier immediately.
@@ -1199,7 +1309,7 @@ impl DispatcherP2pComponent {
                 "dispatcher-p2p: data drive {i} initialized at {addr_str}{cpu_msg}"
             ));
 
-            let cached_channels = ibd.connect_client().ok();
+            let channel_pool = ChannelPool::new(Arc::clone(&ibd), ibd.connect_client().ok());
 
             drives.push(DataDrive {
                 _block_dev: block_dev_component,
@@ -1208,7 +1318,7 @@ impl DispatcherP2pComponent {
                 _extent_mgr_component: extent_mgr
                     as Arc<dyn component_core::IUnknown + Send + Sync>,
                 extent_mgr: iem,
-                cached_channels,
+                channel_pool,
             });
         }
 
@@ -1761,7 +1871,9 @@ impl IDispatcher for DispatcherP2pComponent {
             idx: usize,
             key: CacheKey,
             offset: u64,
-            ipc_handle_addr: *mut u8,
+            /// The block's GPU regions, in object order.
+            regions: Vec<pipeline::P2pRegion>,
+            /// The block's size: the sum of its regions' sizes.
             ipc_handle_size: u32,
         }
         // SAFETY: ColdEntry contains a raw pointer from IpcHandle (GPU device pointer).
@@ -1774,17 +1886,16 @@ impl IDispatcher for DispatcherP2pComponent {
 
         for (i, (key, regions)) in entries.iter().enumerate() {
             let key = *key;
-            // dispatcher-p2p performs a single contiguous P2P read straight into the
-            // caller's GPU buffer; it has no DRAM-staging scatter path, so it cannot
-            // land N non-contiguous per-layer regions. Multi-region (N>1) blocks are
-            // unsupported here — fail cleanly rather than silently offloading region 0.
-            if regions.len() != 1 {
+            // A block is one or more GPU regions (one per layer under vLLM 0.23+'s
+            // LBHNC layout), laid out back to back in the stored object: region L
+            // holds object bytes sum(sizes[0..L]).. . Every path below scatters to
+            // them in that order.
+            if regions.is_empty() {
                 results[i] = Some(Err(DispatcherError::InvalidParameter(
-                    "dispatcher-p2p does not support multi-region (N>1) blocks".into(),
+                    "batch_lookup entry has no GPU regions".into(),
                 )));
                 continue;
             }
-            let ipc_handle = &regions[0];
             match dm.lookup(key) {
                 Ok(lookup_result) => match lookup_result {
                     LookupResult::NotExist => {
@@ -1797,29 +1908,27 @@ impl IDispatcher for DispatcherP2pComponent {
                         )));
                     }
                     LookupResult::MemoryTier { pointer, size } => {
-                        let copy_size = (ipc_handle.size as usize).min(size as usize);
                         let raw = self.warm_stream.load(Ordering::Acquire);
                         let res = if raw != 0 {
                             let s = GpuStream(raw as *mut std::ffi::c_void);
-                            gpu.memcpy_h2d_async(
-                                pointer as *const std::ffi::c_void,
-                                ipc_handle.address as *mut std::ffi::c_void,
-                                copy_size,
-                                s,
-                            )
-                            .map_err(|e| {
-                                DispatcherError::IoError(format!(
-                                    "GPU DMA copy (memory-tier→device) failed: {e}"
-                                ))
-                            })
-                            .and_then(|_| {
-                                gpu.stream_synchronize(s).map_err(|e| {
-                                    DispatcherError::IoError(format!(
-                                        "stream_synchronize failed: {e}"
-                                    ))
+                            scatter_slot_to_regions(&*gpu, s, pointer, size as usize, regions)
+                                .and_then(|_| {
+                                    gpu.stream_synchronize(s).map_err(|e| {
+                                        DispatcherError::IoError(format!(
+                                            "stream_synchronize failed: {e}"
+                                        ))
+                                    })
                                 })
-                            })
+                        } else if regions.len() > 1 {
+                            // The synchronous DmaBuffer copy below reads from the start of
+                            // the slot only; a multi-region scatter needs the warm stream.
+                            Err(DispatcherError::IoError(
+                                "multi-region warm load needs the warm stream (none created)"
+                                    .into(),
+                            ))
                         } else {
+                            let ipc_handle = &regions[0];
+                            let copy_size = (ipc_handle.size as usize).min(size as usize);
                             let aligned = copy_size.next_multiple_of(4096).max(4096);
                             let temp_buf = unsafe {
                                 DmaBuffer::from_raw(
@@ -1867,8 +1976,14 @@ impl IDispatcher for DispatcherP2pComponent {
                             idx: i,
                             key,
                             offset,
-                            ipc_handle_addr: ipc_handle.address,
-                            ipc_handle_size: ipc_handle.size,
+                            regions: regions
+                                .iter()
+                                .map(|r| pipeline::P2pRegion {
+                                    address: r.address as *mut std::ffi::c_void,
+                                    size: r.size as usize,
+                                })
+                                .collect(),
+                            ipc_handle_size: regions.iter().map(|r| r.size).sum(),
                         });
                     }
                 },
@@ -1961,7 +2076,7 @@ impl IDispatcher for DispatcherP2pComponent {
                             .map(|&ci| {
                                 let entry = &cold_entries[ci];
                                 pipeline::P2pColdJob {
-                                    gpu_dst: entry.ipc_handle_addr as *mut std::ffi::c_void,
+                                    regions: entry.regions.clone(),
                                     start_lba: entry.offset / block_size as u64,
                                     total_bytes: entry.ipc_handle_size as usize,
                                 }
@@ -2069,10 +2184,9 @@ impl IDispatcher for DispatcherP2pComponent {
                 let remote_entries: Vec<(CacheKey, u32)> = not_found
                     .iter()
                     .map(|&i| {
-                        // Only single-region entries reach KeyNotFound (N>1 short-circuits
-                        // to InvalidParameter above), so regions[0] is always present here.
+                        // The block's whole size: the sum of its regions.
                         let (key, regions) = &entries[i];
-                        (*key, regions[0].size)
+                        (*key, regions.iter().map(|r| r.size).sum())
                     })
                     .collect();
 
@@ -2098,9 +2212,6 @@ impl IDispatcher for DispatcherP2pComponent {
                     tier[pos] = Some(ServedBy::Remote);
                     let (key, regions) = &entries[pos];
                     let key = *key;
-                    // Only single-region entries reach KeyNotFound (N>1 short-circuits
-                    // to InvalidParameter above), so regions[0] is always present.
-                    let ipc_handle = &regions[0];
                     if let Err(e) = remote_res {
                         results[pos] =
                             Some(Err(DispatcherError::IoError(format!("remote lookup: {e}"))));
@@ -2111,23 +2222,19 @@ impl IDispatcher for DispatcherP2pComponent {
                             // `lookup` pinned the entry; the guard owns that pin now,
                             // including on the failure paths below.
                             remote_pins.adopt(key);
-                            let copy_size = (ipc_handle.size as usize).min(size as usize);
                             let res = if warm_raw != 0 {
                                 let s = GpuStream(warm_raw as *mut std::ffi::c_void);
-                                gpu.memcpy_h2d_async(
-                                    pointer as *const std::ffi::c_void,
-                                    ipc_handle.address as *mut std::ffi::c_void,
-                                    copy_size,
-                                    s,
-                                )
-                                .map_err(|e| {
-                                    DispatcherError::IoError(format!(
-                                        "GPU DMA copy (memory-tier→device) failed: {e}"
-                                    ))
-                                })
+                                scatter_slot_to_regions(&*gpu, s, pointer, size as usize, regions)
+                            } else if regions.len() > 1 {
+                                Err(DispatcherError::IoError(
+                                    "multi-region remote load needs the warm stream (none created)"
+                                        .into(),
+                                ))
                             } else {
                                 // No warm stream: fall back to the synchronous copy,
                                 // which has completed by the time it returns.
+                                let ipc_handle = &regions[0];
+                                let copy_size = (ipc_handle.size as usize).min(size as usize);
                                 let aligned = copy_size.next_multiple_of(4096).max(4096);
                                 match unsafe {
                                     DmaBuffer::from_raw(
@@ -2526,15 +2633,11 @@ impl IDispatcher for DispatcherP2pComponent {
     ) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
 
-        // dispatcher-p2p wraps the whole slot in a single DmaBuffer for one contiguous
-        // GPU->DRAM copy; it has no per-region gather path. Multi-region (N>1) blocks
-        // are unsupported here — fail cleanly rather than storing only region 0.
-        if regions.len() != 1 {
+        if regions.is_empty() {
             return Err(DispatcherError::InvalidParameter(
-                "dispatcher-p2p does not support multi-region (N>1) blocks".into(),
+                "copy_gpu_to_memory_async: no GPU regions".into(),
             ));
         }
-        let ipc_handle = &regions[0];
 
         let mt = self
             .memory_tier
@@ -2542,6 +2645,55 @@ impl IDispatcher for DispatcherP2pComponent {
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
         let (mem_ptr, slot_size) = mt.get(key).ok_or(DispatcherError::KeyNotFound(key))?;
+
+        // Reject a region set that overflows the slot rather than corrupt neighbouring
+        // DRAM (as `dispatcher` does).
+        let total: usize = regions.iter().map(|r| r.size as usize).sum();
+        if total > slot_size as usize {
+            return Err(DispatcherError::InvalidParameter(format!(
+                "regions total {total} bytes exceeds reserved slot {slot_size} for key {key}"
+            )));
+        }
+
+        // Null-stream callers (the shm-queue CopyToStore handler) have no stream to sync
+        // on, and their CommitStore queues the slot's SSD write-through as soon as it
+        // runs: the copy must have landed when this returns, or the background writer
+        // can persist a slot the copy has not reached yet. Same contract as
+        // `dispatcher` (its FR-056).
+        let sync_null_stream = |gpu: &dyn IGpuServices| -> Result<(), DispatcherError> {
+            if stream.0.is_null() {
+                gpu.stream_synchronize(stream).map_err(|e| {
+                    let _ = mt.remove(key);
+                    DispatcherError::IoError(format!("store stream_synchronize failed: {e}"))
+                })?;
+            }
+            Ok(())
+        };
+
+        if regions.len() > 1 {
+            // Gather the N GPU regions contiguously into the one slot: region L lands at
+            // `slot + sum(sizes[0..L])`, the layout every load path scatters back from.
+            let gpu = self
+                .gpu_services
+                .get()
+                .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
+            let mut off = 0usize;
+            for region in regions {
+                gpu.memcpy_d2h_async(
+                    region.address as *const std::ffi::c_void,
+                    (mem_ptr as usize + off) as *mut std::ffi::c_void,
+                    region.size as usize,
+                    stream,
+                )
+                .map_err(|e| {
+                    let _ = mt.remove(key);
+                    DispatcherError::IoError(format!("GPU async DMA copy failed: {e}"))
+                })?;
+                off += region.size as usize;
+            }
+            return sync_null_stream(&*gpu);
+        }
+        let ipc_handle = &regions[0];
 
         let aligned_size = (slot_size as usize).next_multiple_of(4096);
         // SAFETY: mem_ptr is valid for aligned_size bytes, owned by memory-tier.
@@ -2573,7 +2725,7 @@ impl IDispatcher for DispatcherP2pComponent {
 
         // Don't let the noop-free wrapper be dropped (it would call noop_free, which is fine, but let's be explicit).
         std::mem::forget(temp_buf);
-        Ok(())
+        sync_null_stream(&*gpu)
     }
 
     fn copy_gpu_to_memory_completed(
@@ -2772,17 +2924,21 @@ impl IDispatcher for DispatcherP2pComponent {
                 }
 
                 let drive = &drives[drive_idx];
-                let channels = match &drive.cached_channels {
-                    Some(ch) => ch,
-                    None => continue,
-                };
                 let block_dev = Arc::clone(&drive.block_dev_iface);
+                let channel_pool = &drive.channel_pool;
                 let dm = &dm;
                 let mt = &mt;
                 let cold = &cold_entries;
                 let logger = &logger;
 
                 s.spawn(move || {
+                    // This thread serves one drive's entries one after another, so one
+                    // exclusive channel pair covers them all; a drive whose channel cannot
+                    // be had is skipped, as it was when none was cached.
+                    let Ok(lease) = channel_pool.checkout() else {
+                        return;
+                    };
+                    let channels = lease.channels();
                     for &ci in entry_indices {
                         let entry = &cold[ci];
                         let block_size = block_dev.block_size() as u64;
@@ -4950,6 +5106,43 @@ mod tests {
         d.shutdown().unwrap();
     }
 
+    /// A null-stream store (the shm-queue CopyToStore handler) has no stream to sync
+    /// on, and its CommitStore queues the SSD write-through at once, so the copy must
+    /// be synced before `copy_gpu_to_memory_async` returns -- for one region and for
+    /// many. A caller-owned stream is the caller's to sync.
+    #[test]
+    fn null_stream_store_is_synced_before_return() {
+        let fx = setup_initialized_with_remote(&[], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+        let src = vec![0xA5u8; 4096];
+        let region = |off: usize, size: u32| IpcHandle {
+            address: unsafe { src.as_ptr().add(off) } as *mut u8,
+            size,
+        };
+        let null = GpuStream(std::ptr::null_mut());
+        let own = GpuStream(0x1 as *mut std::ffi::c_void);
+
+        let cases: [(CacheKey, Vec<IpcHandle>, GpuStream, usize); 4] = [
+            (10, vec![region(0, 4096)], null, 1),
+            (11, vec![region(0, 1024), region(1024, 3072)], null, 1),
+            (12, vec![region(0, 4096)], own, 0),
+            (13, vec![region(0, 2048), region(2048, 2048)], own, 0),
+        ];
+        for (key, regions, stream, syncs) in cases {
+            d.reserve_memory(key, 4096, 0, None).unwrap();
+            let before = fx.probe.count(GpuEvent::Sync);
+            d.copy_gpu_to_memory_async(key, &regions, stream).unwrap();
+            assert_eq!(
+                fx.probe.count(GpuEvent::Sync) - before,
+                syncs,
+                "key {key}: {} regions, null stream {}",
+                regions.len(),
+                stream.0.is_null()
+            );
+        }
+        d.shutdown().unwrap();
+    }
+
     /// Without a warm stream the delivery falls back to the synchronous copy, which
     /// has already completed on return: no submissions and no sync are observed,
     /// and the pins are still released exactly once.
@@ -5698,5 +5891,147 @@ mod tests {
 
         std::thread::sleep(std::time::Duration::from_millis(200));
         evictor.shutdown();
+    }
+}
+
+#[cfg(test)]
+mod channel_pool_tests {
+    //! The per-drive [`ChannelPool`]: concurrent readers on a drive must never share one
+    //! SPSC channel pair (completion theft: the victim waits on `completion_rx` forever).
+    use super::*;
+    use component_core::channel::SpscChannel;
+    use interfaces::{NvmeBlockError, TelemetrySnapshot};
+    use std::collections::HashSet;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
+
+    /// A block device that only hands out channel pairs, counting the connects.
+    struct CountingDevice {
+        connects: AtomicUsize,
+    }
+
+    impl IBlockDevice for CountingDevice {
+        fn connect_client(&self) -> Result<ClientChannels, NvmeBlockError> {
+            self.connects.fetch_add(1, Ordering::SeqCst);
+            let cmd = SpscChannel::<Command>::new(8);
+            let comp = SpscChannel::<Completion>::new(8);
+            // The device side (cmd_rx, comp_tx) is dropped: these tests only use the client side.
+            Ok(ClientChannels {
+                command_tx: cmd.sender().unwrap(),
+                completion_rx: comp.receiver().unwrap(),
+            })
+        }
+        fn sector_size(&self, _ns_id: u32) -> Result<u32, NvmeBlockError> {
+            Ok(512)
+        }
+        fn num_sectors(&self, _ns_id: u32) -> Result<u64, NvmeBlockError> {
+            Ok(1 << 20)
+        }
+        fn max_queue_depth(&self) -> u32 {
+            8
+        }
+        fn num_io_queues(&self) -> u32 {
+            1
+        }
+        fn max_transfer_size(&self) -> u32 {
+            128 * 1024
+        }
+        fn block_size(&self) -> u32 {
+            512
+        }
+        fn numa_node(&self) -> i32 {
+            -1
+        }
+        fn nvme_version(&self) -> String {
+            "mock".into()
+        }
+        fn telemetry(&self) -> Result<TelemetrySnapshot, NvmeBlockError> {
+            Err(NvmeBlockError::NotSupported("mock".into()))
+        }
+        fn read_write_stats(&self) -> interfaces::ReadWriteStats {
+            interfaces::ReadWriteStats::default()
+        }
+    }
+
+    fn pool_with(first: bool) -> (Arc<CountingDevice>, ChannelPool) {
+        let dev = Arc::new(CountingDevice {
+            connects: AtomicUsize::new(0),
+        });
+        let first = if first {
+            dev.connect_client().ok()
+        } else {
+            None
+        };
+        let pool = ChannelPool::new(
+            Arc::clone(&dev) as Arc<dyn IBlockDevice + Send + Sync>,
+            first,
+        );
+        (dev, pool)
+    }
+
+    #[test]
+    fn concurrent_checkouts_get_distinct_channels() {
+        let (dev, pool) = pool_with(true);
+        let a = pool.checkout().unwrap();
+        let b = pool.checkout().unwrap();
+        let c = pool.checkout().unwrap();
+        let ptrs = [a.channels(), b.channels(), c.channels()]
+            .map(|ch| ch as *const ClientChannels as usize);
+        assert!(ptrs[0] != ptrs[1] && ptrs[1] != ptrs[2] && ptrs[0] != ptrs[2]);
+        // The start-up pair served the first reader; the other two connected their own.
+        assert_eq!(dev.connects.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn a_returned_channel_is_reused_without_connecting() {
+        let (dev, pool) = pool_with(true);
+        assert_eq!(dev.connects.load(Ordering::SeqCst), 1);
+        for _ in 0..5 {
+            let lease = pool.checkout().unwrap();
+            let _ = lease.channels();
+        }
+        assert_eq!(
+            dev.connects.load(Ordering::SeqCst),
+            1,
+            "no reconnect per checkout"
+        );
+        assert_eq!(pool.free.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn an_empty_pool_connects_on_demand() {
+        // The start-up connect failed (None): the first reader connects its own.
+        let (dev, pool) = pool_with(false);
+        assert_eq!(dev.connects.load(Ordering::SeqCst), 0);
+        let lease = pool.checkout().unwrap();
+        let _ = lease.channels();
+        assert_eq!(dev.connects.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn threads_each_get_their_own_channel() {
+        let (_dev, pool) = pool_with(true);
+        let pool = Arc::new(pool);
+        let barrier = Arc::new(std::sync::Barrier::new(8));
+        let seen: Vec<usize> = (0..8)
+            .map(|_| {
+                let (pool, barrier) = (Arc::clone(&pool), Arc::clone(&barrier));
+                thread::spawn(move || {
+                    let lease = pool.checkout().unwrap();
+                    let addr = lease.channels() as *const ClientChannels as usize;
+                    barrier.wait(); // all eight hold a lease at once
+                    addr
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .collect();
+        let distinct: HashSet<usize> = seen.iter().copied().collect();
+        assert_eq!(
+            distinct.len(),
+            8,
+            "eight simultaneous readers, eight channels"
+        );
     }
 }

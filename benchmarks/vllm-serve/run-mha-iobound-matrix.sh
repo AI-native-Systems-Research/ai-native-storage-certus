@@ -13,6 +13,7 @@
 #   ./run-mha-iobound-matrix.sh                 # all 4 arms, 1000 s each (~90 min incl. model load)
 #   MAX_SECONDS=120 ./run-mha-iobound-matrix.sh # quick smoke
 #   ARMS="certus-nointervals cputier-nointervals" ./run-mha-iobound-matrix.sh  # subset
+#   ARMS="cputier-nointervals lmcache-nointervals" ./run-mha-iobound-matrix.sh  # add the LMCache arm (opt-in)
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -60,6 +61,8 @@ stop_vllm(){
     ids=$(podman $st ps -q --filter "ancestor=localhost/certus-shmq-connector:vllm0.30.0" --filter "ancestor=certus-offload:vllm0.30.0" 2>/dev/null)
     [[ -n "$ids" ]] && podman $st stop -t 5 $ids >/dev/null 2>&1
   done
+  # lmcache arms: the serve script's trap removes the LMCache server; this is the backstop.
+  "${SCRIPT_DIR}/../../deploy/lmcache/teardown.sh" >/dev/null 2>&1 || true
   for _ in $(seq 1 60); do curl -fsS --max-time 3 http://127.0.0.1:8000/v1/models >/dev/null 2>&1 || break; sleep 1; done
   # The next arm's container binds port 8000; wait until the old one has released
   # it ("pasta ... Address already in use" otherwise).
@@ -91,12 +94,16 @@ run_arm(){  # $1 = key
     certus-intervals)   serve=run-serve-certus-shmq-mha-iobound.sh; client=run-guidellm-mha-iobound-intervals.sh; backend=certus ;;
     cputier-nointervals) serve=run-serve-cputier-mha-iobound.sh; client=run-guidellm-mha-iobound.sh; backend=cputier ;;
     cputier-intervals)   serve=run-serve-cputier-mha-iobound.sh; client=run-guidellm-mha-iobound-intervals.sh; backend=cputier ;;
+    lmcache-nointervals) serve=run-serve-lmcache-mha-iobound.sh; client=run-guidellm-mha-iobound.sh; backend=lmcache ;;
+    lmcache-intervals)   serve=run-serve-lmcache-mha-iobound.sh; client=run-guidellm-mha-iobound-intervals.sh; backend=lmcache ;;
     *) log "unknown arm $key"; return 1 ;;
   esac
 
   log "===== ARM ${key} (backend=${backend}) ====="
   if [[ "$backend" == certus ]]; then
     start_certus || { touch "$sub/FAILED"; return 1; }
+  elif [[ "$backend" == lmcache ]]; then
+    stop_certus   # run-serve-lmcache.sh clears its own L2 dir on start
   else
     stop_certus
     rm -rf "${FS_TIER_HOST:?}/"* 2>/dev/null; mkdir -p "$FS_TIER_HOST"

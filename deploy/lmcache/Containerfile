@@ -1,0 +1,66 @@
+# Containerfile — vLLM + LMCache in multi-process (MP) mode, with a CPU tier that
+# spills to a local SSD directory. Built by ./build.sh; started by ./run.sh (or
+# benchmarks/vllm-serve/run-serve-lmcache*.sh). ONE image, two roles:
+#
+#   lmcache-server  (entrypoint arg `lmcache-server …`)
+#     `lmcache server`: owns the cache. L1 = pinned host RAM (--l1-size-gb, LRU),
+#     L2 = the "fs_native" adapter (C++ workers, O_DIRECT, one file per chunk) on
+#     the bind-mounted SSD dir. Stores go to L1 and are written through to L2;
+#     on a lookup miss in L1 the server prefetches from L2.
+#   vllm            (any other args → `vllm serve …`)
+#     vLLM with kv_connector=LMCacheMPConnector, talking to the server over ZMQ
+#     (tcp://127.0.0.1:5555). KV moves GPU⇄L1 by CUDA IPC, which is why both
+#     containers need the GPU, --ipc host and --network host.
+#
+# Why MP mode and not the in-process LMCacheConnectorV1 (local_cpu/local_disk):
+# with vLLM 0.30 and LMCache 0.5.5 and 0.5.6, the in-process connector's GPU
+# gather kernel misreads vLLM's fused-K/V layout (per layer [NB, BS, NH, 2*HS], logged
+# as "LBNHC" / NL_X_NB_BS_NH_CS). Every retrieved chunk is wrong and the output
+# after an LMCache hit is garbage, with no error logged. Measured on this host:
+# NHD/HND layouts, FLASH_ATTN/FLASHINFER and --enforce-eager all corrupt, while
+# vLLM's own OffloadingConnector and LMCacheMPConnector are exact. Upstream:
+# https://github.com/LMCache/LMCache/issues/6156 ("zero-valued V tensors").
+#
+# The stock vllm/vllm-openai:v0.30.0 image already bundles lmcache 0.5.5, built
+# against its torch 2.13 / CUDA 13.0, so nothing is compiled here. This layer:
+#   * optionally swaps LMCache to another PyPI release (LMCACHE_VERSION) — it MUST
+#     be a cu13 / torch-2.13 build or its cuda_ops will fail to load;
+#   * fails the build if vLLM's version or LMCache's compiled ops are wrong;
+#   * adds the role-dispatching entrypoint (disk preflight for the server).
+
+ARG VLLM_VERSION=0.30.0
+FROM docker.io/vllm/vllm-openai:v${VLLM_VERSION}
+ARG VLLM_VERSION
+ARG LMCACHE_VERSION=
+
+RUN if [ -n "${LMCACHE_VERSION}" ]; then \
+      pip install --no-cache-dir "lmcache==${LMCACHE_VERSION}"; \
+    else \
+      echo "[Containerfile] keeping the base image's bundled lmcache"; \
+    fi
+
+# Import check without a GPU (build containers have none). The MP server and
+# adapter cannot be imported here — their mooncake transfer-channel import needs
+# libcuda (as does vLLM's LMCacheMPConnector module, which imports them) — so
+# check the compiled ops and config classes; smoke.sh runs the rest.
+RUN python3 - <<PY
+import importlib.metadata as m
+import vllm
+assert vllm.__version__ == "${VLLM_VERSION}", f"vllm {vllm.__version__} != ${VLLM_VERSION}"
+import lmcache.cuda_ops, lmcache.lmcache_native
+from lmcache.v1.distributed.l2_adapters.fs_native_l2_adapter import FSNativeL2AdapterConfig
+print(f"[Containerfile] vllm {vllm.__version__} + lmcache {m.version('lmcache')}: imports OK")
+PY
+
+COPY entrypoint.sh /opt/lmcache/entrypoint.sh
+RUN chmod +x /opt/lmcache/entrypoint.sh \
+  && python3 -c 'import importlib.metadata as m; print(m.version("lmcache"))' > /opt/lmcache/LMCACHE_VERSION
+
+ENV LMCACHE_DISABLE_BANNER=1
+
+LABEL org.certus.image="vllm-lmcache" \
+      org.certus.connector="LMCacheMPConnector" \
+      org.certus.gpu-required="true" \
+      org.certus.run="deploy/lmcache/run.sh (rootless podman; lmcache-server + vllm containers, --ipc host --network host)"
+
+ENTRYPOINT ["/opt/lmcache/entrypoint.sh"]

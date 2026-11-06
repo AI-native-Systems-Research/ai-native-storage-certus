@@ -13,10 +13,14 @@
 #   docs:       https://docs.vllm.ai/en/latest/api/vllm/distributed/kv_transfer/kv_connector/v1/hf3fs/hf3fs_connector/
 #   3FS:        https://github.com/deepseek-ai/3fs
 #
-# STORE: built into podman's DEFAULT store (a bare `podman images` will list it) —
-# that is where run-serve-h3fs0-cc131k.sh looks (it runs --pull=never, no
-# --root/--runroot). Contrast certus-shmq-connector/build_connector_container.sh,
-# which builds the shmq image into the /mnt/certus1 store.
+# STORE: the finished image lands in podman's DEFAULT store (a bare `podman images`
+# will list it) — that is where run-serve-h3fs0-cc131k.sh and
+# 3fs-connector-bench look (they run --pull=never, no --root/--runroot).
+# STORE_DIR=<dir> builds in a separate store instead (images, layers and build
+# temp under <dir>, e.g. on /raid0 when the default store's filesystem is full),
+# seeds it with the vLLM base from the default store when that has it (a local
+# copy, no download), and copies only the finished image back into the default
+# store. KEEP_STORE=1 keeps the build store afterwards for faster rebuilds.
 #
 # The vLLM version is a BUILD ARG selecting the vllm/vllm-openai:v<X> base image;
 # the 3FS source is pinned separately by HF3FS_REF. The connector ships in the
@@ -35,6 +39,7 @@
 #   TAG=vllm0.30-test ./build_h3fs_container.sh 0.30.0     # override the :tag
 #   IMAGE=vllm-hf3fs:mine ./build_h3fs_container.sh 0.30.0 # override full ref
 #   NO_CACHE=1 ./build_h3fs_container.sh 0.30.0            # --no-cache
+#   STORE_DIR=/raid0/podman-hf3fs ./build_h3fs_container.sh 0.30.0  # build store on /raid0
 #   ./build_h3fs_container.sh --print-image 0.30.0         # print the ref, don't build
 #
 # Then point the run script at it:
@@ -84,6 +89,9 @@ env overrides:
   HF3FS_SHUFFLE_METHOD=<m> 3FS data-placement shuffle: g++10|g++11|stdshuffle
                           (Dockerfile default stdshuffle)
   NO_CACHE=1              pass --no-cache to podman build
+  STORE_DIR=<dir>         build in a store under <dir>, then copy the image into the
+                          default store (for when the default store's fs is full)
+  KEEP_STORE=1            with STORE_DIR: keep the build store (layer cache)
 
 examples:
   build_h3fs_container.sh 0.30.0
@@ -137,17 +145,46 @@ build_flags=()
 echo "[build] image        : ${IMAGE}"
 echo "[build] vLLM base    : docker.io/vllm/vllm-openai:v${VLLM_VERSION}"
 echo "[build] 3FS source   : ${HF3FS_REF:-<Dockerfile default: main>}"
-echo "[build] store        : default (bare 'podman images' will show it)"
+echo "[build] store        : ${STORE_DIR:-default} (result in the default store)"
 echo "[build] context      : ${CONTEXT}"
 echo "[build] dockerfile   : ${DOCKERFILE}"
 
-# Default podman store on purpose — no --root/--runroot (see header).
-podman build \
+BUILD_PODMAN=(podman)
+BASE="docker.io/vllm/vllm-openai:v${VLLM_VERSION}"
+if [[ -n "${STORE_DIR:-}" ]]; then
+  mkdir -p "$STORE_DIR"/{storage,run,tmp}
+  # A rootless store outside the default location needs fuse-overlayfs on these
+  # hosts: storage.conf's overlay mountopt "metacopy=on" is refused for an
+  # unprivileged kernel-overlay mount on a fresh store (see deploy/3fs/common.sh).
+  BUILD_PODMAN=(podman --root "$STORE_DIR/storage" --runroot "$STORE_DIR/run")
+  command -v fuse-overlayfs >/dev/null \
+    && BUILD_PODMAN+=(--storage-opt "overlay.mount_program=$(command -v fuse-overlayfs)")
+  export TMPDIR="$STORE_DIR/tmp"
+  # Seed the base from the default store (local copy) rather than downloading it.
+  if ! "${BUILD_PODMAN[@]}" image exists "$BASE" && podman image exists "$BASE"; then
+    echo "[build] copying base ${BASE} from the default store into ${STORE_DIR}"
+    podman save "$BASE" | "${BUILD_PODMAN[@]}" load
+  fi
+fi
+
+"${BUILD_PODMAN[@]}" build \
   --build-arg "VLLM_VERSION=${VLLM_VERSION}" \
   "${build_flags[@]}" \
   -f "$DOCKERFILE" \
   -t "$IMAGE" \
   "$CONTEXT"
+
+if [[ -n "${STORE_DIR:-}" ]]; then
+  # podman load skips layers the default store already has (the vLLM base), so
+  # this writes only the 3FS client layers there.
+  echo "[build] copying ${IMAGE} into the default store"
+  "${BUILD_PODMAN[@]}" save "$IMAGE" | podman load   # staging TMPDIR stays under STORE_DIR
+  if [[ "${KEEP_STORE:-0}" != 1 ]]; then
+    "${BUILD_PODMAN[@]}" system reset --force >/dev/null 2>&1 || true
+    rm -rf "$STORE_DIR" 2>/dev/null || podman unshare rm -rf "$STORE_DIR"
+    echo "[build] removed build store ${STORE_DIR} (KEEP_STORE=1 keeps it)"
+  fi
+fi
 
 echo
 if img_id="$(podman image inspect "$IMAGE" --format '{{.Id}}' 2>/dev/null)"; then

@@ -1,0 +1,37 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Prefill/decode disaggregation with vLLM's native tiered prefix cache in place
+# of certus: the comparison arm for pd-certus-rdma. Each engine runs
+# MultiConnector[NixlConnector, OffloadingConnector(TieringOffloadingSpec)],
+# NIXL first as pd-certus-rdma composes it, the offloading connector being
+# vLLM's documented "Multi-Tier Setup" (docs.vllm.ai, KV Offloading Usage
+# Guide): a CPU tier with a filesystem tier under it. There is no P2P tier, so
+# no decode->prefill fetch: vLLM documents P2P beside fs but recommends no such
+# configuration, and its P2P pull serves only a peer's CPU tier.
+#
+#   same          image (the connector image, so the same vLLM build), engine
+#                 flags, model, window, GPU KV size, NIXL GPU->GPU over RDMA,
+#                 P/D placement and replicas, the memory tier per GPU (certus's
+#                 --memory-tier-size less its bounce reserve), decode storing
+#                 what it generates, the NVMe drives under the disk tier
+#   different     vLLM's CPU + fs tiers in place of certus's DRAM + SSD tiers;
+#                 the fs tier is XFS on a kernel-driver RAID0 of the GPU's
+#                 NUMA-local drives (deploy/llm-d/tiered-disks.sh); no fetch
+#                 between pods; the router is llm-d's own P/D values, without
+#                 pd-certus's fetch-source plugins
+#
+# Run it with certus stopped on the nodes: the drives are certus's otherwise.
+resources:
+  - ../pd
+
+patches:
+  - path: patch.yaml
+
+# As in ../pd-certus (same placeholder, rewritten by install.sh from
+# CERTUS_REGISTRY/CERTUS_REPO): the image both arms run. Keep the tag in step
+# with ../pd-certus/kustomization.yaml.
+images:
+  - name: docker.io/vllm/vllm-openai
+    newName: REGISTRY/REPO/llm-d-vllm-certus
+    newTag: vllm0.30.0-04548e47

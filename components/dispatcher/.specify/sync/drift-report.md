@@ -1,11 +1,13 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-31T16:04:45Z
-spec_sync_git_commit: 27f1dd98
-spec_sync_inputs_sha256: c104e1be7c98cf404405c866539a3b0558f6bbfd81c7a2647b7253a771de5bdc
+spec_sync_synced_at: 2026-11-05T10:19:50Z
+spec_sync_git_commit: 32ffa627f
+spec_sync_inputs_sha256: b547edf5d8dec0c46b152d4ba49561890e67bd46666c28c3a87896586e1ff954
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-11-05 (branch `certus-host-setup`, on unstable `bb0c9b9c`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them (its previous stamp was re-verified against `git archive origin/unstable`); its digest moves because `components/interfaces` changed (`ISPDKEnv::init_with_allowed`, added for the two-process drive race; see the spdk-env and interfaces syncs of the same date). This component does not implement `ISPDKEnv`. No analysis below changes.
+
 > **Re-stamp 2026-10-31 (layout only).** `specs/001-dispatcher-cache-interface/data-model.md`: the lifecycle diagrams are redrawn as box-and-arrow state diagrams within 80 columns, with the cases the picture leaves out listed under it. Same states, transitions and methods; no analysis below changes.
 > **Sync 2026-10-31 (branch `specsync-b`: optimizer session `s20261029-094947` merged onto unstable, plus `55a4ddd4` clippy) — delta, drift resolved by backfill. Not stamped here: the final pass stamps every component on the merged tree.** Base `a0292be6` (`origin/unstable`, fresh stamp), HEAD `0a71990e`. Inputs changed by `4941320a` (batched piece copies), `615d9d0d` (in-loop multi-region cold delivery, checked final sync), the merge `6a917346`, `633d5026` (the 2026-10-30 spec entry) and `55a4ddd4` (rustfmt only in `src/lib.rs` and one test). `cargo test -p dispatcher --lib`: 145 passed.
 >

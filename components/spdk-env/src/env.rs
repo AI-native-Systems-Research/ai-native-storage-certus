@@ -14,7 +14,14 @@ static SPDK_ENV_ACTIVE: AtomicBool = AtomicBool::new(false);
 ///
 /// Order: singleton check -> VFIO checks -> permissions ->
 /// hugepages -> SPDK env init -> PCI enumeration.
-pub(crate) fn do_init(comp: &SPDKEnvComponent) -> Result<(), SpdkEnvError> {
+///
+/// `allowed` restricts the environment to those PCI devices: DPDK then opens
+/// only their VFIO groups, and enumeration returns only them. Empty means every
+/// device, as before. Two processes on one host that each own some drives must
+/// pass their own: DPDK opens a VFIO group exclusively, so a process that
+/// enumerates every drive can hold another's open while that one starts, and
+/// the other then cannot open it ("Device or resource busy").
+pub(crate) fn do_init(comp: &SPDKEnvComponent, allowed: &[PciAddress]) -> Result<(), SpdkEnvError> {
     // 1. Singleton check.
     if SPDK_ENV_ACTIVE
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -26,7 +33,7 @@ pub(crate) fn do_init(comp: &SPDKEnvComponent) -> Result<(), SpdkEnvError> {
     }
 
     // From here on, if we fail we must clear the singleton flag.
-    let result = do_init_inner(comp);
+    let result = do_init_inner(comp, allowed);
     if result.is_err() {
         SPDK_ENV_ACTIVE.store(false, Ordering::Release);
     }
@@ -34,7 +41,7 @@ pub(crate) fn do_init(comp: &SPDKEnvComponent) -> Result<(), SpdkEnvError> {
 }
 
 /// Inner initialization that runs after singleton flag is acquired.
-fn do_init_inner(comp: &SPDKEnvComponent) -> Result<(), SpdkEnvError> {
+fn do_init_inner(comp: &SPDKEnvComponent, allowed: &[PciAddress]) -> Result<(), SpdkEnvError> {
     // 3. Pre-flight checks.
     checks::check_vfio_available()?;
     checks::check_vfio_permissions()?;
@@ -43,7 +50,7 @@ fn do_init_inner(comp: &SPDKEnvComponent) -> Result<(), SpdkEnvError> {
     eprintln!("[spdk-env] Pre-flight checks passed. Initializing SPDK/DPDK environment...");
 
     // 4. Initialize SPDK environment.
-    init_spdk_env()?;
+    init_spdk_env(allowed)?;
 
     eprintln!("[spdk-env] SPDK/DPDK environment initialized. Enumerating devices...");
 
@@ -69,8 +76,9 @@ fn do_init_inner(comp: &SPDKEnvComponent) -> Result<(), SpdkEnvError> {
     Ok(())
 }
 
-/// Initialize the SPDK/DPDK environment via C FFI.
-fn init_spdk_env() -> Result<(), SpdkEnvError> {
+/// Initialize the SPDK/DPDK environment via C FFI, restricted to `allowed` PCI
+/// devices when it is non-empty (SPDK passes them to DPDK as `--allow`).
+fn init_spdk_env(allowed: &[PciAddress]) -> Result<(), SpdkEnvError> {
     let app_name = CString::new("certus-spdk-env").expect("CString::new failed");
 
     // SAFETY: spdk_env_opts_init zeroes the struct and sets default values.
@@ -88,14 +96,41 @@ fn init_spdk_env() -> Result<(), SpdkEnvError> {
     // Don't require specific cores — let DPDK use the default.
     opts.shm_id = -1;
 
+    // Must outlive spdk_env_init, which copies the addresses into DPDK's
+    // arguments.
+    let mut allow_list: Vec<spdk_sys::spdk_pci_addr> = allowed
+        .iter()
+        .map(|a| spdk_sys::spdk_pci_addr {
+            domain: a.domain,
+            bus: a.bus,
+            dev: a.dev,
+            func: a.func,
+        })
+        .collect();
+    if !allow_list.is_empty() {
+        opts.pci_allowed = allow_list.as_mut_ptr();
+        opts.num_pci_addr = allow_list.len();
+        eprintln!(
+            "[spdk-env] Restricting to {} PCI device(s): {}",
+            allowed.len(),
+            allowed
+                .iter()
+                .map(|a| a.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+
     // DPDK's EAL pins the calling thread to its main lcore (CPU 0 with the
     // default core mask). Every thread later spawned from this one would
     // inherit that single-core affinity, so save it here and restore it after.
     let saved_affinity = current_thread_affinity();
 
     // SAFETY: spdk_env_init is called exactly once (enforced by singleton flag).
-    // The opts struct is valid for the duration of the call.
+    // The opts struct, and the allow_list it may point into, are valid for the
+    // duration of the call.
     let rc = unsafe { spdk_sys::spdk_env_init(&opts) };
+    drop(allow_list);
 
     if let Some(set) = saved_affinity {
         restore_thread_affinity(&set);

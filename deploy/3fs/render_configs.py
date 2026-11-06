@@ -112,7 +112,13 @@ render("storage_main.toml",
        sets={("server.mgmtd", "mgmtd_server_addresses"): mgmtd,
              ("server.targets", "target_paths"): qlist([E["STORAGE_PATH"]]),
              # target dir is a bind mount inside a container — no /dev/disk/by-uuid
-             ("server.targets", "allow_disk_without_uuid"): "true"},
+             ("server.targets", "allow_disk_without_uuid"): "true",
+             # io_uring for storage reads when the host allows it, else libaio (the
+             # template's ioengine). RHEL 9 ships kernel.io_uring_disabled=2, where
+             # io_uring_setup is EPERM even for root and storage_main aborts with
+             # "init io uring failed". entrypoint.sh probes it (ENABLE_IO_URING).
+             ("server.aio_read_worker", "enable_io_uring"):
+                 "false" if E.get("ENABLE_IO_URING", "1") == "0" else "true"},
        setall=common, remap=ports("storage"), drop_prefix=REPORTERS)
 
 render("hf3fs_fuse_main_launcher.toml",
