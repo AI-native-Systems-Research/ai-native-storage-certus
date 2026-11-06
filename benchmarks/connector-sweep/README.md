@@ -24,24 +24,51 @@ The `/profile-connector-benches` Claude Code skill drives these same scripts. It
 
 ## Use
 
-From the repo root:
+From the repo root, with the defaults (8 GiB memory tier on every arm, `--mode compare`):
 
 ```bash
-benchmarks/connector-sweep/run_compare.sh \
-    --out bench-results/connector-compare.html \
-    --fs-tier /cache/cputier-bench-fs-tier \
-    --l2-dir /cache/lmcache-bench-l2 \
-    --device-pci 0000:86:00.0 \
-    --dram 4G --working-set 4096 --num-blocks 1024 --layers 1
+benchmarks/connector-sweep/run_compare.sh --out bench-results/connector-compare.html
 ```
 
-That is close to the run behind the 2026-10-30 comparison (one A30, 4 GiB memory tier on every arm, an 8 GiB mixed-eviction working set, both file-based disk tiers on the `/cache` NVMe), which ran before the benches kept jobs in flight; its numbers are not comparable with today's defaults (12G tier, 32 layers, 64-block jobs x 4 in flight).
-
-Without disk-tier flags, the arms get matched hardware: certus uses the four SPDK drives `0000:61:00.0`–`0000:64:00.0` (the same set `benchmarks/vllm-serve` uses), and the cputier fs tier and the lmcache L2 both go under `/raid0`, a 4-drive XFS RAID0 on separate NVMe drives:
+That is the whole command. It builds and starts certus-server (rw-telemetry, the four SPDK
+drives `0000:61:00.0`–`0000:64:00.0`), runs each arm in turn, stops the server and writes the
+report. To compare at another tier size, add only `--dram`:
 
 ```bash
-benchmarks/connector-sweep/run_compare.sh --out bench-results/connector-compare.html --working-set 8192
+benchmarks/connector-sweep/run_compare.sh --out bench-results/compare-12g.html --dram 12G
 ```
+
+`--dram` sets certus-server's `--memory-tier-size` (and the certus bench's `--tier-gib`),
+cputier's `--cpu-bytes` and LMCache's L1, and the working set every arm moves is derived from
+it: 2,948 blocks at 8G, 4,000 at 12G or more, 1,474 at 4G (prefix-miss: 128). Do not pass
+`--num-blocks` unless you want to fix that number by hand. Nothing else needs to change.
+
+What the default run expects (see "Before running"). An arm whose prerequisites are missing
+fails, the other arms still run and the report is still written, but the script exits non-zero;
+skip such an arm explicitly (`--skip-lmcache`, `--skip-cputier`, ...). Only the 3fs arm skips
+itself, with a note, when there is no 3FS mount:
+
+- certus: the four drives bound to `vfio-pci`, no other certus-server running, enough free
+  1 GiB hugepages for `--dram`.
+- cputier: `docker.io/vllm/vllm-openai:v0.30.0`, and its disk tier at `/raid0` (`--fs-tier DIR`
+  elsewhere). Its store pass writes every pass through to that disk, so it needs room.
+- lmcache: `localhost/vllm-lmcache-bench:vllm0.30.0` (`deploy/lmcache/build.sh`); its L2 at
+  `/raid0` (`--l2-dir DIR`).
+- 3fs: a 3FS mount at `/mnt/3fs` and the vLLM + 3FS image; or `--h3fs-mock` to run the code
+  path on vLLM's file-backed mock (not a 3FS measurement; the report says so).
+
+Other common choices:
+
+```bash
+run_compare.sh --out <path> --mode contention         # loads + stores together (certus and cputier only)
+run_compare.sh --out <path> --skip-lmcache            # drop an arm (--skip-certus / --skip-cputier / --skip-3fs)
+run_compare.sh --out <path> --server-bin PATH         # a prebuilt certus-server (rw-telemetry, for the cold disk check)
+run_compare.sh --help                                 # every option and its default
+```
+
+The 2026-10-30 comparison used an older shape (one A30, `--dram 4G --working-set 4096
+--num-blocks 1024 --layers 1`, both file tiers on `/cache`, one batch at a time); its numbers
+are not comparable with these defaults (8G tier, 32 layers, 64-block jobs x 4 in flight).
 
 `--device-pci` (repeatable) or `--drive-count N` replaces the certus drive list; `--fs-tier` and `--l2-dir` move the file tiers.
 
@@ -51,7 +78,7 @@ benchmarks/connector-sweep/run_compare.sh --out bench-results/connector-compare.
 
 **Small memory tier, large `--num-blocks`.** Every bench refuses a warm working set its tier cannot hold (the warm pass would not be warm). `--no-warm` skips the warm pass on every arm, so store and cold compare at any size; `--allow-warm-overflow` runs it anyway, and the report flags those rows (⚠, with the bytes that came back from disk) instead of comparing them as warm.
 
-**Certus cold rows need a telemetry server** to show their disk reads: give `--server-bin` a certus-server built with `--features rw-telemetry` (the default, the tree's own build, is built that way). In a fresh git worktree that build needs the ignored link `kernel/modules/gdrcopy/src/libgdrapi.so -> libgdrapi.so.2`, which the main checkout has; without it the link fails with `unable to find library -lgdrapi`.
+**Certus cold rows need a telemetry server** to show their disk reads: the default (the tree's own build, which run_compare.sh builds with `--features rw-telemetry`) has it; a `--server-bin` must be built that way too. In a fresh git worktree that build needs the ignored link `kernel/modules/gdrcopy/src/libgdrapi.so -> libgdrapi.so.2`, which the main checkout has; without it the link fails with `unable to find library -lgdrapi`.
 
 `--out` is resolved against the directory you run from. Artifacts go to `<out-without-.html>.d/`: `params.json` (records every arm's exact command line), `certus.csv`, `cputier.csv`, `lmcache.csv`, the three bench logs and `server.log`.
 
@@ -71,7 +98,7 @@ The LaTeX table (`--latex`, or `make_report.py --latex PATH`) is a `booktabs` `t
 - **certus:** the script runs `cargo build -p certus-server --release` itself (a no-op when current), so `target/release/certus-server` always matches the tree; an explicit `--server-bin` is used as-is. No other `certus-server` may be running, and the `--device-pci` SSDs must be bound to `vfio-pci`. Free 1 GiB hugepages cap the memory tier.
 - **cputier:** `docker.io/vllm/vllm-openai:v0.30.0` must be in the default podman store.
 - **lmcache:** `localhost/vllm-lmcache-bench:vllm0.30.0` must exist (`deploy/lmcache/build.sh`), and ports 5575 and 8095 must be free. The arm is skipped automatically for `--mode contention` and for `--tp` above 1.
-- **Sizing:** `--working-set × --block-bytes` should exceed `--dram`, or the mixed-eviction phase never fills the tier (8G at 2 MiB: above 4,096; the mixed pass now fills the tier first, so it evicts at any size). `--num-blocks` (the warm working set) must fit every arm's tier: each bench refuses one over 90% of its tier (certus: of `--dram` × `--eviction-threshold`). The benches size their GPU regions by the jobs in flight (`--inflight` × `--job-blocks` plus the store slots), not by the working set.
+- **Sizing:** nothing to set: `--num-blocks` is derived from `--dram` so it fits every arm's tier, and the mixed-eviction pass fills the tier before it starts, so it evicts at any `--working-set`. A `--num-blocks` given by hand must fit every arm's tier (each bench refuses one over 90% of it; certus: of `--dram` × `--eviction-threshold`), unless `--no-warm` or `--allow-warm-overflow`. The benches size their GPU regions by the jobs in flight (`--inflight` × `--job-blocks` plus the store slots), not by the working set.
 - **Disk tiers:** put `--fs-tier` and `--l2-dir` on the same local NVMe filesystem (not overlay or tmpfs, which reject `O_DIRECT`) for a fair cold-path comparison. The defaults do this: both live on `/raid0`, whose four drives are not the four certus drives, so no arm shares an SSD with another.
 
 ## What makes it a fair comparison
