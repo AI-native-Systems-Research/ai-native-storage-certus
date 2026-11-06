@@ -268,8 +268,17 @@ fn validate_pci_address(addr: &str) -> Result<(), String> {
     if dev_func.len() != 2 {
         return Err(format!("invalid PCI dev.func in '{addr}': expected DD.F"));
     }
-    u8::from_str_radix(dev_func[0], 16).map_err(|_| format!("invalid PCI device in '{addr}'"))?;
-    u8::from_str_radix(dev_func[1], 16).map_err(|_| format!("invalid PCI function in '{addr}'"))?;
+    let dev = u8::from_str_radix(dev_func[0], 16)
+        .map_err(|_| format!("invalid PCI device in '{addr}'"))?;
+    let func = u8::from_str_radix(dev_func[1], 16)
+        .map_err(|_| format!("invalid PCI function in '{addr}'"))?;
+    // A device number is 5 bits and a function 3, as spdk-env's PciAddress::parse
+    // checks: catch it here rather than as an SPDK init failure.
+    if dev >= 32 || func >= 8 {
+        return Err(format!(
+            "invalid PCI address '{addr}': device must be < 0x20 and function < 8"
+        ));
+    }
     Ok(())
 }
 
@@ -573,6 +582,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
+    /// Real BDFs pass the CLI address check.
+    #[test]
+    fn pci_address_check_accepts_real_bdfs() {
+        use super::validate_pci_address;
+        for a in ["0000:61:00.0", "0000:c4:00.0", "0001:ff:1f.7"] {
+            assert!(validate_pci_address(a).is_ok(), "{a}");
+        }
+    }
+
+    /// A device number is 5 bits and a function 3: an address past them fails
+    /// here, not later as an SPDK init error.
+    #[test]
+    fn pci_address_check_rejects_out_of_range_device_and_function() {
+        use super::validate_pci_address;
+        for a in ["0000:c1:20.0", "0000:c1:00.8", "0000:c1:ff.0"] {
+            assert!(validate_pci_address(a).is_err(), "{a}");
+        }
+    }
+
     /// Blank must be rejected rather than silently meaning "no cluster".
     ///
     /// The manifests express "off" by OMITTING the ConfigMap key, so a blank

@@ -5,7 +5,7 @@
 
 ## Summary
 
-The `interfaces` crate is fully implemented and serves as the centralized definition point for all Certus component interface traits. It defines 20 `define_interface!` interface traits (180 methods), their supporting types, and feature gates (`spdk`, `integrity-check`, `gpu`) that allow builds without hardware dependencies. This plan documents the existing architecture for maintenance and evolution purposes.
+The `interfaces` crate is fully implemented and serves as the centralized definition point for all Certus component interface traits. It defines 20 `define_interface!` interface traits (181 methods), their supporting types, and feature gates (`spdk`, `integrity-check`, `gpu`) that allow builds without hardware dependencies. This plan documents the existing architecture for maintenance and evolution purposes.
 
 ## Technical Context
 
@@ -18,7 +18,7 @@ components/interfaces/
     lib.rs                           # Module declarations, conditional compilation, re-exports
     igreeter.rs                      # IGreeter (1 method)
     ilogger.rs                       # ILogger (4 methods)
-    ispdk_env.rs                     # ISPDKEnv (5 methods); module spdk-gated
+    ispdk_env.rs                     # ISPDKEnv (6 methods); module spdk-gated
     iblock_device.rs                 # IBlockDevice (11), IBlockDeviceAdmin (6), + types; module spdk-gated
     ieviction_policy.rs              # IEvictionPolicy (9 methods), + types
     idispatch_map.rs                 # IDispatchMap (20 methods, 2 of them integrity-check-gated), + types
@@ -38,13 +38,13 @@ components/interfaces/
 
 ### Interface Count
 
-Counted from the `define_interface!` blocks in `src/`. `IZyreNode` is a plain trait, not a component interface, and is not counted. *(Recounted 2026-10-30: `IGpuServices::memcpy_batch_async` (`4941320a`, spdk-gated) and `IDispatcher::clear_all` (added on unstable in `266ed975`; this table had not been updated for it) bring the total from 178 to 180.)*
+Counted from the `define_interface!` blocks in `src/`. `IZyreNode` is a plain trait, not a component interface, and is not counted. *(Recounted 2026-10-30: `IGpuServices::memcpy_batch_async` (`4941320a`, spdk-gated) and `IDispatcher::clear_all` (added on unstable in `266ed975`; this table had not been updated for it) bring the total from 178 to 180. Recounted 2026-11-05: `ISPDKEnv::init_with_allowed` brings it to 181.)*
 
 | Interface | Methods | Feature Gate |
 |-----------|---------|--------------|
 | IGreeter | 1 | none |
 | ILogger | 4 | none |
-| ISPDKEnv | 5 | spdk |
+| ISPDKEnv | 6 | spdk |
 | IBlockDevice | 11 | spdk |
 | IBlockDeviceAdmin | 6 | spdk |
 | IEvictionPolicy | 9 | none |
@@ -62,7 +62,7 @@ Counted from the `define_interface!` blocks in `src/`. `IZyreNode` is a plain tr
 | IZyre | 2 | none |
 | IExtendedMetadataStore | 5 | none |
 | IPartitionTable | 4 | spdk |
-| **Total** | **180** | |
+| **Total** | **181** | |
 
 ## Architecture
 

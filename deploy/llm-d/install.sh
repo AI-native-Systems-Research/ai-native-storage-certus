@@ -29,6 +29,7 @@
 # Usage:
 #   deploy/llm-d/install.sh                 # aggregated serving
 #   WITH_CERTUS=1 deploy/llm-d/install.sh   # + certus KV-cache offload
+#   WITH_CERTUS=1 FETCH=1 deploy/llm-d/install.sh   # + fetch on a session move
 #   PD=1 deploy/llm-d/install.sh            # prefill/decode disaggregation
 #   PD=1 WITH_CERTUS=1 deploy/llm-d/install.sh   # P/D, certus beside NIXL
 #   DRY_RUN=1 PD=1 deploy/llm-d/install.sh  # check settings; change nothing
@@ -58,10 +59,27 @@
 #                longer lists, instead of refusing (default: 0)
 #   WITH_CERTUS  1 to apply profiles/<PROFILE>/certus, or with PD=1
 #                profiles/<PROFILE>/pd-certus (default: 0)
+#   FETCH        1, with WITH_CERTUS=1 and no PD: profiles/<PROFILE>/certus-fetch,
+#                aggregated certus plus peer selection, so a pod a session moves
+#                to fetches its history from the old pod's certus (default: 0)
 #   PD           1 to apply profiles/<PROFILE>/pd instead of agg (default: 0)
 #   RDMA         1, with PD=1 WITH_CERTUS=1: profiles/<PROFILE>/pd-certus-rdma,
 #                NIXL GPU to GPU over the `roce` secondary network
 #                (deploy/k8s/rdma-network/, which must be applied) (default: 0)
+#   OFFLOAD      1, with PD=1 RDMA=1 and WITH_CERTUS unset or 0:
+#                profiles/<PROFILE>/pd-offload-rdma, pd-certus-rdma with vLLM's
+#                own CPU tier and P2P pull in place of certus -- the comparison
+#                arm. Same image and router values as pd-certus-rdma. Stop
+#                certus on the nodes first (default: 0)
+#   TIERED       1, with PD=1 RDMA=1 and WITH_CERTUS unset or 0:
+#                profiles/<PROFILE>/pd-tiered-rdma, pd-certus-rdma with vLLM's
+#                native tiered prefix cache (CPU tier + filesystem tier) in
+#                place of certus and llm-d's own P/D router values -- the
+#                generic stack certus is compared against. The fs tier needs
+#                /mnt/kv-tier/numa<N> mounted on every node
+#                (deploy/llm-d/tiered-disks.sh), so certus stopped there.
+#                With PD unset: profiles/<PROFILE>/agg-tiered, the same tiers
+#                under aggregated serving (default: 0)
 #   AGG_NODES    space-separated nodes for aggregated serving (default and
 #                WITH_CERTUS). Belongs in SITE_ENV. Optional if the nodes
 #                already carry this instance's label.
@@ -120,6 +138,9 @@ RELEASE_NODES="${RELEASE_NODES:-0}"
 WITH_CERTUS="${WITH_CERTUS:-0}"
 PD="${PD:-0}"
 RDMA="${RDMA:-0}"
+OFFLOAD="${OFFLOAD:-0}"
+FETCH="${FETCH:-0}"
+TIERED="${TIERED:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 KEEP_LLMD="${KEEP_LLMD:-0}"
 GUIDE_NAME="${GUIDE_NAME:-quickstart}"
@@ -183,9 +204,40 @@ if [ "${WITH_CERTUS}" != "0" ]; then
     need_overlay certus   # pd-certus takes its entrypoint from certus/
     [ "${PD}" = "0" ] || need_overlay pd-certus
 fi
-if [ "${RDMA}" != "0" ]; then
+if [ "${FETCH}" != "0" ]; then
+    if [ "${WITH_CERTUS}" = "0" ] || [ "${PD}" != "0" ]; then
+        echo "ERROR: FETCH=1 needs WITH_CERTUS=1 without PD (P/D fetches already)." >&2
+        exit 1
+    fi
+    # Takes pd-certus's render service and RBAC.
+    need_overlay certus-fetch
+    need_overlay pd-certus
+fi
+if [ "${TIERED}" != "0" ]; then
+    if [ "${WITH_CERTUS}" != "0" ] || [ "${OFFLOAD}" != "0" ]; then
+        echo "ERROR: TIERED=1 replaces certus: no WITH_CERTUS or OFFLOAD." >&2
+        exit 1
+    fi
+    if [ "${PD}" != "0" ]; then
+        [ "${RDMA}" != "0" ] || { echo "ERROR: TIERED=1 PD=1 needs RDMA=1 (it is pd-certus-rdma's layout)." >&2; exit 1; }
+        need_overlay pd-tiered-rdma
+    else
+        [ "${RDMA}" = "0" ] || { echo "ERROR: RDMA=1 is P/D only; TIERED=1 without PD is aggregated." >&2; exit 1; }
+        need_overlay agg-tiered
+    fi
+fi
+if [ "${OFFLOAD}" != "0" ]; then
+    if [ "${PD}" = "0" ] || [ "${RDMA}" = "0" ] || [ "${WITH_CERTUS}" != "0" ]; then
+        echo "ERROR: OFFLOAD=1 needs PD=1 RDMA=1 and no WITH_CERTUS (it replaces certus)." >&2
+        exit 1
+    fi
+    # Takes pd-certus's render service and router values, so both arms route alike.
+    need_overlay pd-offload-rdma
+    need_overlay pd-certus
+elif [ "${RDMA}" != "0" ] && [ "${TIERED}" = "0" ]; then
     if [ "${PD}" = "0" ] || [ "${WITH_CERTUS}" = "0" ]; then
-        echo "ERROR: RDMA=1 needs PD=1 WITH_CERTUS=1 (it layers on pd-certus)." >&2
+        echo "ERROR: RDMA=1 needs PD=1 WITH_CERTUS=1 (it layers on pd-certus)," >&2
+        echo "       or OFFLOAD=1 for vLLM's CPU tier in place of certus." >&2
         exit 1
     fi
     need_overlay pd-certus-rdma
@@ -236,6 +288,17 @@ echo "[install] profile ${PROFILE}; llm-d pinned at $(git -C "${LLMD_DIR}" rev-p
 
 cd "${LLMD_DIR}"
 export REPO_ROOT="$(realpath "$(git rev-parse --show-toplevel)")"
+# The router chart, pinned to a release. llm-d.ref pins llm-d's guides, but
+# guides/env.sh defaults the chart to the moving tag `v0`, whose endpoint picker
+# is the moving image `:main` with pullPolicy Always: every router restart then
+# runs whatever main is that day. A main build of 2026-11-02 stopped serving
+# grpc.health.v1.Health on the ext-proc port that envoy health-checks, so envoy
+# marked the picker unhealthy and failed open to its fallback route -- no P/D
+# decision, no fetch, while every request still succeeded. v1.0.0 pins the
+# picker to the same tag (pullPolicy IfNotPresent). Bump deliberately, and rerun
+# the router check in deploy/llm-d/README.md, "Checking the router".
+: "${ROUTER_CHART_VERSION:=v1.0.0}"
+export ROUTER_CHART_VERSION
 # shellcheck disable=SC1091
 source "${REPO_ROOT}/guides/env.sh"
 export NAMESPACE GUIDE_NAME
@@ -402,6 +465,14 @@ if [ "${WITH_CERTUS}" != "0" ]; then
         # Consumes ../agg, so it has to sit beside it.
         install_overlay "${VLLM_DIR}" certus
         OVERLAY="${VLLM_DIR}/certus"
+        if [ "${FETCH}" != "0" ]; then
+            # Layers on certus, so it sits beside it; the render service and
+            # the RBAC are pd-certus's, copied in.
+            install_overlay "${VLLM_DIR}" certus-fetch
+            OVERLAY="${VLLM_DIR}/certus-fetch"
+            OVERLAY_SRC_DIR="${PROFILE_DIR}/certus-fetch"
+            cp "${PROFILE_DIR}/pd-certus/render.yaml" "${PROFILE_DIR}/pd-certus/rbac.yaml" "${OVERLAY}/"
+        fi
     fi
 
     # The committed overlay pins a REGISTRY/REPO placeholder rather than a real
@@ -409,8 +480,11 @@ if [ "${WITH_CERTUS}" != "0" ]; then
     # with. Done on the materialized copy, so the sources stay site-neutral.
     # The image pin lives in pd-certus even when pd-certus-rdma layers on it.
     certus_km="${PD_VLLM_DIR}/pd-certus/kustomization.yaml"
-    [ "${PD}" != "0" ] || certus_km="${OVERLAY}/kustomization.yaml"
-    if grep -q 'REGISTRY/REPO/' "${certus_km}"; then
+    [ "${PD}" != "0" ] || certus_km="${VLLM_DIR}/certus/kustomization.yaml"
+    # certus-fetch pins the image again, for its render service.
+    [ "${FETCH}" = "0" ] || certus_km="${certus_km} ${VLLM_DIR}/certus-fetch/kustomization.yaml"
+    # shellcheck disable=SC2086
+    if grep -q 'REGISTRY/REPO/' ${certus_km}; then
         if [ -z "${CERTUS_REGISTRY:-}" ] || [ -z "${CERTUS_REPO:-}" ]; then
             echo "ERROR: profiles/${PROFILE}/$(basename "${OVERLAY}")/kustomization.yaml pins the REGISTRY/REPO" >&2
             echo "       placeholder, so there is no image to pull. Set CERTUS_REGISTRY and" >&2
@@ -418,10 +492,62 @@ if [ "${WITH_CERTUS}" != "0" ]; then
             echo "       ${SITE_ENV} or the environment." >&2
             exit 1
         fi
-        sed -i "s|REGISTRY/REPO/|${CERTUS_REGISTRY}/${CERTUS_REPO}/|" "${certus_km}"
+        # shellcheck disable=SC2086
+        sed -i "s|REGISTRY/REPO/|${CERTUS_REGISTRY}/${CERTUS_REPO}/|" ${certus_km}
         echo "[install] image registry -> ${CERTUS_REGISTRY}/${CERTUS_REPO}"
     fi
     echo "[install] certus KV-cache offload ENABLED"
+    [ "${FETCH}" = "0" ] || echo "[install] certus fetch on a session move ENABLED (aggregated peer selection)"
+elif [ "${OFFLOAD}" != "0" ]; then
+    # Consumes ../pd, so it sits beside it. render.yaml and the router values
+    # are pd-certus's, so the two arms route identically.
+    install_overlay "${PD_VLLM_DIR}" pd-offload-rdma
+    OVERLAY="${PD_VLLM_DIR}/pd-offload-rdma"
+    OVERLAY_SRC_DIR="${PROFILE_DIR}/pd-certus"
+    cp "${PROFILE_DIR}/pd-certus/render.yaml" "${OVERLAY}/"
+    if ! kubectl get network-attachment-definitions -n "${NAMESPACE}" roce >/dev/null 2>&1 \
+            && [ "${DRY_RUN}" = "0" ]; then
+        echo "ERROR: no 'roce' network in ${NAMESPACE}; apply deploy/k8s/rdma-network/ first." >&2
+        exit 1
+    fi
+    if grep -q 'REGISTRY/REPO/' "${OVERLAY}/kustomization.yaml"; then
+        if [ -z "${CERTUS_REGISTRY:-}" ] || [ -z "${CERTUS_REPO:-}" ]; then
+            echo "ERROR: profiles/${PROFILE}/pd-offload-rdma pins the REGISTRY/REPO placeholder;" >&2
+            echo "       set CERTUS_REGISTRY and CERTUS_REPO in ${SITE_ENV} or the environment." >&2
+            exit 1
+        fi
+        sed -i "s|REGISTRY/REPO/|${CERTUS_REGISTRY}/${CERTUS_REPO}/|" "${OVERLAY}/kustomization.yaml"
+        echo "[install] image registry -> ${CERTUS_REGISTRY}/${CERTUS_REPO}"
+    fi
+    echo "[install] vLLM CPU tier + P2P pull ENABLED (no certus)"
+elif [ "${TIERED}" != "0" ]; then
+    if [ "${PD}" != "0" ]; then
+        # Consumes ../pd, so it sits beside it. No router-values.yaml: the
+        # guide's own P/D values route it, as llm-d ships them.
+        install_overlay "${PD_VLLM_DIR}" pd-tiered-rdma
+        OVERLAY="${PD_VLLM_DIR}/pd-tiered-rdma"
+        if ! kubectl get network-attachment-definitions -n "${NAMESPACE}" roce >/dev/null 2>&1 \
+                && [ "${DRY_RUN}" = "0" ]; then
+            echo "ERROR: no 'roce' network in ${NAMESPACE}; apply deploy/k8s/rdma-network/ first." >&2
+            exit 1
+        fi
+    else
+        # Consumes ../agg, so it sits beside it. The router values are llm-d's
+        # own for the tiered guide.
+        install_overlay "${VLLM_DIR}" agg-tiered
+        OVERLAY="${VLLM_DIR}/agg-tiered"
+        OVERLAY_SRC_DIR="${PROFILE_DIR}/agg-tiered"
+    fi
+    if grep -q 'REGISTRY/REPO/' "${OVERLAY}/kustomization.yaml"; then
+        if [ -z "${CERTUS_REGISTRY:-}" ] || [ -z "${CERTUS_REPO:-}" ]; then
+            echo "ERROR: profiles/${PROFILE}/$(basename "${OVERLAY}") pins the REGISTRY/REPO placeholder;" >&2
+            echo "       set CERTUS_REGISTRY and CERTUS_REPO in ${SITE_ENV} or the environment." >&2
+            exit 1
+        fi
+        sed -i "s|REGISTRY/REPO/|${CERTUS_REGISTRY}/${CERTUS_REPO}/|" "${OVERLAY}/kustomization.yaml"
+        echo "[install] image registry -> ${CERTUS_REGISTRY}/${CERTUS_REPO}"
+    fi
+    echo "[install] vLLM tiered prefix cache (CPU + fs) ENABLED (no certus)"
 elif [ "${PD}" = "0" ]; then
     echo "[install] aggregated serving (WITH_CERTUS=1 for certus offload, PD=1 for P/D)"
 fi
@@ -549,11 +675,19 @@ if [ -f "${OVERLAY_SRC_DIR:-/nonexistent}/router-values.yaml" ]; then
     PROFILE_ROUTER_VALUES=(-f "${OVERLAY_SRC_DIR}/router-values.yaml")
     echo "[install] router values from ${OVERLAY_SRC_DIR#"${SCRIPT_DIR}/"}/router-values.yaml"
 fi
+# --health-checking makes the endpoint picker serve grpc.health.v1.Health on
+# its ext-proc port, which is where the chart's envoy health-checks it. The
+# flag defaults to off and llm-d's values never set it, so the check always
+# failed: older charts left envoy's panic threshold at its default and routed to
+# the picker anyway, newer ones (healthy_panic_threshold 0) fail open instead,
+# silently skipping P/D and fetch. --set-string, after every values file, so no
+# profile can drop it; router-check.sh then confirms envoy sees it healthy.
 helm upgrade --install "${GUIDE_NAME}" \
   "${ROUTER_STANDALONE_CHART}" \
   -f "${REPO_ROOT}/guides/recipes/router/base.values.yaml" \
   -f "${GUIDE_VALUES}" \
   "${PROFILE_ROUTER_VALUES[@]}" \
+  --set-string "router.epp.flags.health-checking=true" \
   -n "${NAMESPACE}" \
   --version "${ROUTER_CHART_VERSION}"
 

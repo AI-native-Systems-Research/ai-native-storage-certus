@@ -3,7 +3,7 @@
 **Feature Branch**: `002-spdk-env-vfio-init`  
 **Created**: 2026-04-07  
 **Status**: Draft  
-**Last Synced**: 2026-10-05 — spec-sync on branch `fix/poller-cpu-placement-logging`. FR-022 BACKFILL: `init()` restores the caller's CPU affinity after `spdk_env_init()`.  
+**Last Synced**: 2026-11-05 — spec-sync on branch `certus-host-setup`. FR-023 (new): `init_with_allowed()` restricts DPDK to the named PCI devices; FR-002/FR-006/FR-015 updated to match. Previously 2026-10-05 (`fix/poller-cpu-placement-logging`): FR-022 BACKFILL, `init()` restores the caller's CPU affinity after `spdk_env_init()`.  
 **Input**: User description: "Build a component, as a lib-based crate, that initializes the SPDK and DPDK environments and iterates over available VFIO attached devices. The component should use the framework provided in ../component-framework [spec-sync backfill 2026-08-20: the component-framework crate has since moved to ../../lib/component-framework; the crate name is unchanged and still resolves as a workspace dependency]. The component interface, ISPDKEnv, should provide methods for iterating over available devices. The component must verify the availability of VFIO and raise an error if the system is not configured correctly. The component should use the logging APIs provided by the framework. Add a test example main.rs that instantiates the component. The component should run without root permissions providing that /dev/vfio directories are user accessible. The component should check for permission and report an error as needed. This component is not an actor, but a plain procedural component."
 
 ## Clarifications
@@ -14,7 +14,7 @@
 - Q: Should the component enforce singleton semantics? → A: Enforce singleton — second instantiation returns an error
 - Q: When should SPDK/DPDK initialization occur? → A: Explicit `init()` method on ISPDKEnv — caller constructs, wires receptacles, then calls `init()`
 - Q: How should the component behave if the logging receptacle is not connected? → A: Fail `init()` with an error requiring the logger to be connected first
-- Q: How should the component handle devices that are in use by another process? → A: Skip unavailable devices, log a warning for each, return only successfully probed devices
+- Q: How should the component handle devices that are in use by another process? → A: Skip unavailable devices, log a warning for each, return only successfully probed devices *(Future — not implemented; see FR-015: today such a device is silently absent, and processes sharing a host's drives use `init_with_allowed`, FR-023.)*
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -31,7 +31,7 @@ A developer instantiates the SPDKEnv component, wires the logging receptacle, an
 1. **Given** a system with VFIO enabled and at least one VFIO-bound device, **When** the component is constructed, logger wired, and `init()` called, **Then** it returns a list of discovered devices with identifying information (PCI address, device type).
 2. **Given** a successful initialization, **When** the developer queries available devices through ISPDKEnv, **Then** each enumerated NVMe device entry includes sufficient information to identify the device (BDF address, vendor/device IDs).
 3. **Given** a system with no VFIO-bound devices, **When** the component initializes successfully, **Then** it returns an empty device list without error.
-4. **Given** a system where some VFIO-bound devices are in use by another SPDK process, **When** the component initializes, **Then** it skips unavailable devices with a logged warning and returns only successfully probed devices.
+4. **Given** a system where some VFIO-bound devices are in use by another SPDK process, **When** the component initializes, **Then** it skips unavailable devices with a logged warning and returns only successfully probed devices. *(Future — see FR-015; today the device is silently absent, and FR-023 avoids the conflict.)*
 
 ---
 
@@ -87,7 +87,7 @@ A developer integrates the SPDKEnv component with other Certus components via th
 ### Edge Cases
 
 - What happens when VFIO is available but hugepages are not configured (required by DPDK)? — `init()` returns an error with a message about hugepage configuration.
-- What happens when a device is bound to VFIO but is in use by another SPDK process? — The device is skipped with a logged warning; only successfully probed devices are returned.
+- What happens when a device is bound to VFIO but is in use by another SPDK process? — The device is skipped with a logged warning; only successfully probed devices are returned. *(Future — see FR-015: today DPDK drops it with an EAL "Device or resource busy" message and it is silently absent; FR-023 avoids the conflict.)*
 - What happens when /dev/vfio exists but contains no IOMMU group directories? — Initialization succeeds; device list is empty.
 - What happens when the SPDK/DPDK initialization fails mid-way (partial initialization cleanup)? — The component cleans up any partially initialized state and returns an error from `init()`.
 - ~~(Removed: no logger receptacle exists — component uses eprintln! for diagnostics.)~~
@@ -98,11 +98,11 @@ A developer integrates the SPDKEnv component with other Certus components via th
 ### Functional Requirements
 
 - **FR-001**: System MUST provide a Rust lib crate structured as a component using `define_component!` and `define_interface!` macros from the component-framework.
-- **FR-002**: System MUST expose an `ISPDKEnv` interface with methods for querying available VFIO-attached devices and an explicit `init()` method for initialization.
-- **FR-003**: System MUST initialize the SPDK and DPDK environments when `init()` is called, not during construction. The caller follows a construct-wire-init lifecycle.
+- **FR-002**: System MUST expose an `ISPDKEnv` interface with methods for querying available VFIO-attached devices and explicit `init()` and `init_with_allowed()` methods for initialization (FR-023).
+- **FR-003**: System MUST initialize the SPDK and DPDK environments when `init()` or `init_with_allowed()` (FR-023) is called, not during construction. The caller follows a construct-wire-init lifecycle.
 - **FR-004**: System MUST verify the presence of /dev/vfio and the vfio-pci kernel module before attempting initialization.
 - **FR-005**: System MUST check read access on the /dev/vfio directory (it is only enumerated, not written) and read/write permissions on /dev/vfio/vfio (the VFIO container) and the IOMMU group device files, and report specific permission errors identifying the inaccessible path.
-- **FR-006**: System MUST enumerate NVMe devices bound to VFIO via `spdk_pci_enumerate` with the NVMe PCI driver after successful initialization, providing PCI BDF address, vendor/device IDs, class ID, NUMA node, and device type string for each. Devices are NOT attached during enumeration (callback returns non-zero), preserving them for later `spdk_nvme_probe`.
+- **FR-006**: System MUST enumerate NVMe devices bound to VFIO via `spdk_pci_enumerate` with the NVMe PCI driver after successful initialization, providing PCI BDF address, vendor/device IDs, class ID, NUMA node, and device type string for each. Devices are NOT attached during enumeration (callback returns non-zero), preserving them for later `spdk_nvme_probe`. After `init_with_allowed()` with a non-empty list, only the allowed devices are enumerated (FR-023).
 - **FR-007**: System uses `eprintln!` for diagnostic output (initialization progress, warnings). There is no logger receptacle; the component has no receptacles.
 - **FR-008**: System MUST operate without root permissions when /dev/vfio directories have appropriate user-level access configured.
 - **FR-009**: System MUST return an empty device list (not an error) when VFIO is properly configured but no devices are bound.
@@ -110,8 +110,8 @@ A developer integrates the SPDKEnv component with other Certus components via th
 - **FR-011**: System MUST be a plain procedural component (not an actor) that does not spawn its own threads or manage message queues.
 - **FR-012**: System MUST properly clean up SPDK/DPDK resources when the component is dropped.
 - **FR-013**: System MUST check for hugepage availability (required by DPDK) and report a clear error if hugepages are not configured.
-- **FR-014**: System MUST enforce singleton semantics via a process-global `AtomicBool` — only one SPDK environment instance may be active per process. A second call to `init()` on a new instance MUST return an error. The flag is cleared on failure (allowing retry) and on Drop.
-- **FR-015**: System MUST skip devices that cannot be probed (e.g., in use by another process), log a warning for each skipped device, and return only successfully probed devices. (Future: not yet implemented. Devices are enumerated but NOT claimed — the enumeration callback returns non-zero so no device is attached during discovery, per FR-006 — and no per-device probe/skip is performed, so the user must ensure exclusive access via system configuration.)
+- **FR-014**: System MUST enforce singleton semantics via a process-global `AtomicBool` — only one SPDK environment instance may be active per process. A second call to `init()` or `init_with_allowed()` on a new instance MUST return an error. The flag is cleared on failure (allowing retry) and on Drop.
+- **FR-015**: System MUST skip devices that cannot be probed (e.g., in use by another process), log a warning for each skipped device, and return only successfully probed devices. (Future: not yet implemented. Devices are enumerated but NOT claimed — the enumeration callback returns non-zero so no device is attached during discovery, per FR-006 — and no per-device probe/skip is performed. A device whose VFIO group another process holds open is dropped by DPDK during `spdk_env_init()` with an EAL "Device or resource busy" message and is silently absent from the device list. Processes that share a host's drives avoid this by each initializing with only their own, via `init_with_allowed()` (FR-023).)
 - **FR-016**: The `ISPDKEnv` interface MUST provide `is_initialized() -> bool` to check whether the environment has been successfully initialized.
 - **FR-017**: The `ISPDKEnv` interface MUST provide `device_count() -> usize` to query the number of discovered devices without cloning the device vector.
 - **FR-018**: The `ISPDKEnv` interface is defined locally in the
@@ -165,14 +165,30 @@ A developer integrates the SPDKEnv component with other Certus components via th
   `spdk_env_init()` to its main lcore (CPU 0 with the default core mask); because that is
   typically the process's main thread, every thread it spawns afterwards would inherit the
   single-core pin. The component saves the caller's affinity with `sched_getaffinity` before
-  `spdk_env_init()` and restores it with `sched_setaffinity` afterwards (`src/env.rs:91-102`,
-  `115-139`). The restore is best-effort: if the save or restore syscall fails, `init()` still
+  `spdk_env_init()` and restores it with `sched_setaffinity` afterwards (`src/env.rs:127-137`,
+  `152-174`). The restore is best-effort: if the save or restore syscall fails, `init()` still
   succeeds and the thread keeps DPDK's pin. This does not spawn threads (FR-011, SC-004).
+- **FR-023** *(New 2026-11-05.)*: The `ISPDKEnv` interface MUST provide
+  `init_with_allowed(&self, pci_addrs: &[String]) -> Result<(), SpdkEnvError>`, which
+  initializes exactly as `init()` does except that DPDK is restricted to the named PCI
+  devices: they are passed as `spdk_env_opts.pci_allowed` (DPDK `--allow`), so DPDK opens
+  only their VFIO groups and enumeration (FR-006) returns only them. Reason: DPDK opens a
+  device's VFIO group exclusively, and `init()` opens every NVMe device bound to VFIO, so
+  when two processes on one host each own some of its drives and start together, one can
+  hold the other's drives open while that one initializes, which then comes up without
+  them (observed with two Certus instances per server, one per NUMA node). Addresses are
+  `DDDD:BB:DD.F` or `BB:DD.F`, hex, any case (`PciAddress::parse`, `src/device.rs:30-65`); a
+  malformed address fails with `SpdkEnvError::InitFailed` before any SPDK call, and the
+  singleton flag (FR-014) is not taken. An empty slice behaves exactly as `init()`: both run
+  `do_init(self, &[])` (`src/lib.rs:78-94`, `src/env.rs:24-41, 44-77, 81-149`). The list is
+  logged when non-empty (FR-007). `certus-server-yaml` always calls `init_with_allowed` with its `--device-pci` list;
+  with `--drive-count` that list is empty (the flags conflict), which is `init()`, as
+  auto-discovery needs every device.
 
 ### Key Entities
 
 - **VfioDevice**: Represents a discovered VFIO-attached device. Key attributes: `address: PciAddress` (domain:bus:dev.func), `id: PciId` (class_id, vendor_id, device_id, subvendor_id, subdevice_id), `numa_node: i32` (-1 = unknown), `device_type: String` (e.g., "nvme").
-- **ISPDKEnv**: The component interface providing device iteration, environment status queries, and explicit `init()`/`fini()` methods.
+- **ISPDKEnv**: The component interface providing device iteration, environment status queries, and explicit `init()`/`init_with_allowed()`/`fini()` methods.
 - **SPDKEnvComponent**: The concrete component implementing ISPDKEnv, managing SPDK/DPDK lifecycle with singleton enforcement.
 - **DmaBuffer**: A DMA-safe, hugepage- or externally-backed byte buffer (see FR-020) used by downstream components (e.g. NVMe block device I/O) for zero-copy transfers; owns a deallocation function invoked on `Drop`, gated by the process-global SPDK-active flag.
 
@@ -180,7 +196,7 @@ A developer integrates the SPDKEnv component with other Certus components via th
 
 ### Measurable Outcomes
 
-- **SC-001**: The component discovers 100% of available (not in-use) NVMe devices bound to VFIO on a properly configured system, matching the NVMe devices visible in /sys/bus/pci/drivers/vfio-pci minus those locked by other processes. *(Spec-sync backfill 2026-09-04: re-scoped from "VFIO-bound devices" to "NVMe devices bound to VFIO" to match FR-006 and the implementation, which enumerate only the NVMe PCI driver.)*
+- **SC-001**: The component discovers 100% of available (not in-use) NVMe devices bound to VFIO on a properly configured system, matching the NVMe devices visible in /sys/bus/pci/drivers/vfio-pci minus those locked by other processes. After `init_with_allowed()` with a non-empty list, the same holds for the allowed devices (FR-023). *(Spec-sync backfill 2026-09-04: re-scoped from "VFIO-bound devices" to "NVMe devices bound to VFIO" to match FR-006 and the implementation, which enumerate only the NVMe PCI driver.)*
 - **SC-002**: On a misconfigured system (no VFIO, wrong permissions, no hugepages), the component reports the specific issue within its first error message, enabling the user to resolve the problem without additional debugging. *(Backfilled 2026-08-07: dropped the stale "missing logger" misconfiguration case — the component has no logger receptacle per FR-007; the same correction was already applied to SC-005.)*
 - **SC-003**: The example main.rs compiles and runs successfully as a non-root user on a system with correct VFIO permissions, printing device information to the console.
 - **SC-004**: All component operations complete synchronously without spawning threads, confirming procedural (non-actor) behavior.

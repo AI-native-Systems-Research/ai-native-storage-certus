@@ -1,11 +1,13 @@
 ---
 spec_sync_component: eviction-policy-lru
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-10-31T06:35:50Z
-spec_sync_git_commit: 50a0f2bf
-spec_sync_inputs_sha256: 9ce8a373c48096f76ffc9bb2d5e53e8707fb9784756b1b9c53b219d4f4842489
+spec_sync_synced_at: 2026-11-05T10:19:50Z
+spec_sync_git_commit: 32ffa627f
+spec_sync_inputs_sha256: b2183d355a4065b7d614ec9d2a1d983914543eceeb2bf1405a9f18a8bf206b6a
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-11-05 (branch `certus-host-setup`, on unstable `bb0c9b9c`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them (its previous stamp was re-verified against `git archive origin/unstable`); its digest moves because `components/interfaces` changed (`ISPDKEnv::init_with_allowed`, added for the two-process drive race; see the spdk-env and interfaces syncs of the same date). This component does not implement `ISPDKEnv`. No analysis below changes.
+
 > **Sync 2026-10-30 (branch `specsync-c`, piece-copy-bench merge) — clippy commit `55a4ddd4`, behaviour unchanged.** Base `a0292be6` (`origin/unstable`, where the last stamp was fresh), HEAD `0a71990e`. This component's only change on the branch is the clippy commit `55a4ddd4`; its digest also moves because `components/interfaces` changed (analysed by the interfaces sync, not here). `cargo clippy --all-targets -D warnings` and `cargo test` pass for logger, eviction-policy-lru, eviction-policy-optimized and eviction-policy-session-lists at HEAD. `55a4ddd4` replaces every `self.state.read()/write().unwrap()` and `pool.lock().unwrap()` with private `#[inline] #[track_caller]` helpers `read_state`/`write_state`/`lock_pool` that call the same `unwrap()` (`src/lib.rs:27-62`), so a poisoned lock still panics, now reported at the caller's location. It adds `#[expect(clippy::cast_possible_truncation)]` on the `len() as u32` casts in `create_pool` and in the list's node allocation (no cast changed), digit separators on hex constants, and test-only changes. `EvictionHandle::new/pool_id/index` gain `#[must_use]` in interfaces. No signature, return value, error variant or ordering changed. No `# Panics`/`# Errors` section was added to any public item. Every spec statement the commit could affect was checked (19 items: FR-001, FR-002, FR-003, FR-004, FR-005, FR-006, FR-007, FR-008, FR-009, FR-010, FR-011, FR-012, NFR-001, NFR-002, NFR-003, NFR-004, SC-002, SC-003, Key Entities PoolId/EvictionHandle): all aligned. No spec states lock-poison behaviour, quotes `from_env_str` arms or `Debug` output, or bounds pool ids or node indices, so the `#[expect]` reasons and the private helpers' panic docs add no requirement. Recorded only, not proposed: the specs do not say that a poisoned lock panics; this is pre-existing, the same before and after the commit, and the `IEvictionPolicy`/`ILogger` methods have no error channel for it. FR-002 cited `src/lib.rs:57` and `:69`; the helpers moved them to `:99` and `:111`. Applied 1 BACKFILL (line citations only; no requirement text changed). Backup in `backups/20261031T045440Z/`. No source files changed.
 >
 > **Status: clean** (to be stamped by the final pass; frontmatter left as it was).

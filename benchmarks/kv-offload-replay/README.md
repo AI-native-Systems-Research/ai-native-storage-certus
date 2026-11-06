@@ -396,6 +396,28 @@ The same selection works outside `profile_all.sh`: any driver honours
 `WORKLOAD_NAME` / `WORKLOAD_MODE` / `DATASET_PATH` / `NUM_CONVS` directly (see
 `run_multiturn_common.resolve_workload`).
 
+**Against a running stack (llm-d).** `longdoc_router.py` sends the same
+long-doc-qa conversations (same `LONGDOC_*` knobs, so the same documents) to an
+OpenAI-compatible router over HTTP, and starts nothing: no certus server, no
+vLLM engine, no container. Model, context window and KV sizing are whatever the
+served stack has. Each turn is one streamed `/v1/completions` request whose
+prompt is the previous prompt, the answer and the next question, as in the
+async driver; a turn too long for the served window is refused by the server
+and retires its conversation.
+
+```bash
+LONGDOC_DOC_TOKENS=8000 LONGDOC_QUESTIONS=8 \
+    ./longdoc_router.py --url http://node2:30080 --num-convs 8 --output-tokens 1 \
+    --out longdoc.jsonl
+```
+
+`--concurrency` (default: every conversation at once), `--turns`, `--model`
+(default: the first served) and `--temperature` / `--top-p` (default 0.7 / 0.95,
+as the drivers) are the rest. `--ignore-eos` makes every turn generate exactly
+`--output-tokens`; use it when comparing runs, or answers end at different
+lengths and the runs carry different KV. Output is one JSON line per turn plus a summary
+(TTFT for turn 0 and for later turns, per-turn prompt length).
+
 > **Note:** the container IPC mode is not a CLI flag — `profile_all.sh` launches
 > the shmq client with `--ipc=host` already, which does double duty: the host
 > `certus-server` can open the container's CUDA IPC handles, and the container sees

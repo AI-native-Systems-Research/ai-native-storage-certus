@@ -16,7 +16,7 @@ The component manages the full SPDK runtime lifecycle: pre-flight system validat
 2. **VFIO availability** -- Checks that `/dev/vfio` exists and the `vfio-pci` kernel module is loaded (via `/sys/bus/pci/drivers/vfio-pci/`).
 3. **VFIO permissions** -- Verifies read/write access to `/dev/vfio/vfio` (container device) and all numeric IOMMU group entries under `/dev/vfio/`.
 4. **Hugepages** -- Confirms that either 2MB or 1GB hugepages are allocated by reading sysfs counters.
-5. **SPDK env init** -- Calls `spdk_env_init()` via FFI with default options (app name `certus-spdk-env`, shared memory ID -1, no core mask restriction).
+5. **SPDK env init** -- Calls `spdk_env_init()` via FFI with default options (app name `certus-spdk-env`, shared memory ID -1, no core mask restriction). `init_with_allowed(pci_addrs)` also passes the named devices as the PCI allow-list (DPDK `--allow`), so DPDK opens only their VFIO groups.
 6. **PCI enumeration** -- Uses `spdk_pci_enumerate` with the NVMe driver to discover devices. The callback returns non-zero so devices are enumerated but not claimed, leaving them available for later `spdk_nvme_probe` in the block device component.
 7. **Cleanup on drop** -- `spdk_env_fini()` is called and the singleton flag is released.
 
@@ -25,6 +25,8 @@ The component manages the full SPDK runtime lifecycle: pre-flight system validat
 | Method | Description |
 |--------|-------------|
 | `init()` | Run pre-flight checks, initialize SPDK, enumerate devices |
+| `init_with_allowed(pci_addrs)` | As `init()`, but open and enumerate only the named devices (`DDDD:BB:DD.F`); empty means all |
+| `fini()` | Tear down the SPDK environment explicitly |
 | `devices()` | Return a clone of all discovered `VfioDevice` entries |
 | `device_count()` | Number of discovered devices |
 | `is_initialized()` | Whether the environment has been successfully initialized |
@@ -32,7 +34,11 @@ The component manages the full SPDK runtime lifecycle: pre-flight system validat
 ### Key Types
 
 - `VfioDevice` -- Immutable snapshot of a discovered PCI device (address, vendor/device IDs, NUMA node, device type string).
-- `PciAddress` -- Domain:Bus:Device.Function identifier, displayed as `DDDD:BB:DD.F`.
+- `PciAddress` -- Domain:Bus:Device.Function identifier, displayed as `DDDD:BB:DD.F`; `PciAddress::parse` reads that form (or `BB:DD.F`).
+
+### Several processes on one host
+
+DPDK opens a device's VFIO group exclusively. `init()` opens every NVMe device bound to VFIO, so when two processes on a host each own some of its drives and start at the same time, one can hold the other's drives while that one initializes, and the other comes up without them (EAL: `Cannot open /dev/vfio/N: Device or resource busy`). Give each process only its own drives with `init_with_allowed`; `certus-server-yaml` does this with its `--device-pci` list.
 - `PciId` -- PCI class, vendor, device, and subsystem identifiers.
 - `DmaBuffer` -- DMA-safe buffer (definition lives in the `interfaces` crate; re-exported here).
 - `SpdkEnvError` -- Enum covering all failure modes (re-exported from `interfaces`).
