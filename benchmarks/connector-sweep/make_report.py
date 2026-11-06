@@ -20,7 +20,7 @@ from collections import Counter
 # Config columns every bench writes to its CSV; each must match across arms.
 PARITY_COLUMNS = ["bs", "num_blocks", "block_bytes", "working_set", "tp", "lookup_order",
                   "job_blocks", "inflight", "step_us", "store_job_blocks", "store_inflight",
-                  "hit_ratio", "requests_per_step", "num_sessions"]
+                  "hit_ratio"]
 # Per-block KV tensors: certus records it as pieces_per_block, the others as layers.
 LAYERS_COLUMN = {"certus": "pieces_per_block", "cputier": "layers", "lmcache": "layers",
                  "3fs": "layers", "cputier-3fs": "layers"}
@@ -329,7 +329,8 @@ so its throughput is not like for like.</p>
 loop), so <code>get_finished</code> (and <code>load_job</code> / <code>store_job</code>, the same samples) is each job's time from
 submit to reap, including its wait behind the other jobs in flight; <code>reap_call</code> is the one non-blocking
 <code>get_finished()</code> poll per scheduler tick, not a wait. certus's cold pass at <code>--inflight 1</code> is its committed
-sequential pass, where <code>get_finished</code> is the wait for its one job.</p>
+sequential pass, where <code>get_finished</code> is the wait for its one job. prefix-miss is sequential (one job at a time) on every
+arm. scheduler-step is not compared: certus-connector-bench's runs vLLM 0.30's scheduler, the other benches' do not yet.</p>
 {''.join(details_html)}
 
 <h2>Parameters</h2>

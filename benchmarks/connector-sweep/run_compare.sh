@@ -11,9 +11,17 @@
 # AND the LMCache server's L1 (--l1-size-gb). The arms run one after the
 # other, since they share the GPU.
 #
+# Modes: --mode compare (the default) runs, on every arm, the modes the four
+# benches drive the same way: default (store, warm, cold, mixed eviction) and
+# prefix-miss, each as its own bench call. --mode default / prefix-miss /
+# contention run one of them. scheduler-step is not compared: certus-connector-
+# bench's runs vLLM 0.30's scheduler (one load job per request, --inflight, one
+# reap per tick), the other three still merge a step's loads and wait inside the
+# step, so the row would compare two harnesses, not connectors; run it with
+# certus-connector-bench directly. Each bench's own --mode all is unchanged.
+#
 # The lmcache arm has no contention mode and is single-rank: it is skipped
-# for --mode contention and for --tp > 1 (with a note), and runs its own
-# --mode all (default, prefix-miss, scheduler-step) for --mode all.
+# for --mode contention and for --tp > 1 (with a note).
 #
 # The 3fs arm (vLLM's HF3FSKVConnector) has no memory tier: --dram does not apply,
 # every store and load goes to 3FS, and it has no mixed-eviction or contention
@@ -35,7 +43,8 @@
 #   --out PATH               HTML report path (required; relative to the current dir)
 #   --latex                  also write the throughput table as LaTeX (booktabs) to
 #                            <out-without-.html>.tex
-#   --mode M                 default|prefix-miss|contention|scheduler-step|all [all]
+#   --mode M                 compare|default|prefix-miss|contention [compare]
+#                            (compare = default, then prefix-miss, on every arm)
 #   --bs N [16]  --num-blocks N [1024]  --block-bytes N [2097152]
 #   --min-duration S [5]  --warmup N [4]  --working-set N [512]
 #   --job-blocks N [64]  --inflight N [4]  --step-us US [100]: the default mode's store,
@@ -44,7 +53,7 @@
 #   --store-job-blocks N  --store-inflight N  the store side, passed only when given
 #                            [each bench: default mode --job-blocks/--inflight, contention 32/1]
 #   --hit-ratio F [0.75]
-#   --requests-per-step N [8]  --num-sessions N [32]  --lookup-order O [lookup-first]
+#   --lookup-order O [lookup-first]
 #   --gpu N [0]  --tp N [1]
 #   --layers N [32]          GPU tensors each block is split into, on EVERY arm (--layers;
 #                            certus takes it as --pieces-per-block). 32 = vLLM's default
@@ -94,10 +103,10 @@ REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 CALLER_DIR="$PWD"   # relative --out (and --server-bin) resolve against the caller's dir
 cd "$REPO_ROOT"
 
-OUT="" MODE=all BS=16 NUM_BLOCKS=1024 BLOCK_BYTES=2097152 MIN_DURATION=5 WARMUP=4
-WORKING_SET=512 HIT_RATIO=0.75 REQS_PER_STEP=8
+OUT="" MODE=compare BS=16 NUM_BLOCKS=1024 BLOCK_BYTES=2097152 MIN_DURATION=5 WARMUP=4
+WORKING_SET=512 HIT_RATIO=0.75
 JOB_BLOCKS=64 INFLIGHT=4 STEP_US=100 STORE_JOB_BLOCKS="" STORE_INFLIGHT=""
-NUM_SESSIONS=32 LOOKUP_ORDER=lookup-first GPU=0 TP=1 DRAM=12G DEVICE_PCI=()
+LOOKUP_ORDER=lookup-first GPU=0 TP=1 DRAM=12G DEVICE_PCI=()
 LAYERS=32 IO_THREADS=16 NUMA=""
 DRIVE_COUNT="" EVICT_THRESHOLD=0.8 WORKERS=4 CHANNELS="" FS_TIER=/raid0/cputier-bench-fs-tier
 SERVER_BIN="" IMAGE=docker.io/vllm/vllm-openai:v0.30.0
@@ -125,8 +134,6 @@ while (($#)); do
     --store-job-blocks) STORE_JOB_BLOCKS="$2"; shift ;;
     --store-inflight) STORE_INFLIGHT="$2"; shift ;;
     --hit-ratio) HIT_RATIO="$2"; shift ;;
-    --requests-per-step) REQS_PER_STEP="$2"; shift ;;
-    --num-sessions) NUM_SESSIONS="$2"; shift ;;
     --lookup-order) LOOKUP_ORDER="$2"; shift ;;
     --gpu) GPU="$2"; shift ;;
     --tp) TP="$2"; shift ;;
@@ -163,6 +170,16 @@ while (($#)); do
 done
 
 [[ -n "$OUT" ]] || { echo "error: --out PATH is required" >&2; exit 2; }
+case "$MODE" in
+  compare) BENCH_MODES=(default prefix-miss) ;;
+  default|prefix-miss|contention) BENCH_MODES=("$MODE") ;;
+  scheduler-step|all)
+    echo "error: --mode $MODE is not compared across the four benches: certus-connector-bench's" \
+         "scheduler-step drives vLLM 0.30's scheduler, the others do not yet. Use --mode compare" \
+         "(default + prefix-miss) here, and run scheduler-step with certus-connector-bench." >&2
+    exit 2 ;;
+  *) echo "error: --mode must be compare, default, prefix-miss or contention" >&2; exit 2 ;;
+esac
 [[ "$OUT" == *.html ]] || OUT="$OUT.html"
 [[ "$OUT" == /* ]] || OUT="$CALLER_DIR/$OUT"
 mkdir -p "$(dirname "$OUT")"
@@ -206,11 +223,11 @@ fi
 GPU_LIST=$(seq -s, "$GPU" $(( GPU + TP - 1 )))
 
 # The one shared workload argument list, passed verbatim to every bench.
-SHARED=(--mode "$MODE" --bs "$BS" --num-blocks "$NUM_BLOCKS" --block-bytes "$BLOCK_BYTES"
+# --mode is appended per bench call (run_modes), one call per entry of BENCH_MODES.
+SHARED=(--bs "$BS" --num-blocks "$NUM_BLOCKS" --block-bytes "$BLOCK_BYTES"
         --min-duration "$MIN_DURATION" --warmup "$WARMUP" --working-set "$WORKING_SET"
         --job-blocks "$JOB_BLOCKS" --inflight "$INFLIGHT" --step-us "$STEP_US"
         --hit-ratio "$HIT_RATIO"
-        --requests-per-step "$REQS_PER_STEP" --num-sessions "$NUM_SESSIONS"
         --lookup-order "$LOOKUP_ORDER" --tp "$TP" --layers "$LAYERS")
 # The store side only when given: otherwise every bench applies the same per-mode
 # defaults (default mode: --job-blocks / --inflight; contention: 32 / 1).
@@ -296,12 +313,11 @@ else
 python3 - "$ART/params.json" <<EOF
 import json, sys
 json.dump({
-  "shared": {"mode": "$MODE", "bs": $BS, "num_blocks": $NUM_BLOCKS, "block_bytes": $BLOCK_BYTES,
+  "shared": {"mode": "$MODE", "bench_modes": "${BENCH_MODES[*]}", "bs": $BS, "num_blocks": $NUM_BLOCKS, "block_bytes": $BLOCK_BYTES,
              "min_duration": $MIN_DURATION, "warmup": $WARMUP, "working_set": $WORKING_SET,
              "job_blocks": $JOB_BLOCKS, "inflight": $INFLIGHT, "step_us": $STEP_US,
              "store_job_blocks": "${STORE_JOB_BLOCKS:-per-mode default}",
              "store_inflight": "${STORE_INFLIGHT:-per-mode default}", "hit_ratio": $HIT_RATIO,
-             "requests_per_step": $REQS_PER_STEP, "num_sessions": $NUM_SESSIONS,
              "lookup_order": "$LOOKUP_ORDER", "tp": $TP, "gpus": "$GPU_LIST", "dram": "$DRAM",
              "layers": $LAYERS, "io_threads": $IO_THREADS, "numa_node": $NUMA, "numa_cpus": "$NUMA_CPUS"},
   "certus": {"channels": $CHANNELS, "eviction_threshold": $EVICT_THRESHOLD, "tier_gib": $TIER_GIB,
@@ -386,15 +402,52 @@ run_arm() {  # run_arm <log> <filter-regex-or-empty> <cmd...>
   local log="$1" filt="$2"; shift 2
   local rcf; rcf=$(mktemp)
   if [[ -n "$filt" ]]; then
-    ( "$@" 2>&1; echo $? > "$rcf" ) | grep --line-buffered -vE "$filt" | tee "$log" &
+    ( "$@" 2>&1; echo $? > "$rcf" ) | grep --line-buffered -vE "$filt" | tee -a "$log" &
   else
-    ( "$@" 2>&1; echo $? > "$rcf" ) | tee "$log" &
+    ( "$@" 2>&1; echo $? > "$rcf" ) | tee -a "$log" &
   fi
   BENCH_PID=$!
   wait "$BENCH_PID"
   BENCH_PID=""
   local rc; rc=$(cat "$rcf" 2>/dev/null || echo 1); rm -f "$rcf"
   return "${rc:-1}"
+}
+
+# One bench call per mode of BENCH_MODES, appending to one log. Each mode's rows have
+# their own columns, so each call writes the bench's CSV afresh; it is set aside after
+# the call and the parts are merged into that one CSV (every column of every part),
+# as a bench's own --mode all writes it. <host-csv> is where the bench's --csv lands
+# on the host. Returns the first failing call's exit code; stops there.
+run_modes() {  # run_modes <log> <filter-regex-or-empty> <host-csv> <cmd...>
+  local log="$1" filt="$2" csv="$3"; shift 3
+  : > "$log"
+  local m rc=0 parts=()
+  for m in "${BENCH_MODES[@]}"; do
+    echo "[compare] --mode $m" | tee -a "$log"
+    rm -f "$csv"
+    run_arm "$log" "$filt" "$@" --mode "$m"; rc=$?
+    if [[ -s "$csv" ]]; then mv "$csv" "$csv.$m.part"; parts+=("$csv.$m.part"); fi
+    ((rc)) && break
+    ((INTERRUPTED)) && { rc=130; break; }
+  done
+  if ((${#parts[@]})); then
+    python3 - "$csv" "${parts[@]}" <<'PY'
+import csv, sys
+out, parts = sys.argv[1], sys.argv[2:]
+rows, cols = [], []
+for p in parts:
+    with open(p, newline="") as f:
+        r = csv.DictReader(f)
+        cols += [c for c in r.fieldnames or [] if c not in cols]
+        rows += list(r)
+with open(out, "w", newline="") as f:
+    w = csv.DictWriter(f, fieldnames=cols)
+    w.writeheader()
+    w.writerows(rows)
+PY
+    rm -f "${parts[@]}"
+  fi
+  return "$rc"
 }
 
 if ((RUN_CERTUS)); then
@@ -424,7 +477,7 @@ if ((RUN_CERTUS)); then
     if ((ready)); then
       sleep 1
       echo "[compare] certus arm: ${NUMA_CMD[*]} ${CERTUS_CMD[*]}"
-      run_arm "$ART/certus-bench.log" "" "${NUMA_CMD[@]}" "${CERTUS_CMD[@]}"
+      run_modes "$ART/certus-bench.log" "" "$ART/certus.csv" "${NUMA_CMD[@]}" "${CERTUS_CMD[@]}"
       [[ $? -eq 0 && -s "$ART/certus.csv" ]] && STATUS_CERTUS=ok
     else
       echo "[compare] certus-server did not become ready; see $ART/server.log" >&2
@@ -436,9 +489,10 @@ fi
 if ((RUN_CPUTIER)); then
   STATUS_CPUTIER=failed
   rm -f "$ART/cputier.csv" "$FS_TIER/cputier.csv"
+  CPUTIER_CSV_HOST=$([[ "$CPUTIER_CSV_IN" == /fs-tier/* ]] && echo "$FS_TIER/cputier.csv" || echo "$ART/cputier.csv")
   echo "[compare] cputier arm: GPU=$GPU_LIST CPU_BYTES=$DRAM ${CPUTIER_CMD[*]}"
   GPU="$GPU_LIST" CPU_BYTES="$DRAM" FS_TIER_HOST="$FS_TIER" IMAGE="$IMAGE" CPUS="$NUMA_CPUS" \
-    run_arm "$ART/cputier-bench.log" "" "${NUMA_CMD[@]}" "${CPUTIER_CMD[@]}"
+    run_modes "$ART/cputier-bench.log" "" "$CPUTIER_CSV_HOST" "${NUMA_CMD[@]}" "${CPUTIER_CMD[@]}"
   rc=$?
   [[ "$CPUTIER_CSV_IN" == /fs-tier/* && -f "$FS_TIER/cputier.csv" ]] && mv "$FS_TIER/cputier.csv" "$ART/cputier.csv"
   [[ $rc -eq 0 && -s "$ART/cputier.csv" ]] && STATUS_CPUTIER=ok
@@ -451,8 +505,8 @@ if ((RUN_LMCACHE)); then
   echo "[compare] lmcache arm: GPU=$GPU L1_GB=$L1_GB ${LMCACHE_CMD[*]}"
   GPU="$GPU" L1_GB="$L1_GB" L2_DIR="$L2_DIR" CHUNK_SIZE="$CHUNK_SIZE" IMAGE="$LMCACHE_IMAGE" \
     CPUS="$NUMA_CPUS" L2_THREADS="$IO_THREADS" \
-    run_arm "$ART/lmcache-bench.log" "LMCache (INFO|WARNING)|slapd|Discovered API|CudaIPCTypes" \
-      "${NUMA_CMD[@]}" "${LMCACHE_CMD[@]}"
+    run_modes "$ART/lmcache-bench.log" "LMCache (INFO|WARNING)|slapd|Discovered API|CudaIPCTypes" \
+      "$REPO_ROOT/${LMCACHE_CSV_IN#/certus/}" "${NUMA_CMD[@]}" "${LMCACHE_CMD[@]}"
   rc=$?
   tmp_csv="$REPO_ROOT/${LMCACHE_CSV_IN#/certus/}"
   [[ "$LMCACHE_CSV_IN" == /certus/.lmcache-compare-* && -f "$tmp_csv" ]] && mv "$tmp_csv" "$ART/lmcache.csv"
@@ -467,8 +521,8 @@ if ((RUN_H3FS)); then
   echo "[compare] 3fs arm (${H3FS_CLIENT} client): GPU=$GPU ${H3FS_CMD[*]}"
   GPU="$GPU" MOCK="$H3FS_MOCK" IMAGE="$H3FS_RUN_IMAGE" H3FS_MOUNT="$H3FS_MOUNT" H3FS_DIR="$H3FS_MOCK_DIR" \
     CPUS="$NUMA_CPUS" \
-    run_arm "$ART/3fs-bench.log" "CUDA_HOME|Triton|cpp_extension|frombuffer|UserWarning|HF3FS Connector Completed" \
-      "${NUMA_CMD[@]}" "${H3FS_CMD[@]}"
+    run_modes "$ART/3fs-bench.log" "CUDA_HOME|Triton|cpp_extension|frombuffer|UserWarning|HF3FS Connector Completed" \
+      "$REPO_ROOT/${H3FS_CSV_IN#/certus/}" "${NUMA_CMD[@]}" "${H3FS_CMD[@]}"
   rc=$?
   tmp_csv="$REPO_ROOT/${H3FS_CSV_IN#/certus/}"
   [[ "$H3FS_CSV_IN" == /certus/.3fs-compare-* && -f "$tmp_csv" ]] && mv "$tmp_csv" "$ART/3fs.csv"
@@ -483,7 +537,9 @@ if ((RUN_CPUTIER_3FS)); then
   rm -f "$ART/cputier-3fs.csv" "$C3_FS_TIER/cputier-3fs.csv"
   echo "[compare] cputier-3fs arm (fs tier on 3FS): GPU=$GPU_LIST CPU_BYTES=$DRAM ${C3_CMD[*]}"
   GPU="$GPU_LIST" CPU_BYTES="$DRAM" FS_TIER_HOST="$C3_FS_TIER" IMAGE="$IMAGE" CPUS="$NUMA_CPUS" \
-    run_arm "$ART/cputier-3fs-bench.log" "" "${NUMA_CMD[@]}" "${C3_CMD[@]}"
+    run_modes "$ART/cputier-3fs-bench.log" "" \
+      "$([[ "$C3_CSV_IN" == /fs-tier/* ]] && echo "$C3_FS_TIER/cputier-3fs.csv" || echo "$ART/cputier-3fs.csv")" \
+      "${NUMA_CMD[@]}" "${C3_CMD[@]}"
   rc=$?
   [[ "$C3_CSV_IN" == /fs-tier/* && -f "$C3_FS_TIER/cputier-3fs.csv" ]] && mv "$C3_FS_TIER/cputier-3fs.csv" "$ART/cputier-3fs.csv"
   [[ $rc -eq 0 && -s "$ART/cputier-3fs.csv" ]] && STATUS_C3=ok

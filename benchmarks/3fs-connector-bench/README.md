@@ -75,7 +75,7 @@ The default mode drives the connector as vLLM 0.30 does, and as `certus-connecto
 | Flag | Default | |
 |---|---|---|
 | `--job-blocks` | 64 | blocks per load job, and per store job unless `--store-job-blocks` is set; at most the connector's staging buffers (`--max-device-buffer-count`, 128), refused above that at argument validation |
-| `--inflight` | 4 | jobs outstanding (default mode; prefix-miss and scheduler-step are unchanged and never read `--pipeline-depth`) |
+| `--inflight` | 4 | jobs outstanding (default mode; prefix-miss and scheduler-step do not use it. scheduler-step merges a step's loads and waits inside the step, unlike certus-connector-bench's, so `connector-sweep/run_compare.sh` does not compare it) |
 | `--step-us` | 100 | the scheduler tick in µs; 0 = `time.sleep(0)` each tick |
 | `--store-job-blocks`, `--store-inflight` | `--job-blocks`, `--inflight` | the store pass's jobs |
 

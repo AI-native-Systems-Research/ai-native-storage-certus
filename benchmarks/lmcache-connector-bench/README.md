@@ -91,7 +91,7 @@ The workload flags (`--bs`, `--num-blocks`, `--block-bytes`, `--min-duration`, `
   3. Cold load, the same jobs. L1 is cleared before each pass (after its L2 write-through drains), so every chunk is prefetched L2 → L1 (`lookup_wait`) and then copied to the GPU.
   4. Mixed store and load under L1 pressure. Size `--working-set` against `L1_GB`; the run prints after how many generations L1 fills.
 - **prefix-miss**: the first `--hit-ratio` of the keys are stored, then every request is looked up and its hit prefix retrieved. LMCache answers a request's whole prefix in one round trip, so `lookup_hit`/`lookup_miss` are per request (split by whether any of it hit), not per key.
-- **scheduler-step**: sessions share one stored prefix pool and diverge at geometric points; each request is a session prefix plus a fresh suffix. Per step: every request's lookup is submitted, then all are polled until answered (`touch_lookup`), the hit prefixes are retrieved in one batched call and drained (`drain_workers`), and the unstored tails are submitted as stores and drained, untimed, at the start of the next step.
+- **scheduler-step** (not compared by `connector-sweep/run_compare.sh`: it merges a step's loads and waits for them inside the step, unlike certus-connector-bench's, which runs vLLM 0.30's scheduler): sessions share one stored prefix pool and diverge at geometric points; each request is a session prefix plus a fresh suffix. Per step: every request's lookup is submitted, then all are polled until answered (`touch_lookup`), the hit prefixes are retrieved in one batched call and drained (`drain_workers`), and the unstored tails are submitted as stores and drained, untimed, at the start of the next step.
 
 ## Jobs in flight (default mode)
 
