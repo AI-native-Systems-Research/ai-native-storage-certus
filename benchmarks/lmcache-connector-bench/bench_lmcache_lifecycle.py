@@ -659,7 +659,10 @@ def inflight_label(args, kind: str) -> str:
         s = f"job_blocks={args.store_job_blocks} inflight={args.store_inflight}"
     else:
         s = f"job_blocks={args.job_blocks} inflight={args.inflight}"
-    return s + f" step_us={args.step_us:g} layers={args.layers}"
+    s += f" step_us={args.step_us:g} layers={args.layers}"
+    if kind == "warm" and getattr(args, "warm_overflow", False):
+        s += " OVERFLOW: set exceeds tier, not warm"
+    return s
 
 
 def bench_store_lifecycle(stack, args, min_duration) -> BenchResult:
@@ -751,18 +754,24 @@ def bench_load_lifecycle(stack, seqs, args, min_duration, *, cold: bool) -> Benc
     phases["load_job"] = loop.load_job
     temp = "Cold" if cold else "Warm"
     result = BenchResult(
-        label=f"{temp} Load Lifecycle ({inflight_label(args, 'load')})",
+        label=f"{temp} Load Lifecycle ({inflight_label(args, 'load' if cold else 'warm')})",
         total_blocks=loop.loaded, total_bytes=loop.loaded * stack.chunk_bytes,
         wall_seconds=timed, phases=phases)
     result.counts = {"load_misses": loop.misses}
-    if cold:
+    overflow = not cold and getattr(args, "warm_overflow", False)
+    if cold or overflow:
         result.counts["disk_read_bytes"] = (
             int(d["lmcache_mp_l2_prefetch_load_completed_chunks_total"]) * stack.chunk_bytes)
+    if overflow:
+        result.counts["warm_overflow"] = 1
     result.print_report()
     print(f"  load jobs={len(loop.load_job.samples)}  passes={passes}")
-    if loop.misses or cold:
+    if loop.misses or cold or overflow:
         print(f"  Load misses: {loop.misses}  "
               f"Prefetched from L2: {int(d['lmcache_mp_l2_prefetch_load_completed_chunks_total'])}")
+    if overflow:
+        print("  WARNING: --allow-warm-overflow: the working set exceeds L1; the chunks above "
+              "came back from L2 or missed. Not a warm measurement.")
     return result
 
 
@@ -1138,6 +1147,15 @@ def main():
     parser.add_argument("--csv", type=str, default=None, help="append results to CSV")
     parser.add_argument("--tag", type=str, default="", help="CSV tag column")
     parser.add_argument("--no-cold", action="store_true")
+    parser.add_argument("--no-warm", action="store_true",
+                        help="Skip the warm-load pass. Then --num-blocks may exceed L1: store and "
+                             "cold run at any size (as certus-connector-bench)")
+    parser.add_argument("--allow-warm-overflow", action="store_true",
+                        help="Run the warm pass even when --num-blocks exceeds the server's L1. Its "
+                             "loads then miss or are prefetched back from L2, so the result is not "
+                             "a warm measurement: its label says so, its CSV row has "
+                             "warm_overflow=1 and its L2 prefetches (disk_read_bytes), and the "
+                             "comparison report flags the row. Without it such a run is refused")
     parser.add_argument("--no-eviction", action="store_true")
     parser.add_argument("--mode", default="default",
                         choices=["default", "prefix-miss", "scheduler-step", "all"])
@@ -1226,12 +1244,14 @@ def main():
         # A warm load is only warm while its chunks stay in L1, as certus-connector-bench
         # refuses a working set over 90% of its tier's usable size.
         fit = int(l1_bytes // stack.chunk_bytes * INFLIGHT_TIER_SHARE)
-        if args.num_blocks > fit:
+        args.warm_overflow = args.num_blocks > fit and not args.no_warm
+        if args.warm_overflow and not args.allow_warm_overflow:
             stack.shutdown()
             sys.exit(f"error: --num-blocks {args.num_blocks} chunks is more than "
                      f"{INFLIGHT_TIER_SHARE:.0%} of the server's L1 ({l1_bytes // stack.chunk_bytes} "
-                     f"chunks): the warm loads would not be warm. Use --num-blocks <= {fit} or a "
-                     f"larger L1 (L1_GB)")
+                     f"chunks): the warm loads would not be warm. Use --num-blocks <= {fit}, a "
+                     f"larger L1 (L1_GB), --no-warm (store and cold only), or "
+                     f"--allow-warm-overflow (runs it, marked as not warm)")
 
     try:
         results = _run(args, stack, has_l2)
@@ -1310,7 +1330,8 @@ def _run(args, stack: LMCacheStack, has_l2: bool) -> list[BenchResult]:
             out.append(bench_store_lifecycle(stack, args, args.min_duration))
             seqs = make_sequences(stack, args.num_blocks, args.job_blocks)
             populate(stack, seqs)
-            out.append(bench_load_lifecycle(stack, seqs, args, args.min_duration, cold=False))
+            if not args.no_warm:
+                out.append(bench_load_lifecycle(stack, seqs, args, args.min_duration, cold=False))
             if args.no_cold:
                 pass
             elif not has_l2:

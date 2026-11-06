@@ -906,6 +906,11 @@ def main():
     parser.add_argument("--csv", type=str, default=None, help="append results to CSV")
     parser.add_argument("--tag", type=str, default="", help="CSV tag column")
     parser.add_argument("--no-cold", action="store_true")
+    parser.add_argument("--no-warm", action="store_true",
+                        help="Skip the warm-load pass (flag parity with the sibling benches)")
+    parser.add_argument("--allow-warm-overflow", action="store_true",
+                        help="accepted for flag parity: 3FS has no memory tier, so its warm pass "
+                             "never overflows one (every load reads 3FS)")
     parser.add_argument("--no-eviction", action="store_true",
                         help="accepted for flag parity (there is no eviction phase)")
     parser.add_argument("--mode", default="default",
@@ -1069,7 +1074,8 @@ def _run(args, stack: H3fsStack) -> list[BenchResult]:
             stored = populate(stack, keys, args.store_job_blocks, args.step_us)
             if stored < len(keys):
                 print(f"  WARNING: populate stored {stored}/{len(keys)} keys")
-            out.append(bench_load_lifecycle(stack, keys, args, args.min_duration, cold=False))
+            if not args.no_warm:
+                out.append(bench_load_lifecycle(stack, keys, args, args.min_duration, cold=False))
             if not args.no_cold:
                 out.append(bench_load_lifecycle(stack, keys, args, args.min_duration, cold=True))
             print("\n  (mixed eviction skipped: HF3FSKVConnector has no memory tier to evict)")

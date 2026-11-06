@@ -34,6 +34,9 @@ Things to know when reading LMCache numbers:
 - **`lookup_wait`** is the polling after the first `check_lookup_result`: the server's ack plus, on a cold lookup, the L2 → L1 prefetch. Even a warm lookup costs about 1.7 ms here, because the scheduler adapter polls without blocking.
 - **Single rank only.** `--tp 1`; LMCache's TP sharding is not simulated.
 
+
+**Working set larger than the server's L1 (`L1_GB`).** Refused by default, as in certus-connector-bench, because the warm loads would not be warm. `--no-warm` skips the warm pass, so store and cold run at any `--num-blocks`. `--allow-warm-overflow` runs the warm pass anyway and marks it: the label ends `OVERFLOW: set exceeds tier, not warm`, the CSV row has `warm_overflow=1` and the blocks that came back from disk (`disk_read_bytes`), and `connector-sweep/make_report.py` flags the row.
+
 ## Running
 
 Prerequisites:

@@ -164,6 +164,10 @@ def main() -> None:
                 n = int(float(r.get(col) or 0))
                 if n:
                     bits.append(f"{n:,} {what}")
+            if int(float(r.get("warm_overflow") or 0)):
+                rd = float(r.get("disk_read_bytes") or 0)
+                bits.append("working set exceeds the memory tier (--allow-warm-overflow): not warm"
+                            + (f", {rd / 1e9:.1f} GB read from disk" if rd else ""))
             if r["label"].startswith("Cold") and r.get("disk_read_bytes") not in (None, ""):
                 rd = float(r["disk_read_bytes"])
                 want = float(r["total_bytes"])
@@ -321,7 +325,8 @@ mode {esc(sh['mode'])} · lookup order {esc(sh['lookup_order'])}</div>
 <code>block_bytes</code>). Every arm is timed the same way: store rows exclude the per-pass drain of the disk write-through
 (certus DRAM→SSD, cputier CPU→fs, lmcache L1→L2) and give the sustained figure including it under the row label; cold rows
 empty the memory tier before every pass, outside the timed window, so each block is read back from disk. ⚠ marks a row
-where an arm skipped work — dropped stores, load misses, or a cold pass that read less than half its bytes from disk —
+where an arm skipped work — dropped stores, load misses, a cold pass that read less than half its bytes from disk, or a
+warm / contention pass run with <code>--allow-warm-overflow</code> on a working set larger than its memory tier —
 so its throughput is not like for like.</p>
 
 <h2>Per-phase latency</h2>

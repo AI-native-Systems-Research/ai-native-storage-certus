@@ -1562,7 +1562,10 @@ def inflight_label(args, kind: str) -> str:
         s = f"job_blocks={args.store_job_blocks} inflight={args.store_inflight}"
     else:
         s = f"job_blocks={args.job_blocks} inflight={args.inflight}"
-    return s + f" step_us={args.step_us:g} layers={args.layers}"
+    s += f" step_us={args.step_us:g} layers={args.layers}"
+    if kind in ("warm", "contention") and getattr(args, "warm_overflow", False):
+        s += " OVERFLOW: set exceeds tier, not warm"
+    return s
 
 
 def _run_loads(loop: StepLoop, units, args, rng, *, min_duration: float, min_passes: int = 2,
@@ -1679,17 +1682,24 @@ def bench_load_inflight(stack: CputierStack, keys, args, min_duration, *, cold: 
     _finish_load_phases(phases, loop)
     temp = "Cold" if cold else "Warm"
     result = BenchResult(
-        label=f"{temp} Load Lifecycle ({inflight_label(args, 'load')})",
+        label=f"{temp} Load Lifecycle ({inflight_label(args, 'load' if cold else 'warm')})",
         total_blocks=loop.loaded, total_bytes=loop.loaded * stack.chunk_bytes,
         wall_seconds=timed, phases=phases)
     result.counts = {"load_misses": loop.load_misses}
     promoted = stack.counters["promoted"] - promoted_before
-    if cold:
+    overflow = not cold and getattr(args, "warm_overflow", False)
+    if cold or overflow:
         result.counts["disk_read_bytes"] = promoted * stack.chunk_bytes
+    if overflow:
+        result.counts["warm_overflow"] = 1
     result.print_report()
     print(f"  load jobs={len(loop.load_job.samples)}  passes={passes}")
-    if loop.load_misses or cold:
+    if loop.load_misses or cold or overflow:
         print(f"  Load misses: {loop.load_misses}  Promoted from fs: {promoted}")
+    if overflow:
+        print(f"  WARNING: --allow-warm-overflow: the working set exceeds the CPU tier; "
+              f"{promoted} blocks came back from the fs tier and {loop.load_misses} missed. "
+              f"Not a warm measurement.")
     return result
 
 
@@ -1732,6 +1742,7 @@ def bench_contention(stack: CputierStack, keys, args, min_duration) -> list[Benc
     populate_keys(stack, keys, args.store_job_blocks)
     stack.take_events()
     removed_before = stack.counters["cpu_removed"]
+    promoted_before = stack.counters["promoted"]
     loop = StepLoop(stack, phases, load_slots=args.inflight, load_job_blocks=args.job_blocks,
                     store_slots=args.store_inflight, store_job_blocks=args.store_job_blocks)
     units = job_units(keys, args.job_blocks)
@@ -1795,8 +1806,10 @@ def bench_contention(stack: CputierStack, keys, args, min_duration) -> list[Benc
     store_phases["get_finished"] = loop.store_job
     store_phases["store_transfer"] = loop.store_transfer
     label = inflight_label(args, "contention")
+    # Only contention's loads need the set resident: the store row is not marked.
+    store_label = label.replace(" OVERFLOW: set exceeds tier, not warm", "")
     store_result = BenchResult(
-        label=f"Contention: Store Thread ({label})",
+        label=f"Contention: Store Thread ({store_label})",
         total_blocks=loop.stored, total_bytes=loop.stored * stack.chunk_bytes,
         wall_seconds=wall, phases=store_phases)
     store_result.counts = {"store_drops": loop.store_drops}
@@ -1804,7 +1817,11 @@ def bench_contention(stack: CputierStack, keys, args, min_duration) -> list[Benc
         label=f"Contention: Load Thread ({label})",
         total_blocks=loop.loaded, total_bytes=loop.loaded * stack.chunk_bytes,
         wall_seconds=wall, phases=load_phases)
-    load_result.counts = {"load_misses": loop.load_misses}
+    load_result.counts = {"load_misses": loop.load_misses,
+                          "disk_read_bytes": (stack.counters["promoted"] - promoted_before)
+                                             * stack.chunk_bytes}
+    if getattr(args, "warm_overflow", False):
+        load_result.counts["warm_overflow"] = 1
     for r in (store_result, load_result):
         r.params = {"store_job_blocks": args.store_job_blocks,
                     "store_inflight": args.store_inflight}
@@ -2209,6 +2226,16 @@ def main():
                         help="Tag column for CSV (e.g. branch name)")
     parser.add_argument("--no-cold", action="store_true",
                         help="Skip the cold-load benchmark (fs→CPU→GPU)")
+    parser.add_argument("--no-warm", action="store_true",
+                        help="(default) Skip the warm-load pass. Then --num-blocks may exceed the "
+                             "CPU tier: store and cold run at any size (as certus-connector-bench)")
+    parser.add_argument("--allow-warm-overflow", action="store_true",
+                        help="(default, contention) Run the warm pass and contention's loads even "
+                             "when --num-blocks exceeds the CPU tier. Loads then miss or are "
+                             "promoted back from the fs tier, so the result is not a warm "
+                             "measurement: its label says so, its CSV row has warm_overflow=1 and "
+                             "its promotions (disk_read_bytes), and the comparison report flags "
+                             "the row. Without it such a run is refused")
     parser.add_argument("--no-eviction", action="store_true",
                         help="Skip the eviction-pressure benchmark")
     parser.add_argument("--mode", type=str, default=None,
@@ -2377,18 +2404,22 @@ def main():
     print(f"  CPU tier: {stack.num_chunks} chunks × {stack.spec.kv_bytes_per_chunk} bytes")
     print(f"  job_blocks={args.job_blocks} inflight={args.inflight} store_job_blocks="
           f"{args.store_job_blocks} store_inflight={args.store_inflight} step_us={args.step_us:g}")
+    args.warm_overflow = False
     if mode in ("default", "contention", "all"):
         # A warm load is only warm while its keys stay in the CPU tier, as in
         # certus-connector-bench (which refuses more than 90% of its tier's usable size):
         # a larger set is evicted to the fs tier and promoted back, or misses.
         fit = int(stack.num_chunks * INFLIGHT_TIER_SHARE)
         need = args.num_blocks            # one key is one chunk (--blocks-per-chunk GPU blocks)
-        if need > fit:
+        args.warm_overflow = need > fit and (mode != "default" or not args.no_warm)
+        if args.warm_overflow and not args.allow_warm_overflow:
             stack.shutdown()
             sys.exit(f"error: --num-blocks {args.num_blocks} ({need} chunks) is more than "
                      f"{INFLIGHT_TIER_SHARE:.0%} of the CPU tier's {stack.num_chunks} chunks "
                      f"(--cpu-bytes {args.cpu_bytes}): the warm loads would not be warm. Use "
-                     f"--num-blocks <= {fit * args.blocks_per_chunk} or a larger --cpu-bytes")
+                     f"--num-blocks <= {fit * args.blocks_per_chunk}, a larger --cpu-bytes, "
+                     f"--no-warm (store and cold only), or --allow-warm-overflow (runs it, "
+                     f"marked as not warm)")
 
     try:
         all_results = _run(args, mode, stack, pattern, eval_expr_fn)
@@ -2514,7 +2545,8 @@ def _run(args, mode, stack: CputierStack, pattern, eval_expr_fn) -> list[BenchRe
             results.append(bench_store_inflight(stack, keys, args, args.min_duration))
 
             populate_keys(stack, keys, args.store_job_blocks)
-            results.append(bench_load_inflight(stack, keys, args, args.min_duration, cold=False))
+            if not args.no_warm:
+                results.append(bench_load_inflight(stack, keys, args, args.min_duration, cold=False))
 
             if args.no_cold:
                 pass

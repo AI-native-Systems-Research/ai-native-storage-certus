@@ -53,6 +53,11 @@
 #   --store-job-blocks N  --store-inflight N  the store side, passed only when given
 #                            [each bench: default mode --job-blocks/--inflight, contention 32/1]
 #   --hit-ratio F [0.75]
+#   --no-warm                skip the warm pass on every arm (then --num-blocks may exceed
+#                            the memory tier: store and cold run at any size)
+#   --allow-warm-overflow    run warm (and contention's loads) on every arm even when
+#                            --num-blocks exceeds the memory tier; those rows are marked
+#                            "OVERFLOW ... not warm" and flagged in the report
 #   --lookup-order O [lookup-first]
 #   --gpu N [0]  --tp N [1]
 #   --layers N [32]          GPU tensors each block is split into, on EVERY arm (--layers;
@@ -111,6 +116,7 @@ LAYERS=32 IO_THREADS=16 NUMA=""
 DRIVE_COUNT="" EVICT_THRESHOLD=0.8 WORKERS=4 CHANNELS="" FS_TIER=/raid0/cputier-bench-fs-tier
 SERVER_BIN="" IMAGE=docker.io/vllm/vllm-openai:v0.30.0
 L2_DIR=/raid0/lmcache-bench-l2 LMCACHE_IMAGE=localhost/vllm-lmcache-bench:vllm0.30.0 CHUNK_SIZE=256
+NO_WARM=0 ALLOW_WARM_OVERFLOW=0
 RUN_CERTUS=1 RUN_CPUTIER=1 RUN_LMCACHE=1 RUN_H3FS=1 RUN_CPUTIER_3FS=1 REPORT_ONLY=0 LATEX=0
 H3FS_MOUNT=/mnt/3fs H3FS_IMAGE=localhost/vllm-hf3fs-bench:vllm0.30.0 H3FS_FILE_SIZE=64G
 H3FS_MOCK=0 H3FS_MOCK_DIR=/raid0/h3fs-mock
@@ -152,6 +158,8 @@ while (($#)); do
     --l2-dir) L2_DIR="$2"; shift ;;
     --lmcache-image) LMCACHE_IMAGE="$2"; shift ;;
     --chunk-size) CHUNK_SIZE="$2"; shift ;;
+    --no-warm) NO_WARM=1 ;;
+    --allow-warm-overflow) ALLOW_WARM_OVERFLOW=1 ;;
     --skip-certus) RUN_CERTUS=0 ;;
     --skip-cputier) RUN_CPUTIER=0 ;;
     --skip-lmcache) RUN_LMCACHE=0 ;;
@@ -233,6 +241,8 @@ SHARED=(--bs "$BS" --num-blocks "$NUM_BLOCKS" --block-bytes "$BLOCK_BYTES"
 # defaults (default mode: --job-blocks / --inflight; contention: 32 / 1).
 [[ -n "$STORE_JOB_BLOCKS" ]] && SHARED+=(--store-job-blocks "$STORE_JOB_BLOCKS")
 [[ -n "$STORE_INFLIGHT" ]] && SHARED+=(--store-inflight "$STORE_INFLIGHT")
+((NO_WARM)) && SHARED+=(--no-warm)
+((ALLOW_WARM_OVERFLOW)) && SHARED+=(--allow-warm-overflow)
 # --dram in GiB: the certus bench sizes and checks its working set against the tier
 # the server starts with (--tier-gib); lmcache L1 below uses the same number.
 TIER_GIB=$(python3 -c "
@@ -318,6 +328,7 @@ json.dump({
              "job_blocks": $JOB_BLOCKS, "inflight": $INFLIGHT, "step_us": $STEP_US,
              "store_job_blocks": "${STORE_JOB_BLOCKS:-per-mode default}",
              "store_inflight": "${STORE_INFLIGHT:-per-mode default}", "hit_ratio": $HIT_RATIO,
+             "no_warm": bool($NO_WARM), "allow_warm_overflow": bool($ALLOW_WARM_OVERFLOW),
              "lookup_order": "$LOOKUP_ORDER", "tp": $TP, "gpus": "$GPU_LIST", "dram": "$DRAM",
              "layers": $LAYERS, "io_threads": $IO_THREADS, "numa_node": $NUMA, "numa_cpus": "$NUMA_CPUS"},
   "certus": {"channels": $CHANNELS, "eviction_threshold": $EVICT_THRESHOLD, "tier_gib": $TIER_GIB,

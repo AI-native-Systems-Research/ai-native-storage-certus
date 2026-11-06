@@ -505,6 +505,14 @@ The benchmark cannot read the tier size from the server, so you state it: `--tie
 - The default and contention modes refuse a `--num-blocks` that does not fit (the warm pass
   and contention's loads need it resident), and one that makes fewer jobs than `--inflight`,
   at argument validation, before connecting, naming the largest (smallest) that works.
+- A small tier with a large `--num-blocks` is still possible, two ways. `--no-warm` skips the
+  warm pass: store and cold do not need the set resident, so they run at any size.
+  `--allow-warm-overflow` runs the warm pass (and contention's loads) anyway; its loads then
+  come partly from the drives, so the result is marked, not hidden: its label ends
+  `OVERFLOW: set exceeds tier, not warm`, its CSV row has `warm_overflow=1` and its SSD reads
+  (`disk_read_bytes`, with an rw-telemetry server), it does not fail on lookup misses (it
+  counts them), and `connector-sweep/make_report.py` flags the row. The same two flags exist in
+  the cputier, LMCache and 3FS benches (3FS has no tier, so it never overflows).
 - Without `--num-blocks` they use 90% of `tier x threshold / block bytes`, at most 4,000.
 - The cold pass takes `--tier-fill-blocks` from the same numbers unless you give it.
 - Every default and contention run prints `Tier assumed: ...` first, so a wrong `--tier-gib`

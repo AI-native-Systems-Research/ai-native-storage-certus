@@ -1019,7 +1019,7 @@ def _job_units(keys: list[bytes], job_blocks: int) -> list[list[bytes]]:
     return [keys[i:i + job_blocks] for i in range(0, len(keys), job_blocks)]
 
 
-def _populate_jobs(manager, worker, keys, job_blocks, verifier=None) -> None:
+def _populate_jobs(manager, worker, keys, job_blocks, verifier=None, allow_short=False) -> None:
     """Store ``keys`` as job_blocks-key jobs (outside any timing), so each job's keys
     form one commit group, as one vLLM store job's do. With a verifier each job's
     GPU blocks are first written with its keys' patterns."""
@@ -1053,9 +1053,12 @@ def _populate_jobs(manager, worker, keys, job_blocks, verifier=None) -> None:
         # A key already present is not re-stored; any other shortfall means the tier
         # refused reservations and the working set does not fit.
         missing = sum(1 for k in keys if not manager.lookup(k))
-        if missing:
+        if missing and not allow_short:
             raise RuntimeError(f"populate: {missing} of {len(keys)} working-set keys not "
                                f"resident (memory tier too small for --num-blocks?)")
+        if missing:
+            print(f"  populate: {missing} of {len(keys)} keys not resident "
+                  f"(--allow-warm-overflow)")
 
 
 def _verify_load_back(manager, worker, keys, job_blocks, verifier) -> None:
@@ -1107,6 +1110,8 @@ def inflight_label(args, kind: str) -> str:
         s += f" pieces={args.pieces_per_block}"
     if args.shape:
         s += f" shape={args.shape}"
+    if kind in ("warm", "contention") and getattr(args, "warm_overflow", False):
+        s += " OVERFLOW: set exceeds tier, not warm"
     return s
 
 
@@ -1146,15 +1151,18 @@ def bench_warm_inflight(manager, worker, keys, block_bytes, min_duration, *, arg
     phases = _inflight_phases("touch", "lookup", "prepare_load", "submit_load",
                               "get_finished", "complete_load")
     units = _job_units(keys, args.job_blocks)
-    _populate_jobs(manager, worker, keys, args.job_blocks, verifier)
+    overflow = getattr(args, "warm_overflow", False)
+    _populate_jobs(manager, worker, keys, args.job_blocks, verifier, allow_short=overflow)
     manager._ring.flush_to_ssd()   # the write-through must not overlap the timed loads
     loop = _StepLoop(manager, worker, phases, touch_first=touch_first,
                      load_slots=args.inflight, load_job_blocks=args.job_blocks,
                      verifier=verifier)
     sched = _LoadScheduler(units, args.seed)
+    io_before = manager._ring.get_io_stats()
     wall = _load_window(loop, sched, min_duration, args.step_us, min_passes=2)
+    reads = manager._ring.get_io_stats()["read_bytes"] - io_before["read_bytes"]
     st = loop.load_stats
-    if st.misses:
+    if st.misses and not overflow:
         # The working set was populated and checked resident, and nothing is stored or
         # evicted during the pass: a warm lookup that misses is a fault, not a result.
         raise RuntimeError(f"warm load: {st.misses} working-set blocks missed at lookup "
@@ -1165,11 +1173,16 @@ def bench_warm_inflight(manager, worker, keys, block_bytes, min_duration, *, arg
         total_blocks=st.blocks, total_bytes=st.blocks * block_bytes,
         wall_seconds=wall, phases=phases,
     )
-    result.counts = {"blocks_not_loaded": st.misses, "load_misses": st.misses}
+    result.counts = {"blocks_not_loaded": st.misses, "load_misses": st.misses,
+                     "disk_read_bytes": reads, "warm_overflow": int(overflow)}
     result.print_report()
     _print_inflight_summary(st, wall, "load")
     print(f"  Blocks not loaded (prefix stopped at a lookup miss): {st.misses}  "
-          f"passes: {sched.passes}")
+          f"passes: {sched.passes}  SSD reads: {reads / 1e6:.0f} MB")
+    if overflow:
+        print(f"  WARNING: --allow-warm-overflow: the working set exceeds the tier; "
+              f"{reads / 1e6:.0f} MB came back from the drives (0 without an rw-telemetry "
+              f"server) and {st.misses} blocks missed. Not a warm measurement.")
     if verifier is not None:
         verifier.report("warm loads")
     return result
@@ -1524,7 +1537,8 @@ def bench_contention(manager, worker, ring, keys, block_bytes, min_duration, *, 
     phases = _inflight_phases(*load_names, "prepare_store", "store_touch", "submit_store",
                               "complete_store", "take_events")
     units = _job_units(keys, args.job_blocks)
-    _populate_jobs(manager, worker, keys, args.store_job_blocks, verifier)
+    _populate_jobs(manager, worker, keys, args.store_job_blocks, verifier,
+                   allow_short=getattr(args, "warm_overflow", False))
     manager._ring.flush_to_ssd()
 
     # The reference: the same loads, nothing stored beside them.
@@ -1532,8 +1546,10 @@ def bench_contention(manager, worker, ring, keys, block_bytes, min_duration, *, 
     alone = _StepLoop(manager, worker, alone_phases, touch_first=touch_first,
                       load_slots=args.inflight, load_job_blocks=args.job_blocks,
                       verifier=verifier)
+    io_alone = manager._ring.get_io_stats()
     alone_wall = _load_window(alone, _LoadScheduler(units, args.seed + 1),
                               CONTENTION_ALONE_SECONDS, args.step_us, min_passes=1)
+    alone_reads = manager._ring.get_io_stats()["read_bytes"] - io_alone["read_bytes"]
     ast_ = alone.load_stats
 
     io_before = manager._ring.get_io_stats()
@@ -1588,7 +1604,9 @@ def bench_contention(manager, worker, ring, keys, block_bytes, min_duration, *, 
                     "store_transfer": sst.transfer}
     alone_phases["get_finished"], alone_phases["load_transfer"] = ast_.job, ast_.transfer
     label = inflight_label(args, "contention")
-    store_r = BenchResult(label=f"Contention: Store Thread ({label})", total_blocks=sst.blocks,
+    # Only contention's loads need the set resident: the store row is not marked.
+    store_label = label.replace(" OVERFLOW: set exceeds tier, not warm", "")
+    store_r = BenchResult(label=f"Contention: Store Thread ({store_label})", total_blocks=sst.blocks,
                           total_bytes=sst.blocks * block_bytes, wall_seconds=wall,
                           phases=store_phases)
     store_r.counts = {"store_drops": sst.misses}
@@ -1596,10 +1614,14 @@ def bench_contention(manager, worker, ring, keys, block_bytes, min_duration, *, 
                          total_bytes=lst.blocks * block_bytes, wall_seconds=wall,
                          phases=load_phases)
     load_r.counts = {"blocks_not_loaded": lst.misses, "load_misses": lst.misses,
-                     "disk_read_bytes": io["read_bytes"]}
+                     "disk_read_bytes": io["read_bytes"],
+                     "warm_overflow": int(getattr(args, "warm_overflow", False))}
     alone_r = BenchResult(label=f"Contention: Load Alone ({label})", total_blocks=ast_.blocks,
                           total_bytes=ast_.blocks * block_bytes, wall_seconds=alone_wall,
                           phases=alone_phases)
+    alone_r.counts = {"blocks_not_loaded": ast_.misses, "load_misses": ast_.misses,
+                      "disk_read_bytes": alone_reads,
+                      "warm_overflow": int(getattr(args, "warm_overflow", False))}
     store_r.print_report()
     _print_inflight_summary(sst, wall, "store")
     print(f"  Store drops: {sst.misses}")
@@ -2874,9 +2896,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-cold", action="store_true",
                         help="Skip the cold-load benchmark (SSD→DRAM→GPU)")
     parser.add_argument("--no-warm", action="store_true",
-                        help="(default) Skip the warm-load pass. Only then may --num-blocks exceed "
-                             "what the tier holds (a store-only run over more than the tier: the "
-                             "stores then wait for the write-through)")
+                        help="(default) Skip the warm-load pass. Then --num-blocks may exceed "
+                             "what the tier holds: store and cold run at any size")
+    parser.add_argument("--allow-warm-overflow", action="store_true",
+                        help="(default, contention) Run the warm pass and contention's loads even "
+                             "when --num-blocks exceeds what the tier holds. The loads then partly "
+                             "come back from the drives, so the result is not a warm measurement: "
+                             "its label says so, its CSV row has warm_overflow=1 and its SSD reads "
+                             "(disk_read_bytes, with an rw-telemetry server), and the comparison "
+                             "report flags the row. Without it such a run is refused")
     parser.add_argument("--no-eviction", action="store_true",
                         help="Skip the eviction-pressure benchmark")
     parser.add_argument("--mode", type=str, default=None,
@@ -3019,7 +3047,9 @@ def resolve_args(parser, argv=None, mode: str | None = None) -> argparse.Namespa
                   f"{args.job_blocks}, but --inflight {args.inflight} needs at least "
                   f"{args.inflight}: use --num-blocks >= {args.inflight * args.job_blocks}, "
                   f"or a smaller --job-blocks or --inflight")
-        if args.num_blocks > tier_usable_blocks and (mode == "contention" or not args.no_warm):
+        args.warm_overflow = (args.num_blocks > tier_usable_blocks
+                              and (mode == "contention" or not args.no_warm))
+        if args.warm_overflow and not args.allow_warm_overflow:
             # A warm load is only warm while its keys stay in the memory tier. A larger set is
             # evicted to the drives and promoted back, and nothing in the pass's own output
             # shows it (4,000 blocks in a 4 GiB tier: 24.45 GB/s, 0 blocks not loaded, 2026-11-05).
@@ -3027,8 +3057,9 @@ def resolve_args(parser, argv=None, mode: str | None = None) -> argparse.Namespa
                   f"--num-blocks {args.num_blocks} is {args.num_blocks * args.block_bytes / 2**30:.1f} GiB, "
                   f"more than the {args.tier_gib * args.eviction_threshold:.1f} GiB the tier holds before "
                   f"evicting (--tier-gib {args.tier_gib:g} x --eviction-threshold {args.eviction_threshold:g}): "
-                  f"loads would come from the drives. Use --num-blocks <= {tier_usable_blocks}, or set "
-                  f"--tier-gib to the server's --memory-tier-size")
+                  f"loads would come from the drives. Use --num-blocks <= {tier_usable_blocks}, set "
+                  f"--tier-gib to the server's --memory-tier-size, --no-warm (store and cold only), "
+                  f"or --allow-warm-overflow (runs it, marked as not warm)")
         if mode == "default" and not args.no_cold:
             if (args.store_order == "interleaved" or args.load_unit == "request") and (
                     args.requests < 1 or args.num_blocks % args.requests):
@@ -3339,11 +3370,20 @@ def main():
                         # with --no-warm, stored here the same way.
                         if a.no_warm:
                             _populate_jobs(manager, worker, keys, a.job_blocks)
+                        # Under --allow-warm-overflow some keys may never have been stored
+                        # (populate allowed a shortfall); the cold row counts them as load
+                        # misses, so the report flags it instead of a smaller set.
+                        absent = (sum(1 for k in keys if not manager.lookup(k))
+                                  if getattr(a, "warm_overflow", False) else 0)
                         r = bench_load_lifecycle(
                             manager, worker, regions, keys,
                             a.job_blocks, acct_block_bytes, a.min_duration,
                             cold=True, lookup_order=a.lookup_order,
                         )
+                        if absent:
+                            r.counts["load_misses"] = absent
+                            print(f"  {absent} of {len(keys)} cold keys were never stored "
+                                  f"(--allow-warm-overflow): counted as load misses")
                         r.print_report()
                         results.append(r)
                     elif not a.no_cold:

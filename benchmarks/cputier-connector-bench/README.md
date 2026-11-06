@@ -41,6 +41,9 @@ Things to know when reading cputier numbers:
 - `blocks` and `iops` count offload **chunks**. With `--blocks-per-chunk N`, each chunk is N GPU blocks (`N × --block-bytes`).
 - Single rank only: TP is not simulated (certus-connector-bench's `--tp` has no counterpart).
 
+
+**Working set larger than the CPU tier (`--cpu-bytes`).** Refused by default, as in certus-connector-bench, because the warm loads would not be warm. `--no-warm` skips the warm pass, so store and cold run at any `--num-blocks`. `--allow-warm-overflow` runs the warm pass and contention anyway and marks it: the label ends `OVERFLOW: set exceeds tier, not warm`, the CSV row has `warm_overflow=1` and the blocks that came back from disk (`disk_read_bytes`), and `connector-sweep/make_report.py` flags the row.
+
 ## Running
 
 Prerequisites:
