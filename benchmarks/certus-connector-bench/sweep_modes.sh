@@ -55,7 +55,7 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 TAG_SUFFIX=""
 [ -n "$TAG" ] && TAG_SUFFIX="_${TAG}"
 
-MODES=(default pipelined prefix-miss contention scheduler-step)
+MODES=(default prefix-miss contention scheduler-step)
 
 # ── Driver switching ─────────────────────────────────────────────────────────
 # Rebind NVMe BDFs between kernel nvme driver (for fio) and vfio-pci (for SPDK).

@@ -10,7 +10,7 @@
 set -euo pipefail
 ref=$1; shift
 here="$(cd "$(dirname "$0")/../.." && pwd)"
-args=(--min-duration 1 --num-blocks 64 --working-set 64 "$@")
+args=(--min-duration 1 --num-blocks 256 --working-set 64 "$@")   # 256 = 4 jobs of 64: --inflight 4 needs 4
 tmp=$(mktemp -d)
 strip() {
     # Values, column padding, the output path and leaked-claim lines carry no
