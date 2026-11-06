@@ -1634,8 +1634,20 @@ def bench_mixed_eviction(
     working_set: int = 512,
     load_fraction: float = 0.5,
     lookup_order: str = LOOKUP_FIRST,
+    fill_blocks: int = 0,
+    tier_gib: float = 12.0,
+    ring=None,
+    world_size: int = 1,
 ) -> BenchResult:
     """Interleaved store + load under memory-tier pressure.
+
+    Before the timed loop the tier is filled to its eviction threshold with
+    ``fill_blocks`` other blocks (tier x threshold / block bytes, as the cold pass's
+    --cold-tier-state full; their write-through drained so they can be evicted), so
+    every timed store evicts from the first generation on. Without it a 512-block
+    working set took ~8 generations to fill a 4 GiB tier, and on a 12 GiB tier the
+    5 s pass ended before the evictor ran (0 evictions, 0 SSD I/O: it measured
+    stores and loads in an uncontended tier). The fill is removed afterwards.
 
     Simulates the production pattern: new blocks are continuously stored
     (pushing the LRU evictor), while earlier blocks are loaded back.  The
@@ -1664,14 +1676,6 @@ def bench_mixed_eviction(
         "take_events": PhaseTiming("take_events"),
     }
 
-    total_blocks = 0
-    total_evictions = 0
-    store_drops = 0
-    load_misses = 0
-    wall_start = time.perf_counter()
-    generation = 0
-    job_id = 100_000
-
     # Split the working set: the first load_fraction are "old" (will be loaded),
     # the rest are "new" (will be stored, pushing evictions).
     load_count = max(1, int(working_set * load_fraction))
@@ -1680,20 +1684,51 @@ def bench_mixed_eviction(
     print(f"\n  Eviction mode: working_set={working_set} "
           f"(store={store_count}/gen, load={load_count}/gen, "
           f"block_bytes={block_bytes})")
-    print(f"  The tier fills after ~{(4 * 1024**3) // block_bytes // store_count} "
-          f"generations (assuming 4G tier), then eviction kicks in.")
+    print(f"  Tier filled to its eviction threshold first ({fill_blocks} blocks of the "
+          f"{tier_gib:g} GiB tier, with the seed generation; untimed): every store evicts.")
 
     # Start clean: clear DRAM and use a random base seed so keys from previous
     # runs (still on SSD in the dispatch-map) don't collide and get deduped.
     manager._ring.clear_memory_tier()
-    io_before = manager._ring.get_io_stats()
     base_seed = random.randint(10_000_000, 99_000_000)
+    # The fill: tier x threshold, less room for the seed generation, in logical keys
+    # (each key is world_size blocks, one per rank). Its seed is negative, apart from
+    # every generation's (base_seed + 1e6 x generation).
+    fill_n = max(0, fill_blocks // max(1, world_size) - load_count)
+    fill = make_content_keys(fill_n, seed=-base_seed) if fill_n else []
+    try:
+        if fill:
+            t0 = time.perf_counter()
+            _populate_keys(manager, worker, fill, batch_size)
+            manager._ring.flush_to_ssd()   # written through, so the evictor may demote them
+            print(f"  tier fill: {len(fill)} blocks in {time.perf_counter() - t0:.1f}s (untimed)")
 
-    # Seed the tier with an initial generation of loadable keys.
-    seed_keys = make_content_keys(load_count, seed=base_seed)
-    _populate_keys(manager, worker, seed_keys, batch_size)
-    loadable_keys = list(seed_keys)
+        # Seed the tier with an initial generation of loadable keys.
+        seed_keys = make_content_keys(load_count, seed=base_seed)
+        _populate_keys(manager, worker, seed_keys, batch_size)
+        loadable_keys = list(seed_keys)
+        io_before = manager._ring.get_io_stats()
+        wall_start = time.perf_counter()   # after the fill and the seed: neither is timed
+        result = _mixed_eviction_loop(
+            manager, worker, phases, batch_size, block_bytes, min_duration, touch_first,
+            working_set, load_fraction, load_count, store_count, base_seed, loadable_keys,
+            io_before, wall_start)
+    finally:
+        if fill and ring is not None:
+            _remove_keys(ring, fill, world_size)
+    return result
 
+
+def _mixed_eviction_loop(manager, worker, phases, batch_size, block_bytes, min_duration,
+                         touch_first, working_set, load_fraction, load_count, store_count,
+                         base_seed, loadable_keys, io_before, wall_start) -> BenchResult:
+    """The timed part of bench_mixed_eviction (unchanged by the fill)."""
+    total_blocks = 0
+    total_evictions = 0
+    store_drops = 0
+    load_misses = 0
+    generation = 0
+    job_id = 100_000
     while (time.perf_counter() - wall_start) < min_duration or generation < 3:
         generation += 1
 
@@ -1819,6 +1854,9 @@ def bench_mixed_eviction(
     print(f"  Eviction events (REMOVED): {total_evictions}  "
           f"Store drops (tier full): {store_drops}  "
           f"Load misses (evicted): {load_misses}")
+    print(f"  (REMOVED counts keys dropped from every tier; the server demotes evicted "
+          f"blocks to SSD instead, logged as 'mt-evictor: demoted' and in its FINAL "
+          f"tier-events evictions[memory N]. SSD writes above include that write-through.)")
     print(f"  SSD I/O: writes={io_after['write_ops']} ({io_after['write_bytes']/1e6:.0f} MB)  "
           f"reads={io_after['read_ops']} ({io_after['read_bytes']/1e6:.0f} MB)")
     if store_drops > 0 and io_after['write_ops'] == 0:
@@ -2946,6 +2984,8 @@ def resolve_args(parser, argv=None, mode: str | None = None) -> argparse.Namespa
     tier_usable_blocks = int(args.tier_gib * 2**30 * args.eviction_threshold // args.block_bytes)
     if args.cold_tier_state == "full" and args.tier_fill_blocks <= 0:
         args.tier_fill_blocks = tier_usable_blocks   # tier size x threshold / block bytes
+    # Mixed eviction starts with the tier at its threshold (bench_mixed_eviction).
+    args.mixed_fill_blocks = tier_usable_blocks
 
     if mode in INFLIGHT_MODES:
         # A working set that fits the tier, unless given.
@@ -3332,6 +3372,8 @@ def main():
                     working_set=a.working_set,
                     load_fraction=0.5,
                     lookup_order=a.lookup_order,
+                    fill_blocks=a.mixed_fill_blocks, tier_gib=a.tier_gib,
+                    ring=ring, world_size=tp,
                 ))
 
         # Clean up between modes.

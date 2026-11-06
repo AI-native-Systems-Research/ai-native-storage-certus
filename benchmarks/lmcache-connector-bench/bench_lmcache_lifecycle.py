@@ -783,6 +783,12 @@ def bench_mixed_eviction(stack, batch_size, min_duration, *, working_set=512,
     store's L1 write count is read from the server's metrics (the scrape is
     excluded from wall time); a dropped batch backs off one engine step and
     is not loaded by the next generation, as in the sibling benches.
+
+    Before the timed loop L1 is filled to its eviction watermark (EVICTION_THRESHOLD of
+    it, as certus-connector-bench fills its tier to the eviction threshold) with other
+    chunks, untimed, so every timed store meets eviction from the first generation on:
+    with a 12 GiB L1 a 512-chunk working set would otherwise not fill it within the
+    pass. L1 is emptied after the pass.
     """
     names_store = {"get_finished": "store_finish", "end_session": "store_end_session"}
     names_load = {"get_finished": "load_finish", "end_session": "load_end_session"}
@@ -794,14 +800,37 @@ def bench_mixed_eviction(stack, batch_size, min_duration, *, working_set=512,
     l1_chunks = l1 // stack.chunk_bytes
     print(f"\n  Eviction mode: working_set={working_set} "
           f"(store={store_count}/gen, load={load_count}/gen, chunk_bytes={stack.chunk_bytes})")
-    print(f"  L1 ({l1_chunks} chunks) fills after ~{l1_chunks // max(1, store_count)} "
-          f"generations, then eviction kicks in.")
-
     stack.evict_l1()
-    c0 = server_counters(stack.http_url)
-    loadable = make_sequences(stack, load_count, batch_size)
-    populate(stack, loadable)
+    try:
+        # Fill L1 to its eviction watermark with the seed generation, untimed (written
+        # through to L2 first, if any, so the evictor may drop it).
+        fill_n = max(0, int(l1_chunks * EVICTION_THRESHOLD) - load_count)
+        t0 = time.perf_counter()
+        populate(stack, make_sequences(stack, fill_n, batch_size))
+        stack.drain_l2()
+        print(f"  L1 ({l1_chunks} chunks) filled to its watermark first ({fill_n} chunks and "
+              f"the seed, {time.perf_counter() - t0:.1f}s, untimed): stores meet eviction.")
+        # The seed: only sequences L1 took are loaded (a dropped one is not a miss).
+        loadable = []
+        w = server_counters(stack.http_url)["lmcache_mp_l1_write_chunks_total"]
+        for seq in make_sequences(stack, load_count, batch_size):
+            want = store_batch(stack, seq)
+            now = server_counters(stack.http_url)["lmcache_mp_l1_write_chunks_total"]
+            if int(now - w) >= want:
+                loadable.append(seq)
+            w = now
+        c0 = server_counters(stack.http_url)
+        return _mixed_eviction_loop(stack, batch_size, min_duration, working_set,
+                                    load_fraction, store_count, loadable, c0,
+                                    phases, names_store, names_load)
+    finally:
+        stack.evict_l1()   # the fill and the pass's chunks leave L1
 
+
+def _mixed_eviction_loop(stack, batch_size, min_duration, working_set, load_fraction,
+                         store_count, loadable, c0, phases, names_store,
+                         names_load) -> BenchResult:
+    """The timed part of bench_mixed_eviction (unchanged by the fill)."""
     total = load_misses = store_drops = 0
     excluded = 0.0
     wall_start = time.perf_counter()

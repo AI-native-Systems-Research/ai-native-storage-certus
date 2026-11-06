@@ -1059,6 +1059,12 @@ def bench_mixed_eviction(
     chunks; if the disk falls behind, prepare_store fails (store drops) and the
     loop backs off one engine step. Only blocks that were actually stored are
     loaded by the next generation. ``take_events()`` is drained each generation.
+
+    Before the timed loop the CPU tier is filled with other blocks, untimed, so every
+    timed store evicts from the first generation on (as certus-connector-bench fills
+    its tier to the eviction threshold): with a 12 GiB tier a 512-block working set
+    would otherwise not fill it within the pass. The fill is evicted by the pass and
+    the tier emptied after it.
     """
     names_store = {"touch": "store_touch", "get_finished": "store_finish",
                    "new_request": "store_new_request", "schedule_end": "store_schedule_end"}
@@ -1076,18 +1082,36 @@ def bench_mixed_eviction(
     print(f"\n  Eviction mode: working_set={working_set} "
           f"(store={store_count}/gen, load={load_count}/gen, "
           f"chunk_bytes={stack.chunk_bytes})")
-    print(f"  The CPU tier ({stack.num_chunks} chunks) fills after "
-          f"~{stack.num_chunks // max(1, store_count)} generations, then eviction kicks in.")
-
     stack.evict_primary()
     stack.take_events()
-    counters_before = stack.counters.copy()
     base_seed = _fresh_seed()
+    # Fill the CPU tier (its LRU evicts once no chunk is free), untimed, leaving room for
+    # the seed generation. Its seed is negative, apart from every generation's
+    # (base_seed + 1e6 x generation).
+    fill = make_content_keys(max(0, stack.num_chunks - load_count), seed=-base_seed)
+    t0 = time.perf_counter()
+    try:
+        populate_keys(stack, fill, batch_size)
+        stack.take_events()
+        print(f"  CPU tier ({stack.num_chunks} chunks) filled first ({len(fill)} blocks and the "
+              f"seed, {time.perf_counter() - t0:.1f}s, untimed): every store evicts.")
+        # The seed: only what was stored is loaded (a dropped seed block is not a miss).
+        seed_keys = make_content_keys(load_count, seed=base_seed)
+        loadable_keys: list[bytes] = []
+        for i in range(0, load_count, batch_size):
+            store_batch(stack, seed_keys[i:i + batch_size], resident=loadable_keys)
+        counters_before = stack.counters.copy()
+        return _mixed_eviction_loop(stack, batch_size, min_duration, working_set, load_fraction,
+                                    store_count, base_seed, loadable_keys, counters_before,
+                                    phases, names_store, names_load)
+    finally:
+        stack.evict_primary()   # the fill and the pass's blocks leave the CPU tier
 
-    seed_keys = make_content_keys(load_count, seed=base_seed)
-    populate_keys(stack, seed_keys, batch_size)
-    loadable_keys = list(seed_keys)
 
+def _mixed_eviction_loop(stack, batch_size, min_duration, working_set, load_fraction,
+                         store_count, base_seed, loadable_keys, counters_before,
+                         phases, names_store, names_load) -> BenchResult:
+    """The timed part of bench_mixed_eviction (unchanged by the fill)."""
     total_blocks = store_drops = load_misses = 0
     wall_start = time.perf_counter()
     generation = 0
