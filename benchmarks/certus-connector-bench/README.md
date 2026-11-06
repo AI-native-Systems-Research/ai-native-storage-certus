@@ -42,6 +42,9 @@ sudo target/release/certus-server --drive-count 4 --channels 32 \
 python benchmarks/certus-connector-bench/bench_connector_lifecycle.py --tier-gib 32
 ```
 
+
+How the memory tier size sets `--num-blocks`, and what happens when it is set higher than the tier holds (`--no-warm`, `--allow-warm-overflow`), is summarised for all four benches in [connector-sweep: Memory tier size and `--num-blocks`](../connector-sweep/README.md#memory-tier-size-and---num-blocks).
+
 ## Prerequisites
 
 The benchmark does **not** start or stop the server. You must start it before running any benchmark:

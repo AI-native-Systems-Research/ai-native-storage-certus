@@ -44,6 +44,9 @@ Things to know when reading cputier numbers:
 
 **Working set larger than the CPU tier (`--cpu-bytes`).** Refused by default, as in certus-connector-bench, because the warm loads would not be warm. `--no-warm` skips the warm pass, so store and cold run at any `--num-blocks`. `--allow-warm-overflow` runs the warm pass and contention anyway and marks it: the label ends `OVERFLOW: set exceeds tier, not warm`, the CSV row has `warm_overflow=1` and the blocks that came back from disk (`disk_read_bytes`), and `connector-sweep/make_report.py` flags the row.
 
+
+How the memory tier size sets `--num-blocks`, and what happens when it is set higher than the tier holds (`--no-warm`, `--allow-warm-overflow`), is summarised for all four benches in [connector-sweep: Memory tier size and `--num-blocks`](../connector-sweep/README.md#memory-tier-size-and---num-blocks).
+
 ## Running
 
 Prerequisites:

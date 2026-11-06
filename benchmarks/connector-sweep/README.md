@@ -74,10 +74,6 @@ are not comparable with these defaults (8G tier, 32 layers, 64-block jobs x 4 in
 
 **Modes.** `--mode compare` (the default) runs, on every arm, only the modes the four benches drive the same way: `default` (store, warm, cold; mixed eviction on the arms with a memory tier) and then `prefix-miss`, one bench call each. `--mode default`, `--mode prefix-miss` or `--mode contention` runs one of them (contention: certus and cputier only). `scheduler-step` is not compared: certus-connector-bench's scheduler-step runs vLLM 0.30's scheduler (one load job per request, `--inflight` outstanding, one reap per tick), the other three benches' still merge a step's loads and wait for them inside the step, so the row would compare two harnesses rather than connectors. Run it with certus-connector-bench directly. Each bench's own `--mode all` is unchanged.
 
-**Changing the tier size.** Give only `--dram` (e.g. `--dram 12G`): it sets every arm's tier and the working set derived from it. `--num-blocks` is only needed to fix a number by hand.
-
-**Small memory tier, large `--num-blocks`.** Every bench refuses a warm working set its tier cannot hold (the warm pass would not be warm). `--no-warm` skips the warm pass on every arm, so store and cold compare at any size; `--allow-warm-overflow` runs it anyway, and the report flags those rows (⚠, with the bytes that came back from disk) instead of comparing them as warm.
-
 **Certus cold rows need a telemetry server** to show their disk reads: the default (the tree's own build, which run_compare.sh builds with `--features rw-telemetry`) has it; a `--server-bin` must be built that way too. In a fresh git worktree that build needs the ignored link `kernel/modules/gdrcopy/src/libgdrapi.so -> libgdrapi.so.2`, which the main checkout has; without it the link fails with `unable to find library -lgdrapi`.
 
 `--out` is resolved against the directory you run from. Artifacts go to `<out-without-.html>.d/`: `params.json` (records every arm's exact command line), `certus.csv`, `cputier.csv`, `lmcache.csv`, the three bench logs and `server.log`.
@@ -91,6 +87,60 @@ run_compare.sh --help                               # every option and its defau
 ```
 
 The LaTeX table (`--latex`, or `make_report.py --latex PATH`) is a `booktabs` `table` with one row per result and one column per arm, in GB/s. Store rows get an extra "incl. disk drain" row. The fastest arm in each row is in bold. A value from an arm that skipped work in that row (dropped stores, load misses, or a cold pass that barely touched disk) carries a dagger, is never bold, and is explained in a footnote under the table. A second table (`tab:connector-sweep-latency`) gives each row's per-job latency (submit to reap, including the wait behind the other jobs in flight), p50 / p99 in ms, per arm. Cold loads get two rows, because cputier and lmcache read from disk while the lookup waits, before the transfer, while certus and 3fs read during the transfer. Add `\usepackage{booktabs}` to the preamble.
+
+## Memory tier size and `--num-blocks`
+
+`--num-blocks` is the working set: the distinct blocks (keys) the store, warm and cold passes
+cycle through. The warm pass only measures memory-tier loads while the whole set stays in the
+tier, so the set is sized from the tier.
+
+**How it is computed when not given.** In the default and contention modes:
+
+```
+num_blocks = min(4000, 0.9 x tier_bytes x eviction_threshold / block_bytes)
+```
+
+90% of what the tier holds before it starts evicting (leaving room for the bench's own
+bookkeeping), capped at 4,000 blocks (7.8 GiB at 2 MiB): beyond that throughput no longer
+changes and each pass only takes longer. The other modes (prefix-miss, scheduler-step,
+pattern) use 128 at any tier size.
+
+| tier (`--dram`) | usable (x 0.8) | `--num-blocks` (default, contention) | cold and mixed-eviction fill |
+|---|---|---|---|
+| 4G | 3.2 GiB | 1,474 | 1,638 |
+| 8G (default) | 6.4 GiB | 2,948 | 3,276 |
+| 12G | 9.6 GiB | 4,000 | 4,915 |
+| 32G | 25.6 GiB | 4,000 (the cap) | 13,107 |
+
+(2 MiB blocks, eviction threshold 0.8.) Each bench computes it from its own tier: certus from
+`--tier-gib` x `--eviction-threshold`, cputier from `--cpu-bytes`, LMCache from the L1 its
+server reports; 3FS has no tier and takes the 8G figure. `run_compare.sh` computes it once
+from `--dram` and passes it to every arm, so every arm moves the same keys. The cold pass
+(`--cold-tier-state full`) and the mixed-eviction pass fill the tier to its eviction threshold
+before they start, from the same numbers, so they evict at any tier size.
+
+**To change the tier size, change only the size**: `run_compare.sh --dram 12G`; or, running a
+bench by hand, the server's `--memory-tier-size 12G` with `--tier-gib 12` (cputier
+`--cpu-bytes 12G` and `CPU_BYTES=12G`, LMCache `L1_GB=12`). Everything above follows. The
+certus bench cannot read the server's tier size, so tell it: a wrong `--tier-gib` is not
+detected, and every run prints `Tier assumed: ...` first.
+
+**If `--num-blocks` is set higher than the tier holds.** Only the warm pass and contention's
+loads need the set resident; store and cold do not (cold empties the tier before every pass).
+
+| flags | store, cold | warm, contention loads |
+|---|---|---|
+| none (default) | — | **refused** before anything runs, naming the largest `--num-blocks` that fits |
+| `--no-warm` | run at any size | warm skipped (contention still refused: its loads need the set resident) |
+| `--allow-warm-overflow` | run at any size | run, and **marked**: label `OVERFLOW: set exceeds tier, not warm`, CSV `warm_overflow=1` and the bytes that came back from disk (`disk_read_bytes`), ⚠ in the report |
+
+Why refuse rather than warn: an overflowing warm pass still prints a clean-looking number. On a
+4 GiB certus tier with 8,000 blocks it reported 24.6 GB/s with 0 misses, and 129.6 GB of it was
+read from the drives (certus demotes evicted blocks to SSD and promotes them back, so the loads
+succeed, slowly or not); cputier in the same situation reported 0.74 GB/s, read back from its
+disk tier. Neither is a memory-tier load. A warning in a log is easy to miss; the refusal, or
+the mark on the row with `--allow-warm-overflow`, is not. The cutoff is 90% of the usable tier
+(certus, cputier, LMCache alike); 3FS has no tier, so nothing is refused there.
 
 ## Before running
 

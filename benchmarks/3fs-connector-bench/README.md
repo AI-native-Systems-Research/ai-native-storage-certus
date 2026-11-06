@@ -19,6 +19,9 @@ No engine, model or HTTP front end is started. The connector object is built wit
 - there's no mixed-eviction phase (nothing to evict) and no contention mode;
 - a store reports finished only once its write has landed, so no write-through drain is excluded.
 
+
+How the memory tier size sets `--num-blocks`, and what happens when it is set higher than the tier holds (`--no-warm`, `--allow-warm-overflow`), is summarised for all four benches in [connector-sweep: Memory tier size and `--num-blocks`](../connector-sweep/README.md#memory-tier-size-and---num-blocks).
+
 ## Mock client: code-path tests only
 
 When the 3FS USRBIO client isn't importable (the stock `vllm-openai` image), vLLM quietly swaps in its file-backed **mock** client. The mock uses plain buffered file I/O, so loads can come from the page cache. A mock run is **not** a 3FS measurement. The bench:
