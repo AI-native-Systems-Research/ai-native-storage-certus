@@ -19,8 +19,8 @@ from collections import Counter
 
 # Config columns every bench writes to its CSV; each must match across arms.
 PARITY_COLUMNS = ["bs", "num_blocks", "block_bytes", "working_set", "tp", "lookup_order",
-                  "pipeline_depth", "direction", "hit_ratio", "requests_per_step",
-                  "num_sessions"]
+                  "job_blocks", "inflight", "step_us", "store_job_blocks", "store_inflight",
+                  "hit_ratio", "requests_per_step", "num_sessions"]
 # Per-block KV tensors: certus records it as pieces_per_block, the others as layers.
 LAYERS_COLUMN = {"certus": "pieces_per_block", "cputier": "layers", "lmcache": "layers",
                  "3fs": "layers", "cputier-3fs": "layers"}
@@ -325,6 +325,11 @@ where an arm skipped work — dropped stores, load misses, or a cold pass that r
 so its throughput is not like for like.</p>
 
 <h2>Per-phase latency</h2>
+<p class="note">The default mode's store, warm and cold passes and contention keep jobs in flight (vLLM 0.30's step
+loop), so <code>get_finished</code> (and <code>load_job</code> / <code>store_job</code>, the same samples) is each job's time from
+submit to reap, including its wait behind the other jobs in flight; <code>reap_call</code> is the one non-blocking
+<code>get_finished()</code> poll per scheduler tick, not a wait. certus's cold pass at <code>--inflight 1</code> is its committed
+sequential pass, where <code>get_finished</code> is the wait for its one job.</p>
 {''.join(details_html)}
 
 <h2>Parameters</h2>
@@ -410,8 +415,6 @@ SHORT_LABEL = {
     "Warm Load Lifecycle": "Warm load",
     "Cold Load Lifecycle": "Cold load",
     "Mixed Store+Load Under Eviction Pressure": "Mixed evict.",
-    "Pipelined Store": "Pipel.\\ store",
-    "Pipelined Load": "Pipel.\\ load",
     "Prefix-Miss Scan": "Prefix miss",
     "Scheduler Step": "Sched.\\ step",
 }
@@ -496,30 +499,34 @@ def latex_table(order, by, names, present, sh, work_flags) -> str:
     return "\n".join(out)
 
 
-# Per row: the phase that is the KV transfer itself (submit -> completion seen
-# by the connector), by the name each bench records it under. Mixed eviction
-# records store and load waits separately.
+# Per row: each job's time from submit to reap, by the name each bench records it
+# under (the first that is present). The siblings record it as load_job / store_job
+# and under get_finished; certus under get_finished (its in-flight passes put each
+# job's submit-to-reap time there; its sequential cold pass at --inflight 1 the wait
+# for its one job, the same thing). Under the step loop a bench's per-tick poll is
+# reap_call, not get_finished, so the poll is never reported as a wait. Mixed
+# eviction records store and load waits separately.
 LATENCY_PHASES = {
-    "Store Lifecycle": [("store", ("get_finished",))],
-    "Warm Load Lifecycle": [("load", ("get_finished",))],
+    "Store Lifecycle": [("store", ("store_job", "get_finished"))],
+    "Warm Load Lifecycle": [("load", ("load_job", "get_finished"))],
     # cputier and lmcache read a cold block from disk while the lookup waits
     # (promotion / L2 prefetch), before the transfer; certus and 3fs read it
     # inside the transfer. Show both so the cold row is comparable.
-    "Cold Load Lifecycle": [("transfer", ("get_finished",)),
+    "Cold Load Lifecycle": [("transfer", ("load_job", "get_finished")),
                             ("fetch", ("lookup_wait",))],
     "Mixed Store+Load Under Eviction Pressure": [("store", ("store_finish",)),
                                                  ("load", ("load_finish",))],
-    "Pipelined Store": [("store", ("pipeline_drain",))],
-    "Pipelined Load": [("load", ("pipeline_drain",))],
+    "Contention: Store Thread": [("store", ("store_job", "get_finished"))],
+    "Contention: Load Thread": [("load", ("load_job", "get_finished"))],
 }
 
 
 def latency_table(order, by, names, arms, sh) -> list[str]:
-    """p50 / p99 of each row's transfer wait (ms), per arm, as a booktabs table.
+    """p50 / p99 of each row's per-job wait (ms), per arm, as a booktabs table.
 
-    The wait is the bench's get_finished phase (store_finish / load_finish in
-    mixed eviction): from submitting a batch of --bs blocks until the connector
-    reports it done, i.e. the GPU<->tier transfer plus the backend's queueing.
+    The wait is each job's time from submit to reap (load_job / store_job, else
+    get_finished; store_finish / load_finish in mixed eviction): the GPU<->tier
+    transfer plus the backend's queueing behind the other jobs in flight.
     Lookup and bookkeeping phases are left out; the HTML report lists them all.
     """
     rows = []
@@ -553,9 +560,11 @@ def latency_table(order, by, names, arms, sh) -> list[str]:
         return []
     cols = "@{}l" + "r" * len(arms) + "@{}"
     head = " & ".join(_arm_head(names[k]) for k in arms)
-    caption = (f"Latency per {sh.get('bs')}-block batch (ms): p50, with p99 in italics below. Transfer wait from "
-               f"submit to completion. Cold fetch: the disk read cputier and lmcache make during the lookup, "
-               f"before the transfer (certus and 3fs read inside it). ---: no such phase.")
+    caption = (f"Latency per job (ms): p50, with p99 in italics below. Each job's time from submit to reap, "
+               f"{sh.get('job_blocks')}-block jobs with {sh.get('inflight')} in flight "
+               f"(mixed eviction: {sh.get('bs')}-block batches, one at a time), so it includes the wait "
+               f"behind the other jobs in flight. Cold fetch: the disk read cputier and lmcache make "
+               f"during the lookup, before the transfer (certus and 3fs read inside it). ---: no such phase.")
     return [*_TABLE_OPEN,
             rf"\begin{{tabular}}{{{cols}}}", r"\toprule",
             rf"Phase & {head} \\", r"\midrule", *rows, r"\bottomrule", r"\end{tabular}",

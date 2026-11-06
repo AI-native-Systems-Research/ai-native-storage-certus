@@ -13,7 +13,7 @@
 #
 # The lmcache arm has no contention mode and is single-rank: it is skipped
 # for --mode contention and for --tp > 1 (with a note), and runs its own
-# --mode all (default, pipelined, prefix-miss, scheduler-step) for --mode all.
+# --mode all (default, prefix-miss, scheduler-step) for --mode all.
 #
 # The 3fs arm (vLLM's HF3FSKVConnector) has no memory tier: --dram does not apply,
 # every store and load goes to 3FS, and it has no mixed-eviction or contention
@@ -35,25 +35,30 @@
 #   --out PATH               HTML report path (required; relative to the current dir)
 #   --latex                  also write the throughput table as LaTeX (booktabs) to
 #                            <out-without-.html>.tex
-#   --mode M                 default|pipelined|prefix-miss|contention|scheduler-step|all [all]
-#   --bs N [16]  --num-blocks N [128]  --block-bytes N [2097152]
+#   --mode M                 default|prefix-miss|contention|scheduler-step|all [all]
+#   --bs N [16]  --num-blocks N [1024]  --block-bytes N [2097152]
 #   --min-duration S [5]  --warmup N [4]  --working-set N [512]
-#   --pipeline-depth N [4]  --direction D [both]  --hit-ratio F [0.75]
+#   --job-blocks N [64]  --inflight N [4]  --step-us US [100]: the default mode's store,
+#                            warm and cold passes and contention keep --inflight jobs of
+#                            --job-blocks blocks outstanding, on EVERY arm
+#   --store-job-blocks N  --store-inflight N  the store side, passed only when given
+#                            [each bench: default mode --job-blocks/--inflight, contention 32/1]
+#   --hit-ratio F [0.75]
 #   --requests-per-step N [8]  --num-sessions N [32]  --lookup-order O [lookup-first]
 #   --gpu N [0]  --tp N [1]
-#   --layers N [1]           GPU tensors each block is split into, on EVERY arm (certus
-#                            --pieces-per-block, cputier/lmcache --layers). 1 = one
-#                            contiguous region per block, the BLHNC layout CertusConnector
-#                            requests; 32 = vLLM's default layer-outermost LBHNC
+#   --layers N [32]          GPU tensors each block is split into, on EVERY arm (--layers;
+#                            certus takes it as --pieces-per-block). 32 = vLLM's default
+#                            layer-outermost LBHNC for Llama-3-8B; 1 = one contiguous region
 #   --io-threads N [16]      disk-tier I/O threads on the file-based arms (cputier fs
 #                            read AND write threads; lmcache fs_native workers)
 #   --numa N [GPU's node]    NUMA node every arm's CPUs and host memory are bound to;
 #                            -1 disables binding
-#   --dram SIZE [4G]         certus --memory-tier-size == cputier --cpu-bytes == lmcache L1
+#   --dram SIZE [12G]        certus --memory-tier-size == cputier --cpu-bytes == lmcache L1
 #   --device-pci ADDR        certus NVMe device (repeatable) [the 4 vfio NVMe drives
 #                            0000:61:00.0..0000:64:00.0, same as benchmarks/vllm-serve], or
 #   --drive-count N          first N discovered NVMe drives (replaces the default list)
-#   --eviction-threshold F   certus-server --memory-tier-eviction-threshold [0.9]
+#   --eviction-threshold F   certus-server --memory-tier-eviction-threshold [0.8]; the certus
+#                            bench gets the same tier (--tier-gib, --eviction-threshold)
 #   --workers N              certus connector ThreadPoolExecutor workers [4]
 #   --channels N             certus-server mailbox channels [auto: max(16, tp*(1+2*workers))]
 #   --fs-tier DIR            cputier fs tier host dir [/raid0/cputier-bench-fs-tier]
@@ -89,11 +94,12 @@ REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 CALLER_DIR="$PWD"   # relative --out (and --server-bin) resolve against the caller's dir
 cd "$REPO_ROOT"
 
-OUT="" MODE=all BS=16 NUM_BLOCKS=128 BLOCK_BYTES=2097152 MIN_DURATION=5 WARMUP=4
-WORKING_SET=512 PIPELINE_DEPTH=4 DIRECTION=both HIT_RATIO=0.75 REQS_PER_STEP=8
-NUM_SESSIONS=32 LOOKUP_ORDER=lookup-first GPU=0 TP=1 DRAM=4G DEVICE_PCI=()
-LAYERS=1 IO_THREADS=16 NUMA=""
-DRIVE_COUNT="" EVICT_THRESHOLD=0.9 WORKERS=4 CHANNELS="" FS_TIER=/raid0/cputier-bench-fs-tier
+OUT="" MODE=all BS=16 NUM_BLOCKS=1024 BLOCK_BYTES=2097152 MIN_DURATION=5 WARMUP=4
+WORKING_SET=512 HIT_RATIO=0.75 REQS_PER_STEP=8
+JOB_BLOCKS=64 INFLIGHT=4 STEP_US=100 STORE_JOB_BLOCKS="" STORE_INFLIGHT=""
+NUM_SESSIONS=32 LOOKUP_ORDER=lookup-first GPU=0 TP=1 DRAM=12G DEVICE_PCI=()
+LAYERS=32 IO_THREADS=16 NUMA=""
+DRIVE_COUNT="" EVICT_THRESHOLD=0.8 WORKERS=4 CHANNELS="" FS_TIER=/raid0/cputier-bench-fs-tier
 SERVER_BIN="" IMAGE=docker.io/vllm/vllm-openai:v0.30.0
 L2_DIR=/raid0/lmcache-bench-l2 LMCACHE_IMAGE=localhost/vllm-lmcache-bench:vllm0.30.0 CHUNK_SIZE=256
 RUN_CERTUS=1 RUN_CPUTIER=1 RUN_LMCACHE=1 RUN_H3FS=1 RUN_CPUTIER_3FS=1 REPORT_ONLY=0 LATEX=0
@@ -113,8 +119,11 @@ while (($#)); do
     --min-duration) MIN_DURATION="$2"; shift ;;
     --warmup) WARMUP="$2"; shift ;;
     --working-set) WORKING_SET="$2"; shift ;;
-    --pipeline-depth) PIPELINE_DEPTH="$2"; shift ;;
-    --direction) DIRECTION="$2"; shift ;;
+    --job-blocks) JOB_BLOCKS="$2"; shift ;;
+    --inflight) INFLIGHT="$2"; shift ;;
+    --step-us) STEP_US="$2"; shift ;;
+    --store-job-blocks) STORE_JOB_BLOCKS="$2"; shift ;;
+    --store-inflight) STORE_INFLIGHT="$2"; shift ;;
     --hit-ratio) HIT_RATIO="$2"; shift ;;
     --requests-per-step) REQS_PER_STEP="$2"; shift ;;
     --num-sessions) NUM_SESSIONS="$2"; shift ;;
@@ -199,9 +208,19 @@ GPU_LIST=$(seq -s, "$GPU" $(( GPU + TP - 1 )))
 # The one shared workload argument list, passed verbatim to every bench.
 SHARED=(--mode "$MODE" --bs "$BS" --num-blocks "$NUM_BLOCKS" --block-bytes "$BLOCK_BYTES"
         --min-duration "$MIN_DURATION" --warmup "$WARMUP" --working-set "$WORKING_SET"
-        --pipeline-depth "$PIPELINE_DEPTH" --direction "$DIRECTION" --hit-ratio "$HIT_RATIO"
+        --job-blocks "$JOB_BLOCKS" --inflight "$INFLIGHT" --step-us "$STEP_US"
+        --hit-ratio "$HIT_RATIO"
         --requests-per-step "$REQS_PER_STEP" --num-sessions "$NUM_SESSIONS"
-        --lookup-order "$LOOKUP_ORDER" --tp "$TP")
+        --lookup-order "$LOOKUP_ORDER" --tp "$TP" --layers "$LAYERS")
+# The store side only when given: otherwise every bench applies the same per-mode
+# defaults (default mode: --job-blocks / --inflight; contention: 32 / 1).
+[[ -n "$STORE_JOB_BLOCKS" ]] && SHARED+=(--store-job-blocks "$STORE_JOB_BLOCKS")
+[[ -n "$STORE_INFLIGHT" ]] && SHARED+=(--store-inflight "$STORE_INFLIGHT")
+# --dram in GiB: the certus bench sizes and checks its working set against the tier
+# the server starts with (--tier-gib); lmcache L1 below uses the same number.
+TIER_GIB=$(python3 -c "
+import re; m=re.fullmatch(r'(\d+(?:\.\d+)?)([KMGT]?)', '$DRAM'.strip().upper())
+print(f'{float(m.group(1)) * (1 << {\"\":0,\"K\":10,\"M\":20,\"G\":30,\"T\":40}[m.group(2)]) / 2**30:g}')")
 
 SERVER_ARGS=(--channels "$CHANNELS" --memory-tier-size "$DRAM"
              --memory-tier-eviction-threshold "$EVICT_THRESHOLD" --shm-path "$SHM_PATH" --format)
@@ -212,14 +231,14 @@ else
 fi
 
 CERTUS_CMD=(python3 benchmarks/certus-connector-bench/bench_connector_lifecycle.py "${SHARED[@]}"
-            --pieces-per-block "$LAYERS"
+            --tier-gib "$TIER_GIB" --eviction-threshold "$EVICT_THRESHOLD"
             --gpu "$GPU" --workers "$WORKERS" --shm-path "$SHM_PATH"
             --csv "$ART/certus.csv" --tag certus)
 # --csv is resolved inside the container, where the repo is /certus.
 REL_ART="${ART#"$REPO_ROOT"/}"
 if [[ "$REL_ART" == /* ]]; then CPUTIER_CSV_IN=/fs-tier/cputier.csv; else CPUTIER_CSV_IN="/certus/$REL_ART/cputier.csv"; fi
 CPUTIER_CMD=(benchmarks/cputier-connector-bench/run-in-container.sh "${SHARED[@]}"
-             --layers "$LAYERS" --fs-read-threads "$IO_THREADS" --fs-write-threads "$IO_THREADS"
+             --fs-read-threads "$IO_THREADS" --fs-write-threads "$IO_THREADS"
              --gpu 0 --cpu-bytes "$DRAM" --csv "$CPUTIER_CSV_IN" --tag cputier)
 
 # lmcache: one rank, no contention mode; L1 is --dram in GiB.
@@ -230,12 +249,9 @@ elif (( TP > 1 )); then
   LMCACHE_NOTE="skipped: lmcache-connector-bench is single-rank (--tp 1)"
 fi
 [[ -n "$LMCACHE_NOTE" ]] && RUN_LMCACHE=0
-L1_GB=$(python3 -c "
-import re,sys; m=re.fullmatch(r'(\d+(?:\.\d+)?)([KMGT]?)', '$DRAM'.strip().upper())
-print(f'{float(m.group(1)) * (1 << {\"\":0,\"K\":10,\"M\":20,\"G\":30,\"T\":40}[m.group(2)]) / 2**30:g}')")
+L1_GB=$TIER_GIB
 if [[ "$REL_ART" == /* ]]; then LMCACHE_CSV_IN=/certus/.lmcache-compare-$$.csv; else LMCACHE_CSV_IN="/certus/$REL_ART/lmcache.csv"; fi
 LMCACHE_CMD=(benchmarks/lmcache-connector-bench/run-in-container.sh "${SHARED[@]}"
-             --layers "$LAYERS"
              --gpu 0 --csv "$LMCACHE_CSV_IN" --tag lmcache)
 
 # 3fs: one rank, no contention mode, no memory tier. Real 3FS needs the mount.
@@ -254,7 +270,7 @@ if [[ "$REL_ART" == /* ]]; then H3FS_CSV_IN=/certus/.3fs-compare-$$.csv; else H3
 # The 3FS connector's I/O jobs (hf3fs_client_numjobs) are its disk parallelism,
 # set like the file-based arms' threads.
 H3FS_CMD=(benchmarks/3fs-connector-bench/run-in-container.sh "${SHARED[@]}"
-          --layers "$LAYERS" --numjobs "$IO_THREADS" --file-size "$H3FS_FILE_SIZE"
+          --numjobs "$IO_THREADS" --file-size "$H3FS_FILE_SIZE"
           --gpu 0 --csv "$H3FS_CSV_IN" --tag 3fs)
 
 # cputier-3fs: the cputier bench with its fs tier on 3FS. Needs a live 3FS mount
@@ -269,7 +285,7 @@ fi
 [[ -n "$C3_NOTE" ]] && ((RUN_CPUTIER_3FS)) && RUN_CPUTIER_3FS=0
 if [[ "$REL_ART" == /* ]]; then C3_CSV_IN=/fs-tier/cputier-3fs.csv; else C3_CSV_IN="/certus/$REL_ART/cputier-3fs.csv"; fi
 C3_CMD=(benchmarks/cputier-connector-bench/run-in-container.sh "${SHARED[@]}"
-        --layers "$LAYERS" --fs-read-threads "$IO_THREADS" --fs-write-threads "$IO_THREADS"
+        --fs-read-threads "$IO_THREADS" --fs-write-threads "$IO_THREADS"
         --gpu 0 --cpu-bytes "$DRAM" --csv "$C3_CSV_IN" --tag cputier-3fs)
 
 # --report-only re-renders an existing run: keep the params.json that run wrote
@@ -282,11 +298,14 @@ import json, sys
 json.dump({
   "shared": {"mode": "$MODE", "bs": $BS, "num_blocks": $NUM_BLOCKS, "block_bytes": $BLOCK_BYTES,
              "min_duration": $MIN_DURATION, "warmup": $WARMUP, "working_set": $WORKING_SET,
-             "pipeline_depth": $PIPELINE_DEPTH, "direction": "$DIRECTION", "hit_ratio": $HIT_RATIO,
+             "job_blocks": $JOB_BLOCKS, "inflight": $INFLIGHT, "step_us": $STEP_US,
+             "store_job_blocks": "${STORE_JOB_BLOCKS:-per-mode default}",
+             "store_inflight": "${STORE_INFLIGHT:-per-mode default}", "hit_ratio": $HIT_RATIO,
              "requests_per_step": $REQS_PER_STEP, "num_sessions": $NUM_SESSIONS,
              "lookup_order": "$LOOKUP_ORDER", "tp": $TP, "gpus": "$GPU_LIST", "dram": "$DRAM",
              "layers": $LAYERS, "io_threads": $IO_THREADS, "numa_node": $NUMA, "numa_cpus": "$NUMA_CPUS"},
-  "certus": {"channels": $CHANNELS, "eviction_threshold": $EVICT_THRESHOLD, "workers": $WORKERS,
+  "certus": {"channels": $CHANNELS, "eviction_threshold": $EVICT_THRESHOLD, "tier_gib": $TIER_GIB,
+             "workers": $WORKERS,
              "devices": "${DEVICE_PCI[*]:-drive-count=$DRIVE_COUNT}", "server_bin": "$SERVER_BIN",
              "server_args": """${SERVER_ARGS[*]}""", "bench_cmd": """${NUMA_CMD[*]} ${CERTUS_CMD[*]}"""},
   "cputier": {"image": "$IMAGE", "fs_tier": "$FS_TIER", "spec": "tiering",
