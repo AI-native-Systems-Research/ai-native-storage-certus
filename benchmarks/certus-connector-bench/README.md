@@ -324,11 +324,16 @@ reported as `Cold Load Lifecycle (lookup → touch → …)` (the plain pass) or
 written to the YAML `params`. The store and warm passes are unchanged by these flags.
 
 With the tier empty (the default) and jobs in flight, the cold pass reads about 24 GB/s
-(64 x 4, 2026-11-05), slightly above `spdk_nvme_perf`'s 23.1 GB/s for these 4 drives;
-the server's promotions to memory equal the blocks loaded (each was read from the
-drives once). With `--cold-tier-state full` (reads evict as they land) 23.8 GB/s; under
+(64 x 4, 2026-11-05), slightly above `spdk_nvme_perf`'s 23.1 GB/s for these 4 drives.
+With `--cold-tier-state full` (reads evict as they land) 23.8 GB/s; under
 `--preset longdocqa` (tier full, interleaved stores, one job per request) about 20.4–21 GB/s.
-This build has no `rw-telemetry`, so drive read bytes print as 0.
+Every cold pass (plain and shaped) prints `Cold pass SSD reads: X MB for Y MB loaded` and
+records `disk_read_bytes`; the counters need a certus-server built with
+`--features rw-telemetry` (otherwise X is 0). On such a server (2026-11-06, latest
+unstable) every byte loaded was read from the drives: default 24.35 GB/s, 125,829 MB read
+for 125,829 MB loaded; `--inflight 1` 14.58 GB/s; `--preset longdocqa` 20.85 GB/s, both
+also equal. So the 24 GB/s is drive reads, and the 23.1 GB/s `spdk_nvme_perf` figure is
+below what these drives deliver at this queue depth, not a ceiling.
 
 - **`--cold-tier-state full` with `--tier-fill-blocks N`: a full memory tier.** In
   production a cold load happens because the tier is full, so serving it means

@@ -1424,7 +1424,7 @@ def bench_cold_load_shaped(
     unit_len = max(len(u) for u in units_base)
     job_id = 2_000_000
     fill_seed = 7_000_000 + args.seed * 1000
-    total_blocks, timed, passes = 0, 0.0, 0
+    total_blocks, timed, passes, reads = 0, 0.0, 0, 0
 
     while timed < min_duration or passes < 2:
         manager._ring.flush_to_ssd()
@@ -1441,6 +1441,8 @@ def bench_cold_load_shaped(
         pending: dict[int, tuple[list[bytes], float]] = {}
         slots = list(range(args.inflight))
         slot_of: dict[int, int] = {}
+        # SSD reads of the timed loads only (the flush, clear and fill are outside it).
+        io_before = manager._ring.get_io_stats()
         t_pass = time.perf_counter()
         while units or pending:
             while units and len(pending) < args.inflight:
@@ -1481,17 +1483,24 @@ def bench_cold_load_shaped(
                     _poll_wait()
                 raise RuntimeError(f"cold load job(s) {failed} failed")
         timed += time.perf_counter() - t_pass
+        reads += manager._ring.get_io_stats()["read_bytes"] - io_before["read_bytes"]
         passes += 1
         if fill:
             _remove_keys(ring, fill, world_size)
 
-    return BenchResult(
+    want = total_blocks * block_bytes
+    print(f"  Cold pass SSD reads: {reads / 1e6:.0f} MB for {want / 1e6:.0f} MB loaded"
+          + ("" if reads else "  (0: certus-server built without rw-telemetry, "
+                              "or the loads were served from DRAM)"))
+    result = BenchResult(
         label=f"Cold Load Lifecycle (shaped: {cold_shape_label(args)})",
         total_blocks=total_blocks,
-        total_bytes=total_blocks * block_bytes,
+        total_bytes=want,
         wall_seconds=timed,
         phases=phases,
     )
+    result.counts = {"disk_read_bytes": reads}
+    return result
 
 
 def bench_contention(manager, worker, ring, keys, block_bytes, min_duration, *, args,
