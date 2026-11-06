@@ -80,6 +80,21 @@ except ImportError as _e:
 DEFAULT_BLOCK_BYTES = 2 * 1024 * 1024
 DEFAULT_LAYERS = 32
 POLL_S = 0.0001
+# --num-blocks when not given, as certus-connector-bench derives it: the default mode's
+# working set is INFLIGHT_TIER_SHARE of what the memory tier holds before it evicts
+# (tier x EVICTION_THRESHOLD / block bytes), at most INFLIGHT_MAX_BLOCKS (4000 at a 12 GiB
+# tier and 2 MiB blocks, about 2948 at 8 GiB); the other modes keep 128.
+INFLIGHT_MAX_BLOCKS = 4000
+EVICTION_THRESHOLD = 0.8
+SEQUENTIAL_NUM_BLOCKS = 128
+
+
+def default_num_blocks(mode: str) -> int:
+    """3FS has no memory tier to fit: the default mode takes certus-connector-bench's
+    default working set (INFLIGHT_MAX_BLOCKS), so the arms move the same keys."""
+    return INFLIGHT_MAX_BLOCKS if mode == "default" else SEQUENTIAL_NUM_BLOCKS
+
+
 CLIENT = "usrbio" if hc.HF3FS_AVAILABLE else "mock"
 
 
@@ -877,7 +892,9 @@ def main():
     parser.add_argument("--bs", type=int, default=16,
                         help="keys (blocks) per request in prefix-miss and scheduler-step; the "
                              "default mode uses --job-blocks")
-    parser.add_argument("--num-blocks", type=int, default=128, help="keys per pass")
+    parser.add_argument("--num-blocks", type=int, default=None,
+                        help="keys per pass (default mode: 4000, certus-connector-bench's default "
+                             "working set; the other modes: 128)")
     parser.add_argument("--block-bytes", type=parse_size, default=DEFAULT_BLOCK_BYTES,
                         help="bytes per key = one GPU block of all layers (one 3FS page)")
     parser.add_argument("--gpu", type=int, default=0)
@@ -917,6 +934,10 @@ def main():
     args = parser.parse_args()
     if args.tp != 1:
         parser.error("--tp > 1 is not supported (one worker, one GPU)")
+    # --num-blocks per mode unless given (default_num_blocks); run_mode sets each mode's.
+    args.num_blocks_given = args.num_blocks
+    if args.num_blocks is None:
+        args.num_blocks = default_num_blocks("default" if args.mode == "all" else args.mode)
     if args.store_job_blocks is None:
         args.store_job_blocks = args.job_blocks
     if args.store_inflight is None:
@@ -951,7 +972,8 @@ def main():
         print(f"WARNING: {msg}")
     os.makedirs(args.storage_path, exist_ok=True)
 
-    kpr = max(4, args.num_blocks // args.requests_per_step)
+    # scheduler-step sizes its requests by its own --num-blocks (128 unless given).
+    kpr = max(4, (args.num_blocks_given or SEQUENTIAL_NUM_BLOCKS) // args.requests_per_step)
     # One slot range per job in flight (loads first, then stores; StepLoop), and the
     # sequential modes' rolling allocator (alloc_blocks) over the rest.
     num_gpu_blocks = max(args.inflight * args.job_blocks + args.store_inflight * args.store_job_blocks,
@@ -995,7 +1017,7 @@ def main():
         elif args.mode == "scheduler-step":
             extra.update(requests_per_step=args.requests_per_step,
                          num_sessions=args.num_sessions)
-        rows = [r.csv_row(extra) for r in results]
+        rows = [r.csv_row({**extra, **getattr(r, "extra_params", {})}) for r in results]
         fieldnames = list(rows[0].keys())
         for r in rows[1:]:
             fieldnames += [k for k in r if k not in fieldnames]
@@ -1027,6 +1049,8 @@ def _run(args, stack: H3fsStack) -> list[BenchResult]:
 
     def run_mode(m: str) -> list[BenchResult]:
         out: list[BenchResult] = []
+        if args.num_blocks_given is None:
+            args.num_blocks = default_num_blocks(m)
         if m == "prefix-miss":
             print(f"\n  Mode: prefix-miss (hit_ratio={args.hit_ratio})")
             out.append(bench_prefix_miss(stack, args.num_blocks, args.bs, args.min_duration,
@@ -1050,6 +1074,8 @@ def _run(args, stack: H3fsStack) -> list[BenchResult]:
                 out.append(bench_load_lifecycle(stack, keys, args, args.min_duration, cold=True))
             print("\n  (mixed eviction skipped: HF3FSKVConnector has no memory tier to evict)")
         stack.reset()
+        for r in out:   # the CSV records each row's own working set (--mode all)
+            r.extra_params = {"num_blocks": args.num_blocks}
         return out
 
     modes = (["default", "prefix-miss", "scheduler-step"]

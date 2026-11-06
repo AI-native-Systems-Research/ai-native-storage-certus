@@ -62,6 +62,7 @@ Each run uses its own data file (`/mnt/3fs/vllm/bench-<pid>`, or a temp director
 | Flag | Default | Connector setting |
 |---|---|---|
 | `--file-size` | `64G` | `hf3fs_file_size`: the data file, i.e. the 3FS capacity in use |
+| `--num-blocks` | 4000 / 128 | keys per pass: 4000 in the default mode (certus-connector-bench's default working set; 3FS has no memory tier to fit), 128 in the others |
 | `--numjobs` | `16` | `hf3fs_client_numjobs`: USRBIO clients, which is the I/O parallelism |
 | `--max-device-buffer-count` | `128` | `hf3fs_max_device_buffer_count`: GPU staging buffers per direction |
 | `--block-bytes` / `--layers` | `2M` / `32` | one key is one GPU block across all layers, which is one 3FS page |

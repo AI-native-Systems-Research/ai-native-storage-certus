@@ -84,6 +84,21 @@ POLL_S = 0.0001
 STEP_BACKOFF_S = 0.001
 # The share of L1 the warm working set may take (certus-connector-bench's INFLIGHT_TIER_SHARE).
 INFLIGHT_TIER_SHARE = 0.9
+# --num-blocks when not given, as certus-connector-bench derives it: the default mode's
+# working set is INFLIGHT_TIER_SHARE of what the memory tier holds before it evicts
+# (tier x EVICTION_THRESHOLD / block bytes), at most INFLIGHT_MAX_BLOCKS (4000 at a 12 GiB
+# tier and 2 MiB blocks, about 2948 at 8 GiB); the other modes keep 128.
+INFLIGHT_MAX_BLOCKS = 4000
+EVICTION_THRESHOLD = 0.8
+SEQUENTIAL_NUM_BLOCKS = 128
+
+
+def default_num_blocks(mode: str, l1_bytes: int, chunk_bytes: int) -> int:
+    """certus-connector-bench's rule with the server's L1 as the tier."""
+    if mode == "default":
+        usable = int(l1_bytes * EVICTION_THRESHOLD // chunk_bytes)
+        return max(1, min(INFLIGHT_MAX_BLOCKS, int(usable * INFLIGHT_TIER_SHARE)))
+    return SEQUENTIAL_NUM_BLOCKS
 
 
 def parse_size(s: str) -> int:
@@ -1078,8 +1093,10 @@ def main():
     parser.add_argument("--bs", type=int, default=16,
                         help="keys (chunks) per request in prefix-miss, scheduler-step and "
                              "mixed eviction; the default mode uses --job-blocks")
-    parser.add_argument("--num-blocks", type=int, default=128,
-                        help="keys per pass")
+    parser.add_argument("--num-blocks", type=int, default=None,
+                        help="keys per pass (default mode: derived from the server's L1 as "
+                             "certus-connector-bench derives it from its tier, 90%% of L1 x 0.8 / "
+                             "--block-bytes, at most 4000; the other modes: 128)")
     parser.add_argument("--block-bytes", type=parse_size, default=DEFAULT_BLOCK_BYTES,
                         help="bytes per key = one LMCache chunk of all layers")
     parser.add_argument("--gpu", type=int, default=0)
@@ -1119,6 +1136,11 @@ def main():
     args = parser.parse_args()
     if args.tp != 1:
         parser.error("--tp > 1 is not supported (one worker adapter, one GPU)")
+    # --num-blocks per mode unless given; the default mode's needs the server's L1 size,
+    # so it is set after connecting (below) and checked there.
+    args.num_blocks_given = args.num_blocks
+    if args.num_blocks is None:
+        args.num_blocks = SEQUENTIAL_NUM_BLOCKS
     if args.store_job_blocks is None:
         args.store_job_blocks = args.job_blocks
     if args.store_inflight is None:
@@ -1128,14 +1150,15 @@ def main():
             parser.error(f"--{name.replace('_', '-')} must be >= 1")
     if args.step_us < 0:
         parser.error("--step-us must be >= 0")
-    if args.mode in ("default", "all"):
+    if args.mode in ("default", "all") and args.num_blocks_given is not None:
         jobs = -(-args.num_blocks // args.job_blocks)
         if jobs < args.inflight:
             parser.error(f"--num-blocks {args.num_blocks} makes only {jobs} job(s) of --job-blocks "
                          f"{args.job_blocks}, but --inflight {args.inflight} needs at least "
                          f"{args.inflight}: use --num-blocks >= {args.inflight * args.job_blocks}")
 
-    kpr = max(4, args.num_blocks // args.requests_per_step)
+    # scheduler-step sizes its requests by its own --num-blocks (128 unless given).
+    kpr = max(4, (args.num_blocks_given or SEQUENTIAL_NUM_BLOCKS) // args.requests_per_step)
     # One slot per job in flight (loads, then stores; StepLoop), ahead of the rolling
     # allocator the sequential modes use.
     pool_chunks = max(args.inflight * args.job_blocks + args.store_inflight * args.store_job_blocks,
@@ -1158,7 +1181,19 @@ def main():
           f"L2={'yes' if has_l2 else 'none'}")
     print(f"  job_blocks={args.job_blocks} inflight={args.inflight} store_job_blocks="
           f"{args.store_job_blocks} store_inflight={args.store_inflight} step_us={args.step_us:g}")
+    args.l1_bytes = l1_bytes
+    if args.num_blocks_given is None:
+        args.num_blocks = default_num_blocks(
+            "default" if args.mode == "all" else args.mode, l1_bytes, stack.chunk_bytes)
+        print(f"  num_blocks={args.num_blocks} (derived from L1)")
     if args.mode in ("default", "all"):
+        jobs = -(-args.num_blocks // args.job_blocks)
+        if jobs < args.inflight:
+            stack.shutdown()
+            sys.exit(f"error: --num-blocks {args.num_blocks} makes only {jobs} job(s) of "
+                     f"--job-blocks {args.job_blocks}, but --inflight {args.inflight} needs at "
+                     f"least {args.inflight}: give --num-blocks >= "
+                     f"{args.inflight * args.job_blocks} or a larger L1 (L1_GB)")
         # A warm load is only warm while its chunks stay in L1, as certus-connector-bench
         # refuses a working set over 90% of its tier's usable size.
         fit = int(l1_bytes // stack.chunk_bytes * INFLIGHT_TIER_SHARE)
@@ -1191,7 +1226,7 @@ def main():
         elif args.mode == "scheduler-step":
             extra.update(requests_per_step=args.requests_per_step,
                          num_sessions=args.num_sessions)
-        rows = [r.csv_row(extra) for r in results]
+        rows = [r.csv_row({**extra, **getattr(r, "extra_params", {})}) for r in results]
         fieldnames = list(rows[0].keys())
         for r in rows[1:]:
             fieldnames += [k for k in r if k not in fieldnames]
@@ -1228,6 +1263,8 @@ def _run(args, stack: LMCacheStack, has_l2: bool) -> list[BenchResult]:
 
     def run_mode(m: str) -> list[BenchResult]:
         out: list[BenchResult] = []
+        if args.num_blocks_given is None:
+            args.num_blocks = default_num_blocks(m, args.l1_bytes, stack.chunk_bytes)
         if m == "prefix-miss":
             print(f"\n  Mode: prefix-miss (hit_ratio={args.hit_ratio})")
             out.append(bench_prefix_miss(stack, args.num_blocks, args.bs, args.min_duration,
@@ -1257,6 +1294,8 @@ def _run(args, stack: LMCacheStack, has_l2: bool) -> list[BenchResult]:
         stack.evict_l1()
         if stack.load_error_blocks:
             print(f"  WARNING: {stack.load_error_blocks} GPU blocks reported retrieve errors")
+        for r in out:   # the CSV records each row's own working set (--mode all)
+            r.extra_params = {"num_blocks": args.num_blocks}
         return out
 
     modes = (["default", "prefix-miss", "scheduler-step"]

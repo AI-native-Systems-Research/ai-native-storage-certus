@@ -1672,6 +1672,20 @@ def bench_load_inflight(stack: CputierStack, keys, args, min_duration, *, cold: 
 # The share of the CPU tier the warm working set may take (certus-connector-bench's
 # INFLIGHT_TIER_SHARE).
 INFLIGHT_TIER_SHARE = 0.9
+# --num-blocks when not given, as certus-connector-bench derives it: for default and
+# contention the working set is INFLIGHT_TIER_SHARE of what the tier holds before it
+# evicts (--cpu-bytes x EVICTION_THRESHOLD / --block-bytes), at most INFLIGHT_MAX_BLOCKS
+# (4000 at 12G and 2 MiB blocks, about 2948 at 8G); the other modes keep 128.
+INFLIGHT_MAX_BLOCKS = 4000
+EVICTION_THRESHOLD = 0.8      # certus-server's --memory-tier-eviction-threshold default here
+SEQUENTIAL_NUM_BLOCKS = 128
+
+
+def default_num_blocks(args, mode: str) -> int:
+    if mode in ("default", "contention"):
+        usable = int(args.cpu_bytes * EVICTION_THRESHOLD // args.block_bytes)
+        return max(1, min(INFLIGHT_MAX_BLOCKS, int(usable * INFLIGHT_TIER_SHARE)))
+    return SEQUENTIAL_NUM_BLOCKS
 # Contention's store side when not given, as certus-connector-bench's CONTENTION_STORE_DEFAULTS.
 CONTENTION_STORE_DEFAULTS = {"store_job_blocks": 32, "store_inflight": 1}
 
@@ -2112,8 +2126,9 @@ def main():
     parser.add_argument("--spec", choices=["tiering", "cpu"], default="tiering",
                         help="tiering = TieringOffloadingSpec (CPU + fs tier, the cputier "
                              "default); cpu = CPUOffloadingSpec (host RAM only)")
-    parser.add_argument("--cpu-bytes", type=parse_size, default=parse_size("4G"),
-                        help="CPU primary tier size, e.g. 4G (cpu_bytes_to_use)")
+    parser.add_argument("--cpu-bytes", type=parse_size, default=parse_size("12G"),
+                        help="CPU primary tier size, e.g. 12G (cpu_bytes_to_use; default 12G, "
+                             "certus-connector-bench's --tier-gib)")
     parser.add_argument("--fs-root", type=str, default=None,
                         help="Directory for the fs disk tier. A per-run subdirectory is "
                              "created and removed at exit (see --keep-fs). Default: a "
@@ -2141,8 +2156,11 @@ def main():
     # workload (same as certus-connector-bench)
     parser.add_argument("--bs", type=int, default=16,
                         help="Batch size (blocks per batch)")
-    parser.add_argument("--num-blocks", type=int, default=128,
-                        help="Total blocks per iteration")
+    parser.add_argument("--num-blocks", type=int, default=None,
+                        help="Total blocks per iteration (default, contention: derived from "
+                             "--cpu-bytes as certus-connector-bench derives it from its tier, "
+                             "90%% of cpu_bytes x 0.8 / --block-bytes, at most 4000; the "
+                             "other modes: 128)")
     parser.add_argument("--block-bytes", type=int, default=DEFAULT_BLOCK_BYTES,
                         help=f"Per-block size in bytes (default: {DEFAULT_BLOCK_BYTES})")
     parser.add_argument("--gpu", type=int, default=0,
@@ -2201,6 +2219,14 @@ def main():
     args = parser.parse_args()
     if args.step_us < 0:
         parser.error("--step-us must be >= 0")
+    # --num-blocks per mode (default_num_blocks) unless given; args.num_blocks is the
+    # in-flight modes' value (or the run's one mode's), _run_mode sets each mode's.
+    args.num_blocks_given = args.num_blocks
+    if args.num_blocks is None:
+        # The same choice as `mode` below: no --mode is pattern under --pattern, else default.
+        run_mode = args.mode or ("pattern" if args.pattern else "default")
+        args.num_blocks = default_num_blocks(
+            args, "default" if run_mode == "all" else run_mode)
     # Store flags given on the command line (contention under --mode all takes its own
     # defaults for the others).
     args.explicit_store = {k for k in CONTENTION_STORE_DEFAULTS if getattr(args, k) is not None}
@@ -2306,15 +2332,21 @@ def main():
     # GPU memory no transfer touches -- 32 GiB at --working-set 16384, 2 MiB
     # blocks -- as certus-connector-bench did before 4e612f8a. A scheduler-step
     # request transfers at most its prefix (shared pool) plus its suffix.
-    kpr = max(4, args.num_blocks // args.requests_per_step)
-    step_request = min((kpr // 2) * 4, args.num_blocks * 2) + (kpr - kpr // 2)
+    # scheduler-step sizes its requests by its own --num-blocks (128 unless given).
+    sched_nb = args.num_blocks_given or SEQUENTIAL_NUM_BLOCKS
+    kpr = max(4, sched_nb // args.requests_per_step)
+    step_request = min((kpr // 2) * 4, sched_nb * 2) + (kpr - kpr // 2)
     # The in-flight passes: one slot per job in flight, loads then stores (StepLoop),
     # contention both at once; in chunks (CputierStack multiplies by --blocks-per-chunk).
     inflight_slots = (args.inflight * args.job_blocks
                       + max(args.store_inflight * args.store_job_blocks,
                             CONTENTION_STORE_DEFAULTS["store_inflight"]
                             * CONTENTION_STORE_DEFAULTS["store_job_blocks"]))
-    max_blocks = max(args.num_blocks, args.bs, step_request, inflight_slots)
+    # Not --num-blocks: that is how many keys cycle through the tier; every transfer
+    # addresses GPU blocks from its own slot (a --bs batch, a scheduler-step step, or
+    # one in-flight job), as certus-connector-bench's gpu_blocks() sizes them. With the
+    # derived default (4000) sizing by it would reserve 7.8 GiB of unused GPU memory.
+    max_blocks = max(args.bs, step_request, inflight_slots)
     if mode == "pattern":
         max_blocks = max(max_blocks, *(ks["cardinality"] for ks in pattern.keyspaces.values()))
     stack = CputierStack(args, block_bytes, max_blocks, fs_root, gpus)
@@ -2418,6 +2450,8 @@ def _run(args, mode, stack: CputierStack, pattern, eval_expr_fn) -> list[BenchRe
 
     def _run_mode(m: str) -> list[BenchResult]:
         results: list[BenchResult] = []
+        if args.num_blocks_given is None:
+            args.num_blocks = default_num_blocks(args, m)
         keys = make_content_keys(args.num_blocks, seed=_fresh_seed())
 
         if m == "pattern":
@@ -2476,6 +2510,8 @@ def _run(args, mode, stack: CputierStack, pattern, eval_expr_fn) -> list[BenchRe
         stack.take_events()
         if stack.failed_jobs:
             print(f"  WARNING: {stack.failed_jobs} transfer jobs reported failure")
+        for r in results:   # the CSV records each row's own working set (--mode all)
+            r.params = {**getattr(r, "params", {}), "num_blocks": args.num_blocks}
         return results
 
     ALL_MODES = ["default", "prefix-miss", "contention", "scheduler-step"]

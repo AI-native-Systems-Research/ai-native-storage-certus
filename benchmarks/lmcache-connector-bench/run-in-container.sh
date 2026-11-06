@@ -20,7 +20,7 @@
 #   IMAGE        vLLM + LMCache image (deploy/lmcache/build.sh)
 #                [localhost/vllm-lmcache-bench:vllm0.30.0]
 #   GPU          CDI GPU index [0]
-#   L1_GB        LMCache L1 (pinned RAM) size in GiB [4]  (cputier --cpu-bytes 4G)
+#   L1_GB        LMCache L1 (pinned RAM) size in GiB [12]  (cputier --cpu-bytes 12G, certus --tier-gib 12)
 #   L2           1 = fs_native L2 adapter on L2_DIR, 0 = none [1]
 #   L2_DIR       host dir for L2 files; a per-run subdirectory is created and
 #                removed at exit (KEEP_L2=1 keeps it) [$HOME/lmcache-bench-l2]
@@ -40,7 +40,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
 
 IMAGE="${IMAGE:-localhost/vllm-lmcache-bench:vllm0.30.0}"
 GPU="${GPU:-0}"
-L1_GB="${L1_GB:-4}"
+L1_GB="${L1_GB:-12}"
 L2="${L2:-1}"
 L2_DIR="${L2_DIR:-${HOME}/lmcache-bench-l2}"
 L2_GB="${L2_GB:-64}"

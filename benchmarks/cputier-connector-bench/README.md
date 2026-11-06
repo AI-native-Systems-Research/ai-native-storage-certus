@@ -88,7 +88,7 @@ podman run --rm --pull=never \
 ```
 
 - `--security-opt label=disable` lets the container read the bind mounts under SELinux without relabelling the repo.
-- `--shm-size` must be at least `--cpu-bytes` plus some headroom; the default `--cpu-bytes` is 4G.
+- `--shm-size` must be at least `--cpu-bytes` plus some headroom; the default `--cpu-bytes` is 12G (certus-connector-bench's `--tier-gib`).
 - Leave out `--fs-root` and the `/fs-tier` mount if you use `--spec cpu`.
 
 ### 3. Interactively inside the container
@@ -122,7 +122,7 @@ python benchmarks/cputier-connector-bench/bench_cputier_lifecycle.py --fs-root /
 | `IMAGE` | `docker.io/vllm/vllm-openai:v0.30.0` | vLLM ≥ 0.30. The 0.26 `certus-offload-fix026` image has an older `kv_offload` API and is not supported |
 | `GPU` | `0` | CDI GPU index (`--device nvidia.com/gpu=$GPU`), or a comma list (`GPU=0,1`) to expose several GPUs for `--tp`. Inside the container they are renumbered `0..N-1` |
 | `FS_TIER_HOST` | `$HOME/cputier-bench-fs-tier` | Host directory for the fs tier, mounted at `/fs-tier`. Put it on the filesystem you want to measure, and not on container overlay storage (no `O_DIRECT`) |
-| `CPU_BYTES` | `4G` | Sizes the container `/dev/shm`. Pass the same value as `--cpu-bytes` |
+| `CPU_BYTES` | `12G` | Sizes the container `/dev/shm`. Pass the same value as `--cpu-bytes` |
 | `SHM_SIZE` | `CPU_BYTES + 4G` | Explicit `/dev/shm` size |
 
 ### Notes
@@ -137,7 +137,8 @@ These play the role of certus-connector-bench's server flags:
 | Parameter | Default | Description |
 |---|---|---|
 | `--spec` | `tiering` | `tiering` = `TieringOffloadingSpec` (cputier); `cpu` = `CPUOffloadingSpec` (host RAM only, no cold phase) |
-| `--cpu-bytes` | `4G` | CPU primary tier (`cpu_bytes_to_use`) |
+| `--cpu-bytes` | `12G` | CPU primary tier (`cpu_bytes_to_use`), certus-connector-bench's `--tier-gib` default |
+| `--num-blocks` | derived | default and contention: 90% of `--cpu-bytes` x 0.8 / `--block-bytes`, at most 4000 (4000 at 12G, 2948 at 8G), as certus-connector-bench derives it from its tier; the other modes: 128 |
 | `--fs-root` | `$TMPDIR` | fs tier root (the wrapper passes `/fs-tier`) |
 | `--no-fs` | — | Tiering spec with no secondary tier |
 | `--fs-read-threads` / `--fs-write-threads` | 16 / 16 | fs tier I/O thread pool |
