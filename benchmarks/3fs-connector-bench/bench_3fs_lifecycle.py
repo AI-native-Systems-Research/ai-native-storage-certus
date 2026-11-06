@@ -82,17 +82,24 @@ DEFAULT_LAYERS = 32
 POLL_S = 0.0001
 # --num-blocks when not given, as certus-connector-bench derives it: the default mode's
 # working set is INFLIGHT_TIER_SHARE of what the memory tier holds before it evicts
-# (tier x EVICTION_THRESHOLD / block bytes), at most INFLIGHT_MAX_BLOCKS (4000 at a 12 GiB
-# tier and 2 MiB blocks, about 2948 at 8 GiB); the other modes keep 128.
+# (tier x EVICTION_THRESHOLD / block bytes), at most INFLIGHT_MAX_BLOCKS (2948 at the 8 GiB
+# default and 2 MiB blocks, 4000 at 12 GiB); the other modes keep 128.
+# 3FS has no memory tier: it uses the sibling benches' default tier (DEFAULT_TIER_BYTES), so
+# with no flags every arm moves the same keys; --num-blocks overrides it.
+DEFAULT_TIER_BYTES = 8 << 30
 INFLIGHT_MAX_BLOCKS = 4000
 EVICTION_THRESHOLD = 0.8
 SEQUENTIAL_NUM_BLOCKS = 128
 
 
-def default_num_blocks(mode: str) -> int:
-    """3FS has no memory tier to fit: the default mode takes certus-connector-bench's
-    default working set (INFLIGHT_MAX_BLOCKS), so the arms move the same keys."""
-    return INFLIGHT_MAX_BLOCKS if mode == "default" else SEQUENTIAL_NUM_BLOCKS
+def default_num_blocks(mode: str, block_bytes: int) -> int:
+    """3FS has no memory tier to fit: the default mode takes the working set the sibling
+    benches derive from their default tier (DEFAULT_TIER_BYTES), so the arms move the
+    same keys."""
+    if mode == "default":
+        usable = int(DEFAULT_TIER_BYTES * EVICTION_THRESHOLD // block_bytes)
+        return max(1, min(INFLIGHT_MAX_BLOCKS, int(usable * 0.9)))
+    return SEQUENTIAL_NUM_BLOCKS
 
 
 CLIENT = "usrbio" if hc.HF3FS_AVAILABLE else "mock"
@@ -893,8 +900,8 @@ def main():
                         help="keys (blocks) per request in prefix-miss and scheduler-step; the "
                              "default mode uses --job-blocks")
     parser.add_argument("--num-blocks", type=int, default=None,
-                        help="keys per pass (default mode: 4000, certus-connector-bench's default "
-                             "working set; the other modes: 128)")
+                        help="keys per pass (default mode: the sibling benches' default working "
+                             "set at their 8 GiB tier, 2948 at 2 MiB blocks; the other modes: 128)")
     parser.add_argument("--block-bytes", type=parse_size, default=DEFAULT_BLOCK_BYTES,
                         help="bytes per key = one GPU block of all layers (one 3FS page)")
     parser.add_argument("--gpu", type=int, default=0)
@@ -942,7 +949,8 @@ def main():
     # --num-blocks per mode unless given (default_num_blocks); run_mode sets each mode's.
     args.num_blocks_given = args.num_blocks
     if args.num_blocks is None:
-        args.num_blocks = default_num_blocks("default" if args.mode == "all" else args.mode)
+        args.num_blocks = default_num_blocks("default" if args.mode == "all" else args.mode,
+                                             args.block_bytes)
     if args.store_job_blocks is None:
         args.store_job_blocks = args.job_blocks
     if args.store_inflight is None:
@@ -1055,7 +1063,7 @@ def _run(args, stack: H3fsStack) -> list[BenchResult]:
     def run_mode(m: str) -> list[BenchResult]:
         out: list[BenchResult] = []
         if args.num_blocks_given is None:
-            args.num_blocks = default_num_blocks(m)
+            args.num_blocks = default_num_blocks(m, args.block_bytes)
         if m == "prefix-miss":
             print(f"\n  Mode: prefix-miss (hit_ratio={args.hit_ratio})")
             out.append(bench_prefix_miss(stack, args.num_blocks, args.bs, args.min_duration,

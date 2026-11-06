@@ -602,7 +602,8 @@ INFLIGHT_MODES = ("default", "contention")
 # Llama-3-8B (a block is 16 tokens x 128 KiB). The other modes keep the argparse defaults.
 INFLIGHT_DEFAULTS = {"pieces_per_block": 32}
 # --num-blocks when not given: 90% of what the memory tier holds before evicting, at most this
-# many (4,000 blocks is 7.8 GiB at 2 MiB, 63 jobs of 64; it is the whole default on a 12 GiB tier).
+# many (4,000 blocks is 7.8 GiB at 2 MiB, 63 jobs of 64, reached on a 12 GiB tier; on the default
+# 8 GiB tier the working set is 2,948 blocks, 47 jobs).
 INFLIGHT_MAX_BLOCKS = 4000
 INFLIGHT_TIER_SHARE = 0.9
 # The contention mode's store side when not given: 32-block jobs, one in flight. Loads are the
@@ -1657,7 +1658,7 @@ def bench_mixed_eviction(
     load_fraction: float = 0.5,
     lookup_order: str = LOOKUP_FIRST,
     fill_blocks: int = 0,
-    tier_gib: float = 12.0,
+    tier_gib: float = 8.0,
     ring=None,
     world_size: int = 1,
 ) -> BenchResult:
@@ -2818,7 +2819,8 @@ def build_parser() -> argparse.ArgumentParser:
                              "takes the remainder, so it need not divide evenly) and need at "
                              "least --inflight jobs; default there: 90%% of what the tier holds "
                              "before evicting (--tier-gib, --eviction-threshold), at most 4000 "
-                             "(4000 on a 12 GiB tier). Default 128 in the other modes")
+                             "(2948 on the default 8 GiB tier, 4000 on 12 GiB or more). Default 128 "
+                             "in the other modes")
     parser.add_argument("--block-bytes", type=int, default=DEFAULT_BLOCK_BYTES,
                         help=f"Per-block size in bytes (default: {DEFAULT_BLOCK_BYTES})")
     parser.add_argument("--pieces-per-block", "--layers", dest="pieces_per_block",
@@ -2835,9 +2837,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="memory tier at the start of each cold pass: empty (cleared, "
                              "the default) or full (refilled with --tier-fill-blocks "
                              "other blocks, outside the timing, so cold reads must evict)")
-    parser.add_argument("--tier-gib", type=float, default=12.0,
-                        help="the server's --memory-tier-size in GiB (default 12, what the targets "
-                             "start it with). The benchmark cannot read it from the server, so a "
+    parser.add_argument("--tier-gib", type=float, default=8.0,
+                        help="the server's --memory-tier-size in GiB (default 8). The benchmark "
+                             "cannot read it from the server, so a "
                              "wrong value is not detected: it is used to refuse a working set that "
                              "cannot stay resident and to size --tier-fill-blocks")
     parser.add_argument("--eviction-threshold", type=float, default=0.8,

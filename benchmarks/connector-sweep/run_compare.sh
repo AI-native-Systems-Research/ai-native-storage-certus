@@ -45,7 +45,11 @@
 #                            <out-without-.html>.tex
 #   --mode M                 compare|default|prefix-miss|contention [compare]
 #                            (compare = default, then prefix-miss, on every arm)
-#   --bs N [16]  --num-blocks N [1024]  --block-bytes N [2097152]
+#   --bs N [16]  --block-bytes N [2097152]
+#   --num-blocks N           keys per pass on every arm [derived from --dram, as each bench
+#                            derives it from its tier: default and contention min(4000, 90%
+#                            of dram x eviction threshold / block bytes), 2948 at 8G; the
+#                            other modes 128]. Give it to fix one number for every mode
 #   --min-duration S [5]  --warmup N [4]  --working-set N [512]
 #   --job-blocks N [64]  --inflight N [4]  --step-us US [100]: the default mode's store,
 #                            warm and cold passes and contention keep --inflight jobs of
@@ -67,7 +71,7 @@
 #                            read AND write threads; lmcache fs_native workers)
 #   --numa N [GPU's node]    NUMA node every arm's CPUs and host memory are bound to;
 #                            -1 disables binding
-#   --dram SIZE [12G]        certus --memory-tier-size == cputier --cpu-bytes == lmcache L1
+#   --dram SIZE [8G]         certus --memory-tier-size == cputier --cpu-bytes == lmcache L1
 #   --device-pci ADDR        certus NVMe device (repeatable) [the 4 vfio NVMe drives
 #                            0000:61:00.0..0000:64:00.0, same as benchmarks/vllm-serve], or
 #   --drive-count N          first N discovered NVMe drives (replaces the default list)
@@ -108,10 +112,10 @@ REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 CALLER_DIR="$PWD"   # relative --out (and --server-bin) resolve against the caller's dir
 cd "$REPO_ROOT"
 
-OUT="" MODE=compare BS=16 NUM_BLOCKS=1024 BLOCK_BYTES=2097152 MIN_DURATION=5 WARMUP=4
+OUT="" MODE=compare BS=16 NUM_BLOCKS="" BLOCK_BYTES=2097152 MIN_DURATION=5 WARMUP=4
 WORKING_SET=512 HIT_RATIO=0.75
 JOB_BLOCKS=64 INFLIGHT=4 STEP_US=100 STORE_JOB_BLOCKS="" STORE_INFLIGHT=""
-LOOKUP_ORDER=lookup-first GPU=0 TP=1 DRAM=12G DEVICE_PCI=()
+LOOKUP_ORDER=lookup-first GPU=0 TP=1 DRAM=8G DEVICE_PCI=()
 LAYERS=32 IO_THREADS=16 NUMA=""
 DRIVE_COUNT="" EVICT_THRESHOLD=0.8 WORKERS=4 CHANNELS="" FS_TIER=/raid0/cputier-bench-fs-tier
 SERVER_BIN="" IMAGE=docker.io/vllm/vllm-openai:v0.30.0
@@ -232,7 +236,7 @@ GPU_LIST=$(seq -s, "$GPU" $(( GPU + TP - 1 )))
 
 # The one shared workload argument list, passed verbatim to every bench.
 # --mode is appended per bench call (run_modes), one call per entry of BENCH_MODES.
-SHARED=(--bs "$BS" --num-blocks "$NUM_BLOCKS" --block-bytes "$BLOCK_BYTES"
+SHARED=(--bs "$BS" --block-bytes "$BLOCK_BYTES"
         --min-duration "$MIN_DURATION" --warmup "$WARMUP" --working-set "$WORKING_SET"
         --job-blocks "$JOB_BLOCKS" --inflight "$INFLIGHT" --step-us "$STEP_US"
         --hit-ratio "$HIT_RATIO"
@@ -248,6 +252,14 @@ SHARED=(--bs "$BS" --num-blocks "$NUM_BLOCKS" --block-bytes "$BLOCK_BYTES"
 TIER_GIB=$(python3 -c "
 import re; m=re.fullmatch(r'(\d+(?:\.\d+)?)([KMGT]?)', '$DRAM'.strip().upper())
 print(f'{float(m.group(1)) * (1 << {\"\":0,\"K\":10,\"M\":20,\"G\":30,\"T\":40}[m.group(2)]) / 2**30:g}')")
+# --num-blocks per mode unless given, by the benches' own rule, computed once here so every
+# arm moves the same keys (3fs has no tier to derive it from).
+INFLIGHT_NUM_BLOCKS=$(python3 -c "print(max(1, min(4000, int(int($TIER_GIB * 2**30 * $EVICT_THRESHOLD // $BLOCK_BYTES) * 0.9))))")
+num_blocks_for() {  # num_blocks_for <mode>
+  if [[ -n "$NUM_BLOCKS" ]]; then echo "$NUM_BLOCKS"
+  elif [[ "$1" == default || "$1" == contention ]]; then echo "$INFLIGHT_NUM_BLOCKS"
+  else echo 128; fi
+}
 
 SERVER_ARGS=(--channels "$CHANNELS" --memory-tier-size "$DRAM"
              --memory-tier-eviction-threshold "$EVICT_THRESHOLD" --shm-path "$SHM_PATH" --format)
@@ -323,7 +335,7 @@ else
 python3 - "$ART/params.json" <<EOF
 import json, sys
 json.dump({
-  "shared": {"mode": "$MODE", "bench_modes": "${BENCH_MODES[*]}", "bs": $BS, "num_blocks": $NUM_BLOCKS, "block_bytes": $BLOCK_BYTES,
+  "shared": {"mode": "$MODE", "bench_modes": "${BENCH_MODES[*]}", "bs": $BS, "num_blocks": "${NUM_BLOCKS:-derived: $INFLIGHT_NUM_BLOCKS (default, contention), 128 (others)}", "block_bytes": $BLOCK_BYTES,
              "min_duration": $MIN_DURATION, "warmup": $WARMUP, "working_set": $WORKING_SET,
              "job_blocks": $JOB_BLOCKS, "inflight": $INFLIGHT, "step_us": $STEP_US,
              "store_job_blocks": "${STORE_JOB_BLOCKS:-per-mode default}",
@@ -436,7 +448,7 @@ run_modes() {  # run_modes <log> <filter-regex-or-empty> <host-csv> <cmd...>
   for m in "${BENCH_MODES[@]}"; do
     echo "[compare] --mode $m" | tee -a "$log"
     rm -f "$csv"
-    run_arm "$log" "$filt" "$@" --mode "$m"; rc=$?
+    run_arm "$log" "$filt" "$@" --mode "$m" --num-blocks "$(num_blocks_for "$m")"; rc=$?
     if [[ -s "$csv" ]]; then mv "$csv" "$csv.$m.part"; parts+=("$csv.$m.part"); fi
     ((rc)) && break
     ((INTERRUPTED)) && { rc=130; break; }

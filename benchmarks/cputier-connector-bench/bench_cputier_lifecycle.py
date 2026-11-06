@@ -1709,7 +1709,7 @@ INFLIGHT_TIER_SHARE = 0.9
 # --num-blocks when not given, as certus-connector-bench derives it: for default and
 # contention the working set is INFLIGHT_TIER_SHARE of what the tier holds before it
 # evicts (--cpu-bytes x EVICTION_THRESHOLD / --block-bytes), at most INFLIGHT_MAX_BLOCKS
-# (4000 at 12G and 2 MiB blocks, about 2948 at 8G); the other modes keep 128.
+# (2948 at the 8G default and 2 MiB blocks, 4000 at 12G); the other modes keep 128.
 INFLIGHT_MAX_BLOCKS = 4000
 EVICTION_THRESHOLD = 0.8      # certus-server's --memory-tier-eviction-threshold default here
 SEQUENTIAL_NUM_BLOCKS = 128
@@ -2167,8 +2167,8 @@ def main():
     parser.add_argument("--spec", choices=["tiering", "cpu"], default="tiering",
                         help="tiering = TieringOffloadingSpec (CPU + fs tier, the cputier "
                              "default); cpu = CPUOffloadingSpec (host RAM only)")
-    parser.add_argument("--cpu-bytes", type=parse_size, default=parse_size("12G"),
-                        help="CPU primary tier size, e.g. 12G (cpu_bytes_to_use; default 12G, "
+    parser.add_argument("--cpu-bytes", type=parse_size, default=parse_size("8G"),
+                        help="CPU primary tier size, e.g. 8G (cpu_bytes_to_use; default 8G, "
                              "certus-connector-bench's --tier-gib)")
     parser.add_argument("--fs-root", type=str, default=None,
                         help="Directory for the fs disk tier. A per-run subdirectory is "

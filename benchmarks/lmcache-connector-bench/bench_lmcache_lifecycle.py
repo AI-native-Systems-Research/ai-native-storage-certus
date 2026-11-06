@@ -86,8 +86,8 @@ STEP_BACKOFF_S = 0.001
 INFLIGHT_TIER_SHARE = 0.9
 # --num-blocks when not given, as certus-connector-bench derives it: the default mode's
 # working set is INFLIGHT_TIER_SHARE of what the memory tier holds before it evicts
-# (tier x EVICTION_THRESHOLD / block bytes), at most INFLIGHT_MAX_BLOCKS (4000 at a 12 GiB
-# tier and 2 MiB blocks, about 2948 at 8 GiB); the other modes keep 128.
+# (tier x EVICTION_THRESHOLD / block bytes), at most INFLIGHT_MAX_BLOCKS (2948 at the 8 GiB
+# default and 2 MiB blocks, 4000 at 12 GiB); the other modes keep 128.
 INFLIGHT_MAX_BLOCKS = 4000
 EVICTION_THRESHOLD = 0.8
 SEQUENTIAL_NUM_BLOCKS = 128

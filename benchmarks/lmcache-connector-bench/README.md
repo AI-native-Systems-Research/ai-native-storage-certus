@@ -65,7 +65,7 @@ Both containers use `--ipc host --network host --pid host`. On this host the ser
 |---|---|---|
 | `IMAGE` | `localhost/vllm-lmcache-bench:vllm0.30.0` | vLLM + LMCache image |
 | `GPU` | `0` | CDI GPU index |
-| `L1_GB` | `12` | Server L1 (pinned RAM). Match cputier's `--cpu-bytes` / certus's `--memory-tier-size` (both 12G by default). The default mode's `--num-blocks`, when not given, is derived from the L1 the server reports: 90% of L1 x 0.8 / `--block-bytes`, at most 4000 (4000 at 12, 2948 at 8), as certus-connector-bench derives it from its tier; the other modes: 128 |
+| `L1_GB` | `8` | Server L1 (pinned RAM). Match cputier's `--cpu-bytes` / certus's `--memory-tier-size` (both 8G by default); to change the tier size, set only this. The default mode's `--num-blocks`, when not given, is derived from the L1 the server reports: 90% of L1 x 0.8 / `--block-bytes`, at most 4000 (2948 at the 8 default, 4000 at 12), as certus-connector-bench derives it from its tier; the other modes: 128 |
 | `L2` | `1` | `1` = `fs_native` L2 on `L2_DIR`; `0` = none |
 | `L2_DIR` / `L2_GB` | `$HOME/lmcache-bench-l2` / `64` | L2 host directory and capacity. Put it on the disk you want to measure, not on overlay storage (no `O_DIRECT`) |
 | `USE_ODIRECT` | `1` | `O_DIRECT` L2 I/O |

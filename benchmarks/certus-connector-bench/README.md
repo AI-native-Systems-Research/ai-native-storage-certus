@@ -9,10 +9,10 @@ Requires a running `certus-server` with shared memory at `/dev/shm/certus-shmq`.
 Start the server (the benchmark never starts or stops it), then run a mode. From the repo root:
 
 ```bash
-# 1. the server: the settings the benchmark's defaults assume (12 GiB memory tier, evict at 0.8)
+# 1. the server: the settings the benchmark's defaults assume (8 GiB memory tier, evict at 0.8)
 sudo target/release/certus-server \
     --drive-count 4 --channels 32 \
-    --memory-tier-size 12G --memory-tier-eviction-threshold 0.8 \
+    --memory-tier-size 8G --memory-tier-eviction-threshold 0.8 \
     --format
 
 # 2. the benchmark, in another shell, each with no shape flags:
@@ -26,11 +26,12 @@ With no shape flags the default mode's store, warm and cold passes and the conte
 Llama-3-8B (see "In-flight passes"). Nothing else is needed on the command line:
 
 - **`--num-blocks` (the working set) is optional.** The default and contention modes derive it
-  from the tier: 90% of what it holds before evicting, at most 4,000.
-- **`--tier-gib` is optional and defaults to 12.** Pass it only when you start the server with a
-  different `--memory-tier-size`, e.g. `--memory-tier-size 32G` and `--tier-gib 32`. The benchmark cannot
-  read the tier size from the server, so a wrong value is not detected; every run prints
-  `Tier assumed: ...` first (see "Memory tier size").
+  from the tier: 90% of what it holds before evicting, at most 4,000 (2,948 on the default 8 GiB).
+- **`--tier-gib` is optional and defaults to 8.** To use another tier size, change only the size:
+  start the server with `--memory-tier-size NG` and pass `--tier-gib N`; the working set, the
+  cold tier fill and the mixed-eviction fill follow from it (no `--num-blocks` needed). The
+  benchmark cannot read the tier size from the server, so a wrong value is not detected; every
+  run prints `Tier assumed: ...` first (see "Memory tier size").
 - `--channels` must exceed the jobs in flight (the modes tell you the number they need; 16 is enough
   for the defaults).
 
@@ -49,12 +50,12 @@ The benchmark does **not** start or stop the server. You must start it before ru
 sudo target/release/certus-server \
     --drive-count 4 \
     --channels 32 \
-    --memory-tier-size 12G \
+    --memory-tier-size 8G \
     --memory-tier-eviction-threshold 0.8 \
     --format
 ```
 
-The tier size and eviction threshold above are what the default and contention modes assume (`--tier-gib 12`,
+The tier size and eviction threshold above are what the default and contention modes assume (`--tier-gib 8`,
 `--eviction-threshold 0.8`); if you change them, pass the same values to the benchmark.
 
 Server parameters (not controlled by the benchmark):
@@ -255,7 +256,7 @@ store and warm passes keep `--inflight` jobs outstanding, which is what pipeline
 --lookup-order ORDER   lookup-first (default, vLLM >= 0.21) or touch-first (vLLM <= 0.20)
 --pieces-per-block N   GPU tensors per block (default 32 in every mode, Llama-3-8B under LBHNC), see below
 --cold-tier-state S    empty (default) or full, with --tier-fill-blocks N; see "Cold-load shape"
---tier-gib G            the server's --memory-tier-size in GiB (default 12); see "Memory tier size"
+--tier-gib G            the server's --memory-tier-size in GiB (default 8); see "Memory tier size"
 --eviction-threshold T  the server's --memory-tier-eviction-threshold (default 0.8)
 --store-order O        batch (default) or interleaved
 --load-unit U          batch (default) or request
@@ -340,7 +341,7 @@ below what these drives deliver at this queue depth, not a ceiling.
   evicting other data. Before every cold pass the benchmark empties the tier, then
   stores N other blocks to bring it back to its eviction threshold, outside the
   timed region (`tier_fill`); the cold reads then evict as they land. N defaults to
-  `--tier-gib` × `--eviction-threshold` ÷ block bytes (12 GiB × 0.8 ÷ 2 MiB = 4915);
+  `--tier-gib` × `--eviction-threshold` ÷ block bytes (8 GiB × 0.8 ÷ 2 MiB = 3276);
   the benchmark cannot read the tier size, so pass `--tier-gib` if the server's
   differs. Default `empty`: the tier is cleared and not refilled.
 - **`--store-order interleaved`: stores from concurrent requests.** vLLM stores per
@@ -376,9 +377,9 @@ observation.
 python benchmarks/certus-connector-bench/bench_connector_lifecycle.py --tier-gib 4 \
     --store-order interleaved --load-unit request --requests 8 --cold-tier-state full
 
-# LongDocQA's shape; start certus-server with --memory-tier-size 12G
+# LongDocQA's shape, as measured (12 GiB tier): start certus-server with --memory-tier-size 12G
 python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
-    --preset longdocqa --working-set 2500
+    --preset longdocqa --working-set 2500 --tier-gib 12
 ```
 
 #### In-flight passes (vLLM 0.30's step loop)
@@ -408,11 +409,11 @@ drives).
 | `--job-blocks` | 64 | from 16 to 128 blocks the plateau at 2+ jobs in flight is the same (warm 22.7 GB/s, 93% of the 24.4 GB/s host-to-device ceiling); 64 keeps the per-job host cost small |
 | `--inflight` | 4 | store and cold load reach their plateau only at 4 (store 14.6 vs 13.1 GB/s at 2); LongDocQA's client runs 4 requests (about 2 measured) |
 | `--pieces-per-block` | 32 | what vLLM 0.30 gives Llama-3-8B (LBHNC); the 3fs, lmcache and cputier benchmarks use 32 layers per block too. At 4 in flight 1 and 32 pieces measure the same; at 1 in flight a 1-piece store is 19% faster |
-| `--num-blocks` | 90% of what the tier holds, at most 4000 | 4,000 blocks (7.8 GiB at 2 MiB) on a 12 GiB tier, 1,474 on 4 GiB, 4,000 on 32 GiB (see below) |
+| `--num-blocks` | 90% of what the tier holds, at most 4000 | 2,948 blocks (5.8 GiB at 2 MiB) on the default 8 GiB tier, 1,474 on 4 GiB, 4,000 on 12 GiB or more (see below) |
 | `--store-job-blocks`, `--store-inflight` | contention: 32, 1; default mode's store pass: `--job-blocks`, `--inflight` | loads are the larger stream in serving (multi-turn moved 3.3x more bytes loaded than stored) |
 | `--step-us` | 100 | removes the GIL stalls (job p99 6.3 ms vs up to 27 ms) |
 | `--workers` | 4 | production's pool size |
-| `--tier-gib`, `--eviction-threshold` | 12, 0.8 | what the targets start the server with |
+| `--tier-gib`, `--eviction-threshold` | 8, 0.8 | the server's tier (pass `--tier-gib` when yours differs; the sweeps above ran on 12) |
 
 LongDocQA's own job is 625 blocks, so pass `--job-blocks 625` to match it.
 
@@ -442,9 +443,9 @@ metric. `knowledge/serving/check.py` fails if a shape disagrees with the
 observation it names.
 
 ```bash
-# 12 GiB tier (threshold 0.8): 4,000 blocks of 2 MiB fit (the defaults, spelled out)
+# 8 GiB tier (threshold 0.8): the defaults, spelled out (2,948 blocks of 2 MiB)
 python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
-    --job-blocks 64 --inflight 4 --num-blocks 4000 \
+    --tier-gib 8 --job-blocks 64 --inflight 4 --num-blocks 2948 \
     --block-bytes 2097152 --pieces-per-block 32 --workers 4
 # the old sequential shape
 python benchmarks/certus-connector-bench/bench_connector_lifecycle.py --job-blocks 16 --inflight 1
@@ -499,8 +500,8 @@ promoted back, and nothing in the pass's own output shows it: with 4,000 blocks 
 4 GiB tier, the warm in-flight pass ran, reported 24.45 GB/s and "0 blocks not loaded" (2026-11-05).
 
 The benchmark cannot read the tier size from the server, so you state it: `--tier-gib` and
-`--eviction-threshold` default to 12 and 0.8, what the targets start the server with. Pass
-`--tier-gib` whenever the server's `--memory-tier-size` differs. Then:
+`--eviction-threshold` default to 8 and 0.8. Pass `--tier-gib` whenever the server's
+`--memory-tier-size` differs. Then:
 
 - The default and contention modes refuse a `--num-blocks` that does not fit (the warm pass
   and contention's loads need it resident), and one that makes fewer jobs than `--inflight`,
@@ -525,25 +526,39 @@ The benchmark cannot read the tier size from the server, so you state it: `--tie
 | 12 GiB | 9.6 GiB, 4,915 blocks | 4,000 (7.8 GiB) | 4,915 blocks | 23.3 / 14.6 / 14.5+6.0 / 21.0 GB/s |
 | 32 GiB | 25.6 GiB, 13,107 blocks | 4,000 (7.8 GiB) | 13,107 blocks | 23.3 / 14.6 / 13.2+6.5 / 22.6 GB/s |
 
-**Running with another tier size, e.g. 8 GiB.** Give the size once to each side; everything
-else (working set, cold fill) follows from it:
+**Running with another tier size.** Change only the tier size; give it once to each side.
+Do not pass `--num-blocks`: the working set, the cold tier fill and the mixed-eviction fill
+are derived from the size, so they follow it. For example, 12 GiB:
 
 ```bash
 # certus: the server's tier, and the same number to the benchmark
 sudo target/release/certus-server --drive-count 4 --channels 32 \
-    --memory-tier-size 8G --memory-tier-eviction-threshold 0.8 --format
-python benchmarks/certus-connector-bench/bench_connector_lifecycle.py --tier-gib 8
-# the siblings: their tier is their own flag (3fs has no memory tier)
-CPU_BYTES=8G benchmarks/cputier-connector-bench/run-in-container.sh --cpu-bytes 8G
-L1_GB=8 benchmarks/lmcache-connector-bench/run-in-container.sh
+    --memory-tier-size 12G --memory-tier-eviction-threshold 0.8 --format
+python benchmarks/certus-connector-bench/bench_connector_lifecycle.py --tier-gib 12
+# the siblings: their tier is their own setting
+CPU_BYTES=12G benchmarks/cputier-connector-bench/run-in-container.sh --cpu-bytes 12G
+L1_GB=12 benchmarks/lmcache-connector-bench/run-in-container.sh
+# 3fs has no memory tier: give it the same working set as the others
+benchmarks/3fs-connector-bench/run-in-container.sh --num-blocks 4000
 # all four at once: run_compare.sh sets every one of the above from --dram
-benchmarks/connector-sweep/run_compare.sh --out bench-results/compare-8g.html --dram 8G
+benchmarks/connector-sweep/run_compare.sh --out bench-results/compare-12g.html --dram 12G
 ```
 
-cputier and LMCache derive their default `--num-blocks` from their own tier by the same rule
-(cputier from `--cpu-bytes`, LMCache from the L1 its server reports), so at 8 GiB all three move
-2,948 blocks; 3FS, which has no tier, takes the 12 GiB figure (4,000). `run_compare.sh` passes
-one `--num-blocks` to every arm (default 1,024), so its arms always match.
+| tier (`--tier-gib`, `--cpu-bytes`, `L1_GB`, `--dram`) | derived `--num-blocks` (default, contention) | cold and mixed-eviction fill |
+|---|---|---|
+| 4 GiB | 1,474 | 1,638 |
+| 8 GiB (default) | 2,948 | 3,276 |
+| 12 GiB | 4,000 | 4,915 |
+| 32 GiB | 4,000 (the cap) | 13,107 |
+
+The other modes (prefix-miss, scheduler-step, pattern) use 128 blocks at any tier size.
+cputier and LMCache derive `--num-blocks` from their own tier by the same rule (cputier from
+`--cpu-bytes`, LMCache from the L1 its server reports). 3FS has no tier: with no flags it takes
+the 8 GiB figure (2,948), so at another size pass it the number from the table.
+`run_compare.sh` computes the number from `--dram` and passes it to every arm, 3FS included,
+so its arms always move the same keys. `--num-blocks` is still accepted everywhere to fix a
+number by hand (a working set larger than the tier is refused; see `--no-warm` and
+`--allow-warm-overflow` above).
 
 The defaults carry over to bigger and smaller tiers. The cost of a bigger tier is the cold pass:
 each pass with `--cold-tier-state full` empties the tier and refills it (`--tier-fill-blocks`), so cold

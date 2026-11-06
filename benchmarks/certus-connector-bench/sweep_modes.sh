@@ -238,6 +238,7 @@ fi
 for mode in "${MODES[@]}"; do
     YAML_OUT="$OUTDIR/${mode}${TAG_SUFFIX}_${TIMESTAMP}.yaml"
     CSV_FILE="$OUTDIR/${mode}${TAG_SUFFIX}_${TIMESTAMP}.csv"
+    TIER_GIB=$(python3 -c "import re,sys; m=re.fullmatch(r'(\\d+(?:\\.\\d+)?)([KMGT]?)', sys.argv[1].strip().upper()); print(float(m.group(1)) * (1 << {'':0,'K':10,'M':20,'G':30,'T':40}[m.group(2)]) / 2**30)" "$MEMORY_TIER_SIZE")
     echo "── $mode ──"
     TAG_ARGS=()
     [ -n "$TAG" ] && TAG_ARGS=(--tag "$TAG")
@@ -245,8 +246,10 @@ for mode in "${MODES[@]}"; do
     SSD_ARGS=()
     [[ -n "$NVME_BDFS" ]] && SSD_ARGS=(--target-ssd "$NVME_BDFS")
 
+    # The bench cannot read the server's tier size: tell it the one started above.
     python3 "$BENCH" \
         --mode "$mode" \
+        --tier-gib "$TIER_GIB" --eviction-threshold "${EVICTION_THRESHOLD:-0.9}" \
         --min-duration "$MIN_DURATION" \
         --output "$YAML_OUT" \
         --csv "$CSV_FILE" \
