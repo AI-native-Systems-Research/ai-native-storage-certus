@@ -272,6 +272,8 @@ class H3fsStack:
         self.data_file = os.path.join(args.storage_path, "hf3fs_vllm_data_file_0")
         self._cursor = 0
         self.failed = 0
+        self._futs: dict[str, list] = {}   # request id -> its futures, until reaped
+        self._rid_of: dict[int, str] = {}  # sequential submissions: first future -> request id
 
     # A store/load is one vLLM request: its block ids in the GPU cache and the
     # prefix hashes that name them in 3FS.
@@ -290,7 +292,7 @@ class H3fsStack:
         ex = self.md.batch_key_exists(keys)
         return next((i for i, e in enumerate(ex) if not e), len(ex))
 
-    def submit_store(self, keys: list[str], blocks: list[int] | None = None):
+    def submit_store(self, keys: list[str], blocks: list[int] | None = None, track=False):
         rid = f"s-{uuid.uuid4().hex[:12]}"
         blocks = blocks if blocks is not None else self.alloc_blocks(len(keys))
         futs = []
@@ -298,18 +300,49 @@ class H3fsStack:
         step = self.c._max_device_buffer_count
         for i in range(0, len(keys), step):
             futs.append(self.am.submit_save_operation(rid, blocks[i:i + step], keys[i:i + step]))
+        if track:   # the step loop reaps it by request id (op_ok)
+            self._futs[rid] = futs
+        elif futs:  # sequential: wait() reaps it
+            self._rid_of[id(futs[0])] = rid
         return rid, futs
 
-    def submit_load(self, keys: list[str], blocks: list[int] | None = None):
+    def submit_load(self, keys: list[str], blocks: list[int] | None = None, track=False):
         blocks = blocks if blocks is not None else self.alloc_blocks(len(keys))
         rid = f"l-{uuid.uuid4().hex[:12]}"
-        return rid, [self.am.submit_load_operation(rid, blocks, keys)]
+        futs = [self.am.submit_load_operation(rid, blocks, keys)]
+        if track:
+            self._futs[rid] = futs
+        elif futs:
+            self._rid_of[id(futs[0])] = rid
+        return rid, futs
+
+    def get_finished(self, store_rids: set[str]):
+        """One non-blocking poll, as vLLM's worker calls get_finished(finished_req_ids)
+        each step: the connector's get_finished_operations reports a save once every
+        save future of a finished request is done, and a load once its future is."""
+        return self.am.get_finished_operations(set(store_rids))
+
+    def op_ok(self, rid: str) -> bool:
+        """True if every operation of a reaped request succeeded."""
+        futs = self._futs.pop(rid, [])
+        ok = all(f.result() for f in futs)
+        if not ok:
+            self.failed += 1
+        return ok
 
     def wait(self, futs) -> bool:
-        """Poll as vLLM's get_finished does; True if every operation succeeded."""
+        """Poll the futures until done (sequential modes); True if every operation
+        succeeded. The connector's own futures dicts are drained by the next
+        get_finished_operations call, as vLLM's next step would."""
         while not all(f.done() for f in futs):
             time.sleep(POLL_S)
         ok = all(f.result() for f in futs)
+        # Reap the request from the connector's own tracking (its _save_futures /
+        # _load_futures), as vLLM's next get_finished would, so long sequential modes
+        # do not accumulate it and a later step loop never sees it.
+        rid = self._rid_of.pop(id(futs[0]), None) if futs else None
+        if rid is not None:
+            self.am.get_finished_operations({rid} if rid.startswith("s-") else set())
         if not ok:
             self.failed += 1
         return ok
@@ -413,144 +446,237 @@ def batches(keys: list[str], bs: int) -> list[list[str]]:
     return [keys[i:i + bs] for i in range(0, len(keys), bs)]
 
 
-# ── default mode phases ─────────────────────────────────────────────────────
+# ── default mode: jobs in flight (vLLM 0.30's step loop) ────────────────────
+#
+# As certus-connector-bench's default mode: up to --inflight jobs of --job-blocks keys
+# outstanding, submitted without waiting; each tick polls the connector once
+# (``get_finished`` → AsyncOperationManager.get_finished_operations, non-blocking)
+# and then sleeps to the next --step-us boundary. A store job is prepared in one tick
+# and submitted at the start of the next, as vLLM defers stores past the step. The
+# store pass uses --store-job-blocks / --store-inflight (default: --job-blocks /
+# --inflight). HF3FSKVConnector runs ONE save thread and ONE load thread, so jobs
+# beyond the first queue behind them; its parallelism is within a job (--numjobs
+# USRBIO clients over 8-page I/O batches). Phase ``get_finished`` is each job's
+# submit-to-reap time (what the one-job-at-a-time passes timed), ``reap_call`` the
+# one poll per tick; ``load_job`` / ``store_job`` repeat the per-job time under the
+# name certus-connector-bench's report keys use.
 
-def bench_store_lifecycle(stack, num_blocks, batch_size, min_duration) -> BenchResult:
-    """submit_store → get_finished, one request per batch.
 
-    Every pass stores fresh keys (the metadata server would otherwise reuse the
-    page). A write lands on disk before get_finished reports it, so there is no
-    background write-through to drain; the per-pass reset (metadata clear) is
-    excluded from wall time like the sibling benches' resets.
-    """
-    phases = _phases("submit_store", "get_finished", "reset")
-    total = drops = 0
-    excluded = 0.0
-    wall_start = time.perf_counter()
-    iteration = 0
-    while (time.perf_counter() - wall_start - excluded) < min_duration or iteration < 2:
-        for b in batches(stack.new_keys(num_blocks), batch_size):
-            n = store_batch(stack, b, phases)
-            total += n
-            drops += len(b) - n
-        iteration += 1
+def step_idle(step_us: float, t_tick: float) -> None:
+    """End of one tick: time.sleep(0) at --step-us 0, else sleep to the boundary."""
+    if step_us <= 0:
+        time.sleep(0)
+        return
+    rest = t_tick + step_us / 1e6 - time.perf_counter()
+    if rest > 0:
+        time.sleep(rest)
+
+
+class StepLoop:
+    """Jobs in flight on one connector, each in its own GPU block slot, reaped by one
+    get_finished() per tick. Loads: lookup (one batch_key_exists per job, stopping at
+    the first miss as a request's prefix does) then submit. Stores: prepared (keys
+    and slot chosen) in one tick, submitted the next."""
+
+    def __init__(self, stack: "H3fsStack", phases, *, load_slots=0, load_job_blocks=0,
+                 store_slots=0, store_job_blocks=0):
+        self.stack, self.phases = stack, phases
+        self.load_job_blocks, self.store_job_blocks = load_job_blocks, store_job_blocks
+        # GPU block ranges: load slots first, then store slots, never overlapping.
+        self.free_load = list(range(load_slots))
+        self.free_store = list(range(store_slots))
+        self.store_base = load_slots * load_job_blocks
+        self.pending: dict[str, tuple] = {}   # request id -> (kind, keys, slot, t_submit, tag)
+        self.deferred: list[tuple] = []       # (keys, slot, tag)
+        self.load_job = PhaseTiming("load_job")
+        self.store_job = PhaseTiming("store_job")
+        self.loaded = self.stored = self.misses = self.failed = 0
+
+    def start_load(self, keys, tag=None) -> bool:
+        slot = self.free_load[0]
+        t0 = time.perf_counter()
+        hit = self.stack.lookup(keys)
+        _rec(self.phases, "lookup", t0)
+        self.misses += len(keys) - hit
+        if not hit:
+            return False
+        base = slot * self.load_job_blocks
+        t0 = time.perf_counter()
+        rid, _ = self.stack.submit_load(keys[:hit], list(range(base, base + hit)), track=True)
+        _rec(self.phases, "submit_load", t0)
+        self.free_load.pop(0)
+        self.pending[rid] = ("load", keys[:hit], slot, time.perf_counter(), tag)
+        return True
+
+    def prepare_store(self, keys, tag=None) -> None:
+        self.deferred.append((keys, self.free_store.pop(0), tag))
+
+    def submit_deferred(self) -> None:
+        while self.deferred:
+            keys, slot, tag = self.deferred.pop(0)
+            base = self.store_base + slot * self.store_job_blocks
+            t0 = time.perf_counter()
+            rid, _ = self.stack.submit_store(keys, list(range(base, base + len(keys))), track=True)
+            _rec(self.phases, "submit_store", t0)
+            self.pending[rid] = ("store", keys, slot, time.perf_counter(), tag)
+
+    def reap(self) -> list:
+        """One get_finished() call; returns (kind, keys, tag) per finished job."""
+        t0 = time.perf_counter()
+        stores = {r for r, v in self.pending.items() if v[0] == "store"}
+        done_s, done_l = self.stack.get_finished(stores)
+        _rec(self.phases, "reap_call", t0)
+        now = time.perf_counter()
+        out = []
+        for rid in list(done_s) + list(done_l):
+            if rid not in self.pending:
+                continue
+            kind, keys, slot, t_sub, tag = self.pending.pop(rid)
+            ok = self.stack.op_ok(rid)
+            if kind == "load":
+                self.free_load.append(slot)
+                self.load_job.record(now - t_sub)
+                self.loaded += len(keys) if ok else 0
+            else:
+                self.free_store.append(slot)
+                self.store_job.record(now - t_sub)
+                self.stored += len(keys) if ok else 0
+            if not ok:
+                self.failed += 1
+                if kind == "load":
+                    self.misses += len(keys)
+            out.append((kind, keys, tag))
+        return out
+
+    def outstanding(self) -> bool:
+        return bool(self.pending or self.deferred)
+
+    def drain(self, step_us: float) -> None:
+        while self.outstanding():
+            t = time.perf_counter()
+            self.submit_deferred()
+            self.reap()
+            step_idle(step_us, t)
+
+
+def job_units(keys: list[str], job_blocks: int) -> list[list[str]]:
+    return [keys[i:i + job_blocks] for i in range(0, len(keys), job_blocks)]
+
+
+def populate(stack: "H3fsStack", keys: list[str], job_blocks: int, step_us: float) -> int:
+    """Store ``keys`` (outside any timing) as one-at-a-time jobs; returns keys stored."""
+    loop = StepLoop(stack, {}, store_slots=1, store_job_blocks=job_blocks)
+    for unit in job_units(keys, job_blocks):
+        loop.prepare_store(unit)
+        loop.drain(step_us)
+    return loop.stored
+
+
+def inflight_label(args, kind: str) -> str:
+    """The settings after a result's base label (make_report.py matches the base)."""
+    if kind == "store":
+        s = f"job_blocks={args.store_job_blocks} inflight={args.store_inflight}"
+    else:
+        s = f"job_blocks={args.job_blocks} inflight={args.inflight}"
+    return s + f" step_us={args.step_us:g} layers={args.layers}"
+
+
+def bench_store_lifecycle(stack, args, min_duration) -> BenchResult:
+    """Store with jobs in flight: per pass, --num-blocks fresh keys as --store-job-blocks
+    jobs with up to --store-inflight outstanding. A write lands on disk before the
+    connector reports it, so no write-through is drained; the per-pass reset (metadata
+    clear) is excluded from wall time like the sibling benches' resets."""
+    phases = _phases("submit_store", "get_finished", "reset", "reap_call")
+    loop = StepLoop(stack, phases, store_slots=args.store_inflight,
+                    store_job_blocks=args.store_job_blocks)
+    timed, passes, want = 0.0, 0, 0
+    while timed < min_duration or passes < 2:
+        t_pass = time.perf_counter()    # fresh keys inside the window, as the old pass had
+        todo = job_units(stack.new_keys(args.num_blocks), args.store_job_blocks)
+        want += args.num_blocks
+        while todo or loop.outstanding():
+            t = time.perf_counter()
+            loop.submit_deferred()
+            while todo and loop.free_store:
+                loop.prepare_store(todo.pop(0))
+            loop.reap()
+            if todo or loop.outstanding():
+                step_idle(args.step_us, t)
+        timed += time.perf_counter() - t_pass
+        passes += 1
         t0 = time.perf_counter()
         stack.reset()
         _rec(phases, "reset", t0)
-        excluded += time.perf_counter() - t0
+    phases["get_finished"] = loop.store_job
+    phases["store_job"] = loop.store_job
+    drops = want - loop.stored
     result = BenchResult(
-        label="Store Lifecycle (touch → prepare_store → submit → finish → complete)",
-        total_blocks=total, total_bytes=total * stack.block_bytes,
-        wall_seconds=time.perf_counter() - wall_start - excluded, phases=phases)
+        label=f"Store Lifecycle ({inflight_label(args, 'store')})",
+        total_blocks=loop.stored, total_bytes=loop.stored * stack.block_bytes,
+        wall_seconds=timed, phases=phases)
     result.counts = {"store_drops": drops}
     result.print_report()
+    print(f"  store jobs={len(loop.store_job.samples)}  passes={passes}")
     if drops:
         print(f"  Store failures (page or buffer allocation, write): {drops}")
     return result
 
 
-def bench_load_lifecycle(stack, key_batches, min_duration, *, cold: bool) -> BenchResult:
-    """lookup → submit_load → get_finished.
-
-    3FS has no memory tier, so warm and cold run the same disk path. Cold drops
-    the data file's page cache before every pass (outside the timed window),
-    which only matters for the buffered mock client; USRBIO never uses it.
-    """
-    phases = _phases("lookup", "submit_load", "get_finished")
+def bench_load_lifecycle(stack, keys, args, min_duration, *, cold: bool) -> BenchResult:
+    """Load with jobs in flight: ``keys`` (stored) as --job-blocks jobs with up to
+    --inflight outstanding, in a shuffled order per pass, through the step loop.
+    3FS has no memory tier, so warm and cold run the same disk path. Cold drops the
+    data file's page cache before every pass (outside the timed window), which only
+    matters for the buffered mock client; USRBIO never uses it."""
+    import random
+    phases = _phases("lookup", "submit_load", "get_finished", "reap_call")
     if cold:
         phases["demote"] = PhaseTiming("demote")
-    total = misses = 0
-    excluded = 0.0
+    units = job_units(keys, args.job_blocks)
+    rng = random.Random(args.seed)
+    loop = StepLoop(stack, phases, load_slots=args.inflight, load_job_blocks=args.job_blocks)
     rd0 = disk_read_bytes(stack.data_file)
-    wall_start = time.perf_counter()
-    iteration = 0
-    while (time.perf_counter() - wall_start - excluded) < min_duration or iteration < 2:
+    timed, passes = 0.0, 0
+    while timed < min_duration or passes < 2:
         if cold:
             t0 = time.perf_counter()
             stack.drop_page_cache()
             _rec(phases, "demote", t0)
-            excluded += time.perf_counter() - t0
-        for b in key_batches:
-            loaded, m = load_batch(stack, b, phases)
-            total += loaded
-            misses += m
-        iteration += 1
-    wall = time.perf_counter() - wall_start - excluded
+        t_pass = time.perf_counter()
+        todo = list(units)
+        rng.shuffle(todo)
+        while todo or loop.outstanding():
+            t = time.perf_counter()
+            while todo and loop.free_load:
+                loop.start_load(todo.pop(0))    # no hit: nothing submitted, counted
+            loop.reap()
+            if todo or loop.outstanding():
+                step_idle(args.step_us, t)
+        timed += time.perf_counter() - t_pass
+        passes += 1
     rd1 = disk_read_bytes(stack.data_file)
+    phases["get_finished"] = loop.load_job
+    phases["load_job"] = loop.load_job
     temp = "Cold" if cold else "Warm"
     result = BenchResult(
-        label=f"{temp} Load Lifecycle (lookup → touch → prepare → submit → finish → complete)",
-        total_blocks=total, total_bytes=total * stack.block_bytes,
-        wall_seconds=wall, phases=phases)
-    result.counts = {"load_misses": misses}
+        label=f"{temp} Load Lifecycle ({inflight_label(args, 'load')})",
+        total_blocks=loop.loaded, total_bytes=loop.loaded * stack.block_bytes,
+        wall_seconds=timed, phases=phases)
+    result.counts = {"load_misses": loop.misses}
     if cold and rd0 is not None and rd1 is not None and CLIENT == "mock":
         # Block-device reads under the data file; USRBIO data moves over RDMA
         # inside 3FS, not through this host's view of the device, so it is only
         # meaningful (and only recorded) for the mock.
         result.counts["disk_read_bytes"] = rd1 - rd0
     result.print_report()
-    if misses:
-        print(f"  Load misses: {misses}")
+    print(f"  load jobs={len(loop.load_job.samples)}  passes={passes}")
+    if loop.misses:
+        print(f"  Load misses: {loop.misses}")
     if cold and CLIENT == "mock":
         rd = (rd1 - rd0) if rd0 is not None and rd1 is not None else None
         print(f"  Cold pass device reads: "
               f"{'n/a' if rd is None else f'{rd / 1e6:.0f} MB'} for "
-              f"{total * stack.block_bytes / 1e6:.0f} MB loaded (mock client, buffered I/O)")
-    return result
-
-
-# ── mode: pipelined ─────────────────────────────────────────────────────────
-
-def bench_pipelined(stack, num_blocks, batch_size, min_duration, *,
-                    pipeline_depth=4, direction="store") -> BenchResult:
-    """Submit pipeline_depth requests before reaping; stores use fresh keys."""
-    is_store = direction == "store"
-    phases = _phases("prepare", "submit", "pipeline_drain", "complete")
-    keys = stack.new_keys(num_blocks)
-    if not is_store:
-        for b in batches(keys, batch_size):
-            store_batch(stack, b)
-    total = 0
-    excluded = 0.0
-    wall_start = time.perf_counter()
-    iteration = 0
-
-    def drain(in_flight):
-        nonlocal total
-        t0 = time.perf_counter()
-        for n, futs in in_flight:
-            if stack.wait(futs):
-                total += n
-        _rec(phases, "pipeline_drain", t0)
-        in_flight.clear()
-
-    while (time.perf_counter() - wall_start - excluded) < min_duration or iteration < 2:
-        pass_keys = stack.new_keys(num_blocks) if is_store else keys
-        in_flight = []
-        for b in batches(pass_keys, batch_size):
-            t0 = time.perf_counter()
-            hit = len(b) if is_store else stack.lookup(b)
-            _rec(phases, "prepare", t0)
-            if not hit:
-                continue
-            t0 = time.perf_counter()
-            _, futs = stack.submit_store(b) if is_store else stack.submit_load(b[:hit])
-            _rec(phases, "submit", t0)
-            in_flight.append((hit, futs))
-            if len(in_flight) >= pipeline_depth:
-                drain(in_flight)
-        if in_flight:
-            drain(in_flight)
-        iteration += 1
-        if is_store:
-            t0 = time.perf_counter()
-            stack.reset()
-            excluded += time.perf_counter() - t0
-    result = BenchResult(
-        label=f"Pipelined {'Store' if is_store else 'Load'} (depth={pipeline_depth})",
-        total_blocks=total, total_bytes=total * stack.block_bytes,
-        wall_seconds=time.perf_counter() - wall_start - excluded, phases=phases)
-    result.print_report()
+              f"{loop.loaded * stack.block_bytes / 1e6:.0f} MB loaded (mock client, buffered I/O)")
     return result
 
 
@@ -717,8 +843,8 @@ def main():
         epilog=(
             "Modes (--mode):\n"
             "\n"
-            "  default        store, warm load, cold load (no mixed eviction: no memory tier)\n"
-            "  pipelined      Submit N requests before reaping\n"
+            "  default        store, warm load, cold load with --inflight jobs of --job-blocks\n"
+            "                 outstanding (vLLM 0.30's step loop); no mixed eviction: no memory tier\n"
             "  prefix-miss    Vary prefix hit ratio to measure the prefix lookup cost\n"
             "  scheduler-step Scheduler steps with multi-request prefix sharing\n"
             "  all            All of the above\n"
@@ -748,7 +874,9 @@ def main():
     parser.add_argument("--verify", action="store_true",
                         help="store random GPU data, zero it, load it back and compare "
                              "bytes before benchmarking")
-    parser.add_argument("--bs", type=int, default=16, help="keys (blocks) per request")
+    parser.add_argument("--bs", type=int, default=16,
+                        help="keys (blocks) per request in prefix-miss and scheduler-step; the "
+                             "default mode uses --job-blocks")
     parser.add_argument("--num-blocks", type=int, default=128, help="keys per pass")
     parser.add_argument("--block-bytes", type=parse_size, default=DEFAULT_BLOCK_BYTES,
                         help="bytes per key = one GPU block of all layers (one 3FS page)")
@@ -764,9 +892,22 @@ def main():
     parser.add_argument("--no-eviction", action="store_true",
                         help="accepted for flag parity (there is no eviction phase)")
     parser.add_argument("--mode", default="default",
-                        choices=["default", "pipelined", "prefix-miss", "scheduler-step", "all"])
-    parser.add_argument("--pipeline-depth", type=int, default=4)
-    parser.add_argument("--direction", default="both", choices=["store", "load", "both"])
+                        choices=["default", "prefix-miss", "scheduler-step", "all"])
+    # jobs in flight (default mode), as certus-connector-bench's defaults
+    parser.add_argument("--job-blocks", type=int, default=64,
+                        help="(default) blocks per load job and, unless --store-job-blocks, per "
+                             "store job (default 64); at most --max-device-buffer-count")
+    parser.add_argument("--inflight", type=int, default=4,
+                        help="(default) jobs kept outstanding (default 4); prefix-miss and "
+                             "scheduler-step do not use it")
+    parser.add_argument("--step-us", type=float, default=100.0,
+                        help="scheduler tick of the in-flight passes, us (default 100; 0 = "
+                             "time.sleep(0) each tick)")
+    parser.add_argument("--store-job-blocks", type=int, default=None,
+                        help="(default) blocks per store job (default --job-blocks)")
+    parser.add_argument("--store-inflight", type=int, default=None,
+                        help="(default) store jobs outstanding (default --inflight)")
+    parser.add_argument("--seed", type=int, default=0, help="seed for the load job order")
     parser.add_argument("--hit-ratio", type=float, default=0.75)
     parser.add_argument("--requests-per-step", type=int, default=8)
     parser.add_argument("--num-sessions", type=int, default=32)
@@ -776,6 +917,32 @@ def main():
     args = parser.parse_args()
     if args.tp != 1:
         parser.error("--tp > 1 is not supported (one worker, one GPU)")
+    if args.store_job_blocks is None:
+        args.store_job_blocks = args.job_blocks
+    if args.store_inflight is None:
+        args.store_inflight = args.inflight
+    for name in ("job_blocks", "inflight", "store_job_blocks", "store_inflight"):
+        if getattr(args, name) < 1:
+            parser.error(f"--{name.replace('_', '-')} must be >= 1")
+    if args.step_us < 0:
+        parser.error("--step-us must be >= 0")
+    # The connector stages a whole load job in --max-device-buffer-count GPU buffers
+    # (one per block, CopyBufferAllocator) and fails a job that does not fit; vLLM's
+    # start_load_kv splits a request into such batches, this bench does not.
+    nbuf = max(args.max_device_buffer_count, args.numjobs * hc.DEFAULT_MAX_IO_ENTRIES)
+    for name in ("job_blocks", "store_job_blocks"):
+        if getattr(args, name) > nbuf:
+            parser.error(f"--{name.replace('_', '-')} {getattr(args, name)} is more than the "
+                         f"connector's {nbuf} staging buffers per direction "
+                         f"(--max-device-buffer-count, at least --numjobs x "
+                         f"{hc.DEFAULT_MAX_IO_ENTRIES}): a job that large fails its buffer "
+                         f"allocation. Use --job-blocks <= {nbuf}")
+    if args.mode in ("default", "all"):
+        jobs = -(-args.num_blocks // args.job_blocks)
+        if jobs < args.inflight:
+            parser.error(f"--num-blocks {args.num_blocks} makes only {jobs} job(s) of --job-blocks "
+                         f"{args.job_blocks}, but --inflight {args.inflight} needs at least "
+                         f"{args.inflight}: use --num-blocks >= {args.inflight * args.job_blocks}")
     if CLIENT == "mock":
         msg = ("vLLM's 3FS USRBIO client is not importable, so HF3FSKVConnector falls "
                "back to its file-backed MOCK client (buffered I/O): results are NOT 3FS.")
@@ -785,7 +952,9 @@ def main():
     os.makedirs(args.storage_path, exist_ok=True)
 
     kpr = max(4, args.num_blocks // args.requests_per_step)
-    num_gpu_blocks = max(args.bs * max(1, args.pipeline_depth),
+    # One slot range per job in flight (loads first, then stores; StepLoop), and the
+    # sequential modes' rolling allocator (alloc_blocks) over the rest.
+    num_gpu_blocks = max(args.inflight * args.job_blocks + args.store_inflight * args.store_job_blocks,
                          2 * args.requests_per_step * kpr, args.bs) + args.bs
 
     print(f"3FS Connector Lifecycle Benchmark (vLLM {vllm.__version__}, torch {torch.__version__}, "
@@ -795,6 +964,8 @@ def main():
         stack = H3fsStack(args, num_gpu_blocks, md.url)
         print(f"  storage={args.storage_path}  file={args.file_size / 2**30:.0f} GiB "
               f"({stack.num_pages} pages)  numjobs={args.numjobs}  gpu={args.gpu}")
+        print(f"  job_blocks={args.job_blocks} inflight={args.inflight} store_job_blocks="
+              f"{args.store_job_blocks} store_inflight={args.store_inflight} step_us={args.step_us:g}")
         print(f"  num_blocks={args.num_blocks}  bs={args.bs}  block_bytes={args.block_bytes}  "
               f"layers={args.layers}  kv=[{num_gpu_blocks}, {stack.num_heads}, "
               f"{args.tokens_per_block}, {stack.content_dim}] fp16  memory tier: none")
@@ -817,9 +988,9 @@ def main():
             "lookup_order": args.lookup_order, "vllm_version": vllm.__version__,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         }
-        if args.mode == "pipelined":
-            extra.update(pipeline_depth=args.pipeline_depth, direction=args.direction)
-        elif args.mode == "prefix-miss":
+        extra.update(job_blocks=args.job_blocks, inflight=args.inflight, step_us=args.step_us,
+                     store_job_blocks=args.store_job_blocks, store_inflight=args.store_inflight)
+        if args.mode == "prefix-miss":
             extra["hit_ratio"] = args.hit_ratio
         elif args.mode == "scheduler-step":
             extra.update(requests_per_step=args.requests_per_step,
@@ -856,14 +1027,7 @@ def _run(args, stack: H3fsStack) -> list[BenchResult]:
 
     def run_mode(m: str) -> list[BenchResult]:
         out: list[BenchResult] = []
-        if m == "pipelined":
-            print(f"\n  Mode: pipelined (depth={args.pipeline_depth}, direction={args.direction})")
-            for d in ("store", "load"):
-                if args.direction in (d, "both"):
-                    out.append(bench_pipelined(stack, args.num_blocks, args.bs, args.min_duration,
-                                               pipeline_depth=args.pipeline_depth, direction=d))
-                    stack.reset()
-        elif m == "prefix-miss":
+        if m == "prefix-miss":
             print(f"\n  Mode: prefix-miss (hit_ratio={args.hit_ratio})")
             out.append(bench_prefix_miss(stack, args.num_blocks, args.bs, args.min_duration,
                                          hit_ratio=args.hit_ratio))
@@ -875,19 +1039,20 @@ def _run(args, stack: H3fsStack) -> list[BenchResult]:
                                             num_sessions=args.num_sessions,
                                             num_blocks=args.num_blocks))
         else:
-            out.append(bench_store_lifecycle(stack, args.num_blocks, args.bs, args.min_duration))
+            print(f"\n  Mode: default ({inflight_label(args, 'load')})")
+            out.append(bench_store_lifecycle(stack, args, args.min_duration))
             keys = stack.new_keys(args.num_blocks)
-            kb = batches(keys, args.bs)
-            for b in kb:
-                store_batch(stack, b)
-            out.append(bench_load_lifecycle(stack, kb, args.min_duration, cold=False))
+            stored = populate(stack, keys, args.store_job_blocks, args.step_us)
+            if stored < len(keys):
+                print(f"  WARNING: populate stored {stored}/{len(keys)} keys")
+            out.append(bench_load_lifecycle(stack, keys, args, args.min_duration, cold=False))
             if not args.no_cold:
-                out.append(bench_load_lifecycle(stack, kb, args.min_duration, cold=True))
+                out.append(bench_load_lifecycle(stack, keys, args, args.min_duration, cold=True))
             print("\n  (mixed eviction skipped: HF3FSKVConnector has no memory tier to evict)")
         stack.reset()
         return out
 
-    modes = (["default", "pipelined", "prefix-miss", "scheduler-step"]
+    modes = (["default", "prefix-miss", "scheduler-step"]
              if args.mode == "all" else [args.mode])
     results: list[BenchResult] = []
     for m in modes:
