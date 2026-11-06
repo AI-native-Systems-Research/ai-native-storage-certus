@@ -532,8 +532,14 @@ def _start_load_job(manager, worker, unit, gpu_base, job_id, phases, *,
     if not touch_first:
         t0 = time.perf_counter(); manager.touch(unit)
         phases["touch"].record(time.perf_counter() - t0)
-    if not hits:
-        return hits
+    if hits:
+        _submit_load_job(manager, worker, hits, gpu_base, job_id, phases)
+    return hits
+
+
+def _submit_load_job(manager, worker, hits, gpu_base, job_id, phases) -> None:
+    """Pin ``hits`` (prepare_load) and submit them to GPU blocks ``gpu_base..``; phases
+    "prepare_load" and "submit_load"."""
     t0 = time.perf_counter()
     spec = manager.prepare_load(hits)
     phases["prepare_load"].record(time.perf_counter() - t0)
@@ -544,7 +550,6 @@ def _start_load_job(manager, worker, unit, gpu_base, job_id, phases, *,
         manager.complete_load(hits)   # not submitted: unpin before the error propagates
         raise
     phases["submit_load"].record(time.perf_counter() - t0)
-    return hits
 
 
 # ── in-flight passes: vLLM 0.30's step loop (store, warm, contention) ──
@@ -807,6 +812,21 @@ class _StepLoop:
         self.pending[self.job_id] = ("load", hits, slot, time.perf_counter(), tag)
         self.n_load += 1
         return True
+
+    def start_load_hits(self, hits, tag=None) -> None:
+        """Start one load job for ``hits``, keys the caller has already looked up and
+        touched (scheduler-step does its own prefix scan per request)."""
+        if len(hits) > self.load_job_blocks:
+            raise RuntimeError(f"load job of {len(hits)} blocks exceeds its GPU slot "
+                               f"({self.load_job_blocks})")
+        slot = self.free_load[0]
+        self.job_id += 1
+        _submit_load_job(self.manager, self.worker, hits, slot * self.load_job_blocks,
+                         self.job_id, self.phases)
+        self.sample(time.perf_counter())
+        self.free_load.pop(0)
+        self.pending[self.job_id] = ("load", list(hits), slot, time.perf_counter(), tag)
+        self.n_load += 1
 
     def prepare_store(self, unit, tag=None) -> bool:
         """Prepare one store job for ``unit``; it is submitted by the next tick's
@@ -1925,7 +1945,6 @@ def bench_prefix_miss(
 def bench_scheduler_step(
     manager: ShmqCertusOffloadingManager,
     worker,
-    kv_regions: list[KvCacheIpc],
     ring: Ring,
     batch_size: int,
     block_bytes: int,
@@ -1933,53 +1952,54 @@ def bench_scheduler_step(
     *,
     requests_per_step: int = 8,
     inflight: int = 4,
+    step_us: float = 100.0,
     num_sessions: int = 32,
     num_blocks: int = 128,
     lookup_order: str = LOOKUP_FIRST,
     prefix_sharing: str = "shared",
 ) -> BenchResult:
-    """Simulate continuous-batching scheduler steps matching production vLLM.
+    """Continuous-batching scheduler steps, driven as vLLM 0.30's offloading connector
+    is (offloading/scheduler.py and worker.py), on the step loop.
 
-    Models the real vLLM offloading connector call pattern:
-      - Per-request maximal prefix scan (per-key lookup, break on miss),
-        then touch() of the request's keys (vLLM >= 0.21), or touch() first
-        with ``lookup_order=TOUCH_FIRST`` (vLLM <= 0.20)
-      - Store deferred: submitted after drain, drained at next step start
-      - drain_workers measures only load completion
-      - Prefix cache fills naturally (no per-step key removal)
-      - Geometric session prefix distribution (varied hit ratios)
-      - Backpressure: store drain at step start models has_pending_work()
+    Each step admits up to ``requests_per_step`` new requests from the session pool.
+    Each request does a maximal prefix scan (per-key lookup, stopping at the first
+    miss) and then touches its keys (touch first with ``lookup_order=TOUCH_FIRST``,
+    vLLM <= 0.20). Its prefix hits become ONE load job of its own (vLLM:
+    update_state_after_alloc, one job per request), submitted that step without
+    waiting; at most ``inflight`` load jobs are outstanding, and a request that would
+    exceed that stays queued for a later step (vLLM's scheduler bounds its running
+    requests the same way). Hit keys another outstanding job is already loading are
+    not loaded again: the request waits for that job (vLLM delays a request whose hit
+    chunks are being loaded, then finds them in the GPU prefix cache). Once a
+    request's loads are reaped it computes its suffix: its store is prepared in that
+    step (prepare_store, then touch, as _build_store_jobs does) and submitted at the
+    start of the next (prepare_store_kv). Finished jobs are reaped by one non-blocking
+    get_finished() per tick; each tick then sleeps to the next ``step_us`` boundary.
+    Nothing waits for a particular job.
 
-    ``prefix_sharing="shared"`` gives every session a slice of one shared
-    prefix pool (like a common system prompt); ``"private"`` gives each
-    session its own prefix blocks, so no prefix block is shared between
-    sessions (a session's own prefix returns every
-    num_sessions / requests_per_step steps). All prefix blocks are stored up
-    front.
+    ``prefix_sharing="shared"`` gives every session a slice of one shared prefix pool
+    (like a common system prompt); ``"private"`` gives each session its own prefix
+    blocks, so no prefix block is shared between sessions. All prefix blocks are
+    stored up front. Keys are never removed between steps: the cache fills and
+    evicts naturally.
+
+    Throughput counts blocks loaded plus blocks stored over the timed window, which
+    ends when the last outstanding job is reaped.
     """
     touch_first = lookup_order == TOUCH_FIRST
     keys_per_request = max(4, num_blocks // requests_per_step)
     prefix_len = keys_per_request // 2
     suffix_len = keys_per_request - prefix_len
 
-    phases = {
-        "touch_lookup": PhaseTiming("touch_lookup"),
-        "prepare_store": PhaseTiming("prepare_store"),
-        "prepare_load": PhaseTiming("prepare_load"),
-        "submit": PhaseTiming("submit"),
-        "drain_workers": PhaseTiming("drain_workers"),
-        "complete": PhaseTiming("complete"),
-        "take_events": PhaseTiming("take_events"),
-    }
+    phases = _inflight_phases("touch", "lookup", "prepare_load", "submit_load",
+                              "load_job", "complete_load", "prepare_store",
+                              "store_touch", "submit_store", "store_job",
+                              "complete_store", "take_events", "step")
 
-    # Build a shared prefix pool, then assign each session a prefix slice.
-    # Sessions share earlier blocks (like production prefix caching) and
-    # diverge at session-specific points. Geometric distribution controls
-    # where each session diverges — short prefixes miss more. With private
-    # prefixes each session gets its own blocks of the same lengths instead.
+    # Session prefixes: slices of one shared pool, geometric lengths (short prefixes
+    # miss more), or private blocks of the same lengths.
     max_prefix_pool = min(prefix_len * 4, num_blocks * 2)
     shared_prefix_pool = make_content_keys(max_prefix_pool, seed=77777)
-
     session_prefixes: list[list[bytes]] = []
     rng = random.Random(42)
     for s in range(num_sessions):
@@ -1994,179 +2014,192 @@ def bench_scheduler_step(
         if prefix_sharing == "private" else shared_prefix_pool
     )
     _populate_keys(manager, worker, prefix_keys, batch_size)
+    manager._ring.flush_to_ssd()   # the populate's write-through must not overlap the steps
 
-    total_blocks = 0
+    # One GPU slot per job, as large as a request (its longest prefix plus suffix).
+    # A request whose store finds no free slot keeps its place and stores in a
+    # later step; admission stops while requests_per_step requests are queued.
+    slot_blocks, load_slots, store_slots = sched_step_slots(
+        num_blocks, requests_per_step, inflight)
+    loop = _StepLoop(manager, worker, phases, touch_first=touch_first,
+                     load_slots=load_slots, load_job_blocks=slot_blocks,
+                     store_slots=store_slots, store_job_blocks=slot_blocks,
+                     drain_events=True)
+
+    next_req = 0            # requests are numbered; request r is session r % num_sessions
+    loading: dict[bytes, int] = {}      # key -> outstanding load job loading it
+    job_of: dict[int, int] = {}         # request -> its outstanding load job
+    blocked: dict[int, list[bytes]] = {}  # request loading its hits -> blocks it then stores
+    delayed: dict[int, tuple[set[int], set[bytes]]] = {}  # request -> (jobs it waits on,
+                                        # keys those jobs loaded: now in the GPU prefix cache)
+    computable: list[tuple[int, list[bytes]]] = []        # loads done: blocks to store
     total_steps = 0
     total_prefix_hits = 0
     total_suffix_stores = 0
-    wall_start = time.perf_counter()
-    job_id = 1_000_000
+    total_requests = 0
+    total_delays = 0
 
-    prev_store_pending = False
-    prev_stored_keys: list[bytes] | None = None
+    def request_keys(r: int) -> list[bytes]:
+        # A seed of its own per request (above the prefix seeds: 77777 and
+        # 1_000_000_000 + session). The old seed, session x 10,000 + 5,000 + step x 100
+        # + index, collided once the step passed 100 (a few seconds in): requests got
+        # other requests' suffix keys, which then hit at lookup or were not reserved
+        # again for store.
+        suffix = make_content_keys(suffix_len, seed=2_000_000_000 + r)
+        return session_prefixes[r % num_sessions] + suffix
 
-    while (time.perf_counter() - wall_start) < min_duration or total_steps < 3:
-        # Drain the PREVIOUS step's deferred store (not timed — production
-        # processes store completions asynchronously between steps).
-        if prev_store_pending:
-            while True:
-                finished = worker.get_finished()
-                if finished:
-                    break
-                _poll_wait()
-            manager.complete_store(prev_stored_keys, success=True)
-            total_blocks += len(prev_stored_keys)
-            prev_store_pending = False
-            prev_stored_keys = None
-
-        # Build requests for this step.
-        all_load_keys: list[bytes] = []
-        all_store_keys: list[bytes] = []
-
-        t_tl = time.perf_counter()
-        for r in range(requests_per_step):
-            s_idx = (total_steps * requests_per_step + r) % num_sessions
-            prefix = session_prefixes[s_idx]
-            suffix = make_content_keys(
-                suffix_len,
-                seed=s_idx * 10_000 + 5_000 + total_steps * 100 + r,
-            )
-            req_keys = prefix + suffix
-
-            # vLLM <= 0.20 touched before the lookup.
-            if touch_first:
-                manager.touch(req_keys)
-
-            # Maximal prefix scan (matches vLLM's _maximal_prefix_lookup).
-            prefix_hits = []
-            for k in req_keys:
-                if manager.lookup(k):
-                    prefix_hits.append(k)
-                else:
-                    break
-
-            # vLLM >= 0.21 (get_num_new_matched_tokens) touches after it.
-            if not touch_first:
-                manager.touch(req_keys)
-
-            suffix_misses = req_keys[len(prefix_hits):]
-            all_load_keys.extend(prefix_hits)
-            all_store_keys.extend(suffix_misses)
-            total_prefix_hits += len(prefix_hits)
-            total_suffix_stores += len(suffix_misses)
-
-        phases["touch_lookup"].record(time.perf_counter() - t_tl)
-
-        # Deduplicate: multiple requests in a step can share prefix keys.
-        seen_load: set[bytes] = set()
-        deduped_load = []
-        for k in all_load_keys:
-            kb = k if isinstance(k, bytes) else k
-            if kb not in seen_load:
-                seen_load.add(kb)
-                deduped_load.append(k)
-        all_load_keys = deduped_load
-
-        seen_store: set[bytes] = set()
-        deduped_store = []
-        for k in all_store_keys:
-            kb = k if isinstance(k, bytes) else k
-            if kb not in seen_store:
-                seen_store.add(kb)
-                deduped_store.append(k)
-        all_store_keys = deduped_store
-
-        # Prepare stores.
-        store_result = None
-        if all_store_keys:
+    def admit(r: int, gpu_cached: set[bytes]) -> str:
+        """One scheduling attempt for request r, as get_num_new_matched_tokens and
+        update_state_after_alloc make it: skip its leading blocks already in the GPU
+        prefix cache (``gpu_cached``: loaded by the jobs it waited on), look up the
+        rest (maximal prefix), touch (also on a delayed attempt, as vLLM does), then
+          "delayed": a hit is being loaded by another job; retried when those end;
+          "no_slot": it has hits to load and --inflight jobs are outstanding;
+          "loading": its hits are one load job of its own;
+          "ready":   nothing to load: it computes (stores) this step."""
+        nonlocal total_prefix_hits, total_suffix_stores, total_requests, total_delays
+        req_keys = request_keys(r)
+        start = 0
+        while start < len(req_keys) and req_keys[start] in gpu_cached:
+            start += 1
+        rest = req_keys[start:]
+        t0 = time.perf_counter()
+        if touch_first:
+            manager.touch(req_keys)
+            phases["touch"].record(time.perf_counter() - t0)
             t0 = time.perf_counter()
-            store_result = manager.prepare_store(all_store_keys)
-            phases["prepare_store"].record(time.perf_counter() - t0)
-
-        # Prepare loads.
-        load_spec = None
-        if all_load_keys:
-            t0 = time.perf_counter()
-            load_spec = manager.prepare_load(all_load_keys)
-            phases["prepare_load"].record(time.perf_counter() - t0)
-
-        # Submit load only; store is deferred to after drain.
-        t0 = time.perf_counter()
-        if load_spec and all_load_keys:
-            gpu_ids = list(range(len(all_load_keys)))
-            job_id += 1
-            worker.submit_load(job_id, load_spec, _FakeGPUSpec(gpu_ids))
-        phases["submit"].record(time.perf_counter() - t0)
-
-        # Drain workers: only the load future (production behavior).
-        t0 = time.perf_counter()
-        pending = 1 if (load_spec and all_load_keys) else 0
-        drained = 0
-        while drained < pending:
-            finished = worker.get_finished()
-            if finished:
-                drained += len(finished)
-            else:
-                _poll_wait()
-        phases["drain_workers"].record(time.perf_counter() - t0)
-
-        # Complete load.
-        t0 = time.perf_counter()
-        if all_load_keys:
-            manager.complete_load(all_load_keys)
-            total_blocks += len(all_load_keys)
-        phases["complete"].record(time.perf_counter() - t0)
-
-        # Drain events.
-        t0 = time.perf_counter()
-        for ev in manager.take_events():
-            pass
-        phases["take_events"].record(time.perf_counter() - t0)
-
-        total_steps += 1
-
-        # Submit store after drain — deferred to next step's start.
-        if store_result and store_result.keys_to_store:
-            stored_keys = store_result.keys_to_store
-            gpu_ids = list(range(len(stored_keys)))
-            job_id += 1
-            worker.submit_store(
-                job_id, _FakeGPUSpec(gpu_ids), store_result.store_spec,
-            )
-            prev_store_pending = True
-            prev_stored_keys = stored_keys
-
-    # Drain the last step's deferred store.
-    if prev_store_pending:
-        while True:
-            finished = worker.get_finished()
-            if finished:
+        hits = []
+        for k in rest:
+            if not manager.lookup(k):
                 break
-            _poll_wait()
-        manager.complete_store(prev_stored_keys, success=True)
-        total_blocks += len(prev_stored_keys)
+            hits.append(k)
+        phases["lookup"].record(time.perf_counter() - t0)
+        if not touch_first:
+            t0 = time.perf_counter()
+            manager.touch(req_keys)
+            phases["touch"].record(time.perf_counter() - t0)
+        busy = {loading[k] for k in hits if k in loading}
+        if busy:
+            total_delays += 1
+            delayed[r] = (busy, set(gpu_cached))
+            return "delayed"
+        if hits and not loop.load_slot_free():
+            return "no_slot"
+        missing = rest[len(hits):]
+        total_prefix_hits += start + len(hits)
+        total_suffix_stores += len(missing)
+        total_requests += 1
+        if hits:
+            loop.start_load_hits(hits, tag=r)
+            jid = job_of[r] = loop.job_id
+            for k in hits:
+                loading[k] = jid
+            blocked[r] = missing
+            return "loading"
+        computable.append((r, missing))
+        return "ready"
 
+    stored_keys: list[bytes] = []              # every suffix block stored, for the cleanup
+    retry: list[tuple[int, set[bytes]]] = []   # delayed requests whose blockers ended
+
+    wall_start = time.perf_counter()
+    loop.sample(wall_start)
+    with loop.cleanup():
+        while True:
+            t_tick = time.perf_counter()
+            running = (t_tick - wall_start) < min_duration or total_steps < 3
+            # Start of the step: stores deferred from the last step, then schedule:
+            # requests already waiting first (vLLM's waiting queue is FCFS), then new
+            # ones, up to --requests-per-step per step and a bounded backlog.
+            loop.submit_deferred()
+            for i, (r, cached) in enumerate(retry):
+                if admit(r, cached) == "no_slot":
+                    retry = retry[i:]
+                    break
+            else:
+                retry = []
+            admitted = 0
+            backlog = len(computable) + len(delayed) + len(blocked)
+            while (running and not retry and admitted < requests_per_step
+                   and backlog < requests_per_step + inflight):
+                if admit(next_req, set()) == "no_slot":
+                    break             # next_req is tried again next step
+                next_req += 1
+                admitted += 1
+                backlog += 1
+            # Requests whose loads are done compute; their stores go out next step.
+            while computable and loop.store_slot_free():
+                r, missing = computable.pop(0)
+                if missing:
+                    stored_keys.extend(missing)   # removed when the run ends
+                    loop.prepare_store(missing, tag=r)
+            phases["step"].record(time.perf_counter() - t_tick)
+            # One non-blocking reap per tick.
+            for kind, keys, tag in loop.reap():
+                if kind != "load":
+                    continue
+                jid = job_of.pop(tag)
+                for k in keys:
+                    if loading.get(k) == jid:
+                        del loading[k]
+                computable.append((tag, blocked.pop(tag)))
+                for r in [r for r, (aw, _c) in delayed.items() if jid in aw]:
+                    aw, cached = delayed[r]
+                    aw.discard(jid)
+                    cached.update(keys)
+                    if not aw:
+                        del delayed[r]
+                        retry.append((r, cached))
+            total_steps += 1
+            if not running and not (delayed or retry or blocked or computable
+                                    or loop.deferred or loop.pending):
+                break
+            _step_idle(step_us, t_tick)
     wall = time.perf_counter() - wall_start
+    loop.sample(wall_start + wall)
+
+    ls, ss = loop.load_stats, loop.store_stats
+    phases["load_job"], phases["store_job"] = ls.job, ss.job
+    phases["load_transfer"], phases["store_transfer"] = ls.transfer, ss.transfer
+    total_blocks = ls.blocks + ss.blocks
     result = BenchResult(
         label=(
             f"Scheduler Step (reqs={requests_per_step}, "
-            f"sessions={num_sessions}, keys/req={keys_per_request})"
+            f"sessions={num_sessions}, keys/req={keys_per_request}, "
+            f"inflight={inflight}, step_us={step_us:g})"
         ),
         total_blocks=total_blocks,
         total_bytes=total_blocks * block_bytes,
         wall_seconds=wall,
         phases=phases,
     )
+    result.counts = {"store_drops": ss.misses}
     result.print_report()
     print(f"  Steps={total_steps}  steps/s={total_steps/wall:.1f}  "
+          f"requests={total_requests}  requests/s={total_requests/wall:.1f}  "
           f"prefix_hits={total_prefix_hits}  suffix_stores={total_suffix_stores}  "
-          f"requests={total_steps * requests_per_step}  "
+          f"delays (hit being loaded by another job)={total_delays}  "
+          f"loaded={ls.blocks}  stored={ss.blocks}  store_drops={ss.misses}  "
           f"lookup_order={lookup_order}  prefix_sharing={prefix_sharing}")
+    _print_inflight_summary(ls, wall, "load")
+    _print_inflight_summary(ss, wall, "store")
 
-    # Clean up the prefix blocks.
-    _remove_keys(ring, prefix_keys, manager._world_size)
+    # Remove everything this run stored (the prefix pool and the suffixes), so a later
+    # run in the same server session starts from the same state.
+    _remove_keys(ring, prefix_keys + stored_keys, manager._world_size)
 
     return result
+
+
+def sched_step_slots(num_blocks: int, requests_per_step: int, inflight: int):
+    """scheduler-step's GPU slots: (blocks per slot, load slots, store slots). A slot
+    holds one request: its longest prefix (the shared pool, 4 x half a request, at
+    most 2 x --num-blocks) plus its suffix. Store slots: one step's requests plus
+    the loads that can finish in one reap."""
+    kpr = max(4, num_blocks // requests_per_step)
+    prefix_len = kpr // 2
+    slot = min(prefix_len * 4, num_blocks * 2) + (kpr - prefix_len)
+    return slot, inflight, requests_per_step + inflight
 
 
 # ── pattern-driven mode (same YAML patterns as certus_fio) ──────────────────
@@ -2642,9 +2675,15 @@ def _populate_keys(
         gpu_ids = list(range(len(stored)))
         job_id += 1
         worker.submit_store(job_id, _FakeGPUSpec(gpu_ids), result.store_spec)
-        while not worker.get_finished():
-            _poll_wait()
-        manager.complete_store(stored, success=True)
+        res = []
+        while not res:
+            res = worker.get_finished()
+            if not res:
+                _poll_wait()
+        ok = all(r.success for r in res)
+        manager.complete_store(stored, success=ok)
+        if not ok:
+            raise RuntimeError(f"populate: store job {job_id} failed")
 
 
 # ── main ────────────────────────────────────────────────────────────────────
@@ -2818,8 +2857,8 @@ def build_parser() -> argparse.ArgumentParser:
                              "request instead")
     parser.add_argument("--inflight", type=int, default=4,
                         help="(default, contention, scheduler-step) jobs kept outstanding by the "
-                             "store, warm and cold passes and contention's loads (default 4; "
-                             "scheduler-step reads it where it read --pipeline-depth): store and cold "
+                             "store, warm and cold passes, contention's loads and scheduler-step's "
+                             "loads (one job per request) (default 4): store and cold "
                              "loads reach their plateau only at 4 (store 14.6 vs 13.1 GB/s at 2), "
                              "and LongDocQA's client runs 4 (about 2 measured); needs server "
                              "channels > the jobs in flight")
@@ -2886,6 +2925,8 @@ def resolve_args(parser, argv=None, mode: str | None = None) -> argparse.Namespa
                                  if mode in INFLIGHT_MODES else 1)
     if args.step_us < 0:
         parser.error("--step-us must be >= 0")
+    if mode == "scheduler-step" and (args.inflight < 1 or args.requests_per_step < 1):
+        _fail(parser, mode_all, mode, "--inflight and --requests-per-step must be >= 1")
     if args.pieces_per_block < 1:
         parser.error(f"--pieces-per-block must be >= 1, got {args.pieces_per_block}")
     if args.block_bytes % args.pieces_per_block:
@@ -2967,11 +3008,10 @@ def gpu_blocks(args) -> int:
                    args.inflight * args.job_blocks + args.store_inflight * args.store_job_blocks)
     blocks = max(args.num_blocks, args.bs)
     if mode == "scheduler-step":
-        # The scheduler-step mode batches a whole step's loads: up to
-        # requests_per_step x (prefix pool + suffix) keys. Only that mode needs it.
-        kpr = max(4, args.num_blocks // args.requests_per_step)
-        step_keys = args.requests_per_step * (min((kpr // 2) * 4, args.num_blocks * 2) + (kpr - kpr // 2))
-        blocks = max(blocks, step_keys)
+        # One slot per load job and per store job (sched_step_slots).
+        slot, loads, stores = sched_step_slots(args.num_blocks, args.requests_per_step,
+                                               args.inflight)
+        blocks = max(blocks, slot * (loads + stores))
     return blocks
 
 
@@ -3015,6 +3055,8 @@ def run_params(args, gpus) -> dict:
     if mode == "prefix-miss":
         extra["hit_ratio"] = args.hit_ratio
     elif mode == "scheduler-step":
+        extra["inflight"] = args.inflight
+        extra["step_us"] = args.step_us
         extra["requests_per_step"] = args.requests_per_step
         extra["num_sessions"] = args.num_sessions
         extra["prefix_sharing"] = args.prefix_sharing
@@ -3104,11 +3146,15 @@ def main():
                      f"certus-server with --channels {need * tp} or more")
 
     for m, a in resolved.items():
-        if m in INFLIGHT_MODES:
+        if m in INFLIGHT_MODES or m == "scheduler-step":
             # Jobs beyond the pool's threads queue in the executor (as in vLLM, whose
             # pool has 4 threads); each running job holds a channel, the main thread one.
-            jobs = (a.inflight + a.store_inflight if m == "contention"
-                    else max(a.inflight, a.store_inflight))
+            if m == "scheduler-step":
+                jobs = sum(sched_step_slots(a.num_blocks, a.requests_per_step, a.inflight)[1:])
+            elif m == "contention":
+                jobs = a.inflight + a.store_inflight
+            else:
+                jobs = max(a.inflight, a.store_inflight)
             need = min(a.workers, jobs) + 1
             if ring._num_channels < need:
                 sys.exit(f"error: --mode {m} needs {need} shmq channels, the server "
@@ -3198,10 +3244,10 @@ def main():
             print(f"\n  Mode: scheduler-step (reqs={a.requests_per_step}, "
                   f"sessions={a.num_sessions})")
             r = bench_scheduler_step(
-                manager, worker, regions, ring,
-                a.bs, acct_block_bytes, a.min_duration,
+                manager, worker, ring, a.bs, acct_block_bytes, a.min_duration,
                 requests_per_step=a.requests_per_step,
                 inflight=a.inflight,
+                step_us=a.step_us,
                 num_sessions=a.num_sessions,
                 num_blocks=a.num_blocks,
                 lookup_order=a.lookup_order,

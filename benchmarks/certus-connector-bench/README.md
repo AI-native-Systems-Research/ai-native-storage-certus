@@ -178,12 +178,16 @@ second manager and worker, is gone; its numbers are not comparable with these.
 
 #### Scheduler-step mode (`--mode scheduler-step`)
 
-Simulates continuous-batching scheduler steps with the production vLLM call pattern:
+Simulates continuous-batching scheduler steps, driven as vLLM 0.30's offloading connector is (`offloading/scheduler.py`, `worker.py`), on the same step loop as the in-flight passes:
 
-- Each step runs `--requests-per-step` requests. Each request does a maximal-prefix lookup (per-key `lookup`, stopping at the first miss) and then a `touch` of all its keys (touch first with `--lookup-order touch-first`). Hits are loaded; the rest of the request is stored.
-- With `--prefix-sharing shared` (default), sessions share one prefix pool and diverge at geometric points (mean = half a request), so short prefixes miss more, as with production prefix caching. With `--prefix-sharing private`, each session gets its own prefix blocks of the same lengths, so no prefix block is shared between sessions; a session's own prefix comes back only every `num_sessions / requests_per_step` steps, so a touch reply practically never helps a later request's lookup. All sessions' prefix blocks are stored up front (about `num_sessions` × the mean prefix length), which can exceed the memory tier and leave some of them on SSD. Keys are never removed between steps, so the cache fills and evicts naturally.
-- Loads and stores are deduplicated across the step's requests.
-- Stores are submitted after the load drain and drained, untimed, at the start of the next step. `drain_workers` therefore measures only load completion, as vLLM never blocks a step on its stores.
+- Each step admits up to `--requests-per-step` new requests. Each request does a maximal-prefix lookup (per-key `lookup`, stopping at the first miss) and then a `touch` of all its keys (touch first with `--lookup-order touch-first`).
+- A request's prefix hits are **one load job of its own** (vLLM: one job per request), submitted that step without waiting. At most `--inflight` load jobs are outstanding (default 4); a request that would need another one waits for a later step, lookup and all, as vLLM re-runs a delayed request's lookup.
+- Hit keys another outstanding job is already loading are not loaded twice: the request waits for that job (vLLM delays a request whose hit chunks are being loaded, then finds them in its GPU prefix cache).
+- Once a request's loads are reaped it computes its suffix: its store is prepared that step (`prepare_store`, then `touch`) and submitted at the start of the next, as vLLM defers stores past the step's sampling.
+- Finished jobs are reaped by one non-blocking `get_finished()` per tick, then the loop sleeps to the next `--step-us` boundary (default 100 µs). Nothing waits for a particular job.
+- With `--prefix-sharing shared` (default), sessions share one prefix pool and diverge at geometric points (mean = half a request), so short prefixes miss more, as with production prefix caching. With `--prefix-sharing private`, each session gets its own prefix blocks of the same lengths, so no prefix block is shared between sessions. All sessions' prefix blocks are stored up front (about `num_sessions` × the mean prefix length), which can exceed the memory tier and leave some of them on SSD. Keys are never removed between steps, so the cache fills and evicts naturally.
+
+Until 2026-11-06 this mode merged each step's loads into one job and waited for it inside the step (one job in flight, transfer and host work in series), and `--inflight` had no effect. Its numbers from before then are not comparable with the current ones.
 
 ```bash
 python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
@@ -201,7 +205,7 @@ python benchmarks/certus-connector-bench/bench_connector_lifecycle.py \
     --mode scheduler-step --prefix-sharing private
 ```
 
-Reports steps/sec, per-step phase times (touch_lookup = all of the step's lookups and touches, prepare_store, prepare_load, submit, drain_workers, complete, take_events), and prefix hit/suffix store counts. `--inflight` has no effect in this mode (it read `--pipeline-depth` before that flag was removed, with the same effect: none): each step submits one load and waits for it.
+Reports throughput (blocks loaded plus stored, over the timed window), steps/s and requests/s, prefix hit and suffix store counts, per-call phases (lookup, touch, prepare_load, submit_load, prepare_store, store_touch, submit_store, complete_load, complete_store, take_events; `step` = one tick's scheduling work; `reap_call` = the one `get_finished()` per tick) and each job's submit-to-reap time (`load_job`, `store_job`), with jobs outstanding and concurrency per direction.
 
 #### Pattern mode (`--pattern`)
 

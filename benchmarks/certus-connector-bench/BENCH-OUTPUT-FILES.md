@@ -190,7 +190,7 @@ The phases correspond to actual connector API calls in the vLLM offloading path:
 | `submit_load` | `worker.submit_load()` — enqueue load to the ring |
 | `complete_load` | `manager.complete_load()` — finalize loaded blocks |
 | `reap_call` | (default store/warm, contention) one non-blocking `get_finished()` per tick |
-| `touch_lookup` | (scheduler-step) batched touch + lookup per step |
+| `step` | (scheduler-step) one tick's scheduling work: admitting requests (lookup, touch, load submits) and preparing stores |
 | `take_events` | (contention) event polling under concurrent load |
 
 Not every phase appears in every mode — only the phases that mode exercises.
@@ -204,7 +204,7 @@ Each mode exercises a different aspect of the connector:
 | **default** | Store, Warm Load, Cold Load, Mixed Store+Load Under Eviction | The four standard lifecycle paths: write blocks to NVMe, read them back from memory tier (warm), read them back from NVMe (cold), and mixed read/write under memory pressure with eviction. |
 | **prefix-miss** | Prefix-Miss Load | Simulates partial cache hits: `hit_ratio` fraction of keys are pre-stored (warm), the rest miss and trigger cold loads. Models real serving where some prompt prefixes are cached. |
 | **contention** | Store Thread, Load Thread (Load Alone printed only) | Loads and stores in flight together on one worker through the step loop, vs. the same loads alone. Measures contention overhead. |
-| **scheduler-step** | Scheduler Step | Reproduces vLLM's scheduler loop: each step touches/lookups `requests_per_step` requests from `num_sessions` conversations, stores new blocks, loads cold blocks. The most realistic single-GPU serving simulation. |
+| **scheduler-step** | Scheduler Step | Reproduces vLLM 0.30's scheduler loop on the step loop: each step admits `requests_per_step` requests from `num_sessions` conversations; each request's prefix hits are one load job (up to `inflight` outstanding), its new blocks are stored after its load is reaped; one non-blocking reap per `step_us` tick. The most realistic single-GPU serving simulation. |
 
 ### Per-mode CSV files: `<mode>_<tag>_<timestamp>.csv`
 
