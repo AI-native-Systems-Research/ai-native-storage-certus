@@ -1173,6 +1173,13 @@ impl IGpuServices for GpuServicesComponent {
                 ) -> std::os::raw::c_int;
             }
 
+            // Without an SPDK environment there is no SPDK memory map to register
+            // in: spdk_mem_register would dereference it and crash. The CUDA
+            // pinning above is still useful for async GPU transfers.
+            if !interfaces::is_spdk_env_active() {
+                return Ok(());
+            }
+
             let rc = unsafe { spdk_mem_register(ptr, size) };
             if rc != 0 && rc != -16 {
                 // rc == -16 (EBUSY): memory already registered with SPDK (e.g. allocated
@@ -1208,9 +1215,13 @@ impl IGpuServices for GpuServicesComponent {
                 ) -> std::os::raw::c_int;
             }
 
-            let rc = unsafe { spdk_mem_unregister(ptr, size) };
-            if rc != 0 {
-                return Err(format!("spdk_mem_unregister failed (rc={})", rc));
+            // Registered with SPDK only when an SPDK environment was active (see
+            // register_host_memory); without one there is nothing to unregister.
+            if interfaces::is_spdk_env_active() {
+                let rc = unsafe { spdk_mem_unregister(ptr, size) };
+                if rc != 0 {
+                    return Err(format!("spdk_mem_unregister failed (rc={})", rc));
+                }
             }
 
             // SAFETY: ptr was previously registered with cudaHostRegister.

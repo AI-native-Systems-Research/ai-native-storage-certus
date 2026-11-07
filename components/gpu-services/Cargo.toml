@@ -26,6 +26,7 @@ spdk-env = { workspace = true, optional = true }
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 base64 = "0.22"
+libc = "0.2"
 
 [[bench]]
 name = "gpu_services_benchmark"
@@ -44,6 +45,10 @@ required-features = ["p2p"]
 
 [[test]]
 name = "gpu_nvme_p2p"
+required-features = ["p2p"]
+
+[[test]]
+name = "host_memory_without_spdk"
 required-features = ["p2p"]
 
 [lints]
