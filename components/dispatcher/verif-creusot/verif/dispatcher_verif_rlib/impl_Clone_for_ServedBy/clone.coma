@@ -1,4 +1,4 @@
-(* #"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 118 9 118 29 *)
+(* #"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 118 9 118 29 *)
 
 (* <ServedBy as std::clone::Clone> *)
 
@@ -10,7 +10,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_ServedBy [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 118 9 118 29]
+let clone_ServedBy [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 118 9 118 29]
   (self: t_ServedBy) (return (x: t_ServedBy)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_ServedBy = Any.any_l () | & self: t_ServedBy = self ])

@@ -2,14 +2,52 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_dm_convert_to_storage": { "prover": "alt-ergo", "time": 0.025 },
-      "vc_dm_release_read": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_dm_convert_to_storage": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_dm_release_read": { "prover": "alt-ergo", "time": 0.026 },
       "vc_elim_Some": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_elim_Some'0": { "prover": "alt-ergo", "time": 0.021 },
-      "vc_em_reserve": { "prover": "alt-ergo", "time": 0.023 },
-      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.021 },
-      "vc_process_write_job": { "prover": "cvc4", "time": 16.7 },
-      "vc_ssd_write": { "prover": "alt-ergo", "time": 0.02 }
+      "vc_elim_Some'0": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_em_reserve": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_process_write_job": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "z3", "time": 0.072 },
+              { "prover": "alt-ergo", "time": 0.046 },
+              { "prover": "alt-ergo", "time": 0.051 },
+              { "prover": "z3", "time": 0.994 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  { "prover": "alt-ergo", "time": 0.061 },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      { "prover": "z3", "time": 0.082 },
+                      { "prover": "cvc5", "time": 0.424 },
+                      { "prover": "cvc5", "time": 0.591 },
+                      { "prover": "z3", "time": 0.084 }
+                    ]
+                  },
+                  { "prover": "z3", "time": 0.07 },
+                  { "prover": "z3", "time": 0.09 },
+                  { "prover": "z3", "time": 0.104 },
+                  { "prover": "z3", "time": 0.069 },
+                  { "prover": "z3", "time": 0.047 }
+                ]
+              },
+              { "prover": "z3", "time": 4.9 },
+              { "prover": "alt-ergo", "time": 0.066 },
+              { "prover": "alt-ergo", "time": 0.062 },
+              { "prover": "z3", "time": 0.039 },
+              { "prover": "alt-ergo", "time": 0.053 }
+            ]
+          }
+        ]
+      },
+      "vc_ssd_write": { "prover": "alt-ergo", "time": 0.026 }
     }
   }
 }

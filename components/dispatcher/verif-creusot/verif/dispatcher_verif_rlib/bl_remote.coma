@@ -1,231 +1,230 @@
-(* #"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1014 0 1014 134 *)
+(* #"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 996 0 996 134 *)
 
-let%span score = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 539 10 539 17
-let%span score'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 541 16 541 107
-let%span score'1 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 436 16 436 111
-let%span score'2 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 719 16 720 195
-let%span score'3 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 345 16 345 32
-let%span score'4 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 350 16 350 30
-let%span score'5 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 375 16 378 5
-let%span score'6 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 611 16 612 96
-let%span score'7 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 599 16 599 40
-let%span score'8 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 463 16 464 72
-let%span score'9 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 456 16 457 73
-let%span score'10 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 726 16 727 91
-let%span score'11 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 335 16 335 46
-let%span score'12 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 605 16 605 65
-let%span score'13 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 314 16 314 50
-let%span score'14 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 304 16 304 43
-let%span score'15 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 324 16 324 28
-let%span score'16 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 593 16 593 68
-let%span score'17 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 554 16 554 43
-let%span smapping = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
-let%span sboundary = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/boundary.rs" 593 10 593 54
-let%span sboundary'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/boundary.rs" 594 10 594 76
-let%span sboundary'1 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/boundary.rs" 595 10 597 139
-let%span sboundary'2 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/boundary.rs" 13 10 13 23
-let%span sboundary'3 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/boundary.rs" 14 10 23 1
-let%span sboundary'4 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/boundary.rs" 45 10 45 23
-let%span sboundary'5 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/boundary.rs" 46 10 52 1
-let%span sboundary'6 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/boundary.rs" 384 10 384 71
-let%span sboundary'7 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/boundary.rs" 385 10 385 31
-let%span sfmap = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
-let%span sfmap'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 96 8 96 34
-let%span sfmap'1 = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
-let%span soption = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/std/option.rs" 796 15 796 27
-let%span soption'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/std/option.rs" 798 8 801 9
-let%span slogic = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/logic.rs" 39 11 39 28
-let%span slogic'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/logic.rs" 40 10 40 19
-let%span svec = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
-let%span svec'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
-let%span svec'1 = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
-let%span svec'2 = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
-let%span svec'3 = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
-let%span svec'4 = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
-let%span svec'5 = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 183 19 183 38
-let%span svec'6 = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 184 18 184 46
-let%span svec'7 = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 185 18 185 49
-let%span svec'8 = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 186 18 186 54
-let%span svec'9 = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 187 18 187 47
-let%span svec'10 = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 200 18 200 34
-let%span sslice = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
-let%span sslice'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
-let%span sslice'1 = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/std/slice.rs" 158 20 158 88
-let%span sevict = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/evict.rs" 404 10 404 139
-let%span slookup = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 52 10 52 118
-let%span slookup'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 53 10 53 39
-let%span slookup'1 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 54 10 54 94
-let%span slookup'2 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 55 10 55 90
-let%span slookup'3 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 56 10 56 106
-let%span slookup'4 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 57 10 57 132
-let%span slookup'5 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 58 10 58 48
-let%span slookup'6 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 59 10 59 65
-let%span slookup'7 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 60 10 60 117
-let%span slookup'8 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 61 10 61 98
-let%span slookup'9 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 62 10 63 132
-let%span slookup'10 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 64 10 64 118
-let%span slookup'11 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 19 16 22 24
-let%span slookup'12 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 12 16 12 92
-let%span slookup'13 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 28 16 29 109
-let%span slookup'14 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 41 16 41 115
-let%span slookup'15 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 6 16 6 42
-let%span sbatch = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1015 23 1015 27
-let%span sbatch'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1016 23 1016 26
-let%span sbatch'1 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1017 23 1017 31
-let%span sbatch'2 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1018 23 1018 28
-let%span sbatch'3 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1019 26 1019 96
-let%span sbatch'4 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1023 12 1023 25
-let%span sbatch'5 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1025 36 1025 46
-let%span sbatch'6 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1026 58 1026 68
-let%span sbatch'7 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1027 23 1027 24
-let%span sbatch'8 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1030 16 1030 139
-let%span sbatch'9 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1029 16 1029 114
-let%span sbatch'10 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1028 16 1028 126
-let%span sbatch'11 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1032 24 1032 27
-let%span sbatch'12 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1032 74 1032 79
-let%span sbatch'13 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1032 63 1032 67
-let%span sbatch'14 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1033 29 1033 59
-let%span sbatch'15 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1034 12 1034 29
-let%span sbatch'16 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1036 13 1036 14
-let%span sbatch'17 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1036 8 1036 14
-let%span sbatch'18 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1038 7 1038 22
-let%span sbatch'19 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1038 26 1038 27
-let%span sbatch'20 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1042 35 1042 45
-let%span sbatch'21 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1043 23 1043 24
-let%span sbatch'22 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1046 14 1046 29
-let%span sbatch'23 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1045 16 1045 152
-let%span sbatch'24 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1044 16 1044 58
-let%span sbatch'25 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1047 27 1047 30
-let%span sbatch'26 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1048 29 1048 41
-let%span sbatch'27 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1048 28 1048 49
-let%span sbatch'28 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1048 18 1048 50
-let%span sbatch'29 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1049 18 1049 30
-let%span sbatch'30 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1049 18 1049 34
-let%span sbatch'31 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1049 8 1049 41
-let%span sbatch'32 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1050 13 1050 14
-let%span sbatch'33 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1050 8 1050 14
-let%span sbatch'34 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1052 23 1052 27
-let%span sbatch'35 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1053 25 1053 49
-let%span sbatch'36 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1054 23 1054 27
-let%span sbatch'37 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1055 18 1055 145
-let%span sbatch'38 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1056 18 1056 34
-let%span sbatch'39 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1057 18 1057 59
-let%span sbatch'40 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1058 18 1058 167
-let%span sbatch'41 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1059 18 1059 135
-let%span sbatch'42 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1060 36 1060 46
-let%span sbatch'43 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1061 36 1061 46
-let%span sbatch'44 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1062 24 1062 25
-let%span sbatch'45 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1063 26 1063 27
-let%span sbatch'46 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1064 23 1064 24
-let%span sbatch'47 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1083 14 1083 29
-let%span sbatch'48 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1082 16 1082 171
-let%span sbatch'49 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1080 16 1081 140
-let%span sbatch'50 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1076 16 1079 93
-let%span sbatch'51 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1075 16 1075 94
-let%span sbatch'52 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1074 16 1074 146
-let%span sbatch'53 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1073 16 1073 148
-let%span sbatch'54 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1072 16 1072 131
-let%span sbatch'55 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1071 16 1071 160
-let%span sbatch'56 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1070 16 1070 116
-let%span sbatch'57 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1069 16 1069 29
-let%span sbatch'58 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1068 16 1068 152
-let%span sbatch'59 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1067 16 1067 85
-let%span sbatch'60 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1066 16 1066 76
-let%span sbatch'61 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1065 16 1065 109
-let%span sbatch'62 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1084 27 1084 30
-let%span sbatch'63 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1085 18 1085 30
-let%span sbatch'64 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1085 18 1085 34
-let%span sbatch'65 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1086 22 1086 103
-let%span sbatch'66 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1087 22 1087 155
-let%span sbatch'67 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1088 28 1088 31
-let%span sbatch'68 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1096 23 1096 28
-let%span sbatch'69 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1097 21 1097 22
-let%span sbatch'70 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1097 16 1097 22
-let%span sbatch'71 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1090 26 1090 27
-let%span sbatch'72 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1090 16 1090 27
-let%span sbatch'73 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1091 23 1091 28
-let%span sbatch'74 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1092 21 1092 22
-let%span sbatch'75 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1092 16 1092 22
-let%span sbatch'76 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1102 16 1102 17
-let%span sbatch'77 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1102 8 1102 17
-let%span sbatch'78 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1103 14 1103 31
-let%span sbatch'79 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1122 23 1122 28
-let%span sbatch'80 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1119 23 1119 28
-let%span sbatch'81 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1105 16 1105 37
-let%span sbatch'82 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1106 73 1106 85
-let%span sbatch'83 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1106 72 1106 93
-let%span sbatch'84 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1106 105 1106 110
-let%span sbatch'85 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1106 33 1106 111
-let%span sbatch'86 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1108 30 1108 49
-let%span sbatch'87 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1111 20 1111 25
-let%span sbatch'88 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1112 23 1112 28
-let%span sbatch'89 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1115 58 1115 59
-let%span sbatch'90 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1115 24 1115 61
-let%span sbatch'91 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1116 23 1116 28
-let%span sbatch'92 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1125 13 1125 14
-let%span sbatch'93 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1125 8 1125 14
-let%span sbatch'94 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1127 18 1127 150
-let%span sbatch'95 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1128 29 1128 34
-let%span sbatch'96 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1129 47 1129 49
-let%span sbatch'97 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1130 7 1130 22
-let%span sbatch'98 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1130 25 1130 26
-let%span sbatch'99 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1130 42 1130 43
-let%span sbatch'100 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1131 28 1131 41
-let%span sbatch'101 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1132 12 1132 33
-let%span sbatch'102 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1133 31 1133 32
-let%span sbatch'103 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1134 31 1134 39
-let%span sbatch'104 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1137 22 1137 37
-let%span sbatch'105 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1136 24 1136 189
-let%span sbatch'106 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1135 24 1135 98
-let%span sbatch'107 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1138 33 1138 36
-let%span sbatch'108 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1138 23 1138 37
-let%span sbatch'109 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1139 21 1139 22
-let%span sbatch'110 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1139 16 1139 22
-let%span sbatch'111 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1143 29 1143 42
-let%span sbatch'112 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1145 23 1145 24
-let%span sbatch'113 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1146 23 1146 27
-let%span sbatch'114 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1153 14 1153 31
-let%span sbatch'115 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1151 16 1152 140
-let%span sbatch'116 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1150 16 1150 141
-let%span sbatch'117 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1149 16 1149 85
-let%span sbatch'118 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1148 16 1148 135
-let%span sbatch'119 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1147 16 1147 34
-let%span sbatch'120 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1154 46 1154 49
-let%span sbatch'121 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1154 61 1154 62
-let%span sbatch'122 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1154 16 1154 64
-let%span sbatch'123 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1155 13 1155 14
-let%span sbatch'124 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1155 8 1155 14
-let%span sbatch'125 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1157 4 1157 38
-let%span sbatch'126 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1158 14 1158 99
-let%span sbatch'127 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 988 11 988 97
-let%span sbatch'128 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 989 11 989 97
-let%span sbatch'129 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 990 10 990 105
-let%span sbatch'130 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 991 10 991 78
-let%span sbatch'131 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 992 10 992 89
-let%span sbatch'132 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 993 10 993 137
-let%span sbatch'133 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 994 10 994 146
-let%span sbatch'134 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 995 10 995 160
-let%span sbatch'135 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 996 10 996 158
-let%span sbatch'136 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 997 10 997 103
-let%span sbatch'137 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 998 10 998 45
-let%span sbatch'138 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 999 10 1003 86
-let%span sbatch'139 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1004 10 1010 93
-let%span sbatch'140 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1011 10 1011 170
-let%span sbatch'141 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1012 10 1013 136
-let%span sbatch'142 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 79 16 79 77
-let%span sbatch'143 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 20 11 20 34
-let%span sbatch'144 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 21 10 21 31
-let%span sbatch'145 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 983 10 983 11
-let%span sbatch'146 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 985 16 985 98
-let%span sbatch'147 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 16 16 16 91
-let%span sbatch'148 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1163 16 1164 98
+let%span score = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 526 10 526 17
+let%span score'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 528 16 528 107
+let%span score'1 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 423 16 423 111
+let%span score'2 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 674 16 675 169
+let%span score'3 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 332 16 332 32
+let%span score'4 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 337 16 337 30
+let%span score'5 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 362 16 365 5
+let%span score'6 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 598 16 599 96
+let%span score'7 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 586 16 586 40
+let%span score'8 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 450 16 451 72
+let%span score'9 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 443 16 444 73
+let%span score'10 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 681 16 682 91
+let%span score'11 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 322 16 322 46
+let%span score'12 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 592 16 592 65
+let%span score'13 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 301 16 301 50
+let%span score'14 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 291 16 291 43
+let%span score'15 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 311 16 311 28
+let%span score'16 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 580 16 580 68
+let%span score'17 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 541 16 541 43
+let%span smapping = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
+let%span sboundary = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/boundary.rs" 578 10 578 54
+let%span sboundary'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/boundary.rs" 579 10 579 76
+let%span sboundary'1 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/boundary.rs" 580 10 582 139
+let%span sboundary'2 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/boundary.rs" 13 10 13 23
+let%span sboundary'3 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/boundary.rs" 14 10 23 1
+let%span sboundary'4 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/boundary.rs" 45 10 45 23
+let%span sboundary'5 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/boundary.rs" 46 10 52 1
+let%span sboundary'6 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/boundary.rs" 384 10 384 71
+let%span sboundary'7 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/boundary.rs" 385 10 385 31
+let%span sfmap = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+let%span sfmap'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 96 8 96 34
+let%span sfmap'1 = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span soption = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/std/option.rs" 796 15 796 27
+let%span soption'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/std/option.rs" 798 8 801 9
+let%span slogic = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/logic.rs" 39 11 39 28
+let%span slogic'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/logic.rs" 40 10 40 19
+let%span svec = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 112 18 112 40
+let%span svec'1 = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'2 = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 193 19 193 38
+let%span svec'3 = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 194 18 194 46
+let%span svec'4 = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span svec'5 = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 183 19 183 38
+let%span svec'6 = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 184 18 184 46
+let%span svec'7 = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 185 18 185 49
+let%span svec'8 = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 186 18 186 54
+let%span svec'9 = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 187 18 187 47
+let%span svec'10 = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 200 18 200 34
+let%span sslice = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/std/slice.rs" 148 20 148 37
+let%span sslice'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/std/slice.rs" 153 20 153 37
+let%span sslice'1 = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/std/slice.rs" 158 20 158 88
+let%span sevict = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/evict.rs" 357 10 357 139
+let%span slookup = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 52 10 52 118
+let%span slookup'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 53 10 53 39
+let%span slookup'1 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 54 10 54 94
+let%span slookup'2 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 55 10 55 90
+let%span slookup'3 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 56 10 56 106
+let%span slookup'4 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 57 10 57 132
+let%span slookup'5 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 58 10 58 48
+let%span slookup'6 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 59 10 59 65
+let%span slookup'7 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 60 10 60 117
+let%span slookup'8 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 61 10 61 98
+let%span slookup'9 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 62 10 63 132
+let%span slookup'10 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 64 10 64 118
+let%span slookup'11 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 19 16 22 24
+let%span slookup'12 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 12 16 12 92
+let%span slookup'13 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 28 16 29 109
+let%span slookup'14 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 41 16 41 115
+let%span slookup'15 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 6 16 6 42
+let%span sbatch = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 997 23 997 27
+let%span sbatch'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 998 23 998 26
+let%span sbatch'1 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 999 23 999 31
+let%span sbatch'2 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1000 23 1000 28
+let%span sbatch'3 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1001 26 1001 96
+let%span sbatch'4 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1005 12 1005 25
+let%span sbatch'5 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1007 36 1007 46
+let%span sbatch'6 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1008 58 1008 68
+let%span sbatch'7 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1009 23 1009 24
+let%span sbatch'8 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1012 16 1012 139
+let%span sbatch'9 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1011 16 1011 114
+let%span sbatch'10 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1010 16 1010 126
+let%span sbatch'11 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1014 24 1014 27
+let%span sbatch'12 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1014 74 1014 79
+let%span sbatch'13 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1014 63 1014 67
+let%span sbatch'14 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1015 29 1015 59
+let%span sbatch'15 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1016 12 1016 29
+let%span sbatch'16 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1018 13 1018 14
+let%span sbatch'17 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1018 8 1018 14
+let%span sbatch'18 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1020 7 1020 22
+let%span sbatch'19 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1020 26 1020 27
+let%span sbatch'20 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1024 35 1024 45
+let%span sbatch'21 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1025 23 1025 24
+let%span sbatch'22 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1028 14 1028 29
+let%span sbatch'23 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1027 16 1027 152
+let%span sbatch'24 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1026 16 1026 58
+let%span sbatch'25 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1029 27 1029 30
+let%span sbatch'26 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1030 29 1030 41
+let%span sbatch'27 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1030 28 1030 49
+let%span sbatch'28 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1030 18 1030 50
+let%span sbatch'29 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1031 18 1031 30
+let%span sbatch'30 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1031 18 1031 34
+let%span sbatch'31 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1031 8 1031 41
+let%span sbatch'32 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1032 13 1032 14
+let%span sbatch'33 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1032 8 1032 14
+let%span sbatch'34 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1034 23 1034 27
+let%span sbatch'35 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1035 25 1035 49
+let%span sbatch'36 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1036 23 1036 27
+let%span sbatch'37 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1037 18 1037 145
+let%span sbatch'38 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1038 18 1038 34
+let%span sbatch'39 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1039 18 1039 59
+let%span sbatch'40 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1040 18 1040 167
+let%span sbatch'41 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1041 18 1041 135
+let%span sbatch'42 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1042 36 1042 46
+let%span sbatch'43 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1043 36 1043 46
+let%span sbatch'44 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1044 24 1044 25
+let%span sbatch'45 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1045 26 1045 27
+let%span sbatch'46 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1046 23 1046 24
+let%span sbatch'47 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1065 14 1065 29
+let%span sbatch'48 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1064 16 1064 171
+let%span sbatch'49 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1062 16 1063 140
+let%span sbatch'50 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1058 16 1061 93
+let%span sbatch'51 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1057 16 1057 94
+let%span sbatch'52 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1056 16 1056 146
+let%span sbatch'53 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1055 16 1055 148
+let%span sbatch'54 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1054 16 1054 131
+let%span sbatch'55 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1053 16 1053 160
+let%span sbatch'56 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1052 16 1052 116
+let%span sbatch'57 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1051 16 1051 29
+let%span sbatch'58 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1050 16 1050 152
+let%span sbatch'59 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1049 16 1049 85
+let%span sbatch'60 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1048 16 1048 76
+let%span sbatch'61 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1047 16 1047 109
+let%span sbatch'62 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1066 27 1066 30
+let%span sbatch'63 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1067 18 1067 30
+let%span sbatch'64 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1067 18 1067 34
+let%span sbatch'65 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1068 22 1068 103
+let%span sbatch'66 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1069 22 1069 155
+let%span sbatch'67 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1070 28 1070 31
+let%span sbatch'68 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1078 23 1078 28
+let%span sbatch'69 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1079 21 1079 22
+let%span sbatch'70 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1079 16 1079 22
+let%span sbatch'71 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1072 26 1072 27
+let%span sbatch'72 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1072 16 1072 27
+let%span sbatch'73 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1073 23 1073 28
+let%span sbatch'74 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1074 21 1074 22
+let%span sbatch'75 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1074 16 1074 22
+let%span sbatch'76 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1084 16 1084 17
+let%span sbatch'77 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1084 8 1084 17
+let%span sbatch'78 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1085 14 1085 31
+let%span sbatch'79 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1104 23 1104 28
+let%span sbatch'80 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1101 23 1101 28
+let%span sbatch'81 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1087 16 1087 37
+let%span sbatch'82 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1088 73 1088 85
+let%span sbatch'83 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1088 72 1088 93
+let%span sbatch'84 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1088 105 1088 110
+let%span sbatch'85 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1088 33 1088 111
+let%span sbatch'86 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1090 30 1090 49
+let%span sbatch'87 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1093 20 1093 25
+let%span sbatch'88 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1094 23 1094 28
+let%span sbatch'89 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1097 58 1097 59
+let%span sbatch'90 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1097 24 1097 61
+let%span sbatch'91 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1098 23 1098 28
+let%span sbatch'92 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1107 13 1107 14
+let%span sbatch'93 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1107 8 1107 14
+let%span sbatch'94 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1109 18 1109 150
+let%span sbatch'95 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1110 29 1110 34
+let%span sbatch'96 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1111 47 1111 49
+let%span sbatch'97 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1112 7 1112 22
+let%span sbatch'98 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1112 25 1112 26
+let%span sbatch'99 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1112 42 1112 43
+let%span sbatch'100 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1113 28 1113 41
+let%span sbatch'101 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1114 12 1114 33
+let%span sbatch'102 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1115 31 1115 32
+let%span sbatch'103 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1116 31 1116 39
+let%span sbatch'104 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1119 22 1119 37
+let%span sbatch'105 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1118 24 1118 189
+let%span sbatch'106 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1117 24 1117 98
+let%span sbatch'107 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1120 33 1120 36
+let%span sbatch'108 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1120 23 1120 37
+let%span sbatch'109 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1121 21 1121 22
+let%span sbatch'110 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1121 16 1121 22
+let%span sbatch'111 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1125 29 1125 42
+let%span sbatch'112 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1127 23 1127 24
+let%span sbatch'113 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1128 23 1128 27
+let%span sbatch'114 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1135 14 1135 31
+let%span sbatch'115 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1133 16 1134 140
+let%span sbatch'116 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1132 16 1132 141
+let%span sbatch'117 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1131 16 1131 85
+let%span sbatch'118 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1130 16 1130 135
+let%span sbatch'119 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1129 16 1129 34
+let%span sbatch'120 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1136 46 1136 49
+let%span sbatch'121 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1136 61 1136 62
+let%span sbatch'122 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1136 16 1136 64
+let%span sbatch'123 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1137 13 1137 14
+let%span sbatch'124 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1137 8 1137 14
+let%span sbatch'125 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1139 4 1139 38
+let%span sbatch'126 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1140 14 1140 99
+let%span sbatch'127 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 970 11 970 97
+let%span sbatch'128 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 971 11 971 97
+let%span sbatch'129 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 972 10 972 105
+let%span sbatch'130 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 973 10 973 78
+let%span sbatch'131 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 974 10 974 89
+let%span sbatch'132 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 975 10 975 137
+let%span sbatch'133 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 976 10 976 146
+let%span sbatch'134 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 977 10 977 160
+let%span sbatch'135 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 978 10 978 158
+let%span sbatch'136 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 979 10 979 103
+let%span sbatch'137 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 980 10 980 45
+let%span sbatch'138 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 981 10 985 86
+let%span sbatch'139 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 986 10 992 93
+let%span sbatch'140 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 993 10 993 170
+let%span sbatch'141 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 994 10 995 136
+let%span sbatch'142 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 74 16 74 77
+let%span sbatch'143 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 20 11 20 34
+let%span sbatch'144 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 21 10 21 31
+let%span sbatch'145 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 965 10 965 11
+let%span sbatch'146 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 967 16 967 98
+let%span sbatch'147 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 16 16 16 91
+let%span sbatch'148 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1145 16 1146 98
 
 use creusot.prelude.MutBorrow
 use creusot.int.UInt64
 use creusot.int.UInt32
 use seq.Seq
 use map.Map
-use creusot.int.Int32
 use creusot.slice.Slice64
 use creusot.slice.Slice64Ops
 use creusot.prelude.Any
@@ -302,7 +301,6 @@ type t_Ev =
   | DevShutdown UInt64.t
   | DevDetach UInt64.t
   | Register
-  | RegWarn
   | Unregister
   | Join
   | Leave
@@ -334,10 +332,8 @@ type t_W = {
   cluster: bool;
   threads: int;
   rw: Map.map int UInt64.t;
-  rw_base: int;
   cfree: Map.map int int;
-  wf: Map.map UInt64.t bool;
-  sdev: Map.map UInt64.t Int32.t }
+  wf: Map.map UInt64.t bool }
 
 type t_S = { p: t_P; g: t_W }
 
@@ -406,7 +402,7 @@ let new_usize (return (x: t_Vec_usize_Global)) = any
   {[@stop_split] [@expl:new ensures] [%#svec'1] Seq.length (view_Vec_usize_Global result) = 0}
     (! return {result}) ]
 
-predicate is_kn [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 78 0 78 28] (r: t_Option_Result_unit_DE) =
+predicate is_kn [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 73 0 73 28] (r: t_Option_Result_unit_DE) =
   [%#sbatch'142] match r with
     | Some'0 (Err (KeyNotFound _)) -> true
     | _ -> false
@@ -495,7 +491,7 @@ type t_Be = { key'1: UInt64.t; regions'1: t_Vec_Ipc_Global }
 
 type t_Ipc = { addr'1: UInt64.t; size'1: UInt32.t }
 
-function sum_sz [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 540 0 540 33] (r: Seq.seq t_Ipc) : int
+function sum_sz [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 527 0 527 33] (r: Seq.seq t_Ipc) : int
 
 axiom sum_sz_def: forall r: Seq.seq t_Ipc [sum_sz r]. sum_sz r
     = ([%#score'0] if Seq.length r = 0 then
@@ -574,10 +570,8 @@ let rl_batch_lookup (s: MutBorrow.t t_S) (fwd: t_Vec_tup2_u64_u32_Global) (retur
           cluster = s.current.g.cluster;
           threads = s.current.g.threads;
           rw = s.current.g.rw;
-          rw_base = s.current.g.rw_base;
           cfree = s.current.g.cfree;
-          wf = s.current.g.wf;
-          sdev = s.current.g.sdev })
+          wf = s.current.g.wf })
     /\ ([@stop_split] [@expl:rl_batch_lookup ensures #2] [%#sboundary'1] Seq.length s.final.g.log
       = Seq.length s.current.g.log + Seq.length (view_Vec_tup2_u64_u32_Global fwd)
     /\ (forall i: int. 0 <= i /\ i < Seq.length s.current.g.log -> Seq.get s.final.g.log i = Seq.get s.current.g.log i)
@@ -599,22 +593,21 @@ let new_u64 (return (x: t_Vec_u64_Global)) = any
   {[@stop_split] [@expl:new ensures] [%#svec'1] Seq.length (view_Vec_u64_Global result) = 0}
     (! return {result}) ]
 
-function count_rl [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 984 0 984 49] (a: Seq.seq t_Rl) (n: int) (x: t_Rl) : int
+function count_rl [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 966 0 966 49] (a: Seq.seq t_Rl) (n: int) (x: t_Rl) : int
 
 axiom count_rl_def: forall a: Seq.seq t_Rl, n: int, x: t_Rl [count_rl a n x]. count_rl a n x
     = ([%#sbatch'146] if n <= 0 then 0 else count_rl a (n - 1) x + (if Seq.get a (n - 1) = x then 1 else 0))
 
-predicate log_ext [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 435 0 435 34] (a: t_W) (b: t_W) =
+predicate log_ext [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 422 0 422 34] (a: t_W) (b: t_W) =
   [%#score'1] Seq.length a.log <= Seq.length b.log
   /\ (forall i: int. 0 <= i /\ i < Seq.length a.log -> Seq.get b.log i = Seq.get a.log i)
 
-predicate same_env [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 718 0 718 35] (a: t_W) (b: t_W) =
+predicate same_env [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 673 0 673 35] (a: t_W) (b: t_W) =
   [%#score'2] b.pool = a.pool
   /\ b.cluster = a.cluster
   /\ b.cap = a.cap
   /\ b.ext = a.ext
   /\ b.rw = a.rw
-  /\ b.rw_base = a.rw_base
   /\ b.ob = a.ob
   /\ b.ob2 = a.ob2
   /\ b.og = a.og /\ b.os = a.os /\ b.ov = a.ov /\ b.ok = a.ok /\ b.threads = a.threads /\ b.cfree = a.cfree
@@ -693,7 +686,7 @@ predicate contains_u64 [@inline:trivial] (self: t_FMap_u64_Ent) (k: UInt64.t) = 
 
 meta "rewrite_def" predicate contains_u64
 
-predicate has [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 344 0 344 32] (w: t_W) (k: UInt64.t) =
+predicate has [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 331 0 331 32] (w: t_W) (k: UInt64.t) =
   [%#score'3] contains_u64 w.dm k
 
 predicate index_Mapping_Ent_bool [@inline:trivial] (self: Map.map t_Ent bool) (a: t_Ent) = [%#smapping] Map.get self a
@@ -716,26 +709,26 @@ function lookup_u64 [@inline:trivial] (self: t_FMap_u64_Ent) (k: UInt64.t) : t_E
 
 meta "rewrite_def" function lookup_u64
 
-function ent [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 349 0 349 31] (w: t_W) (k: UInt64.t) : t_Ent
+function ent [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 336 0 336 31] (w: t_W) (k: UInt64.t) : t_Ent
  = [%#score'4] lookup_u64 w.dm k
 
-function lr_of [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 374 0 374 26] (l: t_Loc) : t_Lr
+function lr_of [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 361 0 361 26] (l: t_Loc) : t_Lr
  = [%#score'5] match l with
     | Blk'0 off -> Blk off
     | Mem'0 ptr size'2 _ -> Mem ptr size'2
     end
 
-predicate others [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 592 0 592 41] (a: t_W) (b: t_W) (k: UInt64.t) =
+predicate others [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 579 0 579 41] (a: t_W) (b: t_W) (k: UInt64.t) =
   [%#score'16] forall j: UInt64.t. j <> k -> get_u64 b.dm j = get_u64 a.dm j
 
-predicate ent_rr [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 610 0 610 49] (a: t_W) (b: t_W) (k: UInt64.t) (d: int) =
+predicate ent_rr [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 597 0 597 49] (a: t_W) (b: t_W) (k: UInt64.t) (d: int) =
   [%#score'6] has a k
   /\ has b k
   /\ (ent b k).loc = (ent a k).loc
   /\ (ent b k).es = (ent a k).es
   /\ (ent b k).wr = (ent a k).wr /\ UInt32.t'int (ent b k).rr = UInt32.t'int (ent a k).rr + d /\ others a b k
 
-predicate only_dm [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 598 0 598 34] (a: t_W) (b: t_W) =
+predicate only_dm [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 585 0 585 34] (a: t_W) (b: t_W) =
   [%#score'7] b
   = { dm = b.dm;
       mt = a.mt;
@@ -756,10 +749,8 @@ predicate only_dm [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-cr
       cluster = a.cluster;
       threads = a.threads;
       rw = a.rw;
-      rw_base = a.rw_base;
       cfree = a.cfree;
-      wf = a.wf;
-      sdev = a.sdev }
+      wf = a.wf }
 
 let dm_lookup (s: MutBorrow.t t_S) (k: UInt64.t) (return (x: t_Result_Lr_DmE)) = any
   [ return (result: t_Result_Lr_DmE) ->
@@ -810,16 +801,16 @@ type t_ServeG = { base: int; m: int; gpu_ok: bool }
 
 type tup2_Result_unit_DE_Snapshot_ServeG = { f0'0: t_Result_unit_DE; f1'0: t_ServeG }
 
-function pre [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 553 0 553 38] (r: Seq.seq t_Ipc) (i: int) : int
+function pre [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 540 0 540 38] (r: Seq.seq t_Ipc) (i: int) : int
  = [%#score'17] sum_sz (Seq.([..]) r 0 i)
 
-function min_int [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 5 0 5 37] (a: int) (b: int) : int
+function min_int [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 5 0 5 37] (a: int) (b: int) : int
  = [%#slookup'15] if a <= b then a else b
 
-function chunk_of [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 11 0 11 54] (r: Seq.seq t_Ipc) (l: int) (size'2: int) : int
+function chunk_of [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 11 0 11 54] (r: Seq.seq t_Ipc) (l: int) (size'2: int) : int
  = [%#slookup'12] min_int (UInt32.t'int (Seq.get r l).size'1) (if size'2 - pre r l > 0 then size'2 - pre r l else 0)
 
-predicate scattered [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 18 0 18 96] (w: t_W) (base'0: int) (r: Seq.seq t_Ipc) (m'0: int) (ptr: UInt64.t) (size'2: UInt32.t) (stream: UInt64.t) =
+predicate scattered [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 18 0 18 96] (w: t_W) (base'0: int) (r: Seq.seq t_Ipc) (m'0: int) (ptr: UInt64.t) (size'2: UInt32.t) (stream: UInt64.t) =
   [%#slookup'11] 0 <= base'0
   /\ base'0 + m'0 <= Seq.length w.log
   /\ (forall l: int. 0 <= l /\ l < m'0
@@ -830,7 +821,7 @@ predicate scattered [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-
       | _ -> false
       end)
 
-predicate h2d_within [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 27 0 27 58] (a: t_W) (b: t_W) (ptr: UInt64.t) (size'2: UInt32.t) =
+predicate h2d_within [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 27 0 27 58] (a: t_W) (b: t_W) (ptr: UInt64.t) (size'2: UInt32.t) =
   [%#slookup'13] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
     -> match Seq.get b.log i with
       | H2D src _ len _ -> UInt64.t'int ptr <= UInt64.t'int src
@@ -838,21 +829,21 @@ predicate h2d_within [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif
       | _ -> true
       end
 
-predicate own_reads [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 462 0 462 36] (a: t_W) (b: t_W) =
+predicate own_reads [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 449 0 449 36] (a: t_W) (b: t_W) =
   [%#score'8] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
     -> match Seq.get b.log i with
       | RelRead _ own -> own > 0
       | _ -> true
       end
 
-predicate own_writes [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 455 0 455 37] (a: t_W) (b: t_W) =
+predicate own_writes [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 442 0 442 37] (a: t_W) (b: t_W) =
   [%#score'9] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
     -> match Seq.get b.log i with
       | RelWrite _ own -> own > 0
       | _ -> true
       end
 
-predicate no_reg [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 725 0 725 33] (a: t_W) (b: t_W) =
+predicate no_reg [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 680 0 680 33] (a: t_W) (b: t_W) =
   [%#score'10] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
     -> match Seq.get b.log i with
       | DmCreate _ -> false
@@ -864,10 +855,10 @@ predicate index_Mapping_Int_bool [@inline:trivial] (self: Map.map int bool) (a: 
 
 meta "rewrite_def" predicate index_Mapping_Int_bool
 
-predicate all_from [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 334 0 334 54] (m'0: Map.map int bool) (t: int) =
+predicate all_from [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 321 0 321 54] (m'0: Map.map int bool) (t: int) =
   [%#score'11] forall i: int. i >= t -> index_Mapping_Int_bool m'0 i
 
-predicate h2d_or_sync [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/lookup.rs" 40 0 40 42] (e: t_Ev) (st: UInt64.t) =
+predicate h2d_or_sync [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/lookup.rs" 40 0 40 42] (e: t_Ev) (st: UInt64.t) =
   [%#slookup'14] match e with
     | H2D _ _ _ stream -> stream = st
     | Sync stream -> stream = st
@@ -899,10 +890,8 @@ let serve_memory_tier_to_gpu (s: MutBorrow.t t_S) (pointer: UInt64.t) (size'2: U
             cluster = s.current.g.cluster;
             threads = s.current.g.threads;
             rw = s.current.g.rw;
-            rw_base = s.current.g.rw_base;
             cfree = s.current.g.cfree;
-            wf = s.current.g.wf;
-            sdev = s.current.g.sdev }
+            wf = s.current.g.wf }
       /\ log_ext s.current.g s.final.g)
     /\ ([@stop_split] [@expl:serve_memory_tier_to_gpu ensures #1] [%#slookup'0] s.final.g.tick >= s.current.g.tick)
     /\ ([@stop_split] [@expl:serve_memory_tier_to_gpu ensures #2] [%#slookup'1] result.f1'0.base
@@ -968,7 +957,7 @@ meta "rewrite_def" predicate resolve_refmut_Option_ServedBy
 
 type t_Result_unit_DmE = Ok'2 () | Err'2 t_DmE
 
-predicate only_dm_log [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 604 0 604 45] (a: t_W) (b: t_W) (e: t_Ev) =
+predicate only_dm_log [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 591 0 591 45] (a: t_W) (b: t_W) (e: t_Ev) =
   [%#score'12] b
   = { dm = b.dm;
       mt = a.mt;
@@ -989,12 +978,10 @@ predicate only_dm_log [#"/home/cornel/repair-j35-rc23/components/dispatcher/veri
       cluster = a.cluster;
       threads = a.threads;
       rw = a.rw;
-      rw_base = a.rw_base;
       cfree = a.cfree;
-      wf = a.wf;
-      sdev = a.sdev }
+      wf = a.wf }
 
-function lg [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 313 0 313 27] (w: t_W) (e: t_Ev) : t_W
+function lg [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 300 0 300 27] (w: t_W) (e: t_Ev) : t_W
  = [%#score'13] { dm = w.dm;
                   mt = w.mt;
                   used = w.used;
@@ -1014,10 +1001,8 @@ function lg [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/
                   cluster = w.cluster;
                   threads = w.threads;
                   rw = w.rw;
-                  rw_base = w.rw_base;
                   cfree = w.cfree;
-                  wf = w.wf;
-                  sdev = w.sdev }
+                  wf = w.wf }
 
 let dm_release_read (s: MutBorrow.t t_S) (k: UInt64.t) (own: int) (return (x: t_Result_unit_DmE)) = any
   [ return (result: t_Result_unit_DmE) ->
@@ -1034,7 +1019,7 @@ let dm_release_read (s: MutBorrow.t t_S) (k: UInt64.t) (own: int) (return (x: t_
       end)}
     (! return {result}) ]
 
-function nx [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 303 0 303 20] (w: t_W) : t_W
+function nx [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 290 0 290 20] (w: t_W) : t_W
  = [%#score'14] { dm = w.dm;
                   mt = w.mt;
                   used = w.used;
@@ -1054,12 +1039,10 @@ function nx [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/
                   cluster = w.cluster;
                   threads = w.threads;
                   rw = w.rw;
-                  rw_base = w.rw_base;
                   cfree = w.cfree;
-                  wf = w.wf;
-                  sdev = w.sdev }
+                  wf = w.wf }
 
-predicate o_gpu [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 323 0 323 26] (w: t_W) =
+predicate o_gpu [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 310 0 310 26] (w: t_W) =
   [%#score'15] index_Mapping_Int_bool w.og w.tick
 
 let gpu_sync (s: MutBorrow.t t_S) (stream: UInt64.t) (return (x: bool)) = any
@@ -1127,17 +1110,15 @@ let rec_remote_lookup (s: MutBorrow.t t_S) (hits: UInt64.t) (misses: UInt64.t) (
         cluster = s.current.g.cluster;
         threads = s.current.g.threads;
         rw = s.current.g.rw;
-        rw_base = s.current.g.rw_base;
         cfree = s.current.g.cfree;
-        wf = s.current.g.wf;
-        sdev = s.current.g.sdev }}
+        wf = s.current.g.wf }}
     (! return {result}) ]
 
-predicate a_fr039 [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 15 0 15 34] (e: Seq.seq t_Be) =
+predicate a_fr039 [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 15 0 15 34] (e: Seq.seq t_Be) =
   [%#sbatch'147] forall i: int. 0 <= i /\ i < Seq.length e
     -> sum_sz (view_Vec_Ipc_Global (Seq.get e i).regions'1) <= UInt32.t'int const_MAX'0
 
-predicate fwd_logged [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1162 0 1162 58] (a: t_W) (b: t_W) (key'2: UInt64.t) (size'2: int) =
+predicate fwd_logged [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 1144 0 1144 58] (a: t_W) (b: t_W) (key'2: UInt64.t) (size'2: int) =
   [%#sbatch'148] exists i: int. Seq.length a.log <= i
     /\ i < Seq.length b.log
     /\ match Seq.get b.log i with
@@ -1149,7 +1130,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let bl_remote [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/batch.rs" 1014 0 1014 134]
+let bl_remote [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 996 0 996 134]
   (s: MutBorrow.t t_S) (entries: Slice64.slice t_Be) (results: MutBorrow.t t_Vec_Option_Result_unit_DE_Global)
   (tier: MutBorrow.t t_Vec_Option_ServedBy_Global) (warm_raw: UInt64.t) (return (x: t_RemG)) =
 {[@stop_split] [@expl:bl_remote requires] ([@stop_split] [@expl:bl_remote requires #0] [%#sbatch'127] Seq.length (view_Vec_Option_Result_unit_DE_Global results.current)

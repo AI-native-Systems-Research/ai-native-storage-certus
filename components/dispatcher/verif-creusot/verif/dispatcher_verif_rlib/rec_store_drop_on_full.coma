@@ -1,14 +1,13 @@
-(* #"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/evict.rs" 46 0 46 40 *)
+(* #"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/evict.rs" 46 0 46 40 *)
 
-let%span sevict = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/evict.rs" 47 20 47 84
-let%span sevict'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/evict.rs" 45 10 45 108
+let%span sevict = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/evict.rs" 47 20 47 84
+let%span sevict'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/evict.rs" 45 10 45 108
 
 use creusot.prelude.MutBorrow
 use creusot.int.UInt64
 use creusot.int.UInt32
 use seq.Seq
 use map.Map
-use creusot.int.Int32
 use creusot.prelude.Any
 use int.Int
 
@@ -83,7 +82,6 @@ type t_Ev =
   | DevShutdown UInt64.t
   | DevDetach UInt64.t
   | Register
-  | RegWarn
   | Unregister
   | Join
   | Leave
@@ -115,10 +113,8 @@ type t_W = {
   cluster: bool;
   threads: int;
   rw: Map.map int UInt64.t;
-  rw_base: int;
   cfree: Map.map int int;
-  wf: Map.map UInt64.t bool;
-  sdev: Map.map UInt64.t Int32.t }
+  wf: Map.map UInt64.t bool }
 
 type t_S = { p: t_P; g: t_W }
 
@@ -130,7 +126,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let rec_store_drop_on_full [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/evict.rs" 46 0 46 40]
+let rec_store_drop_on_full [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/evict.rs" 46 0 46 40]
   (s: MutBorrow.t t_S) (return (x: ())) = (! bb0
   [ bb0 = s0
     [ s0 = [ &s <- { s with current = { s.current with g = ([%#sevict] { dm = s.current.g.dm;
@@ -165,10 +161,8 @@ let rec_store_drop_on_full [#"/home/cornel/repair-j35-rc23/components/dispatcher
                                                                          cluster = s.current.g.cluster;
                                                                          threads = s.current.g.threads;
                                                                          rw = s.current.g.rw;
-                                                                         rw_base = s.current.g.rw_base;
                                                                          cfree = s.current.g.cfree;
-                                                                         wf = s.current.g.wf;
-                                                                         sdev = s.current.g.sdev }) } } ] s1
+                                                                         wf = s.current.g.wf }) } } ] s1
     | s1 = -{resolve_refmut_S s}- s2
     | s2 = return {_ret} ] ] [ & _ret: () = Any.any_l () | & s: MutBorrow.t t_S = s ])
   [ return (result: ()) -> {[@stop_split] [@expl:rec_store_drop_on_full ensures] [%#sevict'0] s.final.p = s.current.p
@@ -205,8 +199,6 @@ let rec_store_drop_on_full [#"/home/cornel/repair-j35-rc23/components/dispatcher
         cluster = s.current.g.cluster;
         threads = s.current.g.threads;
         rw = s.current.g.rw;
-        rw_base = s.current.g.rw_base;
         cfree = s.current.g.cfree;
-        wf = s.current.g.wf;
-        sdev = s.current.g.sdev }}
+        wf = s.current.g.wf }}
     (! return {result}) ]

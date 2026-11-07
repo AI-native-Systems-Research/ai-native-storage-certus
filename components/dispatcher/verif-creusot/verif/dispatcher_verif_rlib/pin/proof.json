@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_dm_take_read": { "prover": "alt-ergo", "time": 0.019 },
-      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.018 },
-      "vc_elim_Err'0": { "prover": "alt-ergo", "time": 0.021 },
-      "vc_ensure_initialized": { "prover": "alt-ergo", "time": 0.016 },
-      "vc_pin": { "prover": "alt-ergo", "time": 0.139 }
+      "vc_dm_take_read": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_elim_Err'0": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_ensure_initialized": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_pin": { "prover": "alt-ergo", "time": 0.165 }
     }
   }
 }

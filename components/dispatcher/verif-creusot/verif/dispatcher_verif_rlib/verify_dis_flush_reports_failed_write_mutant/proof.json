@@ -2,13 +2,13 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_flush_to_ssd": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_flush_to_ssd": { "prover": "alt-ergo", "time": 0.027 },
       "vc_verify_dis_flush_reports_failed_write__mutant": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.037 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.033 }, null ]
           }
         ]
       }

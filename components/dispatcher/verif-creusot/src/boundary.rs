@@ -404,8 +404,6 @@ pub fn set_batch_device(s: &mut S, addr: u64) -> i32 {
 }
 
 /// `device_streams_for(gpu, device)` (lib.rs:470): None for device < 0 or failed setup.
-/// When it returns a set, its streams were created on `device` — in particular
-/// `warm` is non-null and bound to that device (`W.sdev`).
 pub struct Ds {
     pub warm: u64,
     pub store: u64,
@@ -416,7 +414,6 @@ pub struct Ds {
 #[trusted]
 #[ensures((^s).p == s.p && *(^s).g == nx(*s.g))]
 #[ensures(device@ < 0 ==> result == None)]
-#[ensures(match result { Some(ds) => device@ >= 0 && ds.warm@ != 0 && (*s.g).sdev[ds.warm] == device, None => true })]
 pub fn device_streams_for(s: &mut S, device: i32) -> Option<Ds> {
     unimplemented!()
 }

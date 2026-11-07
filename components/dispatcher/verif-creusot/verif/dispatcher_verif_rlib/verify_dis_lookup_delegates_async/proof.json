@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lookup": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_lookup": { "prover": "alt-ergo", "time": 0.018 },
       "vc_verify_dis_lookup_delegates_async": {
         "prover": "alt-ergo",
-        "time": 0.095
+        "time": 0.038
       }
     }
   }

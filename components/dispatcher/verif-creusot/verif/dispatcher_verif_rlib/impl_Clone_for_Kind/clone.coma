@@ -1,4 +1,4 @@
-(* #"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/store.rs" 294 9 294 29 *)
+(* #"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/store.rs" 294 9 294 29 *)
 
 (* <Kind as std::clone::Clone> *)
 
@@ -10,7 +10,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let clone_Kind [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/store.rs" 294 9 294 29]
+let clone_Kind [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/store.rs" 294 9 294 29]
   (self: t_Kind) (return (x: t_Kind)) = (! bb0
   [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_Kind = Any.any_l () | & self: t_Kind = self ]) [ return (result: t_Kind) -> (! return {result}) ]

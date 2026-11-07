@@ -258,10 +258,6 @@ pub struct W {
     pub cfree: Mapping<Int, Int>,
     /// `WriteThroughPins::failed`: keys whose latest write-through did not land.
     pub wf: Mapping<u64, bool>,
-    /// The GPU device each CUDA stream is bound to (the device current at its
-    /// creation). Streams are process-wide environment resources; no modelled
-    /// dispatcher call changes this map.
-    pub sdev: Mapping<u64, i32>,
 }
 
 /// Dispatcher program fields (`define_component!` fields, lib.rs:416-432) and receptacle bindings.

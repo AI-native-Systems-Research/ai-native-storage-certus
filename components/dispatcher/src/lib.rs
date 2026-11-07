@@ -3420,34 +3420,14 @@ impl IDispatcher for DispatcherComponent {
                                 return Err(e);
                             }
                         }
-                        // Resolve the stream the copy will be queued on: the warm
-                        // stream of the destination's device when that device is
-                        // known (FR-052 — a stream on another GPU fails
-                        // cudaMemcpyAsync under multi-GPU), and the shared
-                        // `warm_stream` fallback when it is not (FR-037). A known
-                        // device whose per-device stream setup failed (warm_raw ==
-                        // 0) deliberately does NOT take the shared fallback — that
-                        // stream may be bound to another GPU — but degrades to
-                        // stream 0: the helper's `DmaBuffer` branch then copies
-                        // synchronously and the null stream is the honest answer,
-                        // as on the SSD path.
-                        let stream_raw = if device >= 0 {
-                            warm_raw
-                        } else {
-                            self.warm_stream.load(Ordering::Acquire)
-                        };
-                        // Queue the H2D copy WITHOUT synchronizing and hand the
-                        // caller the stream it was queued on: the caller must
-                        // `stream_synchronize` that stream before touching the
-                        // destination (FR-036). The synchronous `lookup` wrapper
-                        // delegates here and performs that sync before returning.
+                        // Synchronous serve via the shared, device-correct helper.
                         let r = self.serve_memory_tier_to_gpu(
                             &gpu,
                             pointer,
                             size,
                             std::slice::from_ref(&ipc_handle),
-                            stream_raw,
-                            false,
+                            warm_raw,
+                            true,
                         );
                         let _ = dm.release_read(key);
                         mt.touch(key);
@@ -3461,7 +3441,7 @@ impl IDispatcher for DispatcherComponent {
                             // hit.
                             self.tier_counters.record_local_hits(1, 0);
                         }
-                        r.map(|()| GpuStream(stream_raw as *mut std::ffi::c_void))
+                        r.map(|()| null_stream)
                     }
                     LookupResult::BlockDevice { offset } => {
                         // Hold the lookup's read pin across the whole promotion: it is
@@ -8821,5 +8801,3 @@ mod repair_test_rw_stats_after_shutdown;
 mod repair_test_transient_map_error;
 #[path = "repair_test_no_drives_promote_without_read.rs"]
 mod repair_test_no_drives_promote_without_read;
-#[path = "repair_test_lookup_async_stream.rs"]
-mod repair_test_lookup_async_stream;

@@ -2,14 +2,14 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lookup": { "prover": "alt-ergo", "time": 0.04 },
-      "vc_p_zero": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_lookup": { "prover": "alt-ergo", "time": 0.045 },
+      "vc_p_zero": { "prover": "alt-ergo", "time": 0.023 },
       "vc_refute_dis_lookup_size_mismatch": {
         "tactic": "compute_specified",
         "children": [
           {
             "tactic": "split_vc",
-            "children": [ { "prover": "alt-ergo", "time": 0.056 }, null ]
+            "children": [ { "prover": "alt-ergo", "time": 0.051 }, null ]
           }
         ]
       }

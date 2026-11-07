@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_populate": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_populate": { "prover": "alt-ergo", "time": 0.027 },
       "vc_verify_dis_populate_not_wait_ssd__mutant": {
         "tactic": "compute_specified",
         "children": [

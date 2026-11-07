@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_ssd_evictor_pass": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_ssd_evictor_pass": { "prover": "alt-ergo", "time": 0.017 },
       "vc_verify_dis_inv_ssd_evictor_skips_memory_tier": {
         "prover": "alt-ergo",
-        "time": 0.041
+        "time": 0.03
       }
     }
   }

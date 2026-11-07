@@ -1,54 +1,49 @@
-(* #"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 2428 0 2428 73 *)
+(* #"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/drivers.rs" 2194 0 2194 73 *)
 
-let%span score = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 620 16 620 102
-let%span score'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 436 16 436 111
-let%span score'1 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 416 16 420 33
-let%span score'2 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 478 16 478 83
-let%span score'3 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 335 16 335 46
-let%span smapping = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
-let%span svec = "/home/cornel/repair-j35-rc23/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
-let%span sinit = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 146 11 146 20
-let%span sinit'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 147 10 147 22
-let%span sinit'1 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 152 10 152 91
-let%span sinit'2 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 153 10 153 91
-let%span sinit'3 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 154 10 155 114
-let%span sinit'4 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 156 10 156 125
-let%span sinit'5 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 157 10 157 90
-let%span sinit'6 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 158 10 158 103
-let%span sinit'7 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 159 10 159 135
-let%span sinit'8 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 160 10 160 169
-let%span sinit'9 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 161 10 172 1
-let%span sinit'10 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 173 10 173 166
-let%span sinit'11 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 174 10 174 115
-let%span sinit'12 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 175 10 175 164
-let%span sinit'13 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 176 10 178 128
-let%span sinit'14 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 179 10 181 57
-let%span sinit'15 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 185 10 186 43
-let%span sinit'16 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 187 10 188 72
-let%span sinit'17 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 192 10 194 51
-let%span sinit'18 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 32 16 32 76
-let%span sbg = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/bg.rs" 167 10 167 73
-let%span sbg'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/bg.rs" 162 16 163 80
-let%span sbg'1 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/bg.rs" 180 11 180 22
-let%span sbg'2 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/bg.rs" 181 10 181 104
-let%span sbg'3 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/bg.rs" 193 11 193 58
-let%span sbg'4 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/bg.rs" 194 10 194 54
-let%span sdrivers = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 2429 16 2429 30
-let%span sdrivers'0 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 2430 18 2430 51
-let%span sdrivers'1 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 2431 12 2431 37
-let%span sdrivers'2 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 2432 18 2432 52
-let%span sdrivers'3 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 2433 4 2433 31
-let%span sdrivers'4 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 2434 18 2434 37
-let%span sdrivers'5 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 2435 19 2435 37
-let%span sdrivers'6 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 2436 18 2436 50
-let%span sdrivers'7 = "/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 2427 11 2427 32
+let%span score = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 607 16 607 102
+let%span score'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 423 16 423 111
+let%span score'1 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 403 16 407 33
+let%span score'2 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 465 16 465 83
+let%span score'3 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 322 16 322 46
+let%span smapping = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
+let%span svec = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sinit = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/init.rs" 144 11 144 20
+let%span sinit'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/init.rs" 145 10 145 22
+let%span sinit'1 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/init.rs" 146 10 146 68
+let%span sinit'2 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/init.rs" 147 10 148 114
+let%span sinit'3 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/init.rs" 149 10 149 125
+let%span sinit'4 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/init.rs" 150 10 150 90
+let%span sinit'5 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/init.rs" 151 10 151 103
+let%span sinit'6 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/init.rs" 152 10 152 135
+let%span sinit'7 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/init.rs" 153 10 153 169
+let%span sinit'8 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/init.rs" 154 10 165 1
+let%span sinit'9 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/init.rs" 166 10 166 166
+let%span sinit'10 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/init.rs" 167 10 167 115
+let%span sinit'11 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/init.rs" 168 10 168 164
+let%span sinit'12 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/init.rs" 169 10 171 128
+let%span sinit'13 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/init.rs" 172 10 174 57
+let%span sinit'14 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/init.rs" 32 16 32 76
+let%span sbg = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/bg.rs" 167 10 167 73
+let%span sbg'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/bg.rs" 162 16 163 80
+let%span sbg'1 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/bg.rs" 180 11 180 22
+let%span sbg'2 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/bg.rs" 181 10 181 104
+let%span sbg'3 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/bg.rs" 193 11 193 58
+let%span sbg'4 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/bg.rs" 194 10 194 54
+let%span sdrivers = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/drivers.rs" 2195 16 2195 30
+let%span sdrivers'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/drivers.rs" 2196 18 2196 51
+let%span sdrivers'1 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/drivers.rs" 2197 12 2197 37
+let%span sdrivers'2 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/drivers.rs" 2198 18 2198 52
+let%span sdrivers'3 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/drivers.rs" 2199 4 2199 31
+let%span sdrivers'4 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/drivers.rs" 2200 18 2200 37
+let%span sdrivers'5 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/drivers.rs" 2201 19 2201 37
+let%span sdrivers'6 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/drivers.rs" 2202 18 2202 50
+let%span sdrivers'7 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/drivers.rs" 2193 11 2193 32
 
 use creusot.int.UInt64
 use seq.Seq
 use creusot.prelude.MutBorrow
 use creusot.int.UInt32
 use map.Map
-use creusot.int.Int32
 use creusot.prelude.Any
 use int.Int
 
@@ -64,7 +59,7 @@ axiom view_Vec_usize_Global_spec:
   forall self: t_Vec_usize_Global [view_Vec_usize_Global self]. [%#svec] Seq.length (view_Vec_usize_Global self)
     <= UInt64.t'int const_MAX
 
-predicate stg_inv [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/bg.rs" 161 0 161 30] (p: t_Stg) =
+predicate stg_inv [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/bg.rs" 161 0 161 30] (p: t_Stg) =
   [%#sbg'0] p.leased >= 0
   /\ p.leased + Seq.length (view_Vec_usize_Global p.free) = UInt64.t'int p.slots
   /\ (forall i: int. 0 <= i /\ i < Seq.length (view_Vec_usize_Global p.free)
@@ -166,7 +161,6 @@ type t_Ev =
   | DevShutdown UInt64.t
   | DevDetach UInt64.t
   | Register
-  | RegWarn
   | Unregister
   | Join
   | Leave
@@ -198,10 +192,8 @@ type t_W = {
   cluster: bool;
   threads: int;
   rw: Map.map int UInt64.t;
-  rw_base: int;
   cfree: Map.map int int;
-  wf: Map.map UInt64.t bool;
-  sdev: Map.map UInt64.t Int32.t }
+  wf: Map.map UInt64.t bool }
 
 type t_S = { p: t_P; g: t_W }
 
@@ -244,14 +236,14 @@ type t_DFail =
 
 type tup2_Result_unit_DE_DFail = { f0: t_Result_unit_DE; f1: t_DFail }
 
-predicate pinv [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 619 0 619 25] (p'0: t_P) =
+predicate pinv [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 606 0 606 25] (p'0: t_P) =
   [%#score] (p'0.init -> p'0.has_dm /\ p'0.has_mt /\ p'0.writer) /\ (not p'0.init -> not p'0.ssd_ev /\ not p'0.mt_ev)
 
-predicate log_ext [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 435 0 435 34] (a: t_W) (b: t_W) =
+predicate log_ext [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 422 0 422 34] (a: t_W) (b: t_W) =
   [%#score'0] Seq.length a.log <= Seq.length b.log
   /\ (forall i: int. 0 <= i /\ i < Seq.length a.log -> Seq.get b.log i = Seq.get a.log i)
 
-predicate same_ctr [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 415 0 415 39] (a: t_Ctr) (b: t_Ctr) =
+predicate same_ctr [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 402 0 402 39] (a: t_Ctr) (b: t_Ctr) =
   [%#score'1] a.promo_mem = b.promo_mem
   /\ a.promo_gpu = b.promo_gpu
   /\ a.ev_mem = b.ev_mem
@@ -268,14 +260,14 @@ function index_Mapping_Int_Int [@inline:trivial] (self: Map.map int int) (a: int
 
 meta "rewrite_def" function index_Mapping_Int_Int
 
-predicate logged [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 477 0 477 40] (a: t_W) (b: t_W) (e: t_Ev) =
+predicate logged [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 464 0 464 40] (a: t_W) (b: t_W) (e: t_Ev) =
   [%#score'2] exists i: int. Seq.length a.log <= i /\ i < Seq.length b.log /\ Seq.get b.log i = e
 
 predicate index_Mapping_Int_bool [@inline:trivial] (self: Map.map int bool) (a: int) = [%#smapping] Map.get self a
 
 meta "rewrite_def" predicate index_Mapping_Int_bool
 
-predicate all_from [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 334 0 334 54] (m: Map.map int bool) (t: int) =
+predicate all_from [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 321 0 321 54] (m: Map.map int bool) (t: int) =
   [%#score'3] forall i: int. i >= t -> index_Mapping_Int_bool m i
 
 function index_Mapping_Int_u64 [@inline:trivial] (self: Map.map int UInt64.t) (a: int) : UInt64.t =
@@ -283,47 +275,43 @@ function index_Mapping_Int_u64 [@inline:trivial] (self: Map.map int UInt64.t) (a
 
 meta "rewrite_def" function index_Mapping_Int_u64
 
-predicate drives_ok [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/init.rs" 31 0 31 38] (w: t_W) (t: int) =
-  [%#sinit'18] all_from w.ob t /\ (forall i: int. i >= t -> UInt64.t'int (index_Mapping_Int_u64 w.ov i) >= 3)
+predicate drives_ok [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/init.rs" 31 0 31 38] (w: t_W) (t: int) =
+  [%#sinit'14] all_from w.ob t /\ (forall i: int. i >= t -> UInt64.t'int (index_Mapping_Int_u64 w.ov i) >= 3)
 
 function index_Mapping_Int_Seq_Ext [@inline:trivial] (self: Map.map int (Seq.seq t_Ext)) (a: int) : Seq.seq t_Ext =
   [%#smapping] Map.get self a
 
 meta "rewrite_def" function index_Mapping_Int_Seq_Ext
 
-function rw_total [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/core.rs" 684 0 684 36] (w: t_W) (n: int) : int
-
 let initialize (s: MutBorrow.t t_S) (cfg: t_ICfg) (return (x: tup2_Result_unit_DE_DFail)) =
 {[@stop_split] [@expl:initialize requires] [%#sinit] pinv s.current.p}
   any
   [ return (result: tup2_Result_unit_DE_DFail) ->
   {[@stop_split] [@expl:initialize ensures] ([@stop_split] [@expl:initialize ensures #0] [%#sinit'0] pinv s.final.p)
-    /\ ([@stop_split] [@expl:initialize ensures #1] [%#sinit'1] result.f0 = Ok ()
-      -> s.final.p.max_att = cfg.max_att'0 /\ s.final.p.bp_ms = cfg.bp_ms'0)
-    /\ ([@stop_split] [@expl:initialize ensures #2] [%#sinit'2] result.f0 <> Ok ()
-      -> s.final.p.max_att = s.current.p.max_att /\ s.final.p.bp_ms = s.current.p.bp_ms)
-    /\ ([@stop_split] [@expl:initialize ensures #3] [%#sinit'3] s.final.p.has_dm = s.current.p.has_dm
+    /\ ([@stop_split] [@expl:initialize ensures #1] [%#sinit'1] s.final.p.max_att = cfg.max_att'0
+      /\ s.final.p.bp_ms = cfg.bp_ms'0)
+    /\ ([@stop_split] [@expl:initialize ensures #2] [%#sinit'2] s.final.p.has_dm = s.current.p.has_dm
       /\ s.final.p.has_mt = s.current.p.has_mt
       /\ s.final.p.has_gpu = s.current.p.has_gpu
       /\ s.final.p.has_spdk = s.current.p.has_spdk
       /\ s.final.p.has_factory = s.current.p.has_factory
       /\ s.final.p.has_rl = s.current.p.has_rl /\ s.final.p.has_logger = s.current.p.has_logger)
-    /\ ([@stop_split] [@expl:initialize ensures #4] [%#sinit'4] log_ext s.current.g s.final.g
+    /\ ([@stop_split] [@expl:initialize ensures #3] [%#sinit'3] log_ext s.current.g s.final.g
       /\ same_ctr s.current.g.c s.final.g.c /\ s.final.g.wq = s.current.g.wq /\ s.final.g.mt = s.current.g.mt)
-    /\ ([@stop_split] [@expl:initialize ensures #5] [%#sinit'5] not s.current.p.has_dm
+    /\ ([@stop_split] [@expl:initialize ensures #4] [%#sinit'4] not s.current.p.has_dm
       -> result.f0 = Err (NotInit (DispatchMap)) /\ s.final.g = s.current.g)
-    /\ ([@stop_split] [@expl:initialize ensures #6] [%#sinit'6] s.current.p.has_dm /\ not s.current.p.has_mt
+    /\ ([@stop_split] [@expl:initialize ensures #5] [%#sinit'5] s.current.p.has_dm /\ not s.current.p.has_mt
       -> result.f0 = Err (NotInit (MemoryTier)) /\ s.final.g = s.current.g)
-    /\ ([@stop_split] [@expl:initialize ensures #7] [%#sinit'7] s.current.p.has_dm
+    /\ ([@stop_split] [@expl:initialize ensures #6] [%#sinit'6] s.current.p.has_dm
         /\ s.current.p.has_mt /\ UInt64.t'int cfg.n_addrs'0 = 0
       -> result.f0 = Err (InvalidParam) /\ s.final.g = s.current.g /\ s.final.p.nd = s.current.p.nd)
-    /\ ([@stop_split] [@expl:initialize ensures #8] [%#sinit'8] match result.f0 with
+    /\ ([@stop_split] [@expl:initialize ensures #7] [%#sinit'7] match result.f0 with
         | Err _ -> s.final.p.init = s.current.p.init
         /\ s.final.p.writer = s.current.p.writer
         /\ s.final.p.ssd_ev = s.current.p.ssd_ev /\ s.final.p.mt_ev = s.current.p.mt_ev
         | Ok () -> true
         end)
-    /\ ([@stop_split] [@expl:initialize ensures #9] [%#sinit'9] match result.f0 with
+    /\ ([@stop_split] [@expl:initialize ensures #8] [%#sinit'8] match result.f0 with
         | Ok () -> s.final.p.init
         /\ s.final.p.writer
         /\ s.final.p.ssd_ev = (s.current.p.ssd_ev \/ cfg.ssd_thr_pos'0 /\ UInt64.t'int s.final.p.nd > 0)
@@ -343,50 +331,36 @@ let initialize (s: MutBorrow.t t_S) (cfg: t_ICfg) (return (x: tup2_Result_unit_D
           end
         | Err _ -> false
         end)
-    /\ ([@stop_split] [@expl:initialize ensures #10] [%#sinit'10] match result.f0 with
+    /\ ([@stop_split] [@expl:initialize ensures #9] [%#sinit'9] match result.f0 with
         | Err (Io (Partition'0 drive expected found)) -> UInt64.t'int expected = 3
         /\ UInt64.t'int found < 3 /\ result.f1 = Few'1 drive found
         | _ -> true
         end)
-    /\ ([@stop_split] [@expl:initialize ensures #11] [%#sinit'11] s.current.p.has_dm
+    /\ ([@stop_split] [@expl:initialize ensures #10] [%#sinit'10] s.current.p.has_dm
         /\ s.current.p.has_mt /\ UInt64.t'int cfg.n_addrs'0 > 0 /\ not (s.current.p.has_spdk \/ s.current.p.has_factory)
       -> result.f0 = Ok ())
-    /\ ([@stop_split] [@expl:initialize ensures #12] [%#sinit'12] s.current.p.has_dm
+    /\ ([@stop_split] [@expl:initialize ensures #11] [%#sinit'11] s.current.p.has_dm
         /\ s.current.p.has_mt
         /\ UInt64.t'int cfg.n_addrs'0 > 0
         /\ (s.current.p.has_spdk \/ s.current.p.has_factory)
         /\ s.current.p.has_logger /\ drives_ok s.current.g s.current.g.tick -> result.f0 = Ok ())
-    /\ ([@stop_split] [@expl:initialize ensures #13] [%#sinit'13] s.current.p.has_dm
+    /\ ([@stop_split] [@expl:initialize ensures #12] [%#sinit'12] s.current.p.has_dm
         /\ s.current.p.has_mt
         /\ UInt64.t'int cfg.n_addrs'0 > 0
         /\ (s.current.p.has_spdk \/ s.current.p.has_factory) /\ not cfg.format_on_init'0 /\ result.f0 = Ok ()
       -> (forall d: int, e: int. 0 <= d
           /\ d < UInt64.t'int cfg.n_addrs'0 /\ 0 <= e /\ e < Seq.length (index_Mapping_Int_Seq_Ext s.current.g.ext d)
         -> logged s.current.g s.final.g (Recover ((Seq.get (index_Mapping_Int_Seq_Ext s.current.g.ext d) e).key'0) ((Seq.get (index_Mapping_Int_Seq_Ext s.current.g.ext d) e).off'0) ((Seq.get (index_Mapping_Int_Seq_Ext s.current.g.ext d) e).size'0))))
-    /\ ([@stop_split] [@expl:initialize ensures #14] [%#sinit'14] s.current.p.has_dm
-        /\ s.current.p.has_mt
-        /\ UInt64.t'int cfg.n_addrs'0 >= 1
-        /\ (s.current.p.has_spdk \/ s.current.p.has_factory)
-        /\ not cfg.format_on_init'0
-        /\ s.current.p.has_logger
-        /\ all_from s.current.g.ob s.current.g.tick
-        /\ all_from s.current.g.ob2 s.current.g.tick
-        /\ (forall i: int. i >= s.current.g.tick -> UInt64.t'int (index_Mapping_Int_u64 s.current.g.ov i) >= 3)
-      -> logged s.current.g s.final.g (EmFormat (0: UInt64.t)))
-    /\ ([@stop_split] [@expl:initialize ensures #15] [%#sinit'15] s.current.p.has_dm
-        /\ s.current.p.has_mt
-        /\ UInt64.t'int cfg.n_addrs'0 > 0 /\ s.current.p.has_gpu /\ s.current.g.pool /\ result.f0 = Ok ()
-      -> logged s.current.g s.final.g (Register))
-    /\ ([@stop_split] [@expl:initialize ensures #16] [%#sinit'16] s.current.p.has_dm
-        /\ s.current.p.has_mt
-        /\ UInt64.t'int cfg.n_addrs'0 > 0
-        /\ s.current.p.has_gpu /\ s.current.g.pool /\ not (s.current.p.has_spdk \/ s.current.p.has_factory)
-      -> not index_Mapping_Int_bool s.current.g.ob s.current.g.tick -> logged s.current.g s.final.g (RegWarn))
-    /\ ([@stop_split] [@expl:initialize ensures #17] [%#sinit'17] match result.f0 with
-      | Ok () -> s.current.p.has_spdk \/ s.current.p.has_factory
-      -> s.final.g.rw_base = rw_total s.current.g (UInt64.t'int s.current.p.nd)
-      | Err _ -> s.final.g.rw_base = s.current.g.rw_base
-      end)}
+    /\ ([@stop_split] [@expl:initialize ensures #13] [%#sinit'13] s.current.p.has_dm
+      /\ s.current.p.has_mt
+      /\ UInt64.t'int cfg.n_addrs'0 >= 1
+      /\ (s.current.p.has_spdk \/ s.current.p.has_factory)
+      /\ not cfg.format_on_init'0
+      /\ s.current.p.has_logger
+      /\ all_from s.current.g.ob s.current.g.tick
+      /\ all_from s.current.g.ob2 s.current.g.tick
+      /\ (forall i: int. i >= s.current.g.tick -> UInt64.t'int (index_Mapping_Int_u64 s.current.g.ov i) >= 3)
+    -> logged s.current.g s.final.g (EmFormat (0: UInt64.t)))}
     (! return {result}) ]
 
 predicate resolve_refmut_S [@inline:trivial] (_1: MutBorrow.t t_S) = _1.final = _1.current
@@ -397,7 +371,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let verify_dis_inv_staging_bounded [#"/home/cornel/repair-j35-rc23/components/dispatcher/verif-creusot/src/drivers.rs" 2428 0 2428 73]
+let verify_dis_inv_staging_bounded [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/drivers.rs" 2194 0 2194 73]
   (slots'0: UInt64.t) (s: MutBorrow.t t_S) (cfg: t_ICfg) (return (x: ())) =
 {[@stop_split] [@expl:verify_dis_inv_staging_bounded requires] [%#sdrivers'7] pinv s.current.p /\ not s.current.p.stg}
   (! bb0

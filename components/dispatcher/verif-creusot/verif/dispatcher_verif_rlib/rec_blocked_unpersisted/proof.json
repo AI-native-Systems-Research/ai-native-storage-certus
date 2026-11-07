@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_rec_blocked_unpersisted": { "prover": "z3", "time": 0.016 }
+      "vc_rec_blocked_unpersisted": { "prover": "z3", "time": 0.013 }
     }
   }
 }
