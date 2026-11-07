@@ -34,12 +34,18 @@ Things to know when reading LMCache numbers:
 - **`lookup_wait`** is the polling after the first `check_lookup_result`: the server's ack plus, on a cold lookup, the L2 → L1 prefetch. Even a warm lookup costs about 1.7 ms here, because the scheduler adapter polls without blocking.
 - **Single rank only.** `--tp 1`; LMCache's TP sharding is not simulated.
 
+
+**Working set larger than the server's L1 (`L1_GB`).** Refused by default, as in certus-connector-bench, because the warm loads would not be warm. `--no-warm` skips the warm pass, so store and cold run at any `--num-blocks`. `--allow-warm-overflow` runs the warm pass anyway and marks it: the label ends `OVERFLOW: set exceeds tier, not warm`, the CSV row has `warm_overflow=1` and the blocks that came back from disk (`disk_read_bytes`), and `connector-sweep/make_report.py` flags the row.
+
+
+How the memory tier size sets `--num-blocks`, and what happens when it is set higher than the tier holds (`--no-warm`, `--allow-warm-overflow`), is summarised for all four benches in [connector-sweep: Memory tier size and `--num-blocks`](../connector-sweep/README.md#memory-tier-size-and---num-blocks).
+
 ## Running
 
 Prerequisites:
 
 - The vLLM + LMCache image: `deploy/lmcache/build.sh` builds `localhost/vllm-lmcache-bench:vllm0.30.0` in about a minute.
-- A CUDA GPU visible to podman through the NVIDIA CDI device. The bench and server share it; the bench's fake KV cache is about 0.5 GiB at the defaults (272 chunks × `--block-bytes`), and grows with `--bs`, `--pipeline-depth` and `--requests-per-step`.
+- A CUDA GPU visible to podman through the NVIDIA CDI device. The bench and server share it; the bench's fake KV cache is about 0.5 GiB at the defaults (272 chunks × `--block-bytes`), and grows with `--bs`, `--inflight` × `--job-blocks` and `--requests-per-step`.
 
 From the repo root:
 
@@ -62,7 +68,7 @@ Both containers use `--ipc host --network host --pid host`. On this host the ser
 |---|---|---|
 | `IMAGE` | `localhost/vllm-lmcache-bench:vllm0.30.0` | vLLM + LMCache image |
 | `GPU` | `0` | CDI GPU index |
-| `L1_GB` | `4` | Server L1 (pinned RAM). Match cputier's `--cpu-bytes` / certus's `--memory-tier-size` |
+| `L1_GB` | `8` | Server L1 (pinned RAM). Match cputier's `--cpu-bytes` / certus's `--memory-tier-size` (both 8G by default); to change the tier size, set only this. The default mode's `--num-blocks`, when not given, is derived from the L1 the server reports: 90% of L1 x 0.8 / `--block-bytes`, at most 4000 (2948 at the 8 default, 4000 at 12), as certus-connector-bench derives it from its tier; the other modes: 128 |
 | `L2` | `1` | `1` = `fs_native` L2 on `L2_DIR`; `0` = none |
 | `L2_DIR` / `L2_GB` | `$HOME/lmcache-bench-l2` / `64` | L2 host directory and capacity. Put it on the disk you want to measure, not on overlay storage (no `O_DIRECT`) |
 | `USE_ODIRECT` | `1` | `O_DIRECT` L2 I/O |
@@ -81,18 +87,25 @@ Both containers use `--ipc host --network host --pid host`. On this host the ser
 | `--verify` | — | Store random GPU data, zero it, retrieve it (warm, then cold through L2) and compare bytes |
 | `--mq-timeout` | 30 | Seconds the adapters wait for blocking server calls |
 
-The workload flags (`--bs`, `--num-blocks`, `--block-bytes`, `--min-duration`, `--warmup`, `--working-set`, `--mode`, `--pipeline-depth`, `--direction`, `--hit-ratio`, `--requests-per-step`, `--num-sessions`, `--csv`, `--tag`, `--no-cold`, `--no-eviction`) mean the same as in the sibling benches.
+The workload flags (`--bs`, `--num-blocks`, `--block-bytes`, `--min-duration`, `--warmup`, `--working-set`, `--mode`, `--job-blocks`, `--inflight`, `--step-us`, `--store-job-blocks`, `--store-inflight`, `--hit-ratio`, `--requests-per-step`, `--num-sessions`, `--csv`, `--tag`, `--no-cold`, `--no-eviction`) mean the same as in the sibling benches.
 
 ## Modes
 
-- **default**: four serial phases.
-  1. Store (GPU → L1, written through to L2 in the background).
-  2. Warm load (L1 → GPU).
-  3. Cold load. L1 is cleared before each pass (after its L2 write-through drains), so every chunk is prefetched L2 → L1 (`lookup_wait`) and then copied to the GPU.
+- **default**: four phases; the first three run jobs in flight (below).
+  1. Store (GPU → L1, written through to L2 in the background): `--store-job-blocks` × `--store-inflight`.
+  2. Warm load (L1 → GPU): `--job-blocks` × `--inflight`. The working set (`--num-blocks` chunks) must fit 90% of the server's L1, as certus-connector-bench's must fit its tier; a larger one is refused before any run.
+  3. Cold load, the same jobs. L1 is cleared before each pass (after its L2 write-through drains), so every chunk is prefetched L2 → L1 (`lookup_wait`) and then copied to the GPU.
   4. Mixed store and load under L1 pressure. Size `--working-set` against `L1_GB`; the run prints after how many generations L1 fills.
-- **pipelined**: `--pipeline-depth` requests submitted before reaping. For loads, the lookup is part of `prepare`.
 - **prefix-miss**: the first `--hit-ratio` of the keys are stored, then every request is looked up and its hit prefix retrieved. LMCache answers a request's whole prefix in one round trip, so `lookup_hit`/`lookup_miss` are per request (split by whether any of it hit), not per key.
-- **scheduler-step**: sessions share one stored prefix pool and diverge at geometric points; each request is a session prefix plus a fresh suffix. Per step: every request's lookup is submitted, then all are polled until answered (`touch_lookup`), the hit prefixes are retrieved in one batched call and drained (`drain_workers`), and the unstored tails are submitted as stores and drained, untimed, at the start of the next step.
+- **scheduler-step** (not compared by `connector-sweep/run_compare.sh`: it merges a step's loads and waits for them inside the step, unlike certus-connector-bench's, which runs vLLM 0.30's scheduler): sessions share one stored prefix pool and diverge at geometric points; each request is a session prefix plus a fresh suffix. Per step: every request's lookup is submitted, then all are polled until answered (`touch_lookup`), the hit prefixes are retrieved in one batched call and drained (`drain_workers`), and the unstored tails are submitted as stores and drained, untimed, at the start of the next step.
+
+## Jobs in flight (default mode)
+
+**UNTESTED ON HARDWARE.** The LMCache bench image (`localhost/vllm-lmcache-bench:vllm0.30.0`) was not on the host where this mode was written, and was not built. The code was checked with `py_compile` and read against LMCache 0.5.5's `vllm_multi_process_adapter.py` (the version in `docker.io/vllm/vllm-openai:v0.30.0`). To check it, someone with the image should run: `run-in-container.sh --verify`, `run-in-container.sh --job-blocks 16 --inflight 1`, `run-in-container.sh` (64 × 4), and `run-in-container.sh --mode all --min-duration 3`.
+
+The default mode drives the adapters as vLLM 0.30 does, with certus-connector-bench's knobs and defaults: `--job-blocks` 64, `--inflight` 4, `--step-us` 100, `--store-job-blocks` / `--store-inflight` defaulting to those. A load job submits its lookup (`maybe_submit_lookup_request`) in the tick it is scheduled. It then checks `check_lookup_result` once per tick, never spinning, as vLLM retries an unanswered lookup on its next step, and retrieves the hit prefix once answered. A store is submitted one tick after it is prepared. Each tick makes one worker `get_finished()`, passing the outstanding store ids as the engine's finished requests, then sleeps to the next `--step-us` boundary. Each job has its own GPU block range. Phases: `get_finished` (and `load_job` / `store_job`) are each job's submit-to-reap time, `reap_call` the one poll per tick, `lookup_wait` the lookup's submit to answer. Every CSV row records `job_blocks`, `inflight`, `step_us`, `store_job_blocks` and `store_inflight`. `--mode pipelined`, `--pipeline-depth` and `--direction` are gone, as are the one-request-at-a-time default passes. LMCache has no contention mode.
+
+**What jobs in flight mean for LMCache.** Transfers run in the LMCache server, which handles requests with `--max-workers` threads. That is 1 by default (`LMC_WORKERS`), so the server may serialize jobs and cap the gain from `--inflight`. The bench does not raise it: a small gain is a property of the default setup.
 
 ## Side-by-side with cputier and certus
 

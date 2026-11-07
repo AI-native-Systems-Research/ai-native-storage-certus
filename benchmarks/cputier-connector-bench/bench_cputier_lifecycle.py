@@ -370,8 +370,9 @@ def build_offloading_config(args, block_bytes: int, fs_root: str | None, engine_
 # submit_store / submit_load / get_finished / shutdown surface.
 
 
-def _gpu_spec_for(n: int) -> GPULoadStoreSpec:
-    return GPULoadStoreSpec(list(range(n)), group_sizes=(n,), block_indices=(0,))
+def _gpu_spec_ids(block_ids) -> GPULoadStoreSpec:
+    ids = list(block_ids)
+    return GPULoadStoreSpec(ids, group_sizes=(len(ids),), block_indices=(0,))
 
 
 def _cputier_rank_main(conn, barrier, args, block_bytes, num_gpu_blocks, fs_root,
@@ -399,11 +400,12 @@ def _cputier_rank_main(conn, barrier, args, block_bytes, num_gpu_blocks, fs_root
                 msg = conn.recv()
                 if msg[0] == "stop":
                     break
-                op, job_id, n, cpu_spec = msg
+                op, job_id, block_ids, cpu_spec = msg
+                gspec = _gpu_spec_ids(block_ids)   # the same GPU blocks as rank 0's
                 if op == "store":
-                    ok = worker.submit_store(job_id, _gpu_spec_for(n), cpu_spec)
+                    ok = worker.submit_store(job_id, gspec, cpu_spec)
                 else:
-                    ok = worker.submit_load(job_id, cpu_spec, _gpu_spec_for(n))
+                    ok = worker.submit_load(job_id, cpu_spec, gspec)
                 if ok:
                     inflight += 1
                 else:
@@ -462,10 +464,10 @@ class _CputierTPWorkerGroup:
             raise
 
     def _submit(self, op, job_id, gpu_spec, cpu_spec):
-        n = len(gpu_spec.block_ids)
+        ids = [int(b) for b in gpu_spec.block_ids]   # every rank addresses the same blocks
         self._pending[job_id] = [self._world_size, True]
         for conn in self._conns:
-            conn.send((op, job_id, n, cpu_spec))
+            conn.send((op, job_id, ids, cpu_spec))
         if op == "store":
             ok = self._rank0.submit_store(job_id, gpu_spec, cpu_spec)
         else:
@@ -598,6 +600,12 @@ class CputierStack:
             self.manager.on_schedule_end(
                 ScheduleEndContext(new_req_ids=new_req_ids, preempted_req_ids=()))
 
+    def finish_request(self, ctx: ReqContext):
+        """Request finished, inside a scheduler step (the step loop ends the step once
+        per tick with step_end)."""
+        with self.lock:
+            self.manager.on_request_finished(ctx)
+
     def end_request(self, ctx: ReqContext):
         """Request finished, then the scheduler step that saw it ends."""
         with self.lock:
@@ -663,6 +671,33 @@ class CputierStack:
             ok = self.worker.submit_load(job_id, load_spec, self._gpu_spec(num_keys))
         assert ok, f"submit_load({job_id}) rejected"
         return job_id
+
+    def _gpu_spec_at(self, num_keys: int, base: int) -> GPULoadStoreSpec:
+        n = num_keys * self.bpc
+        return GPULoadStoreSpec(list(range(base, base + n)), group_sizes=(n,), block_indices=(0,))
+
+    def submit_store_at(self, store_spec, num_keys: int, base: int) -> int:
+        """submit_store to GPU blocks base.. (the in-flight passes' slots)."""
+        job_id = next(self._job_ids)
+        with self.lock:
+            ok = self.worker.submit_store(job_id, self._gpu_spec_at(num_keys, base), store_spec)
+        assert ok, f"submit_store({job_id}) rejected"
+        return job_id
+
+    def submit_load_at(self, load_spec, num_keys: int, base: int) -> int:
+        job_id = next(self._job_ids)
+        with self.lock:
+            ok = self.worker.submit_load(job_id, load_spec, self._gpu_spec_at(num_keys, base))
+        assert ok, f"submit_load({job_id}) rejected"
+        return job_id
+
+    def poll_results(self) -> list:
+        """One non-blocking get_finished() call; its TransferResults (job_id, success,
+        transfer_time where the worker reports it)."""
+        with self.lock:
+            res = list(self.worker.get_finished())
+        self.failed_jobs += sum(1 for r in res if not r.success)
+        return res
 
     def poll(self):
         with self.lock:
@@ -1024,6 +1059,12 @@ def bench_mixed_eviction(
     chunks; if the disk falls behind, prepare_store fails (store drops) and the
     loop backs off one engine step. Only blocks that were actually stored are
     loaded by the next generation. ``take_events()`` is drained each generation.
+
+    Before the timed loop the CPU tier is filled with other blocks, untimed, so every
+    timed store evicts from the first generation on (as certus-connector-bench fills
+    its tier to the eviction threshold): with a 12 GiB tier a 512-block working set
+    would otherwise not fill it within the pass. The fill is evicted by the pass and
+    the tier emptied after it.
     """
     names_store = {"touch": "store_touch", "get_finished": "store_finish",
                    "new_request": "store_new_request", "schedule_end": "store_schedule_end"}
@@ -1041,18 +1082,36 @@ def bench_mixed_eviction(
     print(f"\n  Eviction mode: working_set={working_set} "
           f"(store={store_count}/gen, load={load_count}/gen, "
           f"chunk_bytes={stack.chunk_bytes})")
-    print(f"  The CPU tier ({stack.num_chunks} chunks) fills after "
-          f"~{stack.num_chunks // max(1, store_count)} generations, then eviction kicks in.")
-
     stack.evict_primary()
     stack.take_events()
-    counters_before = stack.counters.copy()
     base_seed = _fresh_seed()
+    # Fill the CPU tier (its LRU evicts once no chunk is free), untimed, leaving room for
+    # the seed generation. Its seed is negative, apart from every generation's
+    # (base_seed + 1e6 x generation).
+    fill = make_content_keys(max(0, stack.num_chunks - load_count), seed=-base_seed)
+    t0 = time.perf_counter()
+    try:
+        populate_keys(stack, fill, batch_size)
+        stack.take_events()
+        print(f"  CPU tier ({stack.num_chunks} chunks) filled first ({len(fill)} blocks and the "
+              f"seed, {time.perf_counter() - t0:.1f}s, untimed): every store evicts.")
+        # The seed: only what was stored is loaded (a dropped seed block is not a miss).
+        seed_keys = make_content_keys(load_count, seed=base_seed)
+        loadable_keys: list[bytes] = []
+        for i in range(0, load_count, batch_size):
+            store_batch(stack, seed_keys[i:i + batch_size], resident=loadable_keys)
+        counters_before = stack.counters.copy()
+        return _mixed_eviction_loop(stack, batch_size, min_duration, working_set, load_fraction,
+                                    store_count, base_seed, loadable_keys, counters_before,
+                                    phases, names_store, names_load)
+    finally:
+        stack.evict_primary()   # the fill and the pass's blocks leave the CPU tier
 
-    seed_keys = make_content_keys(load_count, seed=base_seed)
-    populate_keys(stack, seed_keys, batch_size)
-    loadable_keys = list(seed_keys)
 
+def _mixed_eviction_loop(stack, batch_size, min_duration, working_set, load_fraction,
+                         store_count, base_seed, loadable_keys, counters_before,
+                         phases, names_store, names_load) -> BenchResult:
+    """The timed part of bench_mixed_eviction (unchanged by the fill)."""
     total_blocks = store_drops = load_misses = 0
     wall_start = time.perf_counter()
     generation = 0
@@ -1113,115 +1172,6 @@ def bench_mixed_eviction(
         if store_drops and not delta["fs_stored"]:
             print("  NOTE: store drops with zero fs writes means the CPU->fs cascade")
             print("  is not completing; check --fs-root is writable.")
-    return result
-
-
-# ── mode: pipelined ──────────────────────────────────────────────────────────
-
-def bench_pipelined(
-    stack: CputierStack, keys: list[bytes], batch_size: int, min_duration: float,
-    *, pipeline_depth: int = 4, direction: str = "store",
-) -> BenchResult:
-    """Submit multiple batches before reaping.
-
-    Instead of submit→spin→complete per batch, submit ``pipeline_depth``
-    batches (one request + scheduler step each), then drain. Each transfer
-    gets its own CUDA stream but CPUOffloadingWorker chains them in submission
-    order, so this shows how much per-batch overhead overlaps the DMA.
-    Stores use a fresh key set per pass; the CPU-tier reset between passes
-    (fs write-through drain) is excluded from wall time.
-    """
-    is_store = direction == "store"
-    label_dir = "Store" if is_store else "Load"
-    phases = _phases("prepare", "submit", "pipeline_drain", "complete")
-
-    if not is_store:
-        populate_keys(stack, keys, batch_size)
-
-    total_blocks = 0
-    excluded = 0.0
-    wall_start = time.perf_counter()
-    iteration = 0
-
-    def _drain(in_flight: collections.deque):
-        t0 = time.perf_counter()
-        while in_flight:
-            stack.poll()
-            while in_flight and stack.is_done(in_flight[0][0]):
-                job, ctx, done_keys = in_flight.popleft()
-                stack.reap(job)
-                t_c = time.perf_counter()
-                if is_store:
-                    stack.complete_store(done_keys, ctx, success=True)
-                else:
-                    stack.complete_load(done_keys, ctx)
-                stack.end_request(ctx)
-                _rec(phases, "complete", t_c)
-            if in_flight:
-                time.sleep(POLL_S)
-        _rec(phases, "pipeline_drain", t0)
-
-    while (time.perf_counter() - wall_start - excluded) < min_duration or iteration < 2:
-        in_flight: collections.deque = collections.deque()
-        pass_keys = rekey(keys, iteration) if is_store else keys
-
-        for i in range(0, len(pass_keys), batch_size):
-            batch_keys = pass_keys[i : i + batch_size]
-            t0 = time.perf_counter()
-            ctx = stack.new_request()
-            if is_store:
-                stack.touch(batch_keys, ctx)
-                result = stack.prepare_store(batch_keys, ctx)
-                if result is None or not result.keys_to_store:
-                    stack.end_request(ctx)
-                    continue
-                done_keys, spec = result.keys_to_store, result.store_spec
-            else:
-                # Touches in --lookup-order (see resolve_lookups).
-                done_keys, _ = resolve_lookups(stack, batch_keys, ctx)
-                if not done_keys:
-                    stack.end_request(ctx)
-                    continue
-                spec = stack.prepare_load(done_keys, ctx)
-            _rec(phases, "prepare", t0)
-
-            t0 = time.perf_counter()
-            if is_store:
-                job = stack.submit_store(spec, len(done_keys))
-            else:
-                job = stack.submit_load(spec, len(done_keys))
-            stack.step_end()
-            _rec(phases, "submit", t0)
-
-            in_flight.append((job, ctx, done_keys))
-            total_blocks += len(done_keys)
-
-            if len(in_flight) >= pipeline_depth:
-                _drain(in_flight)
-
-        if in_flight:
-            _drain(in_flight)
-
-        iteration += 1
-        if is_store:
-            t0 = time.perf_counter()
-            stack.evict_primary()
-            excluded += time.perf_counter() - t0
-
-    elapsed = time.perf_counter() - wall_start
-    result = BenchResult(
-        label=f"Pipelined {label_dir} (depth={pipeline_depth})",
-        total_blocks=total_blocks,
-        total_bytes=total_blocks * stack.chunk_bytes,
-        wall_seconds=elapsed - excluded,
-        phases=phases,
-    )
-    if is_store:
-        result.sustained = (result.total_bytes / elapsed / 1e9, elapsed)
-    result.print_report()
-    if is_store and stack.has_secondary:
-        print(f"  Sustained incl. fs write-through drain: "
-              f"{result.total_bytes / elapsed / 1e9:.2f} GB/s over {elapsed:.3f}s")
     return result
 
 
@@ -1323,127 +1273,562 @@ def bench_prefix_miss(
     return result
 
 
-# ── mode: contention ─────────────────────────────────────────────────────────
+# ── default mode and contention: jobs in flight (vLLM 0.30's step loop) ────────
+#
+# As certus-connector-bench's default and contention modes: up to --inflight jobs of
+# --job-blocks keys outstanding (stores: --store-job-blocks x --store-inflight),
+# submitted without waiting. Each tick: submit the stores prepared last tick, start
+# loads into free slots, make one non-blocking get_finished() poll, end the scheduler
+# step (on_schedule_end, which flushes the fs tier's async probes and promotions), then
+# sleep to the next --step-us boundary. This is vLLM's own async model for this
+# connector: OffloadingConnectorScheduler/Worker submit and reap the same way.
+#
+# A load job's lookups run in the tick it is scheduled. A key that answers RETRY or
+# HIT_PENDING (async fs probe, fs->CPU promotion) parks the job; it is looked up again
+# on a later tick, after on_schedule_end, as vLLM defers the request to its next step
+# (phase lookup_wait: first lookup to the tick it resolved). Then touch, prepare_load
+# and submit_load. Stores: new_request, touch, prepare_store in one tick, submitted the
+# next. Each job has its own GPU block range (slot x job blocks x --blocks-per-chunk).
+#
+# CPUOffloadingWorker chains its transfers per direction on the GPU (each transfer's
+# stream waits for the previous one's end event), so several jobs in flight overlap
+# only their host work (lookups, prepare, submit) with a running copy, and a load and a
+# store overlap each other. A small gain from --inflight is a property of the connector.
+#
+# Phases: get_finished = each job's submit-to-reap time (load_job / store_job repeat it
+# under certus-connector-bench's names), reap_call = the one poll per tick,
+# *_transfer = the worker's TransferResult.transfer_time.
 
-# Contention mode: the load thread reads only the batch committed most recently (a one-entry
-# mailbox); a batch replaced before the load reached it is skipped and counted.
-CONTENTION_QUEUE_MAX = 1
+
+def step_idle(step_us: float, t_tick: float) -> None:
+    """End of one tick: time.sleep(0) at --step-us 0, else sleep to the boundary."""
+    if step_us <= 0:
+        time.sleep(0)
+        return
+    rest = t_tick + step_us / 1e6 - time.perf_counter()
+    if rest > 0:
+        time.sleep(rest)
 
 
-def bench_contention(
-    stack: CputierStack, batch_size: int, min_duration: float,
-) -> list[BenchResult]:
-    """Concurrent store + load streams on the same CPU tier.
+class StepLoop:
+    """Load and store jobs in flight on one CputierStack, each in its own GPU slot."""
 
-    Thread A stores new keys continuously. Thread B loads the batch thread A
-    committed most recently, received via a one-entry mailbox. Manager calls are
-    serialized by the stack lock (vLLM's scheduler is single-threaded); GPU→CPU and
-    CPU→GPU DMA run concurrently on separate CUDA streams, and the fs write-through
-    competes with both.
+    def __init__(self, stack: CputierStack, phases: dict, *, load_slots=0, load_job_blocks=0,
+                 store_slots=0, store_job_blocks=0, lookup_timeout=60.0):
+        self.stack, self.phases = stack, phases
+        self.load_job_blocks, self.store_job_blocks = load_job_blocks, store_job_blocks
+        bpc = stack.bpc
+        self.free_load = list(range(load_slots))
+        self.free_store = list(range(store_slots))
+        self.load_base = lambda slot: slot * load_job_blocks * bpc
+        self.store_base = lambda slot: (load_slots * load_job_blocks + slot * store_job_blocks) * bpc
+        self.parked: list[dict] = []          # load jobs waiting on RETRY / HIT_PENDING
+        self.deferred: list[tuple] = []       # prepared stores: (ctx, keys, spec, slot, tag)
+        self.pending: dict[int, tuple] = {}   # job id -> (kind, ctx, keys, slot, t_submit, tag)
+        self.load_job = PhaseTiming("load_job")
+        self.store_job = PhaseTiming("store_job")
+        self.load_transfer = PhaseTiming("load_transfer")
+        self.store_transfer = PhaseTiming("store_transfer")
+        self.loaded = self.stored = self.load_misses = self.store_drops = 0
+        self.lookup_timeout = lookup_timeout
+        self.n_load = self.n_store = 0        # jobs holding a slot (parked/deferred included)
+        self._released: set = set()
 
-    The load reads the newest batch, not the oldest: with an unbounded
-    oldest-first queue a store faster than the load let the backlog grow, so the
-    load reached keys the tier had already evicted and measured its own lag (the
-    certus-connector-bench contention mode had the same flaw; workbench session
-    s20261031-092234). A batch replaced before the load took it is reported as
-    skipped. A slow load still shows as lower load throughput.
-    """
-    stop_event = threading.Event()
-    committed_queue: collections.deque = collections.deque(maxlen=CONTENTION_QUEUE_MAX)
-    mailbox_lock = threading.Lock()   # the skipped count and the pop see one state
-    barrier = threading.Barrier(2)
-    errors: list[BaseException] = []
+    # -- loads --
+    def start_load(self, keys, tag=None) -> None:
+        """Take a slot and run the job's first lookup pass (resolved later if parked)."""
+        slot = self.free_load.pop(0)
+        self.n_load += 1
+        st = self.stack
+        t0 = time.perf_counter()
+        ctx = st.new_request()
+        _rec(self.phases, "new_request", t0)
+        job = {"ctx": ctx, "keys": keys, "slot": slot, "tag": tag,
+               "status": [None] * len(keys), "t0": time.perf_counter(), "first": True}
+        if st.touch_first:
+            t0 = time.perf_counter()
+            st.touch(keys, ctx)
+            _rec(self.phases, "touch", t0)
+        self._lookup_pass(job)
 
-    store_phases = _phases("touch", "prepare_store", "submit_store", "get_finished",
+    def _lookup_pass(self, job) -> None:
+        st, keys, status = self.stack, job["keys"], job["status"]
+        t0 = time.perf_counter()
+        pending = False
+        for i, k in enumerate(keys):
+            if status[i] is not None:
+                continue
+            r = st.lookup(k, job["ctx"])
+            if r is LookupResult.HIT:
+                status[i] = True
+            elif r is LookupResult.MISS:
+                status[i] = False
+            else:                              # RETRY / HIT_PENDING: next tick
+                pending = True
+                job["waited"] = True
+        if job["first"]:
+            _rec(self.phases, "lookup", t0)
+        if not st.touch_first:                 # vLLM >= 0.21: touch after every pass
+            t1 = time.perf_counter()
+            st.touch(keys, job["ctx"])
+            if job["first"]:
+                _rec(self.phases, "touch", t1)
+        if job["first"]:
+            job["first"] = False
+            job["t_wait"] = time.perf_counter()
+        if pending:
+            if time.perf_counter() - job["t0"] > self.lookup_timeout:
+                raise TimeoutError(f"lookups unresolved after {self.lookup_timeout}s")
+            self.parked.append(job)
+            return
+        if job.get("waited"):
+            # A promotion can evict a key that resolved HIT in an earlier tick, and
+            # prepare_load needs every key resident now: look the earlier hits up again.
+            # One that is no longer HIT goes back to unresolved and the job parks again
+            # (RETRY / HIT_PENDING) or counts it as missed (MISS).
+            again = False
+            for i, k in enumerate(keys):
+                if status[i]:
+                    r = st.lookup(k, job["ctx"])
+                    if r is LookupResult.MISS:
+                        status[i] = False
+                    elif r is not LookupResult.HIT:
+                        status[i] = None
+                        again = True
+            if again:
+                if time.perf_counter() - job["t0"] > self.lookup_timeout:
+                    raise TimeoutError(f"lookups unresolved after {self.lookup_timeout}s")
+                self.parked.append(job)
+                return
+            _rec(self.phases, "lookup_wait", job["t_wait"])
+            st.counters["promoted"] += sum(1 for s in status if s)
+        hits = [k for k, s in zip(keys, status) if s]
+        self.load_misses += len(keys) - len(hits)
+        if not hits:
+            self._release_load(job["slot"], job["tag"])
+            st.finish_request(job["ctx"])
+            return
+        t0 = time.perf_counter()
+        spec = st.prepare_load(hits, job["ctx"])
+        _rec(self.phases, "prepare_load", t0)
+        t0 = time.perf_counter()
+        jid = st.submit_load_at(spec, len(hits), self.load_base(job["slot"]))
+        _rec(self.phases, "submit_load", t0)
+        self.pending[jid] = ("load", job["ctx"], hits, job["slot"], time.perf_counter(), job["tag"])
+
+    def retry_parked(self) -> None:
+        jobs, self.parked = self.parked, []
+        for job in jobs:
+            self._lookup_pass(job)
+
+    def _release_load(self, slot, tag=None) -> None:
+        self.free_load.append(slot)
+        self.n_load -= 1
+        if tag is not None:
+            self._released.add(tag)
+
+    def released_loads(self) -> set:
+        """Tags of load jobs ended without a transfer (every key missed) since last call."""
+        out, self._released = self._released, set()
+        return out
+
+    # -- stores --
+    def prepare_store(self, keys, tag=None) -> bool:
+        st = self.stack
+        t0 = time.perf_counter()
+        ctx = st.new_request()
+        _rec(self.phases, "new_request", t0)
+        t0 = time.perf_counter()
+        st.touch(keys, ctx)
+        _rec(self.phases, "store_touch" if "store_touch" in self.phases else "touch", t0)
+        t0 = time.perf_counter()
+        res = st.prepare_store(keys, ctx)
+        _rec(self.phases, "prepare_store", t0)
+        if res is None:
+            self.store_drops += len(keys)
+            st.finish_request(ctx)
+            return False
+        if not res.keys_to_store:          # already resident: nothing to send
+            st.finish_request(ctx)
+            return True
+        self.deferred.append((ctx, list(res.keys_to_store), res.store_spec,
+                              self.free_store.pop(0), tag))
+        self.n_store += 1
+        return True
+
+    def submit_deferred(self) -> None:
+        st = self.stack
+        while self.deferred:
+            ctx, keys, spec, slot, tag = self.deferred.pop(0)
+            t0 = time.perf_counter()
+            jid = st.submit_store_at(spec, len(keys), self.store_base(slot))
+            _rec(self.phases, "submit_store", t0)
+            self.pending[jid] = ("store", ctx, keys, slot, time.perf_counter(), tag)
+
+    # -- reaping --
+    def reap(self) -> list:
+        st = self.stack
+        t0 = time.perf_counter()
+        results = st.poll_results()
+        _rec(self.phases, "reap_call", t0)
+        now = time.perf_counter()
+        out, failed = [], []
+        for res in results:
+            if res.job_id not in self.pending:
+                continue
+            kind, ctx, keys, slot, t_sub, tag = self.pending.pop(res.job_id)
+            tt = getattr(res, "transfer_time", None)
+            if kind == "load":
+                self.load_job.record(now - t_sub)
+                if tt is not None:
+                    self.load_transfer.record(tt)
+                t1 = time.perf_counter()
+                st.complete_load(keys, ctx)
+                _rec(self.phases, "complete_load", t1)
+                self._release_load(slot)
+                if res.success:
+                    self.loaded += len(keys)
+            else:
+                self.store_job.record(now - t_sub)
+                if tt is not None:
+                    self.store_transfer.record(tt)
+                t1 = time.perf_counter()
+                st.complete_store(keys, ctx, success=bool(res.success))
+                _rec(self.phases, "complete_store", t1)
+                self.free_store.append(slot)
+                self.n_store -= 1
+                if res.success:
+                    self.stored += len(keys)
+            st.finish_request(ctx)
+            if not res.success:
+                failed.append(res.job_id)
+            out.append((kind, keys, tag))
+        if failed:
+            raise RuntimeError(f"in-flight transfer job(s) {failed} failed")
+        return out
+
+    def tick_end(self) -> None:
+        """The scheduler step's end, once per tick (vLLM calls on_schedule_end every step)."""
+        t0 = time.perf_counter()
+        self.stack.step_end()
+        _rec(self.phases, "schedule_end", t0)
+
+    def outstanding(self) -> bool:
+        return bool(self.pending or self.deferred or self.parked)
+
+    def abort(self) -> None:
+        """On an error: unreserve prepared stores, drain what is in flight."""
+        st = self.stack
+        for ctx, keys, _spec, _slot, _tag in self.deferred:
+            try:
+                st.complete_store(keys, ctx, success=False)
+                st.finish_request(ctx)
+            except Exception:  # noqa: BLE001 - best effort while failing
+                pass
+        self.deferred = []
+        for job in self.parked:
+            try:
+                st.finish_request(job["ctx"])
+            except Exception:  # noqa: BLE001
+                pass
+        self.parked = []
+        deadline = time.monotonic() + 120.0
+        while self.pending and time.monotonic() < deadline:
+            for res in st.poll_results():
+                item = self.pending.pop(res.job_id, None)
+                if item is None:
+                    continue
+                kind, ctx, keys = item[0], item[1], item[2]
+                try:
+                    if kind == "load":
+                        st.complete_load(keys, ctx)
+                    else:
+                        st.complete_store(keys, ctx, success=bool(res.success))
+                    st.finish_request(ctx)
+                except Exception:  # noqa: BLE001
+                    pass
+            time.sleep(0)
+
+
+def job_units(keys: list[bytes], job_blocks: int) -> list[list[bytes]]:
+    return [keys[i:i + job_blocks] for i in range(0, len(keys), job_blocks)]
+
+
+def inflight_label(args, kind: str) -> str:
+    if kind == "contention":
+        s = (f"load {args.job_blocks}x{args.inflight} "
+             f"store {args.store_job_blocks}x{args.store_inflight}")
+    elif kind == "store":
+        s = f"job_blocks={args.store_job_blocks} inflight={args.store_inflight}"
+    else:
+        s = f"job_blocks={args.job_blocks} inflight={args.inflight}"
+    s += f" step_us={args.step_us:g} layers={args.layers}"
+    if kind in ("warm", "contention") and getattr(args, "warm_overflow", False):
+        s += " OVERFLOW: set exceeds tier, not warm"
+    return s
+
+
+def _run_loads(loop: StepLoop, units, args, rng, *, min_duration: float, min_passes: int = 2,
+               before_pass=None, phases=None):
+    """Load passes over ``units`` (shuffled per pass) until --min-duration and
+    ``min_passes``; ``before_pass`` runs untimed before each pass. Returns timed seconds."""
+    timed, passes = 0.0, 0
+    while timed < min_duration or passes < min_passes:
+        if before_pass is not None:
+            before_pass()
+        t_pass = time.perf_counter()
+        todo = list(units)
+        rng.shuffle(todo)
+        try:
+            while todo or loop.outstanding():
+                t = time.perf_counter()
+                loop.retry_parked()
+                while todo and loop.free_load:
+                    loop.start_load(todo.pop(0))
+                loop.reap()
+                loop.tick_end()
+                if todo or loop.outstanding():
+                    step_idle(args.step_us, t)
+        except BaseException:
+            loop.abort()
+            raise
+        timed += time.perf_counter() - t_pass
+        passes += 1
+    return timed, passes
+
+
+def _finish_load_phases(phases, loop):
+    phases["get_finished"] = loop.load_job
+    phases["load_job"] = loop.load_job
+    phases["load_transfer"] = loop.load_transfer
+
+
+def bench_store_inflight(stack: CputierStack, keys, args, min_duration) -> BenchResult:
+    """Store with jobs in flight: every pass stores a fresh key set (rekey, so each block
+    is really written through to the fs tier) as --store-job-blocks jobs with up to
+    --store-inflight outstanding. After a pass the CPU tier is emptied (``reset``, which
+    first waits for the pass's fs write-through), excluded from wall time, so the
+    headline is the GPU->CPU store path; the sustained figure includes the drains."""
+    phases = _phases("new_request", "touch", "prepare_store", "submit_store",
+                     "get_finished", "complete_store", "schedule_end", "reset", "reap_call")
+    loop = StepLoop(stack, phases, store_slots=args.store_inflight,
+                    store_job_blocks=args.store_job_blocks)
+    timed, passes = 0.0, 0
+    t_all = time.perf_counter()
+    while timed < min_duration or passes < 2:
+        t_pass = time.perf_counter()    # fresh keys inside the window, as the old pass had
+        todo = job_units(rekey(keys, passes), args.store_job_blocks)
+        try:
+            while todo or loop.outstanding():
+                t = time.perf_counter()
+                loop.submit_deferred()
+                while todo and loop.free_store:
+                    if not loop.prepare_store(todo.pop(0)):
+                        break                  # tier full: retried no sooner than next tick
+                loop.reap()
+                loop.tick_end()
+                if todo or loop.outstanding():
+                    step_idle(args.step_us, t)
+        except BaseException:
+            loop.abort()
+            raise
+        timed += time.perf_counter() - t_pass
+        passes += 1
+        t0 = time.perf_counter()
+        stack.evict_primary()
+        _rec(phases, "reset", t0)
+    elapsed = time.perf_counter() - t_all
+    phases["get_finished"] = loop.store_job
+    phases["store_job"] = loop.store_job
+    phases["store_transfer"] = loop.store_transfer
+    result = BenchResult(
+        label=f"Store Lifecycle ({inflight_label(args, 'store')})",
+        total_blocks=loop.stored, total_bytes=loop.stored * stack.chunk_bytes,
+        wall_seconds=timed, phases=phases)
+    result.sustained = (result.total_bytes / elapsed / 1e9, elapsed)
+    result.counts = {"store_drops": loop.store_drops}
+    result.print_report()
+    print(f"  store jobs={len(loop.store_job.samples)}  passes={passes}")
+    if stack.has_secondary:
+        print(f"  Sustained incl. fs write-through drain: "
+              f"{result.sustained[0]:.2f} GB/s over {elapsed:.3f}s")
+    if loop.store_drops:
+        print(f"  Store drops (CPU tier full / pinned by fs write-through): {loop.store_drops}")
+    return result
+
+
+def bench_load_inflight(stack: CputierStack, keys, args, min_duration, *, cold: bool) -> BenchResult:
+    """Load with jobs in flight: ``keys`` (stored, resident for warm) as --job-blocks jobs
+    with up to --inflight outstanding, shuffled per pass. Warm: pinned host RAM -> GPU.
+    Cold: the CPU tier is emptied before every pass (``demote``, untimed), so every key
+    is found on the fs tier and promoted disk -> CPU across scheduler steps
+    (``lookup_wait``), then copied to the GPU."""
+    import random as _random
+    phases = _phases("new_request", "touch", "lookup", "lookup_wait", "prepare_load",
+                     "submit_load", "get_finished", "complete_load", "schedule_end", "reap_call")
+    if cold:
+        phases["demote"] = PhaseTiming("demote")
+    loop = StepLoop(stack, phases, load_slots=args.inflight, load_job_blocks=args.job_blocks)
+    promoted_before = stack.counters["promoted"]
+
+    def demote():
+        t0 = time.perf_counter()
+        stack.evict_primary()
+        _rec(phases, "demote", t0)
+
+    timed, passes = _run_loads(loop, job_units(keys, args.job_blocks), args,
+                               _random.Random(args.seed), min_duration=min_duration,
+                               before_pass=demote if cold else None)
+    _finish_load_phases(phases, loop)
+    temp = "Cold" if cold else "Warm"
+    result = BenchResult(
+        label=f"{temp} Load Lifecycle ({inflight_label(args, 'load' if cold else 'warm')})",
+        total_blocks=loop.loaded, total_bytes=loop.loaded * stack.chunk_bytes,
+        wall_seconds=timed, phases=phases)
+    result.counts = {"load_misses": loop.load_misses}
+    promoted = stack.counters["promoted"] - promoted_before
+    overflow = not cold and getattr(args, "warm_overflow", False)
+    if cold or overflow:
+        result.counts["disk_read_bytes"] = promoted * stack.chunk_bytes
+    if overflow:
+        result.counts["warm_overflow"] = 1
+    result.print_report()
+    print(f"  load jobs={len(loop.load_job.samples)}  passes={passes}")
+    if loop.load_misses or cold or overflow:
+        print(f"  Load misses: {loop.load_misses}  Promoted from fs: {promoted}")
+    if overflow:
+        print(f"  WARNING: --allow-warm-overflow: the working set exceeds the CPU tier; "
+              f"{promoted} blocks came back from the fs tier and {loop.load_misses} missed. "
+              f"Not a warm measurement.")
+    return result
+
+
+# The share of the CPU tier the warm working set may take (certus-connector-bench's
+# INFLIGHT_TIER_SHARE).
+INFLIGHT_TIER_SHARE = 0.9
+# --num-blocks when not given, as certus-connector-bench derives it: for default and
+# contention the working set is INFLIGHT_TIER_SHARE of what the tier holds before it
+# evicts (--cpu-bytes x EVICTION_THRESHOLD / --block-bytes), at most INFLIGHT_MAX_BLOCKS
+# (2948 at the 8G default and 2 MiB blocks, 4000 at 12G); the other modes keep 128.
+INFLIGHT_MAX_BLOCKS = 4000
+EVICTION_THRESHOLD = 0.8      # certus-server's --memory-tier-eviction-threshold default here
+SEQUENTIAL_NUM_BLOCKS = 128
+
+
+def default_num_blocks(args, mode: str) -> int:
+    if mode in ("default", "contention"):
+        usable = int(args.cpu_bytes * EVICTION_THRESHOLD // args.block_bytes)
+        return max(1, min(INFLIGHT_MAX_BLOCKS, int(usable * INFLIGHT_TIER_SHARE)))
+    return SEQUENTIAL_NUM_BLOCKS
+# Contention's store side when not given, as certus-connector-bench's CONTENTION_STORE_DEFAULTS.
+CONTENTION_STORE_DEFAULTS = {"store_job_blocks": 32, "store_inflight": 1}
+
+
+def bench_contention(stack: CputierStack, keys, args, min_duration) -> list[BenchResult]:
+    """Loads and stores in flight together on one stack, as in serving, as
+    certus-connector-bench's contention mode: the load working set (``keys``) is stored
+    first; then for the timed window --inflight load jobs of --job-blocks keys (the working
+    set, shuffled per pass) and --store-inflight store jobs of --store-job-blocks fresh
+    keys run together through the step loop. Nothing is excluded: the fs write-through
+    and any CPU-tier eviction it forces run inside the window. A load key evicted by then
+    misses (counted). One scheduler, one worker, single-threaded, as vLLM's."""
+    import random as _random
+    store_phases = _phases("new_request", "store_touch", "prepare_store", "submit_store",
                            "complete_store")
-    load_phases = _phases("touch", "lookup", "lookup_wait", "prepare_load",
-                          "submit_load", "get_finished", "complete_load")
-    store_state = {"total_blocks": 0, "drops": 0}
-    load_state = {"total_blocks": 0, "misses": 0, "skipped_batches": 0}
-    base_seed = _fresh_seed()
+    load_phases = _phases("touch", "lookup", "lookup_wait", "prepare_load", "submit_load",
+                          "complete_load")
+    phases = {**store_phases, **load_phases, "schedule_end": PhaseTiming("schedule_end"),
+              "reap_call": PhaseTiming("reap_call")}
+    populate_keys(stack, keys, args.store_job_blocks)
     stack.take_events()
     removed_before = stack.counters["cpu_removed"]
-
-    def _store_thread():
-        try:
-            barrier.wait()
-            generation = 0
-            while not stop_event.is_set():
-                generation += 1
-                batch_keys = make_content_keys(
-                    batch_size, seed=base_seed + 1_000_000 * generation,
-                )
-                s, d = store_batch(stack, batch_keys, store_phases)
-                store_state["total_blocks"] += s
-                store_state["drops"] += d
-                if s:
-                    with mailbox_lock:
-                        if len(committed_queue) == committed_queue.maxlen:
-                            load_state["skipped_batches"] += 1   # replaced before the load took it
-                        committed_queue.append(batch_keys)
-                elif d:
-                    # A dropped store is retried no sooner than the next
-                    # engine step; spinning would starve the load thread.
-                    time.sleep(STEP_BACKOFF_S)
-        except BaseException as e:
-            errors.append(e)
-            stop_event.set()
-
-    def _load_thread():
-        try:
-            barrier.wait()
-            time.sleep(0.5)  # let stores seed some keys
-            while not stop_event.is_set():
-                try:
-                    with mailbox_lock:
-                        batch_keys = committed_queue.pop()   # the newest committed batch
-                except IndexError:
-                    time.sleep(0.001)
-                    continue
-                loaded, m = load_batch(stack, batch_keys, load_phases)
-                load_state["total_blocks"] += loaded
-                load_state["misses"] += m
-        except BaseException as e:
-            errors.append(e)
-            stop_event.set()
-
-    t_store = threading.Thread(target=_store_thread, name="contention-store")
-    t_load = threading.Thread(target=_load_thread, name="contention-load")
-
-    wall_start = time.perf_counter()
-    t_store.start()
-    t_load.start()
-    stop_event.wait(min_duration)
-    stop_event.set()
-    t_store.join(timeout=30)
-    t_load.join(timeout=30)
-    wall = time.perf_counter() - wall_start
-    if errors:
-        raise errors[0]
-
+    promoted_before = stack.counters["promoted"]
+    loop = StepLoop(stack, phases, load_slots=args.inflight, load_job_blocks=args.job_blocks,
+                    store_slots=args.store_inflight, store_job_blocks=args.store_job_blocks)
+    units = job_units(keys, args.job_blocks)
+    rng = _random.Random(args.seed)
+    order: list = []
+    busy: set = set()
+    base_seed = _fresh_seed()
+    gen = passes = 0
+    t_start = time.perf_counter()
+    try:
+        while True:
+            t = time.perf_counter()
+            running = not (t - t_start >= min_duration and passes >= 2 and not order)
+            loop.submit_deferred()
+            if running:
+                loop.retry_parked()
+                # As certus-connector-bench's _LoadScheduler: a job whose keys are still
+                # in flight is skipped for that turn; each job tried at most once a tick.
+                tried = 0
+                while loop.free_load and tried < len(units):
+                    if not order:
+                        order = list(range(len(units)))
+                        rng.shuffle(order)
+                        passes += 1
+                    idx = next((i for i in order if i not in busy), None)
+                    if idx is None:
+                        break
+                    order.remove(idx)
+                    tried += 1
+                    busy.add(idx)
+                    loop.start_load(units[idx], tag=idx)
+                # One reservation attempt per free store slot per tick; a refused one
+                # (tier full) is counted as dropped and tried again next tick.
+                for _ in range(len(loop.free_store)):
+                    gen += 1
+                    loop.prepare_store(make_content_keys(args.store_job_blocks,
+                                                         seed=base_seed + gen))
+            else:
+                loop.retry_parked()
+            for kind, _keys, tag in loop.reap():
+                if kind == "load":
+                    busy.discard(tag)
+            busy -= loop.released_loads()
+            loop.tick_end()
+            if not running and not loop.outstanding():
+                break
+            step_idle(args.step_us, t)
+    except BaseException:
+        loop.abort()
+        raise
+    wall = time.perf_counter() - t_start
     stack.take_events()
-    total_evictions = stack.counters["cpu_removed"] - removed_before
-
+    evictions = stack.counters["cpu_removed"] - removed_before
+    for k in ("touch", "lookup", "lookup_wait", "prepare_load", "submit_load", "complete_load",
+              "reap_call"):
+        load_phases[k] = phases[k]
+    load_phases["get_finished"] = loop.load_job
+    load_phases["load_transfer"] = loop.load_transfer
+    for k in ("new_request", "store_touch", "prepare_store", "submit_store", "complete_store"):
+        store_phases[k] = phases[k]
+    store_phases["get_finished"] = loop.store_job
+    store_phases["store_transfer"] = loop.store_transfer
+    label = inflight_label(args, "contention")
+    # Only contention's loads need the set resident: the store row is not marked.
+    store_label = label.replace(" OVERFLOW: set exceeds tier, not warm", "")
     store_result = BenchResult(
-        label="Contention: Store Thread",
-        total_blocks=store_state["total_blocks"],
-        total_bytes=store_state["total_blocks"] * stack.chunk_bytes,
-        wall_seconds=wall,
-        phases=store_phases,
-    )
+        label=f"Contention: Store Thread ({store_label})",
+        total_blocks=loop.stored, total_bytes=loop.stored * stack.chunk_bytes,
+        wall_seconds=wall, phases=store_phases)
+    store_result.counts = {"store_drops": loop.store_drops}
     load_result = BenchResult(
-        label="Contention: Load Thread",
-        total_blocks=load_state["total_blocks"],
-        total_bytes=load_state["total_blocks"] * stack.chunk_bytes,
-        wall_seconds=wall,
-        phases=load_phases,
-    )
-
+        label=f"Contention: Load Thread ({label})",
+        total_blocks=loop.loaded, total_bytes=loop.loaded * stack.chunk_bytes,
+        wall_seconds=wall, phases=load_phases)
+    load_result.counts = {"load_misses": loop.load_misses,
+                          "disk_read_bytes": (stack.counters["promoted"] - promoted_before)
+                                             * stack.chunk_bytes}
+    if getattr(args, "warm_overflow", False):
+        load_result.counts["warm_overflow"] = 1
+    for r in (store_result, load_result):
+        r.params = {"store_job_blocks": args.store_job_blocks,
+                    "store_inflight": args.store_inflight}
     store_result.print_report()
-    print(f"  Store drops: {store_state['drops']}")
+    print(f"  Store drops: {loop.store_drops}")
     load_result.print_report()
-    print(f"  Load misses: {load_state['misses']}  Evictions: {total_evictions}  "
-          f"Skipped store batches: {load_state['skipped_batches']}")
+    print(f"  Load misses: {loop.load_misses}  Evictions: {evictions}  passes: {passes}")
     return [store_result, load_result]
 
 
@@ -1760,13 +2145,13 @@ def main():
         epilog=(
             "Modes (--mode):\n"
             "\n"
-            "  default        Four serial phases: store, warm load, cold load, mixed eviction\n"
-            "  pipelined      Submit N batches before reaping\n"
+            "  default        store, warm load, cold load with --inflight jobs of --job-blocks\n"
+            "                 outstanding (vLLM 0.30's step loop), then mixed eviction\n"
             "  prefix-miss    Vary prefix hit ratio to measure maximal-prefix lookup cost\n"
-            "  contention     Concurrent store + load threads on the same CPU tier\n"
+            "  contention     Loads and stores in flight together on one stack (step loop)\n"
             "  scheduler-step Full scheduler step simulation with multi-request prefix sharing\n"
             "\n"
-            "Without --mode, runs the default 4-phase lifecycle (or --pattern if given).\n"
+            "Without --mode, runs the default mode (or --pattern if given).\n"
             "\n"
             "Exercises vLLM's TieringOffloadingManager (CPU primary + fs disk tier)\n"
             "and CPUOffloadingWorker directly, emulating the scheduler's per-request\n"
@@ -1782,8 +2167,9 @@ def main():
     parser.add_argument("--spec", choices=["tiering", "cpu"], default="tiering",
                         help="tiering = TieringOffloadingSpec (CPU + fs tier, the cputier "
                              "default); cpu = CPUOffloadingSpec (host RAM only)")
-    parser.add_argument("--cpu-bytes", type=parse_size, default=parse_size("4G"),
-                        help="CPU primary tier size, e.g. 4G (cpu_bytes_to_use)")
+    parser.add_argument("--cpu-bytes", type=parse_size, default=parse_size("8G"),
+                        help="CPU primary tier size, e.g. 8G (cpu_bytes_to_use; default 8G, "
+                             "certus-connector-bench's --tier-gib)")
     parser.add_argument("--fs-root", type=str, default=None,
                         help="Directory for the fs disk tier. A per-run subdirectory is "
                              "created and removed at exit (see --keep-fs). Default: a "
@@ -1811,8 +2197,11 @@ def main():
     # workload (same as certus-connector-bench)
     parser.add_argument("--bs", type=int, default=16,
                         help="Batch size (blocks per batch)")
-    parser.add_argument("--num-blocks", type=int, default=128,
-                        help="Total blocks per iteration")
+    parser.add_argument("--num-blocks", type=int, default=None,
+                        help="Total blocks per iteration (default, contention: derived from "
+                             "--cpu-bytes as certus-connector-bench derives it from its tier, "
+                             "90%% of cpu_bytes x 0.8 / --block-bytes, at most 4000; the "
+                             "other modes: 128)")
     parser.add_argument("--block-bytes", type=int, default=DEFAULT_BLOCK_BYTES,
                         help=f"Per-block size in bytes (default: {DEFAULT_BLOCK_BYTES})")
     parser.add_argument("--gpu", type=int, default=0,
@@ -1837,18 +2226,37 @@ def main():
                         help="Tag column for CSV (e.g. branch name)")
     parser.add_argument("--no-cold", action="store_true",
                         help="Skip the cold-load benchmark (fs→CPU→GPU)")
+    parser.add_argument("--no-warm", action="store_true",
+                        help="(default) Skip the warm-load pass. Then --num-blocks may exceed the "
+                             "CPU tier: store and cold run at any size (as certus-connector-bench)")
+    parser.add_argument("--allow-warm-overflow", action="store_true",
+                        help="(default, contention) Run the warm pass and contention's loads even "
+                             "when --num-blocks exceeds the CPU tier. Loads then miss or are "
+                             "promoted back from the fs tier, so the result is not a warm "
+                             "measurement: its label says so, its CSV row has warm_overflow=1 and "
+                             "its promotions (disk_read_bytes), and the comparison report flags "
+                             "the row. Without it such a run is refused")
     parser.add_argument("--no-eviction", action="store_true",
                         help="Skip the eviction-pressure benchmark")
     parser.add_argument("--mode", type=str, default=None,
-                        choices=["default", "pipelined", "prefix-miss",
-                                 "contention", "scheduler-step", "all"],
-                        help="Benchmark mode (omit for default 4-phase or --pattern; "
+                        choices=["default", "prefix-miss", "contention", "scheduler-step", "all"],
+                        help="Benchmark mode (omit for default or --pattern; "
                              "'all' runs every mode sequentially)")
-    parser.add_argument("--pipeline-depth", type=int, default=4,
-                        help="(pipelined) Batches in-flight before reaping")
-    parser.add_argument("--direction", type=str, default="both",
-                        choices=["store", "load", "both"],
-                        help="(pipelined) Which direction to benchmark")
+    # jobs in flight (default and contention), certus-connector-bench's defaults
+    parser.add_argument("--job-blocks", type=int, default=64,
+                        help="(default, contention) blocks per load job, and per store job in "
+                             "the default mode unless --store-job-blocks (default 64)")
+    parser.add_argument("--inflight", type=int, default=4,
+                        help="(default, contention) jobs kept outstanding (default 4); "
+                             "prefix-miss and scheduler-step do not use it")
+    parser.add_argument("--step-us", type=float, default=100.0,
+                        help="(default, contention) scheduler tick in us (default 100; 0 = "
+                             "time.sleep(0) each tick)")
+    parser.add_argument("--store-job-blocks", type=int, default=None,
+                        help="blocks per store job (default mode: --job-blocks; contention: 32)")
+    parser.add_argument("--store-inflight", type=int, default=None,
+                        help="store jobs outstanding (default mode: --inflight; contention: 1)")
+    parser.add_argument("--seed", type=int, default=0, help="seed for the load job order")
     parser.add_argument("--hit-ratio", type=float, default=0.75,
                         help="(prefix-miss) Fraction of keys pre-stored (0.0-1.0)")
     parser.add_argument("--requests-per-step", type=int, default=8,
@@ -1860,6 +2268,37 @@ def main():
                              "mode that does both: lookup-first (default) is vLLM >= 0.21 "
                              "(vLLM PR #41228, still so in 0.30); touch-first is vLLM <= 0.20")
     args = parser.parse_args()
+    if args.step_us < 0:
+        parser.error("--step-us must be >= 0")
+    # --num-blocks per mode (default_num_blocks) unless given; args.num_blocks is the
+    # in-flight modes' value (or the run's one mode's), _run_mode sets each mode's.
+    args.num_blocks_given = args.num_blocks
+    if args.num_blocks is None:
+        # The same choice as `mode` below: no --mode is pattern under --pattern, else default.
+        run_mode = args.mode or ("pattern" if args.pattern else "default")
+        args.num_blocks = default_num_blocks(
+            args, "default" if run_mode == "all" else run_mode)
+    # Store flags given on the command line (contention under --mode all takes its own
+    # defaults for the others).
+    args.explicit_store = {k for k in CONTENTION_STORE_DEFAULTS if getattr(args, k) is not None}
+    if args.mode == "contention":
+        for k, v in CONTENTION_STORE_DEFAULTS.items():
+            if getattr(args, k) is None:
+                setattr(args, k, v)
+    if args.store_job_blocks is None:
+        args.store_job_blocks = args.job_blocks
+    if args.store_inflight is None:
+        args.store_inflight = args.inflight
+    for name in ("job_blocks", "inflight", "store_job_blocks", "store_inflight"):
+        if getattr(args, name) < 1:
+            parser.error(f"--{name.replace('_', '-')} must be >= 1")
+    if args.mode in (None, "default", "contention", "all") and not args.pattern:
+        jobs = -(-args.num_blocks // args.job_blocks)
+        if jobs < args.inflight:
+            parser.error(f"--num-blocks {args.num_blocks} makes only {jobs} job(s) of --job-blocks "
+                         f"{args.job_blocks}, but --inflight {args.inflight} needs at least "
+                         f"{args.inflight}: use --num-blocks >= {args.inflight * args.job_blocks}, "
+                         f"or a smaller --job-blocks or --inflight")
 
     if args.gpus:
         gpus = [int(g) for g in args.gpus.split(",")]
@@ -1944,13 +2383,43 @@ def main():
     # GPU memory no transfer touches -- 32 GiB at --working-set 16384, 2 MiB
     # blocks -- as certus-connector-bench did before 4e612f8a. A scheduler-step
     # request transfers at most its prefix (shared pool) plus its suffix.
-    kpr = max(4, args.num_blocks // args.requests_per_step)
-    step_request = min((kpr // 2) * 4, args.num_blocks * 2) + (kpr - kpr // 2)
-    max_blocks = max(args.num_blocks, args.bs, step_request)
+    # scheduler-step sizes its requests by its own --num-blocks (128 unless given).
+    sched_nb = args.num_blocks_given or SEQUENTIAL_NUM_BLOCKS
+    kpr = max(4, sched_nb // args.requests_per_step)
+    step_request = min((kpr // 2) * 4, sched_nb * 2) + (kpr - kpr // 2)
+    # The in-flight passes: one slot per job in flight, loads then stores (StepLoop),
+    # contention both at once; in chunks (CputierStack multiplies by --blocks-per-chunk).
+    inflight_slots = (args.inflight * args.job_blocks
+                      + max(args.store_inflight * args.store_job_blocks,
+                            CONTENTION_STORE_DEFAULTS["store_inflight"]
+                            * CONTENTION_STORE_DEFAULTS["store_job_blocks"]))
+    # Not --num-blocks: that is how many keys cycle through the tier; every transfer
+    # addresses GPU blocks from its own slot (a --bs batch, a scheduler-step step, or
+    # one in-flight job), as certus-connector-bench's gpu_blocks() sizes them. With the
+    # derived default (4000) sizing by it would reserve 7.8 GiB of unused GPU memory.
+    max_blocks = max(args.bs, step_request, inflight_slots)
     if mode == "pattern":
         max_blocks = max(max_blocks, *(ks["cardinality"] for ks in pattern.keyspaces.values()))
     stack = CputierStack(args, block_bytes, max_blocks, fs_root, gpus)
     print(f"  CPU tier: {stack.num_chunks} chunks × {stack.spec.kv_bytes_per_chunk} bytes")
+    print(f"  job_blocks={args.job_blocks} inflight={args.inflight} store_job_blocks="
+          f"{args.store_job_blocks} store_inflight={args.store_inflight} step_us={args.step_us:g}")
+    args.warm_overflow = False
+    if mode in ("default", "contention", "all"):
+        # A warm load is only warm while its keys stay in the CPU tier, as in
+        # certus-connector-bench (which refuses more than 90% of its tier's usable size):
+        # a larger set is evicted to the fs tier and promoted back, or misses.
+        fit = int(stack.num_chunks * INFLIGHT_TIER_SHARE)
+        need = args.num_blocks            # one key is one chunk (--blocks-per-chunk GPU blocks)
+        args.warm_overflow = need > fit and (mode != "default" or not args.no_warm)
+        if args.warm_overflow and not args.allow_warm_overflow:
+            stack.shutdown()
+            sys.exit(f"error: --num-blocks {args.num_blocks} ({need} chunks) is more than "
+                     f"{INFLIGHT_TIER_SHARE:.0%} of the CPU tier's {stack.num_chunks} chunks "
+                     f"(--cpu-bytes {args.cpu_bytes}): the warm loads would not be warm. Use "
+                     f"--num-blocks <= {fit * args.blocks_per_chunk}, a larger --cpu-bytes, "
+                     f"--no-warm (store and cold only), or --allow-warm-overflow (runs it, "
+                     f"marked as not warm)")
 
     try:
         all_results = _run(args, mode, stack, pattern, eval_expr_fn)
@@ -1981,10 +2450,9 @@ def main():
             "vllm_version": vllm.__version__,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         }
-        if mode == "pipelined":
-            extra["pipeline_depth"] = args.pipeline_depth
-            extra["direction"] = args.direction
-        elif mode == "prefix-miss":
+        extra.update(job_blocks=args.job_blocks, inflight=args.inflight, step_us=args.step_us,
+                     store_job_blocks=args.store_job_blocks, store_inflight=args.store_inflight)
+        if mode == "prefix-miss":
             extra["hit_ratio"] = args.hit_ratio
         elif mode == "scheduler-step":
             extra["requests_per_step"] = args.requests_per_step
@@ -1992,7 +2460,8 @@ def main():
         elif mode == "pattern":
             extra["pattern"] = args.pattern
 
-        rows = [r.csv_row(extra) for r in all_results]
+        # A result that ran with other job settings (contention's store side) carries them.
+        rows = [r.csv_row({**extra, **getattr(r, "params", {})}) for r in all_results]
         write_header = not os.path.exists(args.csv)
         fieldnames = list(rows[0].keys())
         for r in rows[1:]:
@@ -2036,24 +2505,14 @@ def _run(args, mode, stack: CputierStack, pattern, eval_expr_fn) -> list[BenchRe
 
     def _run_mode(m: str) -> list[BenchResult]:
         results: list[BenchResult] = []
+        if args.num_blocks_given is None:
+            args.num_blocks = default_num_blocks(args, m)
         keys = make_content_keys(args.num_blocks, seed=_fresh_seed())
 
         if m == "pattern":
             print(f"\nPattern: {pattern.id} ({pattern.name})")
             pattern.describe()
             results = bench_pattern(pattern, eval_expr_fn, stack, args.bs, args.min_duration)
-
-        elif m == "pipelined":
-            print(f"\n  Mode: pipelined (depth={args.pipeline_depth}, "
-                  f"direction={args.direction})")
-            for direction in ("store", "load"):
-                if args.direction not in (direction, "both"):
-                    continue
-                stack.evict_primary()
-                results.append(bench_pipelined(
-                    stack, keys, args.bs, args.min_duration,
-                    pipeline_depth=args.pipeline_depth, direction=direction,
-                ))
 
         elif m == "prefix-miss":
             print(f"\n  Mode: prefix-miss (hit_ratio={args.hit_ratio})")
@@ -2063,8 +2522,13 @@ def _run(args, mode, stack: CputierStack, pattern, eval_expr_fn) -> list[BenchRe
             ))
 
         elif m == "contention":
-            print(f"\n  Mode: contention")
-            results = bench_contention(stack, args.bs, args.min_duration)
+            ca = argparse.Namespace(**vars(args))
+            for k, v in CONTENTION_STORE_DEFAULTS.items():
+                if k not in args.explicit_store:
+                    setattr(ca, k, v)
+            print(f"\n  Mode: contention ({inflight_label(ca, 'contention')})")
+            stack.evict_primary()
+            results = bench_contention(stack, keys, ca, args.min_duration)
 
         elif m == "scheduler-step":
             print(f"\n  Mode: scheduler-step (reqs={args.requests_per_step}, "
@@ -2077,19 +2541,19 @@ def _run(args, mode, stack: CputierStack, pattern, eval_expr_fn) -> list[BenchRe
             ))
 
         else:  # default
-            results.append(bench_store_lifecycle(stack, keys, args.bs, args.min_duration))
+            print(f"\n  Mode: default ({inflight_label(args, 'load')})")
+            results.append(bench_store_inflight(stack, keys, args, args.min_duration))
 
-            populate_keys(stack, keys, args.bs)
-            results.append(bench_load_lifecycle(stack, keys, args.bs, args.min_duration,
-                                                cold=False))
+            populate_keys(stack, keys, args.store_job_blocks)
+            if not args.no_warm:
+                results.append(bench_load_inflight(stack, keys, args, args.min_duration, cold=False))
 
             if args.no_cold:
                 pass
             elif not stack.has_secondary:
                 print("\n  (cold load skipped: no fs tier; use --spec tiering without --no-fs)")
             else:
-                results.append(bench_load_lifecycle(stack, keys, args.bs, args.min_duration,
-                                                    cold=True))
+                results.append(bench_load_inflight(stack, keys, args, args.min_duration, cold=True))
 
             if not args.no_eviction:
                 results.append(bench_mixed_eviction(
@@ -2102,9 +2566,11 @@ def _run(args, mode, stack: CputierStack, pattern, eval_expr_fn) -> list[BenchRe
         stack.take_events()
         if stack.failed_jobs:
             print(f"  WARNING: {stack.failed_jobs} transfer jobs reported failure")
+        for r in results:   # the CSV records each row's own working set (--mode all)
+            r.params = {**getattr(r, "params", {}), "num_blocks": args.num_blocks}
         return results
 
-    ALL_MODES = ["default", "pipelined", "prefix-miss", "contention", "scheduler-step"]
+    ALL_MODES = ["default", "prefix-miss", "contention", "scheduler-step"]
     modes_to_run = ALL_MODES if mode == "all" else [mode]
 
     all_results: list[BenchResult] = []

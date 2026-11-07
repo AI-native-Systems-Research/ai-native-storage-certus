@@ -82,6 +82,23 @@ DEFAULT_LAYERS = 32
 POLL_S = 0.0001
 # Stand-in for one engine step between scheduler retries.
 STEP_BACKOFF_S = 0.001
+# The share of L1 the warm working set may take (certus-connector-bench's INFLIGHT_TIER_SHARE).
+INFLIGHT_TIER_SHARE = 0.9
+# --num-blocks when not given, as certus-connector-bench derives it: the default mode's
+# working set is INFLIGHT_TIER_SHARE of what the memory tier holds before it evicts
+# (tier x EVICTION_THRESHOLD / block bytes), at most INFLIGHT_MAX_BLOCKS (2948 at the 8 GiB
+# default and 2 MiB blocks, 4000 at 12 GiB); the other modes keep 128.
+INFLIGHT_MAX_BLOCKS = 4000
+EVICTION_THRESHOLD = 0.8
+SEQUENTIAL_NUM_BLOCKS = 128
+
+
+def default_num_blocks(mode: str, l1_bytes: int, chunk_bytes: int) -> int:
+    """certus-connector-bench's rule with the server's L1 as the tier."""
+    if mode == "default":
+        usable = int(l1_bytes * EVICTION_THRESHOLD // chunk_bytes)
+        return max(1, min(INFLIGHT_MAX_BLOCKS, int(usable * INFLIGHT_TIER_SHARE)))
+    return SEQUENTIAL_NUM_BLOCKS
 
 
 def parse_size(s: str) -> int:
@@ -478,86 +495,283 @@ def populate(stack: LMCacheStack, seqs: list[list[int]]) -> int:
     return sum(store_batch(stack, s) for s in seqs)
 
 
-# ── default mode phases ─────────────────────────────────────────────────────
+# ── default mode: jobs in flight (vLLM 0.30's step loop) ────────────────────
+#
+# As certus-connector-bench's default mode: up to --inflight jobs of --job-blocks chunks
+# outstanding (stores: --store-job-blocks x --store-inflight), submitted without waiting.
+# A load job submits its lookup (maybe_submit_lookup_request) in the tick it is
+# scheduled and polls check_lookup_result once per tick, never spinning, as vLLM's
+# get_num_new_matched_tokens retries an unanswered lookup on the next step; once
+# answered, the hit prefix is retrieved. A store job is prepared in one tick and
+# submitted in the next. Each tick: submit stores, start and poll lookups, one
+# worker get_finished() (with the outstanding store ids as finished_req_ids, as the
+# engine reports a finished request), end finished requests, sleep to the next
+# --step-us boundary. Every job has its own GPU block range. The LMCache server's
+# --max-workers (1 by default in its CLI) may serialize jobs on the server side.
+# Phases: get_finished = each job's submit-to-reap time (load_job / store_job repeat
+# it), reap_call = the one poll per tick, lookup_wait = lookup submit to answer.
 
-def bench_store_lifecycle(stack, num_blocks, batch_size, min_duration) -> BenchResult:
-    """submit_store → get_finished → end_session, one request per batch.
 
-    Every pass stores fresh sequences (LMCache dedups chunks it already holds).
-    After a pass L1 is emptied (``reset``): that first waits for the pass's
-    L1→L2 write-through, then clears L1. The reset is excluded from wall time,
-    so the headline is the GPU→L1 store path; the sustained figure including
-    the L2 drain is printed below it.
-    """
-    phases = _phases("submit_store", "get_finished", "end_session", "reset")
-    total = 0
-    excluded = 0.0
+def step_idle(step_us: float, t_tick: float) -> None:
+    if step_us <= 0:
+        time.sleep(0)
+        return
+    rest = t_tick + step_us / 1e6 - time.perf_counter()
+    if rest > 0:
+        time.sleep(rest)
+
+
+class StepLoop:
+    def __init__(self, stack: "LMCacheStack", phases, *, load_slots=0, load_job_blocks=0,
+                 store_slots=0, store_job_blocks=0, lookup_timeout=120.0):
+        self.stack, self.phases = stack, phases
+        bpc, tpb = stack.bpc, stack.tokens_per_block
+        self.free_load = list(range(load_slots))
+        self.free_store = list(range(store_slots))
+        # GPU blocks per chunk = bpc; a job of n chunks takes n * bpc GPU blocks.
+        self.load_base = lambda slot: slot * load_job_blocks * bpc
+        self.store_base = lambda slot: (load_slots * load_job_blocks + slot * store_job_blocks) * bpc
+        self.looking: dict[str, dict] = {}     # rid -> lookup in progress
+        self.deferred: list[tuple] = []        # (rid, tokens, slot, tag)
+        self.pending: dict[str, tuple] = {}    # rid -> (kind, chunks, slot, t_submit, tag)
+        self.load_job = PhaseTiming("load_job")
+        self.store_job = PhaseTiming("store_job")
+        self.loaded = self.stored = self.misses = 0
+        self.lookup_timeout = lookup_timeout
+
+    def start_load(self, tokens, tag=None) -> None:
+        slot = self.free_load.pop(0)
+        rid = self.stack.new_rid("l")
+        t0 = time.perf_counter()
+        self.stack.submit_lookup(rid, tokens)
+        hit = self.stack.check_lookup(rid)
+        _rec(self.phases, "lookup", t0)
+        job = {"tokens": tokens, "slot": slot, "tag": tag, "t0": t0}
+        if hit is None:
+            job["t_wait"] = time.perf_counter()
+            self.looking[rid] = job
+        else:
+            self._retrieve(rid, job, hit)
+
+    def poll_lookups(self) -> None:
+        for rid, job in list(self.looking.items()):
+            hit = self.stack.check_lookup(rid)     # one non-blocking check per tick
+            if hit is None:
+                if time.perf_counter() - job["t0"] > self.lookup_timeout:
+                    raise TimeoutError(f"lookup {rid} unanswered after {self.lookup_timeout}s")
+                continue
+            del self.looking[rid]
+            _rec(self.phases, "lookup_wait", job["t_wait"])
+            self._retrieve(rid, job, hit)
+
+    def _retrieve(self, rid, job, hit) -> None:
+        st = self.stack
+        want = len(job["tokens"]) // st.chunk_tokens
+        got = hit // st.chunk_tokens
+        self.misses += want - got
+        if not hit:
+            self.free_load.append(job["slot"])
+            t0 = time.perf_counter()
+            st.end_request(rid)
+            _rec(self.phases, "end_session", t0)
+            return
+        base = self.load_base(job["slot"])
+        blocks = list(range(base, base + hit // st.tokens_per_block))
+        t0 = time.perf_counter()
+        st.submit_retrieve([(rid, job["tokens"], 0, hit, blocks)])
+        _rec(self.phases, "submit_load", t0)
+        self.pending[rid] = ("load", got, job["slot"], time.perf_counter(), job["tag"])
+
+    def prepare_store(self, tokens, tag=None) -> None:
+        self.deferred.append((self.stack.new_rid("s"), tokens, self.free_store.pop(0), tag))
+
+    def submit_deferred(self) -> None:
+        st = self.stack
+        while self.deferred:
+            rid, tokens, slot, tag = self.deferred.pop(0)
+            base = self.store_base(slot)
+            blocks = list(range(base, base + len(tokens) // st.tokens_per_block))
+            t0 = time.perf_counter()
+            st.submit_store([(rid, tokens, 0, len(tokens), blocks)])
+            _rec(self.phases, "submit_store", t0)
+            self.pending[rid] = ("store", len(tokens) // st.chunk_tokens, slot,
+                                 time.perf_counter(), tag)
+
+    def reap(self) -> list:
+        st = self.stack
+        t0 = time.perf_counter()
+        st.poll()
+        _rec(self.phases, "reap_call", t0)
+        now = time.perf_counter()
+        out = []
+        for rid in list(self.pending):
+            kind, chunks, slot, t_sub, tag = self.pending[rid]
+            done = st.done_stores if kind == "store" else st.done_retrieves
+            if rid not in done:
+                continue
+            done.discard(rid)
+            del self.pending[rid]
+            if kind == "load":
+                self.load_job.record(now - t_sub)
+                self.free_load.append(slot)
+                self.loaded += chunks
+            else:
+                self.store_job.record(now - t_sub)
+                self.free_store.append(slot)
+                self.stored += chunks
+            t1 = time.perf_counter()
+            st.end_request(rid)
+            _rec(self.phases, "end_session", t1)
+            out.append((kind, chunks, tag))
+        return out
+
+    def outstanding(self) -> bool:
+        return bool(self.pending or self.deferred or self.looking)
+
+    def abort(self) -> None:
+        """On an error: clean up unresolved lookups, drain what is in flight, end every
+        session, so no lookup lock or session outlives the failed pass."""
+        st = self.stack
+        for rid in list(self.looking):
+            for f in (st.sch.cleanup_lookup_result, st.end_request):
+                try:
+                    f(rid)
+                except Exception:  # noqa: BLE001 - best effort while failing
+                    pass
+        self.looking = {}
+        for rid, _tokens, _slot, _tag in self.deferred:
+            try:
+                st.end_request(rid)
+            except Exception:  # noqa: BLE001
+                pass
+        self.deferred = []
+        deadline = time.monotonic() + 120.0
+        while self.pending and time.monotonic() < deadline:
+            try:
+                self.reap()
+            except Exception:  # noqa: BLE001
+                break
+            time.sleep(POLL_S)
+
+
+def inflight_label(args, kind: str) -> str:
+    if kind == "store":
+        s = f"job_blocks={args.store_job_blocks} inflight={args.store_inflight}"
+    else:
+        s = f"job_blocks={args.job_blocks} inflight={args.inflight}"
+    s += f" step_us={args.step_us:g} layers={args.layers}"
+    if kind == "warm" and getattr(args, "warm_overflow", False):
+        s += " OVERFLOW: set exceeds tier, not warm"
+    return s
+
+
+def bench_store_lifecycle(stack, args, min_duration) -> BenchResult:
+    """Store with jobs in flight: every pass stores --num-blocks fresh chunks (LMCache
+    dedups chunks it already holds) as --store-job-blocks-chunk jobs with up to
+    --store-inflight outstanding. After a pass L1 is emptied (``reset``: waits for the
+    pass's L1->L2 write-through, then clears L1), excluded from wall time; the
+    sustained figure including the L2 drain is printed below it."""
+    phases = _phases("submit_store", "get_finished", "end_session", "reset", "reap_call")
+    loop = StepLoop(stack, phases, store_slots=args.store_inflight,
+                    store_job_blocks=args.store_job_blocks)
     has_l2 = stack.has_l2()
-    wall_start = time.perf_counter()
-    iteration = 0
-    while (time.perf_counter() - wall_start - excluded) < min_duration or iteration < 2:
-        for seq in make_sequences(stack, num_blocks, batch_size):
-            total += store_batch(stack, seq, phases)
-        iteration += 1
+    timed, passes = 0.0, 0
+    t_all = time.perf_counter()
+    while timed < min_duration or passes < 2:
+        t_pass = time.perf_counter()    # fresh sequences inside the window, as the old pass had
+        todo = make_sequences(stack, args.num_blocks, args.store_job_blocks)
+        try:
+            while todo or loop.outstanding():
+                t = time.perf_counter()
+                loop.submit_deferred()
+                while todo and loop.free_store:
+                    loop.prepare_store(todo.pop(0))
+                loop.reap()
+                if todo or loop.outstanding():
+                    step_idle(args.step_us, t)
+        except BaseException:
+            loop.abort()
+            raise
+        timed += time.perf_counter() - t_pass
+        passes += 1
         t0 = time.perf_counter()
         stack.evict_l1()
         _rec(phases, "reset", t0)
-        excluded += time.perf_counter() - t0
-    elapsed = time.perf_counter() - wall_start
+    elapsed = time.perf_counter() - t_all
+    phases["get_finished"] = loop.store_job
+    phases["store_job"] = loop.store_job
     result = BenchResult(
-        label="Store Lifecycle (touch → prepare_store → submit → finish → complete)",
-        total_blocks=total, total_bytes=total * stack.chunk_bytes,
-        wall_seconds=elapsed - excluded, phases=phases)
+        label=f"Store Lifecycle ({inflight_label(args, 'store')})",
+        total_blocks=loop.stored, total_bytes=loop.stored * stack.chunk_bytes,
+        wall_seconds=timed, phases=phases)
     result.sustained = (result.total_bytes / elapsed / 1e9, elapsed)
     result.print_report()
+    print(f"  store jobs={len(loop.store_job.samples)}  passes={passes}")
     if has_l2:
         print(f"  Sustained incl. L2 write-through drain: "
-              f"{result.total_bytes / elapsed / 1e9:.2f} GB/s over {elapsed:.3f}s")
+              f"{result.sustained[0]:.2f} GB/s over {elapsed:.3f}s")
     return result
 
 
-def bench_load_lifecycle(stack, seqs, min_duration, *, cold: bool) -> BenchResult:
-    """lookup (→ lookup_wait) → submit_load → get_finished → end_session.
-
-    Warm: the chunks are in L1 (pinned RAM → GPU).
-    Cold: L1 is emptied before every pass, so each lookup prefetches the
-    chunks L2 → L1 (``lookup_wait``) before the retrieve copies them to the
-    GPU. The empty-out (``demote``) is excluded from wall time.
-    """
-    phases = _phases("lookup", "lookup_wait", "submit_load", "get_finished", "end_session")
+def bench_load_lifecycle(stack, seqs, args, min_duration, *, cold: bool) -> BenchResult:
+    """Load with jobs in flight: ``seqs`` (stored; one --job-blocks-chunk sequence per
+    job) with up to --inflight outstanding, shuffled per pass. Warm: chunks in L1.
+    Cold: L1 is emptied before every pass (``demote``, untimed), so each lookup
+    prefetches its chunks L2 -> L1 (``lookup_wait``) before the retrieve."""
+    import random as _random
+    phases = _phases("lookup", "lookup_wait", "submit_load", "get_finished", "end_session",
+                     "reap_call")
     if cold:
         phases["demote"] = PhaseTiming("demote")
-    total = misses = 0
-    excluded = 0.0
+    loop = StepLoop(stack, phases, load_slots=args.inflight, load_job_blocks=args.job_blocks)
+    rng = _random.Random(args.seed)
     c0 = server_counters(stack.http_url)
-    wall_start = time.perf_counter()
-    iteration = 0
-    while (time.perf_counter() - wall_start - excluded) < min_duration or iteration < 2:
+    timed, passes = 0.0, 0
+    while timed < min_duration or passes < 2:
         if cold:
             t0 = time.perf_counter()
             stack.evict_l1()
             _rec(phases, "demote", t0)
-            excluded += time.perf_counter() - t0
-        for seq in seqs:
-            loaded, m = load_batch(stack, seq, phases)
-            total += loaded
-            misses += m
-        iteration += 1
-    wall = time.perf_counter() - wall_start - excluded
+        t_pass = time.perf_counter()
+        todo = list(seqs)
+        rng.shuffle(todo)
+        try:
+            while todo or loop.outstanding():
+                t = time.perf_counter()
+                loop.poll_lookups()
+                while todo and loop.free_load:
+                    loop.start_load(todo.pop(0))
+                loop.reap()
+                if todo or loop.outstanding():
+                    step_idle(args.step_us, t)
+        except BaseException:
+            loop.abort()
+            raise
+        timed += time.perf_counter() - t_pass
+        passes += 1
     d = server_counters(stack.http_url) - c0
+    phases["get_finished"] = loop.load_job
+    phases["load_job"] = loop.load_job
     temp = "Cold" if cold else "Warm"
     result = BenchResult(
-        label=f"{temp} Load Lifecycle (lookup → touch → prepare → submit → finish → complete)",
-        total_blocks=total, total_bytes=total * stack.chunk_bytes,
-        wall_seconds=wall, phases=phases)
-    result.counts = {"load_misses": misses}
-    if cold:
+        label=f"{temp} Load Lifecycle ({inflight_label(args, 'load' if cold else 'warm')})",
+        total_blocks=loop.loaded, total_bytes=loop.loaded * stack.chunk_bytes,
+        wall_seconds=timed, phases=phases)
+    result.counts = {"load_misses": loop.misses}
+    overflow = not cold and getattr(args, "warm_overflow", False)
+    if cold or overflow:
         result.counts["disk_read_bytes"] = (
             int(d["lmcache_mp_l2_prefetch_load_completed_chunks_total"]) * stack.chunk_bytes)
+    if overflow:
+        result.counts["warm_overflow"] = 1
     result.print_report()
-    if misses or cold:
-        print(f"  Load misses: {misses}  "
+    print(f"  load jobs={len(loop.load_job.samples)}  passes={passes}")
+    if loop.misses or cold or overflow:
+        print(f"  Load misses: {loop.misses}  "
               f"Prefetched from L2: {int(d['lmcache_mp_l2_prefetch_load_completed_chunks_total'])}")
+    if overflow:
+        print("  WARNING: --allow-warm-overflow: the working set exceeds L1; the chunks above "
+              "came back from L2 or missed. Not a warm measurement.")
     return result
 
 
@@ -578,6 +792,12 @@ def bench_mixed_eviction(stack, batch_size, min_duration, *, working_set=512,
     store's L1 write count is read from the server's metrics (the scrape is
     excluded from wall time); a dropped batch backs off one engine step and
     is not loaded by the next generation, as in the sibling benches.
+
+    Before the timed loop L1 is filled to its eviction watermark (EVICTION_THRESHOLD of
+    it, as certus-connector-bench fills its tier to the eviction threshold) with other
+    chunks, untimed, so every timed store meets eviction from the first generation on:
+    with a 12 GiB L1 a 512-chunk working set would otherwise not fill it within the
+    pass. L1 is emptied after the pass.
     """
     names_store = {"get_finished": "store_finish", "end_session": "store_end_session"}
     names_load = {"get_finished": "load_finish", "end_session": "load_end_session"}
@@ -589,14 +809,37 @@ def bench_mixed_eviction(stack, batch_size, min_duration, *, working_set=512,
     l1_chunks = l1 // stack.chunk_bytes
     print(f"\n  Eviction mode: working_set={working_set} "
           f"(store={store_count}/gen, load={load_count}/gen, chunk_bytes={stack.chunk_bytes})")
-    print(f"  L1 ({l1_chunks} chunks) fills after ~{l1_chunks // max(1, store_count)} "
-          f"generations, then eviction kicks in.")
-
     stack.evict_l1()
-    c0 = server_counters(stack.http_url)
-    loadable = make_sequences(stack, load_count, batch_size)
-    populate(stack, loadable)
+    try:
+        # Fill L1 to its eviction watermark with the seed generation, untimed (written
+        # through to L2 first, if any, so the evictor may drop it).
+        fill_n = max(0, int(l1_chunks * EVICTION_THRESHOLD) - load_count)
+        t0 = time.perf_counter()
+        populate(stack, make_sequences(stack, fill_n, batch_size))
+        stack.drain_l2()
+        print(f"  L1 ({l1_chunks} chunks) filled to its watermark first ({fill_n} chunks and "
+              f"the seed, {time.perf_counter() - t0:.1f}s, untimed): stores meet eviction.")
+        # The seed: only sequences L1 took are loaded (a dropped one is not a miss).
+        loadable = []
+        w = server_counters(stack.http_url)["lmcache_mp_l1_write_chunks_total"]
+        for seq in make_sequences(stack, load_count, batch_size):
+            want = store_batch(stack, seq)
+            now = server_counters(stack.http_url)["lmcache_mp_l1_write_chunks_total"]
+            if int(now - w) >= want:
+                loadable.append(seq)
+            w = now
+        c0 = server_counters(stack.http_url)
+        return _mixed_eviction_loop(stack, batch_size, min_duration, working_set,
+                                    load_fraction, store_count, loadable, c0,
+                                    phases, names_store, names_load)
+    finally:
+        stack.evict_l1()   # the fill and the pass's chunks leave L1
 
+
+def _mixed_eviction_loop(stack, batch_size, min_duration, working_set, load_fraction,
+                         store_count, loadable, c0, phases, names_store,
+                         names_load) -> BenchResult:
+    """The timed part of bench_mixed_eviction (unchanged by the fill)."""
     total = load_misses = store_drops = 0
     excluded = 0.0
     wall_start = time.perf_counter()
@@ -641,83 +884,6 @@ def bench_mixed_eviction(stack, batch_size, min_duration, *, working_set=512,
         p = int(d["lmcache_mp_l2_prefetch_load_completed_chunks_total"])
         print(f"  L2: writes={w} ({w * stack.chunk_bytes / 1e6:.0f} MB)  "
               f"prefetches={p} ({p * stack.chunk_bytes / 1e6:.0f} MB)")
-    return result
-
-
-# ── mode: pipelined ─────────────────────────────────────────────────────────
-
-def bench_pipelined(stack, num_blocks, batch_size, min_duration, *,
-                    pipeline_depth=4, direction="store") -> BenchResult:
-    """Submit pipeline_depth requests before reaping.
-
-    Stores: fresh sequences each pass; the per-pass L1 reset (L2 drain) is
-    excluded. Loads: the lookup is part of ``prepare``; the retrieve is
-    submitted without waiting, then the depth is drained.
-    """
-    is_store = direction == "store"
-    phases = _phases("prepare", "submit", "pipeline_drain", "complete")
-    seqs = None if is_store else make_sequences(stack, num_blocks, batch_size)
-    if seqs:
-        populate(stack, seqs)
-    total = 0
-    excluded = 0.0
-    wall_start = time.perf_counter()
-    iteration = 0
-
-    def _drain(in_flight):
-        t0 = time.perf_counter()
-        if is_store:
-            stack.wait(stores=[r for r, _ in in_flight])
-        else:
-            stack.wait(retrieves=[r for r, _ in in_flight])
-        for rid, _ in in_flight:
-            t_c = time.perf_counter()
-            stack.end_request(rid)
-            _rec(phases, "complete", t_c)
-        in_flight.clear()
-        _rec(phases, "pipeline_drain", t0)
-
-    while (time.perf_counter() - wall_start - excluded) < min_duration or iteration < 2:
-        in_flight: list = []
-        pass_seqs = make_sequences(stack, num_blocks, batch_size) if is_store else seqs
-        for seq in pass_seqs:
-            rid = stack.new_rid("p")
-            t0 = time.perf_counter()
-            end = len(seq)
-            if not is_store:
-                end = stack.lookup(rid, seq)
-                if not end:
-                    stack.end_request(rid)
-                    continue
-            _rec(phases, "prepare", t0)
-            t0 = time.perf_counter()
-            if is_store:
-                stack.submit_store([(rid, seq, 0, end, None)])
-            else:
-                stack.submit_retrieve([(rid, seq, 0, end, None)])
-            _rec(phases, "submit", t0)
-            in_flight.append((rid, end))
-            total += end // stack.chunk_tokens
-            if len(in_flight) >= pipeline_depth:
-                _drain(in_flight)
-        if in_flight:
-            _drain(in_flight)
-        iteration += 1
-        if is_store:
-            t0 = time.perf_counter()
-            stack.evict_l1()
-            excluded += time.perf_counter() - t0
-    elapsed = time.perf_counter() - wall_start
-    result = BenchResult(
-        label=f"Pipelined {'Store' if is_store else 'Load'} (depth={pipeline_depth})",
-        total_blocks=total, total_bytes=total * stack.chunk_bytes,
-        wall_seconds=elapsed - excluded, phases=phases)
-    if is_store:
-        result.sustained = (result.total_bytes / elapsed / 1e9, elapsed)
-    result.print_report()
-    if is_store and stack.has_l2():
-        print(f"  Sustained incl. L2 write-through drain: "
-              f"{result.total_bytes / elapsed / 1e9:.2f} GB/s over {elapsed:.3f}s")
     return result
 
 
@@ -935,8 +1101,8 @@ def main():
         epilog=(
             "Modes (--mode):\n"
             "\n"
-            "  default        Four serial phases: store, warm load, cold load, mixed eviction\n"
-            "  pipelined      Submit N requests before reaping\n"
+            "  default        store, warm load, cold load with --inflight jobs of --job-blocks\n"
+            "                 chunks outstanding (vLLM 0.30's step loop), then mixed eviction\n"
             "  prefix-miss    Vary prefix hit ratio to measure the prefix lookup cost\n"
             "  scheduler-step Scheduler steps with multi-request prefix sharing\n"
             "  all            All of the above\n"
@@ -963,9 +1129,12 @@ def main():
                         help="store random GPU data, zero it, retrieve it (warm, and cold "
                              "through L2) and compare bytes before benchmarking")
     parser.add_argument("--bs", type=int, default=16,
-                        help="keys (chunks) per request")
-    parser.add_argument("--num-blocks", type=int, default=128,
-                        help="keys per pass")
+                        help="keys (chunks) per request in prefix-miss, scheduler-step and "
+                             "mixed eviction; the default mode uses --job-blocks")
+    parser.add_argument("--num-blocks", type=int, default=None,
+                        help="keys per pass (default mode: derived from the server's L1 as "
+                             "certus-connector-bench derives it from its tier, 90%% of L1 x 0.8 / "
+                             "--block-bytes, at most 4000; the other modes: 128)")
     parser.add_argument("--block-bytes", type=parse_size, default=DEFAULT_BLOCK_BYTES,
                         help="bytes per key = one LMCache chunk of all layers")
     parser.add_argument("--gpu", type=int, default=0)
@@ -978,11 +1147,32 @@ def main():
     parser.add_argument("--csv", type=str, default=None, help="append results to CSV")
     parser.add_argument("--tag", type=str, default="", help="CSV tag column")
     parser.add_argument("--no-cold", action="store_true")
+    parser.add_argument("--no-warm", action="store_true",
+                        help="Skip the warm-load pass. Then --num-blocks may exceed L1: store and "
+                             "cold run at any size (as certus-connector-bench)")
+    parser.add_argument("--allow-warm-overflow", action="store_true",
+                        help="Run the warm pass even when --num-blocks exceeds the server's L1. Its "
+                             "loads then miss or are prefetched back from L2, so the result is not "
+                             "a warm measurement: its label says so, its CSV row has "
+                             "warm_overflow=1 and its L2 prefetches (disk_read_bytes), and the "
+                             "comparison report flags the row. Without it such a run is refused")
     parser.add_argument("--no-eviction", action="store_true")
     parser.add_argument("--mode", default="default",
-                        choices=["default", "pipelined", "prefix-miss", "scheduler-step", "all"])
-    parser.add_argument("--pipeline-depth", type=int, default=4)
-    parser.add_argument("--direction", default="both", choices=["store", "load", "both"])
+                        choices=["default", "prefix-miss", "scheduler-step", "all"])
+    # jobs in flight (default mode), certus-connector-bench's defaults
+    parser.add_argument("--job-blocks", type=int, default=64,
+                        help="(default) chunks per load job, and per store job unless "
+                             "--store-job-blocks (default 64)")
+    parser.add_argument("--inflight", type=int, default=4,
+                        help="(default) jobs kept outstanding (default 4); prefix-miss and "
+                             "scheduler-step do not use it")
+    parser.add_argument("--step-us", type=float, default=100.0,
+                        help="(default) scheduler tick in us (default 100; 0 = time.sleep(0))")
+    parser.add_argument("--store-job-blocks", type=int, default=None,
+                        help="(default) chunks per store job (default --job-blocks)")
+    parser.add_argument("--store-inflight", type=int, default=None,
+                        help="(default) store jobs outstanding (default --inflight)")
+    parser.add_argument("--seed", type=int, default=0, help="seed for the load job order")
     parser.add_argument("--hit-ratio", type=float, default=0.75)
     parser.add_argument("--requests-per-step", type=int, default=8)
     parser.add_argument("--num-sessions", type=int, default=32)
@@ -993,9 +1183,32 @@ def main():
     args = parser.parse_args()
     if args.tp != 1:
         parser.error("--tp > 1 is not supported (one worker adapter, one GPU)")
+    # --num-blocks per mode unless given; the default mode's needs the server's L1 size,
+    # so it is set after connecting (below) and checked there.
+    args.num_blocks_given = args.num_blocks
+    if args.num_blocks is None:
+        args.num_blocks = SEQUENTIAL_NUM_BLOCKS
+    if args.store_job_blocks is None:
+        args.store_job_blocks = args.job_blocks
+    if args.store_inflight is None:
+        args.store_inflight = args.inflight
+    for name in ("job_blocks", "inflight", "store_job_blocks", "store_inflight"):
+        if getattr(args, name) < 1:
+            parser.error(f"--{name.replace('_', '-')} must be >= 1")
+    if args.step_us < 0:
+        parser.error("--step-us must be >= 0")
+    if args.mode in ("default", "all") and args.num_blocks_given is not None:
+        jobs = -(-args.num_blocks // args.job_blocks)
+        if jobs < args.inflight:
+            parser.error(f"--num-blocks {args.num_blocks} makes only {jobs} job(s) of --job-blocks "
+                         f"{args.job_blocks}, but --inflight {args.inflight} needs at least "
+                         f"{args.inflight}: use --num-blocks >= {args.inflight * args.job_blocks}")
 
-    kpr = max(4, args.num_blocks // args.requests_per_step)
-    pool_chunks = max(args.bs * max(1, args.pipeline_depth),
+    # scheduler-step sizes its requests by its own --num-blocks (128 unless given).
+    kpr = max(4, (args.num_blocks_given or SEQUENTIAL_NUM_BLOCKS) // args.requests_per_step)
+    # One slot per job in flight (loads, then stores; StepLoop), ahead of the rolling
+    # allocator the sequential modes use.
+    pool_chunks = max(args.inflight * args.job_blocks + args.store_inflight * args.store_job_blocks,
                       2 * args.requests_per_step * kpr, args.bs) + args.bs
 
     import importlib.metadata as md
@@ -1013,6 +1226,32 @@ def main():
     print(f"  num_blocks={args.num_blocks}  bs={args.bs}  min_duration={args.min_duration}s  "
           f"L1={l1_bytes / 2**30:.1f} GiB ({l1_bytes // stack.chunk_bytes} chunks)  "
           f"L2={'yes' if has_l2 else 'none'}")
+    print(f"  job_blocks={args.job_blocks} inflight={args.inflight} store_job_blocks="
+          f"{args.store_job_blocks} store_inflight={args.store_inflight} step_us={args.step_us:g}")
+    args.l1_bytes = l1_bytes
+    if args.num_blocks_given is None:
+        args.num_blocks = default_num_blocks(
+            "default" if args.mode == "all" else args.mode, l1_bytes, stack.chunk_bytes)
+        print(f"  num_blocks={args.num_blocks} (derived from L1)")
+    if args.mode in ("default", "all"):
+        jobs = -(-args.num_blocks // args.job_blocks)
+        if jobs < args.inflight:
+            stack.shutdown()
+            sys.exit(f"error: --num-blocks {args.num_blocks} makes only {jobs} job(s) of "
+                     f"--job-blocks {args.job_blocks}, but --inflight {args.inflight} needs at "
+                     f"least {args.inflight}: give --num-blocks >= "
+                     f"{args.inflight * args.job_blocks} or a larger L1 (L1_GB)")
+        # A warm load is only warm while its chunks stay in L1, as certus-connector-bench
+        # refuses a working set over 90% of its tier's usable size.
+        fit = int(l1_bytes // stack.chunk_bytes * INFLIGHT_TIER_SHARE)
+        args.warm_overflow = args.num_blocks > fit and not args.no_warm
+        if args.warm_overflow and not args.allow_warm_overflow:
+            stack.shutdown()
+            sys.exit(f"error: --num-blocks {args.num_blocks} chunks is more than "
+                     f"{INFLIGHT_TIER_SHARE:.0%} of the server's L1 ({l1_bytes // stack.chunk_bytes} "
+                     f"chunks): the warm loads would not be warm. Use --num-blocks <= {fit}, a "
+                     f"larger L1 (L1_GB), --no-warm (store and cold only), or "
+                     f"--allow-warm-overflow (runs it, marked as not warm)")
 
     try:
         results = _run(args, stack, has_l2)
@@ -1029,14 +1268,14 @@ def main():
             "lookup_order": args.lookup_order, "lmcache_version": lmc_version,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         }
-        if args.mode == "pipelined":
-            extra.update(pipeline_depth=args.pipeline_depth, direction=args.direction)
-        elif args.mode == "prefix-miss":
+        extra.update(job_blocks=args.job_blocks, inflight=args.inflight, step_us=args.step_us,
+                     store_job_blocks=args.store_job_blocks, store_inflight=args.store_inflight)
+        if args.mode == "prefix-miss":
             extra["hit_ratio"] = args.hit_ratio
         elif args.mode == "scheduler-step":
             extra.update(requests_per_step=args.requests_per_step,
                          num_sessions=args.num_sessions)
-        rows = [r.csv_row(extra) for r in results]
+        rows = [r.csv_row({**extra, **getattr(r, "extra_params", {})}) for r in results]
         fieldnames = list(rows[0].keys())
         for r in rows[1:]:
             fieldnames += [k for k in r if k not in fieldnames]
@@ -1073,14 +1312,9 @@ def _run(args, stack: LMCacheStack, has_l2: bool) -> list[BenchResult]:
 
     def run_mode(m: str) -> list[BenchResult]:
         out: list[BenchResult] = []
-        if m == "pipelined":
-            print(f"\n  Mode: pipelined (depth={args.pipeline_depth}, direction={args.direction})")
-            for d in ("store", "load"):
-                if args.direction in (d, "both"):
-                    stack.evict_l1()
-                    out.append(bench_pipelined(stack, args.num_blocks, args.bs, args.min_duration,
-                                               pipeline_depth=args.pipeline_depth, direction=d))
-        elif m == "prefix-miss":
+        if args.num_blocks_given is None:
+            args.num_blocks = default_num_blocks(m, args.l1_bytes, stack.chunk_bytes)
+        if m == "prefix-miss":
             print(f"\n  Mode: prefix-miss (hit_ratio={args.hit_ratio})")
             out.append(bench_prefix_miss(stack, args.num_blocks, args.bs, args.min_duration,
                                          hit_ratio=args.hit_ratio))
@@ -1092,25 +1326,29 @@ def _run(args, stack: LMCacheStack, has_l2: bool) -> list[BenchResult]:
                                             num_sessions=args.num_sessions,
                                             num_blocks=args.num_blocks))
         else:
-            out.append(bench_store_lifecycle(stack, args.num_blocks, args.bs, args.min_duration))
-            seqs = make_sequences(stack, args.num_blocks, args.bs)
+            print(f"\n  Mode: default ({inflight_label(args, 'load')})")
+            out.append(bench_store_lifecycle(stack, args, args.min_duration))
+            seqs = make_sequences(stack, args.num_blocks, args.job_blocks)
             populate(stack, seqs)
-            out.append(bench_load_lifecycle(stack, seqs, args.min_duration, cold=False))
+            if not args.no_warm:
+                out.append(bench_load_lifecycle(stack, seqs, args, args.min_duration, cold=False))
             if args.no_cold:
                 pass
             elif not has_l2:
                 print("\n  (cold load skipped: the server has no L2 adapter)")
             else:
-                out.append(bench_load_lifecycle(stack, seqs, args.min_duration, cold=True))
+                out.append(bench_load_lifecycle(stack, seqs, args, args.min_duration, cold=True))
             if not args.no_eviction:
                 out.append(bench_mixed_eviction(stack, args.bs, args.min_duration,
                                                 working_set=args.working_set))
         stack.evict_l1()
         if stack.load_error_blocks:
             print(f"  WARNING: {stack.load_error_blocks} GPU blocks reported retrieve errors")
+        for r in out:   # the CSV records each row's own working set (--mode all)
+            r.extra_params = {"num_blocks": args.num_blocks}
         return out
 
-    modes = (["default", "pipelined", "prefix-miss", "scheduler-step"]
+    modes = (["default", "prefix-miss", "scheduler-step"]
              if args.mode == "all" else [args.mode])
     results: list[BenchResult] = []
     for m in modes:

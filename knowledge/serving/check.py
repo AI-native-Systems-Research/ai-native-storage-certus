@@ -2,8 +2,10 @@
 """Check knowledge/serving/*.yaml and print every derived value.
 
 Fails (exit 1) on: a reference to an unknown model, deployment or file; a model value
-the formulas need that is missing; an observation value without a basis; or a stored
-derived value (`stored_*`) that disagrees with the one computed from its inputs.
+the formulas need that is missing; an observation value without a basis; a stored
+derived value (`stored_*`) that disagrees with the one computed from its inputs; or a
+connector-benchmark preset (COLD_PRESETS) or validation shape (INFLIGHT_SHAPES) that
+disagrees with the observation it names.
 
 Usage: python3 knowledge/serving/check.py [--quiet]
 """
@@ -78,23 +80,90 @@ def model_kv(mid: str, m: dict, dtype_bytes: int) -> tuple[int | None, int | Non
 BENCH = REPO / "benchmarks" / "certus-connector-bench" / "bench_connector_lifecycle.py"
 
 
-def bench_presets() -> dict:
-    """COLD_PRESETS from the connector benchmark, read from its source (importing it
-    needs CUDA). A missing benchmark or literal is an error, not an empty set."""
+def bench_literal(name: str) -> dict:
+    """A dict literal (COLD_PRESETS, INFLIGHT_SHAPES) from the connector benchmark,
+    read from its source (importing it needs CUDA). A missing benchmark or literal is
+    an error, not an empty set."""
     import ast
     if not BENCH.exists():
         err(f"benchmark {BENCH.relative_to(REPO)} not found (needed for the preset check)")
         return {}
     for node in ast.walk(ast.parse(BENCH.read_text())):
         if isinstance(node, ast.Assign) and any(
-                isinstance(t, ast.Name) and t.id == "COLD_PRESETS" for t in node.targets):
+                isinstance(t, ast.Name) and t.id == name for t in node.targets):
             try:
                 return ast.literal_eval(node.value)
             except ValueError as e:
-                err(f"COLD_PRESETS in {BENCH.name} must be a plain literal: {e}")
+                err(f"{name} in {BENCH.name} must be a plain literal: {e}")
                 return {}
-    err(f"COLD_PRESETS not found in {BENCH.name}")
+    err(f"{name} not found in {BENCH.name}")
     return {}
+
+
+def bench_presets() -> dict:
+    return bench_literal("COLD_PRESETS")
+
+
+def _obs_value(o: dict, key: str):
+    v = (o.get("values") or {}).get(key)
+    return v.get("value") if isinstance(v, dict) else None
+
+
+def check_inflight_shapes(obs_by_id: dict, derived_by_dep: dict) -> None:
+    """Each in-flight validation shape (INFLIGHT_SHAPES) must name an observation and
+    match it: block bytes and pieces per block (via the deployment), blocks per load
+    job exactly, blocks per store job to the nearest block, and the configured
+    requests in flight for both directions. A shape key the check needs and the
+    observation lacks is an error, so a shape cannot drift from data it never had."""
+    for name, shape in bench_literal("INFLIGHT_SHAPES").items():
+        where = f"benchmark shape {name!r}"
+        oid = shape.get("observation")
+        o = obs_by_id.get(oid)
+        if o is None:
+            err(f"{where}: observation {oid!r} not in observations.yaml")
+            continue
+        row = derived_by_dep.get(o.get("deployment"))
+        if row:
+            _, _, ppb, _, dv = row
+            if shape.get("pieces_per_block") != ppb:
+                err(f"{where}: pieces_per_block {shape.get('pieces_per_block')} != {ppb} "
+                    f"for {o.get('deployment')}")
+            if shape.get("block_bytes") != dv["block_bytes"]:
+                err(f"{where}: block_bytes {shape.get('block_bytes')} != {dv['block_bytes']} "
+                    f"for {o.get('deployment')}")
+        else:
+            err(f"{where}: observation {oid!r} has no derivable deployment")
+        # Every key the shape sets must be checked against a measured or computed value,
+        # or named in "assumed" (with no observation to check it against).
+        checks = (
+            ("job_blocks", "blocks_per_load_job", lambda a, b: a == b),
+            ("store_job_blocks", "blocks_per_store_job", lambda a, b: a == round(b)),
+            ("inflight", "inflight_configured", lambda a, b: a == b),
+        )
+        assumed = set(shape.get("assumed") or ())
+        # The benchmark reads every one of these for the in-flight modes.
+        required = {"observation", "block_bytes", "pieces_per_block", "job_blocks",
+                    "inflight", "store_job_blocks", "store_inflight"}
+        for key in sorted(required - set(shape)):
+            err(f"{where}: missing {key}")
+        for key in sorted(assumed - set(shape)):
+            err(f"{where}: 'assumed' names {key}, which the shape does not set")
+        known = {"observation", "assumed", "block_bytes", "pieces_per_block"} | {c[0] for c in checks}
+        for key in shape:
+            if key not in known and key not in assumed:
+                err(f"{where}: {key} is neither checked against the observation nor listed "
+                    f"in 'assumed'")
+        for skey, okey, same in checks:
+            have, want = shape.get(skey), _obs_value(o, okey)
+            if skey in assumed:
+                err(f"{where}: {skey} is checked against {okey}; it cannot be 'assumed'")
+                continue
+            if have is None:
+                continue          # reported above as missing
+            if want is None:
+                err(f"{where}: {skey} {have} but observation {oid} has no {okey}")
+            elif not same(have, want):
+                err(f"{where}: {skey} {have} != observation {oid} {okey} {want}")
 
 
 def check_bench_presets(obs_by_id: dict, derived_by_dep: dict) -> None:
@@ -214,6 +283,7 @@ def main() -> int:
                 err(f"observation {oid}: computed value {key} needs formula")
 
     check_bench_presets({o.get("id"): o for o in obs}, derived_by_dep)
+    check_inflight_shapes({o.get("id"): o for o in obs}, derived_by_dep)
 
     if not quiet:
         w = max([len("deployment")] + [len(r[0]) for r in rows])

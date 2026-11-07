@@ -15,8 +15,6 @@ bench-results/
 │   └── raw-<tag>_<date>/                    # Raw tool output (audit trail)
 ├── default_<tag>_<timestamp>.yaml           # Connector bench: default mode
 ├── default_<tag>_<timestamp>.csv            # Same data, flat CSV
-├── pipelined_<tag>_<timestamp>.yaml         # Connector bench: pipelined mode
-├── pipelined_<tag>_<timestamp>.csv
 ├── prefix-miss_<tag>_<timestamp>.yaml       # Connector bench: prefix-miss mode
 ├── contention_<tag>_<timestamp>.yaml        # Connector bench: contention mode
 ├── scheduler-step_<tag>_<timestamp>.yaml    # Connector bench: scheduler-step mode
@@ -157,7 +155,8 @@ Run configuration — everything needed to reproduce the result.
 | `working_set` | Total blocks in the eviction-pressure working set |
 | `timestamp` | ISO 8601 time the run started |
 
-Mode-specific params are added depending on the mode (e.g. `pipeline_depth`,
+Mode-specific params are added depending on the mode (e.g. `job_blocks`,
+`inflight`, `step_us`, `store_job_blocks`, `store_inflight` for default and contention;
 `hit_ratio`, `requests_per_step`).
 
 #### `results:`
@@ -185,16 +184,13 @@ The phases correspond to actual connector API calls in the vLLM offloading path:
 | `lookup` | `manager.lookup()` — check which blocks are already stored |
 | `prepare_store` | `manager.prepare_store()` — build regions, hash content |
 | `submit_store` | `worker.submit_store()` — enqueue store to the shmq ring |
-| `get_finished` | `worker.get_finished()` — poll for completion events |
+| `get_finished` | the wait for a job: the sequential passes time their poll loop; the in-flight passes (default store/warm, contention) record each job's submit-to-reap time here |
 | `complete_store` | `manager.complete_store()` — finalize stored blocks |
 | `prepare_load` | `manager.prepare_load()` — build load regions |
 | `submit_load` | `worker.submit_load()` — enqueue load to the ring |
 | `complete_load` | `manager.complete_load()` — finalize loaded blocks |
-| `prepare` | (pipelined) combined prepare step |
-| `submit` | (pipelined) combined submit step |
-| `pipeline_drain` | (pipelined) wait for in-flight pipeline slots |
-| `complete` | (pipelined) combined complete step |
-| `touch_lookup` | (scheduler-step) batched touch + lookup per step |
+| `reap_call` | (default store/warm, contention) one non-blocking `get_finished()` per tick |
+| `step` | (scheduler-step) one tick's scheduling work: admitting requests (lookup, touch, load submits) and preparing stores |
 | `take_events` | (contention) event polling under concurrent load |
 
 Not every phase appears in every mode — only the phases that mode exercises.
@@ -206,10 +202,9 @@ Each mode exercises a different aspect of the connector:
 | Mode | Workloads produced | What it tests |
 |------|-------------------|---------------|
 | **default** | Store, Warm Load, Cold Load, Mixed Store+Load Under Eviction | The four standard lifecycle paths: write blocks to NVMe, read them back from memory tier (warm), read them back from NVMe (cold), and mixed read/write under memory pressure with eviction. |
-| **pipelined** | Pipelined Store, Pipelined Load | Overlapped submit/complete with a configurable pipeline depth (`pipeline_depth`). Measures how much throughput improves when multiple batches are in flight simultaneously. |
 | **prefix-miss** | Prefix-Miss Load | Simulates partial cache hits: `hit_ratio` fraction of keys are pre-stored (warm), the rest miss and trigger cold loads. Models real serving where some prompt prefixes are cached. |
-| **contention** | Store Thread, Load Thread, Load Alone | Concurrent store + load threads competing for the shmq ring, vs. load running alone. Measures contention overhead. |
-| **scheduler-step** | Scheduler Step | Reproduces vLLM's scheduler loop: each step touches/lookups `requests_per_step` requests from `num_sessions` conversations, stores new blocks, loads cold blocks. The most realistic single-GPU serving simulation. |
+| **contention** | Store Thread, Load Thread (Load Alone printed only) | Loads and stores in flight together on one worker through the step loop, vs. the same loads alone. Measures contention overhead. |
+| **scheduler-step** | Scheduler Step | Reproduces vLLM 0.30's scheduler loop on the step loop: each step admits `requests_per_step` requests from `num_sessions` conversations; each request's prefix hits are one load job (up to `inflight` outstanding), its new blocks are stored after its load is reaped; one non-blocking reap per `step_us` tick. The most realistic single-GPU serving simulation. |
 
 ### Per-mode CSV files: `<mode>_<tag>_<timestamp>.csv`
 
