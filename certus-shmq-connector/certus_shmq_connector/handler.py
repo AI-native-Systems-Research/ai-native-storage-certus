@@ -93,6 +93,26 @@ def _submit_trace(method: str, job_id: int, num_blocks: int, num_keys: int) -> N
         pass
 
 
+def _compute_stream_mark():
+    """A CUDA event recorded on the calling thread's current stream (vLLM's compute
+    stream, when called from its worker), or None when CUDA is not in use here.
+
+    Waiting on it means every kernel queued on that stream before this call has run,
+    so the KV it wrote is complete. torch is imported lazily: this module has no
+    torch dependency (the scheduler side and the tests run without it), and a worker
+    that submits stores is always inside a vLLM process, which has torch loaded and
+    CUDA initialized."""
+    try:
+        import torch
+    except ImportError:
+        return None
+    if not torch.cuda.is_available() or not torch.cuda.is_initialized():
+        return None
+    event = torch.cuda.Event()
+    event.record(torch.cuda.current_stream())
+    return event
+
+
 # Diagnostic rate-limiter for CopyToStore failures. The ring transport returns
 # only a per-key ok/fail bool (no server-side error string, unlike gRPC's
 # TransferResult.error_message), so we log a bounded number of the FAILED KEYS
@@ -452,16 +472,33 @@ def _build_worker_class():
                 num_blocks=len(gpu_block_ids),
                 transfer_type=transfer_type,
             )
+            # certus-server copies to and from vLLM's KV cache from another process,
+            # on its own stream, which vLLM's compute stream cannot order. Under async
+            # scheduling the CPU submits a step's transfers while the GPU still runs
+            # earlier work on those blocks: a store's source may not be written yet,
+            # and a load's destination may still have a write pending (a block freed
+            # and reallocated while an older step's write to it is queued). So mark
+            # vLLM's stream here and let the pool thread wait for the GPU to pass the
+            # mark before the server touches the blocks, in both directions, as vLLM's
+            # own CPU offloader orders both with stream.wait_stream(current_stream()).
+            ready = _compute_stream_mark()
 
             # transfer_time is the transfer itself, as cputier reports it (CUDA
             # events around its copy): not the wait for a pool thread, nor the wait
-            # for vLLM's next get_finished call.
+            # for vLLM's next get_finished call, nor the wait for the GPU to reach
+            # the mark.
             def run():
-                job.start_time = time.monotonic()
                 try:
+                    if ready is not None:
+                        ready.synchronize()
+                    job.start_time = time.monotonic()
                     return fn(gpu_block_ids, keys, skip)
                 finally:
+                    # Both are set on every path (get_finished subtracts them even for
+                    # a failed job); a wait that raised gives a zero transfer time.
                     job.end_time = time.monotonic()
+                    if job.start_time is None:
+                        job.start_time = job.end_time
 
             job.future = self._executor.submit(run)
             self._pending.append(job)
