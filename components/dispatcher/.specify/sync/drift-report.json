@@ -1,205 +1,117 @@
 {
-  "generated": "2026-10-31T06:30:00Z",
-  "analysis_run": "2026-10-31",
+  "generated": "2026-11-07T12:00:00Z",
+  "analysis_run": "2026-11-07",
   "project": "dispatcher",
   "component_path": "components/dispatcher",
-  "branch": "specsync-b",
-  "head": "0a71990e",
-  "base": "a0292be6 (origin/unstable; fresh stamp)",
-  "scope": "delta: git diff a0292be6 HEAD -- components/dispatcher/src components/dispatcher/specs components/interfaces/src; plus data-model.md (approved) and spec 002 wire citations",
+  "branch": "fix/dispatcher-j33-repairs",
+  "head": "f4579a41f",
+  "base": "7c12e427a (merge-base with origin/unstable = origin/unstable tip)",
+  "supersedes": "2026-11-06 analysis at HEAD 01d9ec387 (git stash 'j33 spec-sync analysis 2026-11-06 (before repair 7 out)'; ~/pr-fixes/sync/full_out_j33_dispatcher.txt)",
+  "delta_since_previous_analysis": [
+    "209b01de5 dispatcher: take out repair 7 (lookup-async-sync-null-stream): src/lib.rs lookup_async memory-tier arm back to serve_memory_tier_to_gpu(.., warm_raw, true) + null stream (src/lib.rs:3423-3444); repair_test_lookup_async_stream.rs removed; fix 9 route counter kept",
+    "9a79224a1 gpu-services: no SPDK registration without an SPDK environment (A-14): components/gpu-services/src/lib.rs:1176-1181, :1218-1225",
+    "f4579a41f merge of origin/unstable 7c12e427a: no change to components/dispatcher/src, specs, components/interfaces, components/dispatch-map"
+  ],
+  "scope": "full sweep: every active FR/SC of both specs re-read against HEAD; contracts/errors.md; interfaces IDispatcher/TierEventStats doc comments; git diff origin/unstable...HEAD -- components/dispatcher/src",
+  "method": "read-only; no build or test run; test evidence cited from test sources",
   "summary": {
     "specs_analyzed": 2,
-    "requirements_checked": 25,
-    "aligned": 14,
-    "drifted": 11,
+    "requirements_checked": 119,
+    "aligned": 79,
+    "drifted": 25,
+    "drifted_new": 15,
+    "drifted_carried": 10,
     "not_implemented": 0,
-    "unspecced_features": 0
+    "not_verifiable": 15,
+    "unspecced_features": 1
   },
-  "items": [
+  "fixes": [
+    {"fix": 1, "commit": "11748983d", "title": "failed initialize keeps max_eviction_attempts / store_backpressure_ms", "covered_by": "001 FR-012 (spec.md:342), SC-005 (:491)", "spec_right": "no (silent)", "code": "src/lib.rs:2142-2147, :2371-2379", "proposals": ["B-35"]},
+    {"fix": 2, "commit": "7ac879dd4 (+ gpu-services 9a79224a1)", "title": "pool registered with the GPU in every mode; failure is a warning", "covered_by": "001 FR-034 (spec.md:364)", "spec_right": "yes (precision: CUDA-only without SPDK unstated)", "code": "src/lib.rs:2246-2270 (warn :2263-2266); components/gpu-services/src/lib.rs:1176-1181, :1218-1225", "proposals": ["B-48"], "closes": ["A-14"]},
+    {"fix": 3, "commit": "d65de1fef", "title": "read/write stats never decrease after shutdown / re-initialize", "covered_by": "001 FR-056 read_write_stats (spec.md:396); interfaces idispatcher.rs:936-942 'Monotonic'", "spec_right": "interface yes, spec silent", "code": "src/lib.rs:446, :1831-1837, :2168-2171, :2438-2440, :4595-4608", "proposals": ["B-36", "A-16"]},
+    {"fix": 4, "commit": "03b05d505", "title": "eviction refusals counted by real cause", "covered_by": "002 FR-033 (spec.md:573-590), FR-035", "spec_right": "intent yes, mapping/third cause unstated", "code": "src/lib.rs:1215-1244; src/background.rs:736-738", "proposals": ["B-37", "B-38", "A-17"]},
+    {"fix": 5, "commit": "b0720fe6c", "title": "batch_lookup exhausted map retry -> Timeout/IoError, not KeyNotFound/remote", "covered_by": "001 FR-039 step (1) (spec.md:369), FR-008, FR-045; contracts/errors.md:36-37", "spec_right": "partly; errors.md contradicts", "code": "src/lib.rs:2663-2678, :2743-2756, :3130-3137, :3349", "proposals": ["B-39", "B-40"]},
+    {"fix": 6, "commit": "60838384e", "title": "no-drives promotion delivers to GPU then flips in place; releases on failure", "covered_by": "001 FR-028 (spec.md:358), US-9 AS3 (:182)", "spec_right": "no (FR-028 records old defect as A-04)", "code": "src/lib.rs:880-925, :2789-2847", "proposals": ["B-41", "B-42"], "closes": ["A-04"]},
+    {"fix": 7, "commit": "9ff85fa51 reverted by 209b01de5", "title": "lookup_async real stream — TAKEN OUT", "covered_by": "001 FR-036 (spec.md:366)", "spec_right": "n/a: code back to unstable (sync copy, null stream, src/lib.rs:3423-3444)", "proposals": [], "withdrawn": ["B-43", "A-13"], "note": "N-13: an async lookup must hold the read pin until the copy is done (FR-039 step 2 rule)"},
+    {"fix": 8, "commit": "408a568d0", "title": "one NVMe read timeout fails only that entry", "covered_by": "001 US-11 AS4 (spec.md:217), FR-054, FR-061 (:462-467)", "spec_right": "yes (AS4); FR-061 silent on how", "code": "src/pipeline.rs:1402-1420, :1481-1495", "proposals": ["B-44", "A-15"]},
+    {"fix": 9, "commit": "ec1b890ca", "title": "route counters add up (single lookups counted; remote counted when peer answers)", "covered_by": "001 FR-058 (spec.md:405), SC-017 (:510); 002 FR-025 (:554-555)", "spec_right": "partition yes; conflicts with remote-on-fetch", "code": "src/lib.rs:3434-3443, :3476-3490, :3360-3366, :3212-3215", "proposals": ["B-45"]}
+  ],
+  "specs": [
     {
-      "requirement": "FR-003",
-      "spec": "001 spec.md:333",
-      "code": "src/lib.rs:3568-3580, :3826-3915",
-      "verdict": "aligned",
-      "resolution": "none (2026-10-30 entry verified)"
+      "id": "001-dispatcher-cache-interface",
+      "title": "Dispatcher Cache Interface (Memory-Tier Architecture)",
+      "aligned": ["FR-002", "FR-004", "FR-005", "FR-006", "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-014", "FR-015", "FR-016", "FR-019", "FR-023", "FR-024", "FR-025", "FR-029", "FR-030", "FR-031", "FR-032", "FR-033", "FR-035", "FR-040", "FR-041", "FR-042", "FR-043", "FR-045", "FR-046", "FR-047", "FR-048", "FR-049", "FR-050", "FR-053", "FR-054", "FR-055", "FR-057", "FR-059", "FR-060", "FR-063", "SC-001", "SC-002", "SC-004", "SC-005", "SC-006", "SC-007", "SC-009", "SC-010", "SC-011", "SC-013", "SC-015", "SC-016", "SC-018"],
+      "count_check": "001: 52 aligned + 12 drifted (new) + 8 carried + 2 not verifiable = 74 (57 FR + 17 SC); 002: 27 + 3 + 2 + 13 = 45 (36 FR + 9 SC); total 119",
+      "drifted": [
+        {"requirement": "FR-001", "spec_text": "Write / cache management: populate, batch_populate, remove, touch, promote_to_memory_tier (inventory claims to be full)", "actual": "trait also has clear_memory_tier, clear_all, tier_event_stats", "location": "components/interfaces/src/idispatcher.rs:862, :889, :950; src/lib.rs:4404, :4470, :4610", "severity": "minor", "fix": null, "resolution": "B-47"},
+        {"requirement": "FR-012", "spec_text": "The `initialize` method MUST validate that the `dispatch_map` and `memory_tier` receptacles are bound before proceeding.", "actual": "a failed initialize leaves max_eviction_attempts/store_backpressure_ms unchanged (committed just before initialized)", "location": "src/lib.rs:2142-2147, :2371-2379", "severity": "minor", "fix": 1, "resolution": "B-35"},
+        {"requirement": "FR-028", "spec_text": "(Exception, tracked as align task A-04: the no-drives `promote_and_serve` does not re-register the entry and keeps its slot.)", "actual": "no-drives promote_and_serve and batch_lookup deliver, then promote_block_to_memory_tier in place; release on failure", "location": "src/lib.rs:880-925, :2789-2847", "severity": "moderate", "fix": 6, "resolution": "B-41"},
+        {"requirement": "US-9 AS3", "spec_text": "it creates a memory-tier slot with zero-copied data, performs a direct GPU DMA from the slot, and re-registers the entry.", "actual": "slot not zeroed; in-place re-register; also batch_lookup; release+fail on error", "location": "src/lib.rs:880-925, :2789-2847", "severity": "minor", "fix": 6, "resolution": "B-42", "counted": false},
+        {"requirement": "FR-034", "spec_text": "after GPU and memory-tier are ready ... CUDA-pin and SPDK-register ... Registration failure MUST be logged as a warning", "actual": "aligned in substance (fix 2); precision: registration also without SPDK/drives, where gpu-services only CUDA-pins (9a79224a1); failure does not fail initialize", "location": "src/lib.rs:2246-2270; components/gpu-services/src/lib.rs:1176-1181, :1218-1225", "severity": "minor", "fix": 2, "resolution": "B-48"},
+        {"requirement": "FR-037", "spec_text": "A single `AtomicU64` warm stream (`warm_stream`) is retained as a fallback;", "actual": "warm_stream is created/destroyed but never read; unknown-device warm copies are synchronous", "location": "src/lib.rs:448, :2205, :2425, :1483-1519", "severity": "minor", "fix": 7, "fix_note": "pre-existing on unstable; fix 7 briefly added the only reader", "resolution": "B-49"},
+        {"requirement": "FR-039 step (1)", "spec_text": "retried locally a few times (up to 5) rather than collapsed into `KeyNotFound`", "actual": "exhausted retry -> Timeout / IoError, never KeyNotFound, not forwarded to remote, ERROR attribution", "location": "src/lib.rs:2743-2756, :3130-3137, :3349", "severity": "moderate", "fix": 5, "resolution": "B-39"},
+        {"requirement": "contracts/errors.md Timeout/IoError rows", "spec_text": "| `Timeout` | `pin`, `clear_memory_tier` |", "actual": "batch_lookup and check also return Timeout (and check IoError)", "location": "src/lib.rs:2748-2755, :3538-3541", "severity": "moderate", "fix": 5, "resolution": "B-40", "counted": false},
+        {"requirement": "FR-052", "spec_text": "When the device is unknown (`-1`) the paths fall back to the shared pipeline-ring / `warm_stream` streams.", "actual": "cold single-entry paths: pipeline-ring streams; scatter-gather: two new streams; warm paths: no stream (sync dma_copy_to_device)", "location": "src/lib.rs:974-985, :1119-1125, :2953-2964, :1483-1519", "severity": "minor", "fix": 7, "fix_note": "pre-existing", "resolution": "B-49"},
+        {"requirement": "FR-056 read_write_stats", "spec_text": "returns aggregate read/write I/O counters", "actual": "cumulative, never decreases across shutdown/re-initialize (baseline)", "location": "src/lib.rs:1831-1837, :4595-4608", "severity": "minor", "fix": 3, "resolution": "B-36 (+ A-16)"},
+        {"requirement": "FR-058", "spec_text": "the three MUST sum to the served count for any interval ... remote_lookup_hits counted when the remote fetch succeeds — not when delivered", "actual": "single-key path now in the partition; remote counted at fetch so a failed remote delivery breaks the partition", "location": "src/lib.rs:3434-3443, :3476-3490, :3212-3215, :3248-3284", "severity": "moderate", "fix": 9, "resolution": "B-45"},
+        {"requirement": "SC-017", "spec_text": "`lookup_hits_dram + lookup_hits_ssd + remote_lookup_hits` MUST equal the served-key count over the same interval", "actual": "exceeds it by the number of failed remote deliveries", "location": "src/lib.rs:3212-3215, :3349", "severity": "moderate", "fix": 9, "resolution": "B-45"},
+        {"requirement": "FR-061", "spec_text": "retain and report the first error per job while continuing to drain outstanding completions", "actual": "tagless Timeout attributed after the loop to the incomplete job only; channel faults still fail the drive", "location": "src/pipeline.rs:1402-1420, :1481-1495, :1314-1320, :1421-1434, :1448-1463", "severity": "minor", "fix": 8, "resolution": "B-44 (+ A-15)"},
+        {"requirement": "FR-062", "spec_text": "The read targets the drive chosen by the write path's placement hash (`drive_index`)", "actual": "drive recorded in the SSD location (select_drive); drive_index removed", "location": "src/lib.rs:4647-4670", "severity": "moderate", "fix": null, "resolution": "B-46"},
+        {"requirement": "US-13 AS1", "spec_text": "read from drive `drive_index(key, N)`", "actual": "drive recorded in the location", "location": "src/lib.rs:4647-4670", "severity": "moderate", "fix": null, "resolution": "B-46", "counted": false},
+        {"requirement": "US-11 AS4", "verdict": "aligned (fix 8)", "location": "src/pipeline.rs:1402-1420, :1481-1495; tests repair_test_nvme_timeout_fails_whole_drive.rs:817, :840, :862", "counted": false}
+      ],
+      "drifted_carried": [
+        {"requirement": "FR-036", "spec_text": "returns a `GpuStream` handle instead of blocking on the H2D DMA transfer ... For SSD promotion paths the copy completes synchronously and a null stream is returned.", "actual": "every path blocks and returns the null stream (fix 7 reverted; same as unstable). Caller contract (sync on non-null) is honoured; non-blocking promise is not", "location": "src/lib.rs:3423-3444, :3491", "severity": "minor", "fix": 7, "resolution": "deferred to the separate lookup_async issue (209b01de5); no proposal; note N-13"},
+        {"requirement": "FR-003", "task": "A-05", "rechecked": false},
+        {"requirement": "FR-013", "task": "A-1", "rechecked": true, "location": "src/lib.rs:4571-4593 (schedule_write_through enqueues without a pin)"},
+        {"requirement": "FR-017", "task": "A-5", "rechecked": false},
+        {"requirement": "FR-018", "task": "A-4", "rechecked": false},
+        {"requirement": "FR-038", "task": "A-3", "rechecked": true, "location": "src/lib.rs:4440-4447"},
+        {"requirement": "FR-051", "task": "A-02", "rechecked": true, "location": "src/lib.rs:2727"},
+        {"requirement": "SC-003", "task": "A-12", "rechecked": true, "location": "src/lib.rs:3582, :3634"}
+      ],
+      "not_implemented": [],
+      "not_verifiable": ["SC-012", "SC-014"]
     },
     {
-      "requirement": "FR-006",
-      "spec": "001 spec.md:336",
-      "code": "src/lib.rs:1421-1474; src/pipeline.rs:131-167",
-      "verdict": "drifted (zero-size rule unstated)",
-      "resolution": "B-32"
-    },
-    {
-      "requirement": "FR-019",
-      "spec": "001 spec.md:349",
-      "code": "src/pipeline.rs:1357-1383, :1474-1491",
-      "verdict": "drifted",
-      "resolution": "B-26"
-    },
-    {
-      "requirement": "FR-028",
-      "spec": "001 spec.md:358",
-      "code": "src/lib.rs:2932-2948 (slot released on Err incl. failed final sync)",
-      "verdict": "aligned",
-      "resolution": "none"
-    },
-    {
-      "requirement": "FR-036",
-      "spec": "001 spec.md:366",
-      "code": "src/lib.rs:3273-3305 (serve_memory_tier_to_gpu, synchronize=true)",
-      "verdict": "aligned",
-      "resolution": "none"
-    },
-    {
-      "requirement": "FR-037",
-      "spec": "001 spec.md:367",
-      "code": "src/lib.rs:1421-1435, :3568-3580",
-      "verdict": "aligned",
-      "resolution": "none"
-    },
-    {
-      "requirement": "FR-039 step (2)",
-      "spec": "001 spec.md:369",
-      "code": "src/lib.rs:2912-2932, :2978-2981",
-      "verdict": "drifted",
-      "resolution": "B-25"
-    },
-    {
-      "requirement": "FR-039 steps (4)-(6)",
-      "spec": "001 spec.md:369",
-      "code": "src/lib.rs:2751-2955",
-      "verdict": "aligned",
-      "resolution": "none"
-    },
-    {
-      "requirement": "FR-051",
-      "spec": "001 spec.md:381",
-      "code": "src/lib.rs:1485-1500, :3190",
-      "verdict": "aligned",
-      "resolution": "none"
-    },
-    {
-      "requirement": "FR-052",
-      "spec": "001 spec.md:382",
-      "code": "src/lib.rs:2517-2523, :2826-2832",
-      "verdict": "aligned",
-      "resolution": "none"
-    },
-    {
-      "requirement": "FR-053",
-      "spec": "001 spec.md:383",
-      "code": "src/lib.rs:1091-1141, :2781-2804, :2956-2975",
-      "verdict": "drifted (multi-region staged delivery unstated)",
-      "resolution": "B-31"
-    },
-    {
-      "requirement": "FR-056 copy_gpu_to_memory_async",
-      "spec": "001 spec.md:390",
-      "code": "src/lib.rs:3826-3915",
-      "verdict": "aligned",
-      "resolution": "none (2026-10-30 entry verified)"
-    },
-    {
-      "requirement": "FR-059",
-      "spec": "001 spec.md:405",
-      "code": "src/lib.rs:3601-3700",
-      "verdict": "aligned",
-      "resolution": "none"
-    },
-    {
-      "requirement": "FR-061",
-      "spec": "001 spec.md:462-467",
-      "code": "src/pipeline.rs:569-579, :1086-1512",
-      "verdict": "aligned",
-      "resolution": "none (optimizer's edit verified)"
-    },
-    {
-      "requirement": "Q&A pipelined reader",
-      "spec": "001 spec.md:317",
-      "code": "src/pipeline.rs:1474-1491",
-      "verdict": "drifted",
-      "resolution": "B-27"
-    },
-    {
-      "requirement": "Key Entities Pipelined Reader",
-      "spec": "001 spec.md:478",
-      "code": "src/pipeline.rs:1357-1491",
-      "verdict": "drifted",
-      "resolution": "B-28"
-    },
-    {
-      "requirement": "Implementation Notes",
-      "spec": "001 spec.md:518",
-      "code": "src/pipeline.rs:1366-1383",
-      "verdict": "drifted",
-      "resolution": "B-29"
-    },
-    {
-      "requirement": "US-11 AS4",
-      "spec": "001 spec.md:217",
-      "code": "src/pipeline.rs:1481-1491",
-      "verdict": "drifted",
-      "resolution": "B-30"
-    },
-    {
-      "requirement": "US-11 AS2/AS6",
-      "spec": "001 spec.md:215,219",
-      "code": "src/lib.rs:2978-2995",
-      "verdict": "aligned",
-      "resolution": "none"
-    },
-    {
-      "requirement": "data-model.md",
-      "spec": "001 data-model.md",
-      "code": "see drift-report.md note",
-      "verdict": "drifted (pre-existing, v0 model)",
-      "resolution": "B-33"
-    },
-    {
-      "requirement": "contracts/idispatcher.md",
-      "spec": "001 contracts/idispatcher.md",
-      "code": "components/interfaces/src/idispatcher.rs",
-      "verdict": "drifted (pre-existing, v0 contract, cited by no requirement)",
-      "resolution": "H-1 (not approved)"
-    },
-    {
-      "requirement": "contracts/errors.md",
-      "spec": "001 contracts/errors.md",
-      "code": "no change on this branch",
-      "verdict": "aligned",
-      "resolution": "none"
-    },
-    {
-      "requirement": "002 FR-008/FR-009, invariant 6",
-      "spec": "002 spec.md:476-481; contracts/idispatcher.md:116",
-      "code": "src/lib.rs:2643, :3207-3224",
-      "verdict": "aligned",
-      "resolution": "none"
-    },
-    {
-      "requirement": "002 shm-queue citations / FR-019",
-      "spec": "002 spec.md:75,82,269,270,527,536; served-by.md:115,119; research.md:50",
-      "code": "lib/shmq-dispatcher/src/translate.rs:1143-1152, wire.rs:194-205",
-      "verdict": "drifted (stale lines, pre-existing)",
-      "resolution": "B-34"
-    },
-    {
-      "requirement": "55a4ddd4 clippy",
-      "spec": "-",
-      "code": "src/lib.rs (rustfmt), repair_test_warm_copy_stops_at_zero_region.rs (rustfmt)",
-      "verdict": "no behaviour change",
-      "resolution": "none"
+      "id": "002-served-by-tier-attribution",
+      "title": "Serving-Tier Attribution (served_by)",
+      "aligned": ["FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-017", "FR-019", "FR-020", "FR-021", "FR-022", "FR-023", "FR-023a", "FR-024", "FR-026", "FR-028", "FR-034", "FR-036", "SC-001", "SC-004"],
+      "drifted": [
+        {"requirement": "FR-025", "spec_text": "The aggregate counters MUST agree with the per-entry attribution in the same responses.", "actual": "a failed remote delivery is ERROR but counted in remote_lookup_hits", "location": "src/lib.rs:3215, :3349", "severity": "moderate", "fix": 9, "resolution": "B-45"},
+        {"requirement": "FR-033", "spec_text": "evictions_blocked_unpersisted when it refuses for want of an ssd_offset", "actual": "InvalidState -> unpersisted; other refusals -> neither; variant/third cause unstated", "location": "src/lib.rs:1215-1244", "severity": "minor", "fix": 4, "resolution": "B-37 (+ A-17)"},
+        {"requirement": "FR-035", "spec_text": "(p2p only) Its background MemoryTierEvictor is still not counted ... MUST stay declared", "actual": "dispatcher's background evictor also records neither cause; undeclared", "location": "src/background.rs:736-738", "severity": "moderate", "fix": 4, "fix_note": "pre-existing", "resolution": "B-38"}
+      ],
+      "drifted_carried": [
+        {"requirement": "FR-027", "task": "A-08", "rechecked": true, "location": "value tests exist for Dram, Miss, Ssd (repair_test_nvme_timeout_fails_whole_drive.rs:769), Error (:749; repair_test_transient_map_error.rs:780; repair_test_sync_failure_error.rs:532); none for Remote or SizeMismatch"},
+        {"requirement": "SC-009", "task": "A-08", "rechecked": true}
+      ],
+      "not_implemented": [],
+      "not_verifiable": ["SC-002", "SC-003", "SC-005", "SC-006", "SC-007", "SC-008", "FR-014", "FR-015", "FR-018", "FR-029", "FR-030", "FR-031", "FR-032"]
     }
   ],
-  "not_reverified": "FR-001..002, FR-004..005, FR-007..018, FR-020..035 except FR-028, FR-038, FR-040..050, FR-054..055, FR-057..058, FR-060, FR-062..063, all SCs, US-1..8 and 10, spec 002 beyond FR-008/009/019 (unchanged by the diff; 2026-10-27 verdicts stand)",
-  "unspecced": [],
-  "notes": [
-    "interfaces IDispatcher::copy_gpu_to_memory_async doc (components/interfaces/src/idispatcher.rs:748) says one cudaMemcpyAsync per region; now batched. Interfaces belongs to another agent; recorded only.",
-    "info/FLOW.svg shows the v0 flow; outside hashed inputs, not edited.",
-    "dispatcher lib tests: 145 passed (deps/spdk symlinked from the main checkout, gitignored)."
+  "align_defects": [
+    {"id": "A-15", "requirement": "001 FR-028 vs FR-062", "location": "src/pipeline.rs:1402-1420, :1481-1495; src/lib.rs:3068-3071, :1016-1023", "problem": "timed-out read's slot freed at once; a late drive write can land in a reused slot", "severity": "moderate", "fix": 8},
+    {"id": "A-16", "requirement": "001 FR-056 read_write_stats", "location": "src/lib.rs:1831-1837, :2168-2171, :2438-2444, :4602-4606", "problem": "absorb and swap under separate locks; concurrent reader double-counts", "severity": "minor", "fix": 3},
+    {"id": "A-17", "requirement": "002 FR-033", "location": "src/lib.rs:1225-1234; components/dispatch-map/src/lib.rs:576-578", "problem": "InvalidState also means not-MemoryTier; cold-prep slot counted unpersisted", "severity": "low", "fix": 4}
   ],
-  "conflicts": [],
-  "drift_status": "clean (after apply; not stamped this run)",
-  "previous": "backups/20261031T054807Z/drift-report.json.prev"
+  "closed": [
+    {"id": "A-13", "status": "withdrawn (fix 7 taken out, 209b01de5)", "kept_as": "N-13"},
+    {"id": "A-14", "status": "resolved in code by 9a79224a1 (gpu-services)", "evidence": "components/gpu-services/src/lib.rs:1176-1181, :1218-1225"},
+    {"id": "A-04", "status": "resolved in code by 60838384e; spec reference removed by B-41"},
+    {"id": "B-43", "status": "withdrawn (fix 7 taken out)"}
+  ],
+  "notes": [
+    {"id": "N-13", "text": "An asynchronous lookup_async must hold the entry's read pin until its copy has completed, not merely been queued, and count the hit only then; the synchronous lookup delegates and syncs afterwards (src/lib.rs:2477-2488). FR-039 step (2) states this rule for batch_lookup. Needs an interface decision; deferred with fix 7."}
+  ],
+  "unspecced": [
+    {"feature": "Five repair_test_* modules compiled into the non-test library (no #[cfg(test)] on the mod declaration, no #![cfg(test)] in the file)", "location": "src/lib.rs:87, :8796, :8798, :8800, :8802", "lines": null, "suggested_spec": "none — source hygiene for the source owner / repair acceptance check"}
+  ],
+  "conflicts": [
+    {"between": "001 FR-058 partition sentence + SC-017 + 002 FR-025", "and": "001 FR-058 remote-on-fetch sentence (interfaces idispatcher.rs:375-377)", "resolution": "B-45"},
+    {"between": "001 FR-039 step (1)", "and": "contracts/errors.md:37", "resolution": "B-39 + B-40"},
+    {"between": "001 FR-028 (release slot on failed read)", "and": "001 FR-062 rationale (never free a buffer a drive may still write)", "resolution": "A-15"}
+  ],
+  "drift_status": "drifted (proposals not approved; nothing applied; frontmatter left for the re-stamp script)",
+  "previous": "git show HEAD:components/dispatcher/.specify/sync/drift-report.json (2026-10-31); 2026-11-06 version in git stash 'j33 spec-sync analysis 2026-11-06 (before repair 7 out)'"
 }

@@ -1,57 +1,98 @@
 {
-  "generated": "2026-10-31T06:30:00Z",
+  "generated": "2026-11-07T12:00:00Z",
   "project": "gpu-services",
-  "branch": "specsync-b",
-  "head": "0a71990e",
-  "base": "a0292be6 (origin/unstable; fresh stamp)",
-  "scope": "delta: git diff a0292be6 HEAD -- components/gpu-services components/interfaces/src",
+  "branch": "fix/dispatcher-j33-repairs",
+  "head": "f4579a41f",
+  "base": "32ffa627f (last stamp)",
+  "scope": "delta: git diff 32ffa627f HEAD -- components/gpu-services components/interfaces; one gpu-services commit 9a79224a1 (A-14); interfaces change fc2a2b80d (ISPDKEnv::init_with_allowed) transitive only",
   "summary": {
     "specs_analyzed": 3,
-    "requirements_checked": 4,
-    "aligned": 2,
-    "drifted": 0,
+    "requirements_checked": 8,
+    "aligned": 4,
+    "drifted": 4,
     "not_implemented": 0,
-    "unspecced_features": 1
+    "unspecced_features": 0,
+    "interface_doc_drift": 1
   },
-  "items": [
+  "specs": [
     {
-      "requirement": "memcpy_batch_async",
-      "code": "src/lib.rs:973-1038",
-      "verdict": "unspecced",
-      "resolution": "B-1, B-2"
+      "id": "001-gpu-cuda-services",
+      "title": "GPU CUDA Services",
+      "aligned": ["FR-007 (host un/registration only via FR-015/016)", "FR-014", "FR-020 (allocate_pinned_dma_buffer, unchanged)"],
+      "drifted": [
+        {
+          "requirement": "FR-015",
+          "spec_text": "page-locks the specified host memory region via `cudaHostRegister` (enabling async GPU DMA) and registers it with SPDK via `spdk_mem_register` (enabling NVMe DMA)",
+          "spec_location": "specs/001-gpu-cuda-services/spec.md:309-326",
+          "actual": "cudaHostRegister(PORTABLE) always; spdk_mem_register only when interfaces::is_spdk_env_active() at call time, else returns Ok(()) with CUDA pinning only",
+          "location": "src/lib.rs:1155-1158, :1179-1181, :1183-1191",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "FR-016",
+          "spec_text": "unregisters memory from SPDK via `spdk_mem_unregister` then removes page-locking via `cudaHostUnregister`",
+          "spec_location": "specs/001-gpu-cuda-services/spec.md:327-331",
+          "actual": "spdk_mem_unregister only when is_spdk_env_active() at call time; cudaHostUnregister always",
+          "location": "src/lib.rs:1220-1225, :1228-1234",
+          "severity": "moderate"
+        }
+      ],
+      "not_implemented": []
     },
     {
-      "requirement": "FR-014 (no-gpu returns error)",
-      "code": "src/lib.rs:981-985",
-      "verdict": "aligned",
-      "resolution": "none"
+      "id": "002-gpu-ssd-dma-prepare",
+      "title": "GPU SSD DMA Prepare",
+      "aligned": [],
+      "drifted": [
+        {
+          "requirement": "FR-019",
+          "spec_text": "page-locks an existing host allocation via `cudaHostRegister` ... and registers it with SPDK via `spdk_mem_register` (enabling NVMe controllers to DMA directly to/from it)",
+          "spec_location": "specs/002-gpu-ssd-dma-prepare/spec.md:95",
+          "actual": "same as 001 FR-015",
+          "location": "src/lib.rs:1179-1181",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "FR-020",
+          "spec_text": "reverses FR-019: calls `spdk_mem_unregister` then `cudaHostUnregister`",
+          "spec_location": "specs/002-gpu-ssd-dma-prepare/spec.md:96",
+          "actual": "same as 001 FR-016",
+          "location": "src/lib.rs:1220-1225",
+          "severity": "moderate"
+        }
+      ],
+      "not_implemented": []
     },
     {
-      "requirement": "not_unsafe_ptr_arg_deref attrs / build.rs expects",
-      "code": "src/lib.rs:300,517,750,811,862,923; build.rs",
-      "verdict": "no behaviour change",
-      "resolution": "none"
-    },
-    {
-      "requirement": "GpuDmaBuffer Debug (interfaces)",
-      "code": "components/interfaces/src/igpu_services.rs:222",
-      "verdict": "aligned (no spec quotes Debug output)",
-      "resolution": "none"
+      "id": "003-gpu-p2p-server",
+      "title": "GPU P2P Server",
+      "aligned": ["unchanged; not touched by the delta (p2p_server sets up its own SPDK env, src/bin/p2p_server.rs:136-153)"],
+      "drifted": [],
+      "not_implemented": []
     }
   ],
-  "not_reverified": "FR-001..025, SC-001..008, specs 002/003 (unchanged)",
-  "unspecced": [
+  "interface_docs": [
     {
-      "feature": "memcpy_batch_async",
-      "location": "src/lib.rs:973-1038",
-      "lines": 66,
-      "suggested_spec": "001 FR-026 (applied)"
+      "item": "IGpuServices::register_host_memory / unregister_host_memory doc comments",
+      "location": "components/interfaces/src/igpu_services.rs:786-815",
+      "doc_text": "Register existing host memory as CUDA-pinned and SPDK DMA-capable. Calls `cudaHostRegister` ... then `spdk_mem_register` ... Returns an error if CUDA host registration or SPDK registration fails. / Calls `spdk_mem_unregister` then `cudaHostUnregister`.",
+      "actual": "SPDK step conditional on is_spdk_env_active(); the Errors line is still literally true (SPDK registration can only fail when attempted)",
+      "severity": "minor",
+      "touches_interfaces": true
     }
   ],
+  "unspecced": [],
   "conflicts": [],
-  "notes": [
-    "FFI binds the CUDA 13.x cudaMemcpyBatchAsync signature; CUDA 12.8 has an extra failIdx argument under the same symbol. Stated in FR-026."
+  "observations": [
+    "Flag is read at call time in each method independently: register while SPDK inactive, then unregister after SPDK became active, calls spdk_mem_unregister on a region SPDK never registered; non-zero rc returns Err before cudaHostUnregister (src/lib.rs:1222-1224), leaving the CUDA pin. No caller in the tree does this (dispatcher src/lib.rs:2256/2419, dispatcher-p2p src/lib.rs:1451/1735 register in initialize, unregister in shutdown). Covered by wording in P-1..P-4; no ALIGN proposed.",
+    "allocate_pinned_dma_buffer (src/lib.rs:1097-1130 -> src/dma.rs:259) still calls spdk_mem_register unguarded. Aligned with 001 FR-020 (registration is the method's purpose), but has the A-14 crash class without SPDK; dispatcher StagingPool::new calls it (components/dispatcher/src/pipeline.rs:219). Reachability in memory-tier-only mode is a dispatcher question; flagged for human review, no proposal here."
   ],
-  "drift_status": "clean (after apply; not stamped this run)",
-  "previous": "backups/20261031T054807Z/drift-report.json.prev"
+  "tests": {
+    "new": "tests/host_memory_without_spdk.rs (real GPU, --features p2p; child process so SIGSEGV is a test failure)",
+    "run_this_session": false,
+    "note": "cargo test/check not approved in this session; the commit reports the node7 GPU run passing, not reproduced here"
+  },
+  "not_reverified": "every other FR/SC of 001/002/003 (unchanged since the 2026-10-31 sync)",
+  "drift_status": "drifted (until P-1..P-4 applied)",
+  "previous": "backups/20261107T120000Z/drift-report.json.prev"
 }

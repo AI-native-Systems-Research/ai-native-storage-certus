@@ -87,7 +87,9 @@ changed.** Line numbers refer to HEAD `4f8b5554b`.
 - [ ] A test that pins a key and then calls `clear_memory_tier` sees the key still resident and readable.
 - [ ] `clear_memory_tier` terminates when every resident key is pinned.
 
-## Task: Align 001-dispatcher-cache-interface/FR-028 + US-9 AS3: no-drives promote (A-04, OPEN, moderate)
+## Task: Align 001-dispatcher-cache-interface/FR-028 + US-9 AS3: no-drives promote (A-04, ✅ RESOLVED by `60838384e`, moderate)
+
+> **Resolved** on branch `fix/dispatcher-j33-repairs` by commit `60838384e` (DIS-LOOKUP-NO-HW-PROMOTE, DIS-BATCH-LOOKUP-COLD-PROMOTES). `promote_and_serve` now delivers the slot and flips the entry in place with `promote_block_to_memory_tier`, releasing the slot on failure (`src/lib.rs:880-925`); `batch_lookup`'s no-drives loop delivers before the same flip (`:2789-2847`). The mock refuses an overwrite (`src/lib.rs:5268-5277`). Tests: `src/repair_test_no_drives_promote_without_read.rs:582`, `:613`, `:645`, `:680`, `:724`. The spec side is B-41 / B-42 of the 2026-11-07 apply.
 
 **Spec Requirement**: 001 FR-028 / US-9 AS3. The reader MUST re-insert the entry into the memory tier and re-register it as a MemoryTier entry (001 spec.md:305, :166).
 **Current Code**: `dm.create_memory_tier_entry` on an existing BlockDevice entry returns `AlreadyExists`, which is ignored. `dm.release_write` is then called without a write ref. The slot is orphaned and the entry stays BlockDevice (`src/lib.rs:814-820`).
@@ -361,3 +363,69 @@ N-01 (decision) from earlier runs.
 
 - Spec 002 says a responder promotes a disk-resident key into DRAM before the RDMA write, and `peer_triggered_promotions` measures it. True of remote-lookup; not of certus-transfer-endpoint, which serves through `read_to_bounce` without promoting, so that counter does not move for it.
 - When the endpoint is wired into an app: make the Assumption and SC-003 remote-lookup-specific, and decide whether the responder-side cold-work counter should also count bounce reads.
+
+---
+
+# Apply 2026-11-07 — branch `fix/dispatcher-j33-repairs` (approved by Cornel, 2026-11-07)
+
+Source: `.specify/sync/proposals.json` / `proposals.md` (analysis run 2026-11-07, HEAD
+`f4579a41f`). All three ALIGN proposals of this run carry the approval note *"Approved by
+Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as
+proposed)."* As ALIGN items they are recorded here as tasks. **No code was changed.** Line
+numbers refer to HEAD `f4579a41f`, relative to `components/dispatcher/`.
+
+## Closed by this branch
+
+- **A-04** — ✅ RESOLVED in code by `60838384e` (see the task above; the spec side is B-41 / B-42).
+- **A-14** (2026-11-06 analysis, never written here) — closed in code by gpu-services `9a79224a1`;
+  the spec precision is B-48.
+- **A-13** (2026-11-06 analysis, never written here) — withdrawn with fix 7 (`209b01de5`); kept as
+  note N-13 below.
+
+## Task: Align 001-dispatcher-cache-interface/FR-028 vs FR-062: do not free the slot of a timed-out read (A-15, OPEN, moderate, MEDIUM confidence)
+
+**Spec Requirement**: FR-062's rule that a buffer a drive may still be writing is leaked, never freed (`spec.md:422-430`), against FR-028 ("release that slot (`IMemoryTier::remove`) before reporting the error", `:358`). B-44 records this as a known gap in FR-061.
+**Current Code**: a timed-out object is reported `Err` (`src/pipeline.rs:1481-1495`), and `batch_lookup` then releases its slot at once (`src/lib.rs:3068-3071`); `promote_and_serve` does the same (`:1016-1023`). The actor has forgotten the operation, so a late NVMe completion can land in the slot after it was reused for another key. The pipeline only keeps the memory alive for the call (`src/pipeline.rs:1415-1418`).
+**Required Change**: mark a timed-out object distinctly in the pipeline results (its own error variant or a flag). On that result, `batch_lookup` and `promote_and_serve` do not call `mt.remove`: they leave the slot reserved and log it, as FR-062 does for a bounce buffer. On apply, add to FR-028: "except a slot whose read timed out, which is leaked (logged), never freed, for the reason given in FR-062", and drop B-44's known-gap sentence.
+**Files to Modify**: `src/pipeline.rs`, `src/lib.rs` (`batch_lookup`, `promote_and_serve`), a new test module; `specs/001-dispatcher-cache-interface/spec.md` (FR-028, FR-061) on apply
+**Estimated Effort**: medium
+
+### Acceptance Criteria
+- [ ] A mock drive that reports `Timeout` and then writes the buffer late: the slot is not reused by a later insert.
+- [ ] The test is written first and fails at HEAD `f4579a41f`.
+
+## Task: Align 001-dispatcher-cache-interface/FR-056 `read_write_stats` (as amended by B-36): no double count while the drive list is handed over (A-16, OPEN, minor, HIGH confidence)
+
+**Spec Requirement**: the counters MUST NOT decrease between two calls (FR-056 as amended by B-36); the interface says "Monotonic" (`components/interfaces/src/idispatcher.rs:940`).
+**Current Code**: `absorb_drive_rw_stats` takes the `data_drives` read lock and the baseline write lock and releases both (`src/lib.rs:1831-1837`); the drive list is swapped later under a separate write lock (`:2171`, `:2441-2444`). A `read_write_stats` call in between (`:4602-4606`) adds the baseline, which already includes the outgoing drives, to those same drives, and returns double their counters; the next call reads lower.
+**Required Change**: take the `data_drives` write lock first and hold it through both the absorb and the swap (add its drives to the baseline, then replace or clear the list), so readers see either the state before or the state after. On apply, drop B-36's known-gap sentence.
+**Files to Modify**: `src/lib.rs` (`absorb_drive_rw_stats`, `initialize`, `shutdown`), a test module
+**Estimated Effort**: small
+
+### Acceptance Criteria
+- [ ] A reader thread that loops on `read_write_stats` while `shutdown` runs sees a sequence that never decreases.
+- [ ] `src/repair_test_rw_stats_after_shutdown.rs:620` still passes.
+
+## Task: Align 002-served-by-tier-attribution/FR-033 (as amended by B-37): count `evictions_blocked_unpersisted` only for a memory-tier entry without an `ssd_offset` (A-17, OPEN, low, MEDIUM confidence)
+
+**Spec Requirement**: `evictions_blocked_unpersisted` only "when it refuses for want of an `ssd_offset`" (002 `spec.md` FR-033, as amended by B-37).
+**Current Code**: every `InvalidState` from `try_evict_to_block` is counted as unpersisted (`src/lib.rs:1225-1234`). The dispatch map also answers `InvalidState` for an entry that is not in MemoryTier state (`components/dispatch-map/src/lib.rs:576-578`), e.g. a `batch_lookup` cold-prep slot over a still-BlockDevice, unpinned entry (cold pin released at classification, `src/lib.rs:2727`, A-02). A scan at that moment counts write-through lag that does not exist.
+**Required Change**: either (a, interface-free) have `evict_one_clean` count unpersisted only after confirming the entry is MemoryTier (one extra lookup on an already-failed path), or (b) give `try_evict_to_block` distinct answers for "no `ssd_offset`" and "not in the memory tier" — a dispatch-map and **[interfaces]** change (`components/interfaces/src/idispatch_map.rs:181-187`). Fixing A-02 also removes the common case. On apply, drop B-37's known-gap sentence.
+**Files to Modify**: (a) `src/lib.rs` (`evict_one_clean`), a test module; (b) also `components/interfaces/src/idispatch_map.rs`, `components/dispatch-map/src/lib.rs`
+**Estimated Effort**: small (a) / medium (b)
+
+### Acceptance Criteria
+- [ ] A cold-prep slot over a BlockDevice entry, scanned by `evict_one_clean`, increments neither counter.
+- [ ] `src/repair_test_eviction_errors_counted_unpersisted.rs:273` still passes.
+
+## Open items from this run (not approved)
+
+None. Every proposal of this run is `approved: true`, so there is no unapproved proposal with an `approval_note` to carry here. The approval note's exception, gpu-services P-5, belongs to the gpu-services sync, not to this component.
+
+### NOTE N-13 — `lookup_async` must hold the read pin until its copy completes (deferred, from A-13 of 2026-11-06)
+
+- An asynchronous `lookup_async` (one returning the stream its copy is queued on) must hold the entry's read pin until the copy has **completed**, not merely been queued, and record hit counters only then. The synchronous `lookup`, which delegates and syncs afterwards (`src/lib.rs:2477-2488`), needs the same. FR-039 step (2) states the rule for `batch_lookup`. Needs an interface decision (a pin guard returned with the stream, or a caller-held pin); deferred with fix 7 to its separate issue (`209b01de5`). Not a task in this apply.
+
+## Still open (carried over)
+
+A-1, A-2, A-3, A-4, A-5, A-02, A-05, A-06, A-08, A-10, A-12, N-01, RH-03, DISP-RESERVE-REASON (as listed in `proposals.json` `carried_over_open`), plus the new A-15, A-16, A-17. A-2 and A-06 are listed as closed in the 2026-10-24 section above; they are carried here only because `proposals.json` lists them.

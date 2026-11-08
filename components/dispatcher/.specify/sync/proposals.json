@@ -1,169 +1,403 @@
 {
-  "generated": "2026-10-31T06:30:00Z",
-  "analysis_run": "2026-10-31",
+  "generated": "2026-11-07T12:00:00Z",
+  "analysis_run": "2026-11-07",
   "project": "dispatcher",
-  "branch": "specsync-b",
-  "head": "0a71990e",
+  "branch": "fix/dispatcher-j33-repairs",
+  "head": "f4579a41f",
+  "base": "7c12e427a (merge-base with origin/unstable)",
   "based_on": "drift-report.json (same run)",
-  "mode": "non-interactive: BACKFILL approved by the brief's rule; B-33 approved by the user via the lead; judgment calls not approved",
+  "mode": "BATCH: no questions; every proposal approved=false; nothing applied",
+  "supersedes": "2026-11-06 analysis (git stash 'j33 spec-sync analysis 2026-11-06 (before repair 7 out)', HEAD 01d9ec387)",
   "summary": {
-    "proposals": 11,
-    "backfill": 10,
-    "align": 0,
-    "human_decision": 1,
+    "proposals": 17,
+    "backfill": 14,
+    "align": 3,
+    "human_decision": 0,
     "new_spec": 0,
-    "approved": 10
+    "other": 0,
+    "approved": 0,
+    "edits_components_interfaces": 0
   },
+  "withdrawn": [
+    {
+      "id": "B-43",
+      "reason": "fix 7 taken out by 209b01de5; lookup_async is back to the synchronous copy + null stream (src/lib.rs:3424-3444)"
+    },
+    {
+      "id": "A-13",
+      "reason": "fix 7 taken out by 209b01de5; the pin is again held across a synchronous copy (src/lib.rs:3424-3432). Finding kept as note N-13"
+    }
+  ],
+  "closed": [
+    {
+      "id": "A-14",
+      "by": "9a79224a1 (gpu-services)",
+      "evidence": "components/gpu-services/src/lib.rs:1176-1181, :1218-1225 (SPDK half only when interfaces::is_spdk_env_active())"
+    },
+    {
+      "id": "A-04",
+      "by": "60838384e",
+      "evidence": "src/lib.rs:880-925, :2789-2847; closed in the spec by B-41"
+    }
+  ],
+  "notes": [
+    {
+      "id": "N-13",
+      "from": "A-13 (2026-11-06)",
+      "text": "An asynchronous lookup_async (returning the stream its copy is queued on) must hold the entry's read pin until the copy has completed, not merely been queued, and record hit counters only then; the synchronous lookup, which delegates and syncs afterwards (src/lib.rs:2477-2488), inherits the same need. FR-039 step (2) states the rule for batch_lookup. Needs an interface decision (pin guard or caller-held pin); deferred with fix 7 to its separate issue."
+    }
+  ],
+  "proposals": [
+    {
+      "id": "B-35",
+      "direction": "BACKFILL",
+      "fix": 1,
+      "spec": "001",
+      "requirement": "FR-012",
+      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:342",
+      "spec_says": "The `initialize` method MUST validate that the `dispatch_map` and `memory_tier` receptacles are bound before proceeding. Other receptacles are validated lazily on first use.",
+      "code_does": "max_eviction_attempts / store_backpressure_ms committed only after every validation, just before `initialized` is published; a failed initialize changes neither",
+      "code_location": "src/lib.rs:2142-2147, :2371-2379; tests src/repair_test_failed_initialize_changes_config.rs:208, :242",
+      "old_text": "- **FR-012**: The `initialize` method MUST validate that the `dispatch_map` and `memory_tier` receptacles are bound before proceeding. Other receptacles are validated lazily on first use.",
+      "new_text": "- **FR-012**: The `initialize` method MUST validate that the `dispatch_map` and `memory_tier` receptacles are bound before proceeding. Other receptacles are validated lazily on first use. An `initialize` that returns `Err` — an unbound required receptacle, an empty `data_pci_addrs`, or a drive-creation, partition or format error — MUST leave the dispatcher's tunables unchanged: `max_eviction_attempts` and `store_backpressure_ms` (FR-033) are committed only after every validation has passed, immediately before the dispatcher is marked initialized, so a rejected config never retunes a running dispatcher. *(Sync 2026-11-07, branch `fix/dispatcher-j33-repairs` — code authoritative, commit `11748983d`, repair DIS-INITIALIZE-FAILURE-NO-CONFIG-CHANGE, `src/lib.rs:2371-2379`. Before it both values were stored at the top of `initialize`.)*",
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as proposed)."
+    },
+    {
+      "id": "B-36",
+      "direction": "BACKFILL",
+      "fix": 3,
+      "spec": "001",
+      "requirement": "FR-056 read_write_stats",
+      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:396",
+      "spec_says": "`read_write_stats() -> ReadWriteStats` returns aggregate read/write I/O counters (the `ReadWriteStats` type is shared from `iblock_device`).",
+      "code_does": "rw_stats_baseline absorbs outgoing drives' counters before shutdown and re-initialize; read_write_stats = baseline + live drives (never decreases); interfaces doc already says Monotonic (idispatcher.rs:936-942)",
+      "code_location": "src/lib.rs:446, :1831-1837, :2168-2171, :2438-2440, :4595-4608; test src/repair_test_rw_stats_after_shutdown.rs:620",
+      "old_text": "    - `read_write_stats() -> ReadWriteStats` returns aggregate read/write I/O counters (the `ReadWriteStats` type is shared from `iblock_device`).",
+      "new_text": "    - `read_write_stats() -> ReadWriteStats` returns aggregate read/write I/O counters (the `ReadWriteStats` type is shared from `iblock_device`), summed over every data drive. They are zero unless the dispatcher and its block devices are built with the `rw-telemetry` / `telemetry` features. The counters are cumulative over the dispatcher component's lifetime and MUST NOT decrease between two calls: before `shutdown` drops the data drives, and before a re-`initialize` replaces them, the outgoing drives' counters are folded into a retained baseline, and each call returns that baseline merged with the live drives. *(Sync 2026-11-07, branch `fix/dispatcher-j33-repairs` — code authoritative, commit `d65de1fef`, repair DIS-READ-WRITE-STATS-MONOTONIC, `src/lib.rs:1831-1837`, `:4595-4608`. Before it the counters read zero after `shutdown`. Known gap, tracked as A-16: a call made while the drive list is being handed over can count the outgoing drives twice, so the next call can read lower.)*",
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as proposed)."
+    },
+    {
+      "id": "B-37",
+      "direction": "BACKFILL",
+      "fix": 4,
+      "spec": "002",
+      "requirement": "FR-033",
+      "spec_location": "specs/002-served-by-tier-attribution/spec.md:573-578",
+      "spec_says": "`evictions_blocked_by_pin` when `IDispatchMap::try_evict_to_block` returns `ActiveReferences`, and `evictions_blocked_unpersisted` when it refuses for want of an `ssd_offset`. The call site MUST match the error variant",
+      "code_does": "ActiveReferences -> by_pin; InvalidState -> unpersisted; any other refusal -> neither",
+      "code_location": "src/lib.rs:1215-1244; components/dispatch-map/src/lib.rs:571-578; test src/repair_test_eviction_errors_counted_unpersisted.rs:273",
+      "old_text": "causes applied, as separate counters on `TierEventStats`: `evictions_blocked_by_pin` when\n`IDispatchMap::try_evict_to_block` returns `ActiveReferences`, and\n`evictions_blocked_unpersisted` when it refuses for want of an `ssd_offset`. The call site MUST\nmatch the error variant; testing `is_ok()` and incrementing a single \"eviction failed\" counter\ndoes NOT satisfy this.",
+      "new_text": "causes applied, as separate counters on `TierEventStats`: `evictions_blocked_by_pin` when\n`IDispatchMap::try_evict_to_block` returns `ActiveReferences`, and\n`evictions_blocked_unpersisted` when it refuses for want of an `ssd_offset` (the dispatch map\nanswers `InvalidState` for a memory-tier entry without one). The call site MUST\nmatch the error variant; testing `is_ok()` and incrementing a single \"eviction failed\" counter\ndoes NOT satisfy this. A refusal that is neither — e.g. `KeyNotFound` for a memory-tier slot\nwhose dispatch-map entry is not registered yet — MUST increment **neither** counter, so that a\nthird cause shows up as the two counters falling short of the scanned total rather than being\nabsorbed into one of them. In `dispatcher` both counters are recorded by the foreground\nclean-eviction scan (`evict_one_clean`); for the background evictor see FR-035.\n*(Sync 2026-11-07, branch `fix/dispatcher-j33-repairs` — code authoritative, commit\n`03b05d505`, `components/dispatcher/src/lib.rs:1215-1244`. Known gap, tracked as A-17:\n`InvalidState` is also the answer for an entry that is not in memory-tier state, which is\nstill counted as unpersisted.)*",
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as proposed)."
+    },
+    {
+      "id": "B-38",
+      "direction": "BACKFILL",
+      "fix": 4,
+      "fix_note": "pre-existing gap found while verifying fix 4",
+      "spec": "002",
+      "requirement": "FR-035",
+      "spec_location": "specs/002-served-by-tier-attribution/spec.md:596-605",
+      "spec_says": "(of dispatcher-p2p only) Its **background** `MemoryTierEvictor` is still not counted ... The remaining gap MUST stay declared ... for as long as it exists.",
+      "code_does": "dispatcher's own background MemoryTierEvictor records neither cause: `if dm.try_evict_to_block(key).is_err() { continue; }`",
+      "code_location": "src/background.rs:736-738; only recording sites src/lib.rs:1222-1234",
+      "old_text": "  - *Previously (2026-10-02 to 2026-10-09):* p2p reported none of FR-033/FR-034, because those\n    eviction paths were free functions holding no counter handle.\n  - This is distinguished deliberately from the route-counter defect recorded in SC-008: reporting",
+      "new_text": "  - *Previously (2026-10-02 to 2026-10-09):* p2p reported none of FR-033/FR-034, because those\n    eviction paths were free functions holding no counter handle.\n  - **`dispatcher` has the same gap.** Its background `MemoryTierEvictor` skips a refused\n    candidate without recording either cause (`components/dispatcher/src/background.rs:736-738`),\n    so in `dispatcher` too `evictions_blocked_by_pin` and `evictions_blocked_unpersisted` count\n    the foreground scan only, and are a lower bound whenever `memory_tier_eviction_threshold > 0`\n    starts that evictor. Declared here under this requirement's own rule. *(Sync 2026-11-07,\n    branch `fix/dispatcher-j33-repairs` — pre-existing, found while verifying `03b05d505`.)*\n  - This is distinguished deliberately from the route-counter defect recorded in SC-008: reporting",
+      "option_not_taken": "ALIGN: count both causes in background.rs as evict_one_clean does",
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as proposed)."
+    },
+    {
+      "id": "B-39",
+      "direction": "BACKFILL",
+      "fix": 5,
+      "spec": "001",
+      "requirement": "FR-039 step (1)",
+      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:369",
+      "spec_says": "so it is retried locally a few times (up to 5) rather than collapsed into `KeyNotFound` (exhausted case unstated)",
+      "code_does": "after the retries: map Timeout -> DispatcherError::Timeout, other map error -> IoError; never KeyNotFound, not forwarded to remote (remote takes only KeyNotFound), attributed ERROR",
+      "code_location": "src/lib.rs:2663-2678, :2743-2756, :3130-3137, :3349; test src/repair_test_transient_map_error.rs:683 (asserts ServedBy::Error :780)",
+      "old_text": "so it is retried locally a few times (up to 5) rather than collapsed into `KeyNotFound`; collapsing it would forward a live key to remote-lookup, whose miss becomes a fatal load failure in the vLLM connector (`EngineDeadError`) *(Sync 2026-09-02 — code authoritative, commit `1d55b9c2`; this retry is defensive and does not fire under the current workload, where `write_ref` windows are sub-millisecond)*,",
+      "new_text": "so it is retried locally a few times (up to 5) rather than collapsed into `KeyNotFound`; collapsing it would forward a live key to remote-lookup, whose miss becomes a fatal load failure in the vLLM connector (`EngineDeadError`) *(Sync 2026-09-02 — code authoritative, commit `1d55b9c2`; this retry is defensive and does not fire under the current workload, where `write_ref` windows are sub-millisecond)*. If every retry still fails, the entry's result is the dispatch map's own error and never `KeyNotFound`: `Timeout` for a dispatch-map timeout, `IoError` for any other map error. It is attributed `ERROR` (spec 002 FR-007) and is not forwarded to remote lookup, which takes only `KeyNotFound` results (FR-045) — the rule `check` follows (FR-008) *(Sync 2026-11-07, branch `fix/dispatcher-j33-repairs` — code authoritative, commit `b0720fe6c`, `src/lib.rs:2743-2756`)*,",
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as proposed)."
+    },
+    {
+      "id": "B-40",
+      "direction": "BACKFILL",
+      "fix": 5,
+      "spec": "001",
+      "requirement": "contracts/errors.md Timeout and IoError rows",
+      "spec_location": "specs/001-dispatcher-cache-interface/contracts/errors.md:36-37",
+      "spec_says": "| `Timeout` | `pin`, `clear_memory_tier` | ... `lookup` and `remove` never return `Timeout` ...; IoError raised by `lookup`, `batch_lookup`, `initialize`, `commit_store`, `flush_to_ssd`",
+      "code_does": "batch_lookup returns Timeout per entry after exhausted retries; check returns Timeout and IoError; lookup_async/remove still map map errors to KeyNotFound",
+      "code_location": "src/lib.rs:2748-2755, :3538-3541, :3495, :3612, :3640",
+      "old_text": "| `Timeout` | `pin`, `clear_memory_tier` | `pin`: the dispatch-map wait for a writer exceeded its timeout.",
+      "new_text": "| `Timeout` | `pin`, `clear_memory_tier`, `check`, `batch_lookup` | `pin`: the dispatch-map wait for a writer exceeded its timeout. `check` (FR-008) and `batch_lookup` (per entry, FR-039 step 1): every retry of the dispatch-map lookup timed out behind a writer; the key is live and its presence unknown, so it is not reported absent *(Sync 2026-11-07, branch `fix/dispatcher-j33-repairs`, commit `b0720fe6c`; `check` since `898bba7eb`)*.",
+      "additional_edits": [
+        {
+          "old_text": "`lookup`, `batch_lookup`, `initialize`, `commit_store`, `flush_to_ssd`",
+          "new_text": "`lookup`, `batch_lookup`, `check`, `initialize`, `commit_store`, `flush_to_ssd`",
+          "where": "errors.md:36 second cell"
+        },
+        {
+          "append_to": "errors.md:36 condition cell",
+          "text": " **For `check` and `batch_lookup`, also** a dispatch-map error other than a timeout that persists through every retry (FR-008, FR-039 step 1)."
+        }
+      ],
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as proposed)."
+    },
+    {
+      "id": "B-41",
+      "direction": "BACKFILL",
+      "fix": 6,
+      "spec": "001",
+      "requirement": "FR-028 (closes A-04)",
+      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:358",
+      "spec_says": "*(Exception, tracked as align task A-04: the no-drives `promote_and_serve` does not re-register the entry and keeps its slot.)*",
+      "code_does": "no drives: deliver slot to GPU, release + fail on copy error, flip in place with promote_block_to_memory_tier, release + fail on transition error; batch_lookup's no-drives loop delivers before flipping",
+      "code_location": "src/lib.rs:880-925, :2789-2847; tests src/repair_test_no_drives_promote_without_read.rs:582, :613, :645, :680, :724; mock refuses overwrite src/lib.rs:5268-5277",
+      "old_text": "*(Exception, tracked as align task A-04: the no-drives `promote_and_serve` does not re-register the entry and keeps its slot.)*",
+      "new_text": "With no data drives (memory-tier-only mode) there is no SSD read: the freshly reserved slot stands in for it, is delivered to the entry's GPU destination(s), and the entry is then re-registered in place with `promote_block_to_memory_tier` — in `promote_and_serve` and in `batch_lookup` alike. A failed delivery or transition releases the slot and fails that key, as above. *(Sync 2026-11-07, branch `fix/dispatcher-j33-repairs` — code authoritative, commit `60838384e`, `src/lib.rs:880-925`, `:2789-2847`; this closes align task A-04. Before it `promote_and_serve` called `create_memory_tier_entry`, which refuses the existing BlockDevice entry, and `batch_lookup` flipped the entry without delivering the block.)*",
+      "also": "on apply mark A-04 RESOLVED in .specify/sync/align-tasks.md",
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as proposed)."
+    },
+    {
+      "id": "B-42",
+      "direction": "BACKFILL",
+      "fix": 6,
+      "spec": "001",
+      "requirement": "User Story 9, acceptance scenario 3",
+      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:182",
+      "spec_says": "it creates a memory-tier slot with zero-copied data, performs a direct GPU DMA from the slot, and re-registers the entry.",
+      "code_does": "slot not zeroed (no SSD read); copy to GPU; in-place promote_block_to_memory_tier; release + error on failure; batch_lookup does the same",
+      "code_location": "src/lib.rs:880-925, :2789-2847",
+      "old_text": "3. **Given** no hardware is available (memory-tier-only mode), **When** promote_and_serve runs, **Then** it creates a memory-tier slot with zero-copied data, performs a direct GPU DMA from the slot, and re-registers the entry.",
+      "new_text": "3. **Given** no data drives (memory-tier-only mode), **When** a cold lookup promotes a BlockDevice entry (`lookup`/`lookup_async` via `promote_and_serve`, or `batch_lookup`), **Then** it reserves a memory-tier slot (there is no SSD read; the slot's contents stand in for the block), copies the slot to the GPU destination, and re-registers the entry in place as MemoryTier (`promote_block_to_memory_tier`); if the copy or the transition fails, the slot is released, the entry stays BlockDevice and the lookup fails (FR-028). *(Sync 2026-11-07, commit `60838384e`.)*",
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as proposed)."
+    },
+    {
+      "id": "B-44",
+      "direction": "BACKFILL",
+      "fix": 8,
+      "spec": "001",
+      "requirement": "FR-061 (drain-all-on-error bullet)",
+      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:466 (US-11 AS4 :217 already right)",
+      "spec_says": "Preserve the **drain-all-on-error** invariant of FR-054 per drive: never break early while reads are in flight; retain and report the first error per job while continuing to drain outstanding completions.",
+      "code_does": "Completion::Timeout counted, submission continues, message kept; after the loop each incomplete object is failed alone; invalid tag / unexpected completion / disconnect still fail the drive",
+      "code_location": "src/pipeline.rs:1402-1420, :1481-1495, :1314-1320, :1421-1434, :1448-1463; tests src/repair_test_nvme_timeout_fails_whole_drive.rs:794, :817, :840, :862",
+      "old_text": "  - Preserve the **drain-all-on-error** invariant of FR-054 per drive: never break early while reads are in flight; retain and report the first error per job while continuing to drain outstanding completions.",
+      "new_text": "  - Preserve the **drain-all-on-error** invariant of FR-054 per drive: never break early while reads are in flight; retain and report the first error per job while continuing to drain outstanding completions. A read timeout (`Completion::Timeout`) carries only the actor's operation handle, not the job tag, and the actor forgets the timed-out operation; it MUST NOT fail the drive's other jobs. Submission and draining continue, and after the loop each job whose segments did not all complete is reported `Err` with the timeout message — that job only (User Story 11 scenario 4). Completions that indicate a broken channel rather than a failed read — an invalid tag, an unexpected completion kind, a disconnected completion channel — still fail every job of that drive and stop its submissions. *(Sync 2026-11-07, branch `fix/dispatcher-j33-repairs` — code authoritative, commit `408a568d0`, `src/pipeline.rs:1402-1420`, `:1481-1495`. Before it one timeout failed every job of its drive. Known gap, tracked as A-15: the timed-out job's memory-tier slot is then released at once, although the drive may still write into it.)*",
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as proposed)."
+    },
+    {
+      "id": "B-45",
+      "direction": "BACKFILL",
+      "fix": 9,
+      "spec": "001+002",
+      "requirement": "001 FR-058, SC-017; 002 FR-025",
+      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:405, :510; specs/002-served-by-tier-attribution/spec.md:554-555",
+      "spec_says": "the three MUST sum to the served count for any interval; remote_lookup_hits counted when the remote fetch succeeds — not when delivered; 002: aggregate counters MUST agree with per-entry attribution",
+      "code_does": "single-key path now records lookup_hits_dram/ssd (kept through the fix-7 revert); remote hits still counted at fetch, so a failed remote delivery is ERROR but counted as a remote hit",
+      "code_location": "src/lib.rs:3434-3443, :3476-3490, :3360-3366, :3212-3215, :3248-3284, :3349; tests src/repair_test_route_partition_does_not_add_up.rs:544, :591, :633, :684, :717",
+      "old_text": "`lookup_hits_dram` and `lookup_hits_ssd`, which with `remote_lookup_hits` **partition** every served key by route: the three MUST sum to the served count for any interval.",
+      "new_text": "`lookup_hits_dram` and `lookup_hits_ssd`, which with `remote_lookup_hits` **partition** every served key by route: the three MUST sum to the served count for any interval, on both lookup paths — `batch_lookup` and the single-key `lookup`/`lookup_async` (memory-tier hit → DRAM, cold promotion → SSD, concurrent-promotion recovery → DRAM). One exception follows from counting remote hits at fetch (above): a key a peer returned whose local delivery then fails is counted in `remote_lookup_hits` but is not served (its result is `Err`, attributed `ERROR`), so over an interval with such failures the sum exceeds the served count by exactly their number. *(Sync 2026-11-07, branch `fix/dispatcher-j33-repairs` — code authoritative, commit `ec1b890ca`, repair DIS-TIER-STATS-ROUTE-PARTITION, `src/lib.rs:3434-3443`, `:3476-3490`: before it the single-key path counted `promotions_to_gpu` but no route counter. The remote-on-fetch exception is pre-existing and kept deliberately.)*",
+      "additional_edits": [
+        {
+          "where": "001 spec.md:510 (SC-017)",
+          "old_text": "And `lookup_hits_dram + lookup_hits_ssd + remote_lookup_hits` MUST equal the served-key count over the same interval — the partition property, which is checkable without any knowledge of the workload.",
+          "new_text": "And `lookup_hits_dram + lookup_hits_ssd + remote_lookup_hits` MUST equal the served-key count over the same interval, single-key lookups included, plus the number of keys a peer returned whose local delivery failed in that interval (FR-058); with no such failure it equals the served-key count exactly — the partition property, which is checkable without any knowledge of the workload."
+        },
+        {
+          "where": "002 spec.md:554-555 (FR-025)",
+          "old_text": "- **FR-025**: The aggregate counters MUST agree with the per-entry attribution in the same\n  responses.",
+          "new_text": "- **FR-025**: The aggregate counters MUST agree with the per-entry attribution in the same\n  responses. One deliberate exception: `remote_lookup_hits` counts a key when the peer returns it,\n  so a key whose local delivery then fails is attributed `ERROR` but still counted as a remote hit\n  (spec 001 FR-058). *(Sync 2026-11-07.)*"
+        }
+      ],
+      "option_not_taken": "ALIGN: count remote hits on delivery (code + interfaces doc idispatcher.rs:375-377; re-stamps every component)",
+      "interfaces_optional": "TierEventStats::lookup_hits_dram doc idispatcher.rs:346-349 could name the exception [interfaces — optional, re-stamps every component]",
+      "confidence": "HIGH (behaviour) / MEDIUM (choice)",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as proposed)."
+    },
+    {
+      "id": "B-46",
+      "direction": "BACKFILL",
+      "fix": null,
+      "fix_note": "pre-existing",
+      "spec": "001",
+      "requirement": "FR-062 + US-13 AS1",
+      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:419-421, :259-262",
+      "spec_says": "The read targets the drive chosen by the write path's placement hash (`drive_index`) ...; read from drive `drive_index(key, N)`",
+      "code_does": "reads the drive recorded in the SSD location (select_drive) at the raw offset; a missing drive -> Io without reading; drive_index no longer exists in src/",
+      "code_location": "src/lib.rs:4647-4670; tests src/lib.rs:8497, :8541",
+      "old_text": "  - The read targets the drive chosen by the write path's placement hash (`drive_index`), at\n    LBA `offset / block_size`, `len` rounded up to the block size, segmented by the drive's\n    maximum transfer, over a channel checked out of that drive's `ChannelPool`.",
+      "new_text": "  - The read targets the drive recorded in the entry's SSD location (`select_drive`, bits 56-63,\n    FR-039 step (4)), at LBA `raw_offset / block_size`, `len` rounded up to the block size,\n    segmented by the drive's maximum transfer, over a channel checked out of that drive's\n    `ChannelPool`. A location that names a drive that does not exist returns `Io` without\n    reading. *(Sync 2026-11-07 — code authoritative since the 2026-10-27 rebase onto\n    `4bb69289`, `src/lib.rs:4647-4670`; `drive_index` no longer exists.)*",
+      "additional_edits": [
+        {
+          "where": "spec.md:260",
+          "old_text": "   extent is read from drive `drive_index(key, N)` at LBA `offset / block_size`, segmented by",
+          "new_text": "   extent is read from the drive its SSD location records, at LBA `raw_offset / block_size`, segmented by"
+        }
+      ],
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as proposed)."
+    },
+    {
+      "id": "B-47",
+      "direction": "BACKFILL",
+      "fix": null,
+      "fix_note": "pre-existing",
+      "spec": "001",
+      "requirement": "FR-001 method inventory",
+      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:326, :328",
+      "spec_says": "Write / cache management: populate, batch_populate, remove, touch, promote_to_memory_tier. Durability / introspection: flush_to_ssd, schedule_write_through, read_write_stats.",
+      "code_does": "trait also has clear_memory_tier, clear_all, tier_event_stats",
+      "code_location": "components/interfaces/src/idispatcher.rs:862, :889, :950; src/lib.rs:4404, :4470, :4610",
+      "old_text": "  - **Write / cache management**: `populate`, `batch_populate`, `remove`, `touch`, `promote_to_memory_tier`.",
+      "new_text": "  - **Write / cache management**: `populate`, `batch_populate`, `remove`, `touch`, `promote_to_memory_tier`, `clear_memory_tier` (FR-038), `clear_all` (FR-063).",
+      "additional_edits": [
+        {
+          "where": "spec.md:328 (start of line; rest unchanged)",
+          "old_text": "  - **Durability / introspection** (see FR-056): `flush_to_ssd`, `schedule_write_through`, `read_write_stats`.",
+          "new_text": "  - **Durability / introspection** (see FR-056): `flush_to_ssd`, `schedule_write_through`, `read_write_stats`, `tier_event_stats` (FR-058)."
+        }
+      ],
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as proposed)."
+    },
+    {
+      "id": "B-48",
+      "direction": "BACKFILL",
+      "fix": 2,
+      "fix_note": "spec already right (FR-034); precision for the no-SPDK mode; replaces closed A-14",
+      "spec": "001",
+      "requirement": "FR-034",
+      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:364",
+      "spec_says": "During `initialize()`, after GPU and memory-tier are ready, the dispatcher MUST call `IGpuServices::register_host_memory` ... Registration failure MUST be logged as a warning (zero-copy pipelines require this registration).",
+      "code_does": "registration runs whenever gpu_services and memory_tier are bound (no longer SPDK-gated); failure log_warn, initialize Ok; gpu-services registers with SPDK only when an SPDK env is active (CUDA-only otherwise)",
+      "code_location": "src/lib.rs:2246-2270 (warn :2263-2266); tests src/repair_test_register_host_memory.rs:408, :432; components/gpu-services/src/lib.rs:1176-1181, :1218-1225 (commit 9a79224a1)",
+      "old_text": "Registration failure MUST be logged as a warning (zero-copy pipelines require this registration).",
+      "new_text": "Registration failure MUST be logged as a warning and MUST NOT fail `initialize` (zero-copy pipelines require this registration; the DRAM path does not). Registration runs whenever the GPU services and the memory tier are bound — with or without an SPDK environment or data drives, so factory-mode and memory-tier-only deployments are registered too; without an active SPDK environment `register_host_memory` only CUDA-pins the pool (there is no SPDK memory map to register in), and `unregister_host_memory` (FR-035) skips the SPDK half likewise. *(Sync 2026-11-07, branch `fix/dispatcher-j33-repairs` — code authoritative, commit `7ac879dd4` (repair DIS-INITIALIZE-REGISTER-HOST-MEMORY, `src/lib.rs:2246-2270`; before it the pool was registered only when `spdk_env` was connected) and gpu-services commit `9a79224a1` (`components/gpu-services/src/lib.rs:1176-1181`, `:1218-1225`; before it memory-tier-only mode crashed `initialize` in `spdk_mem_register`, align task A-14 of the 2026-11-06 analysis, now closed).)*",
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as proposed)."
+    },
+    {
+      "id": "B-49",
+      "direction": "BACKFILL",
+      "fix": 7,
+      "fix_note": "pre-existing on unstable; fix 7 added and the revert removed the only reader of warm_stream",
+      "spec": "001",
+      "requirement": "FR-037, FR-052 (warm_stream fallback)",
+      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:367, :382",
+      "spec_says": "A single `AtomicU64` warm stream (`warm_stream`) is retained as a fallback; ... When the device is unknown (`-1`) the paths fall back to the shared pipeline-ring / `warm_stream` streams.",
+      "code_does": "warm_stream is created at initialize and destroyed at shutdown but never read; unknown device -> warm_raw=0 -> synchronous dma_copy_to_device; cold single-entry paths fall back to pipeline-ring streams; scatter-gather creates two streams",
+      "code_location": "src/lib.rs:448, :2205, :2425, :505-508, :1164, :2606, :3399, :1483-1519, :974-985, :1119-1125, :2953-2964",
+      "old_text": "A single `AtomicU64` warm stream (`warm_stream`) is retained as a fallback;",
+      "new_text": "A single `AtomicU64` warm stream (`warm_stream`) is still created at `initialize()` and destroyed at `shutdown()`, but no copy path uses it: a warm copy whose destination device is unknown takes the synchronous `dma_copy_to_device` fallback (FR-006, FR-052) *(Sync 2026-11-07 — pre-existing, `src/lib.rs:2205`, `:2425`; no reader)*;",
+      "additional_edits": [
+        {
+          "where": "spec.md:382 (last sentence of FR-052)",
+          "old_text": "When the device is unknown (`-1`) the paths fall back to the shared pipeline-ring / `warm_stream` streams.",
+          "new_text": "When the device is unknown (`-1`), the single-entry cold paths (`promote_and_serve`, `serve_cold_staged`) fall back to the shared pipeline-ring streams, `batch_lookup`'s scatter-gather creates two streams for the call, and the warm (memory-tier→GPU) paths use no stream at all — they copy synchronously through `dma_copy_to_device` (FR-006). *(Sync 2026-11-07 — code authoritative, pre-existing, `src/lib.rs:974-985`, `:1119-1125`, `:2953-2964`, `:1483-1519`.)*"
+        }
+      ],
+      "option_not_taken": "ALIGN: delete warm_stream, or route unknown-device warm copies to it (part of the deferred lookup_async issue)",
+      "confidence": "HIGH",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as proposed)."
+    },
+    {
+      "id": "A-15",
+      "direction": "ALIGN",
+      "fix": 8,
+      "fix_note": "related; pre-existing hazard not closed by the fix",
+      "spec": "001",
+      "requirement": "FR-028 vs FR-062",
+      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:358, :422-430",
+      "spec_says": "FR-028: release the slot before reporting a failed SSD read; FR-062: a buffer a drive may still be writing is leaked, never freed",
+      "code_does": "timed-out object reported Err and its slot released at once; a late NVMe write can land in a reused slot",
+      "code_location": "src/pipeline.rs:1402-1420, :1481-1495; src/lib.rs:3068-3071, :1016-1023",
+      "proposed_change": "distinct timeout marker in results; batch_lookup/promote_and_serve leak (log) that slot instead of mt.remove; FR-028 exception sentence on apply; test with a mock drive that writes after Timeout",
+      "confidence": "MEDIUM",
+      "severity": "moderate",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as proposed)."
+    },
+    {
+      "id": "A-16",
+      "direction": "ALIGN",
+      "fix": 3,
+      "fix_note": "residual race",
+      "spec": "001",
+      "requirement": "FR-056 read_write_stats (as B-36)",
+      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:396; components/interfaces/src/idispatcher.rs:940",
+      "spec_says": "counters MUST NOT decrease between two calls (B-36); interface: Monotonic",
+      "code_does": "absorb and drive-list swap under separate lock acquisitions; a concurrent read in between double-counts the outgoing drives",
+      "code_location": "src/lib.rs:1831-1837, :2168-2171, :2438-2444, :4602-4606",
+      "proposed_change": "hold data_drives write lock across absorb + swap; test: reader loop during shutdown sees a non-decreasing sequence",
+      "confidence": "HIGH",
+      "severity": "minor",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as proposed)."
+    },
+    {
+      "id": "A-17",
+      "direction": "ALIGN",
+      "fix": 4,
+      "fix_note": "residual",
+      "spec": "002",
+      "requirement": "FR-033 (as B-37)",
+      "spec_location": "specs/002-served-by-tier-attribution/spec.md:576",
+      "spec_says": "evictions_blocked_unpersisted when it refuses for want of an ssd_offset",
+      "code_does": "every InvalidState counted unpersisted, but dispatch-map also returns InvalidState for an entry not in MemoryTier state (cold-prep slot over a BlockDevice entry, A-02)",
+      "code_location": "src/lib.rs:1225-1234, :2727; components/dispatch-map/src/lib.rs:576-578",
+      "proposed_change": "interface-free: confirm MemoryTier before counting unpersisted in evict_one_clean; or distinct dispatch-map variants [interfaces]; test: cold-prep slot scanned increments neither counter",
+      "confidence": "MEDIUM",
+      "severity": "low",
+      "approved": true,
+      "approval_note": "Approved by Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as proposed)."
+    }
+  ],
   "carried_over_open": [
     "A-1",
     "A-2",
     "A-3",
     "A-4",
     "A-5",
-    "A-01",
     "A-02",
-    "A-04",
     "A-05",
     "A-06",
     "A-08",
     "A-10",
-    "N-01"
+    "A-12",
+    "N-01",
+    "RH-03",
+    "DISP-RESERVE-REASON"
   ],
-  "proposals": [
-    {
-      "id": "B-25",
-      "spec": "001",
-      "requirement": "FR-039 step (2)",
-      "direction": "BACKFILL",
-      "before": "a multi-region cold entry's serve_memory_tier_to_gpu sync on the warm stream also waits for queued warm copies",
-      "after": "cold entries do not use the warm stream (in-loop pipe-stream delivery, FR-061); only a staged multi-region entry syncs on warm",
-      "location": "src/lib.rs:2912-2932, :2978-2981",
-      "rationale": "code authoritative: shipped on this branch, reviewed and tested (dispatcher lib tests 145/145)",
-      "confidence": "HIGH",
-      "approved": true
-    },
-    {
-      "id": "B-26",
-      "spec": "001",
-      "requirement": "FR-019",
-      "direction": "BACKFILL",
-      "before": "scatter-gather makes one final dual pipe-stream sync",
-      "after": "+ multi-region object gets one piece batch; final sync is checked and fails every issued object",
-      "location": "src/pipeline.rs:1357-1383, :1474-1491",
-      "rationale": "code authoritative: shipped on this branch, reviewed and tested (dispatcher lib tests 145/145)",
-      "confidence": "HIGH",
-      "approved": true
-    },
-    {
-      "id": "B-27",
-      "spec": "001",
-      "requirement": "Clarification Q&A (pipelined reader)",
-      "direction": "BACKFILL",
-      "before": "one final dual pipe-stream sync",
-      "after": "one final, checked dual sync; multi-region piece copies batched in the loop",
-      "location": "src/pipeline.rs:1474-1491",
-      "rationale": "code authoritative: shipped on this branch, reviewed and tested (dispatcher lib tests 145/145)",
-      "confidence": "HIGH",
-      "approved": true
-    },
-    {
-      "id": "B-28",
-      "spec": "001",
-      "requirement": "Key Entities: Pipelined Reader",
-      "direction": "BACKFILL",
-      "before": "one final dual pipe-stream sync covers the batch",
-      "after": "+ checked; multi-region job via ColdReadJob::regions / queue_slot_to_regions",
-      "location": "src/pipeline.rs:569-579, :1357-1383",
-      "rationale": "code authoritative: shipped on this branch, reviewed and tested (dispatcher lib tests 145/145)",
-      "confidence": "HIGH",
-      "approved": true
-    },
-    {
-      "id": "B-29",
-      "spec": "001",
-      "requirement": "Implementation Notes",
-      "direction": "BACKFILL",
-      "before": "cold pipeline uses coalesced per-object memcpy_h2d_async",
-      "after": "+ multi-region object: one batched piece copy on the pipe stream",
-      "location": "src/pipeline.rs:1366-1383",
-      "rationale": "code authoritative: shipped on this branch, reviewed and tested (dispatcher lib tests 145/145)",
-      "confidence": "HIGH",
-      "approved": true
-    },
-    {
-      "id": "B-30",
-      "spec": "001",
-      "requirement": "US-11 acceptance scenario 4",
-      "direction": "BACKFILL",
-      "before": "error reported for that entry only",
-      "after": "+ exception: failed final sync fails every issued entry",
-      "location": "src/pipeline.rs:1481-1491; test repair_test_failed_promotion_releases_slot.rs:985",
-      "rationale": "code authoritative: shipped on this branch, reviewed and tested (dispatcher lib tests 145/145)",
-      "confidence": "HIGH",
-      "approved": true
-    },
-    {
-      "id": "B-31",
-      "spec": "001",
-      "requirement": "FR-053",
-      "direction": "BACKFILL",
-      "before": "(multi-region staged delivery unstated)",
-      "after": "single-region fused SSD->GPU; multi-region reads into staging then serve_memory_tier_to_gpu scatter on warm, synced, before the lease is returned; not part of in-loop delivery",
-      "location": "src/lib.rs:1091-1141, :2781-2804",
-      "rationale": "code authoritative: shipped on this branch, reviewed and tested (dispatcher lib tests 145/145)",
-      "confidence": "HIGH",
-      "approved": true
-    },
-    {
-      "id": "B-32",
-      "spec": "001",
-      "requirement": "FR-006",
-      "direction": "BACKFILL",
-      "before": "(zero-size-region rule unstated)",
-      "after": "copies clamped to the slot; zero-size region gets no bytes but does not stop the scatter; only an exhausted slot does",
-      "location": "src/pipeline.rs:131-167; tests repair_test_warm_copy_stops_at_zero_region.rs:494,530",
-      "rationale": "code authoritative: shipped on this branch, reviewed and tested (dispatcher lib tests 145/145)",
-      "confidence": "HIGH",
-      "approved": true
-    },
-    {
-      "id": "B-33",
-      "spec": "001",
-      "requirement": "data-model.md (CacheKey, DispatcherConfig, BackgroundWriteJob, PendingWrite, Cache Entry Lifecycle, Dispatcher Lifecycle, Relationships)",
-      "direction": "BACKFILL",
-      "before": "v0 model: prepare_store/commit_store/cancel_store, [Staging] state, metadata block device, removed config fields",
-      "after": "states/transitions/receptacles as the code has them (approved by the user via the lead)",
-      "location": "see drift-report.md 2026-10-31 note",
-      "rationale": "approved by the user via the lead; stale independent of this branch",
-      "confidence": "HIGH",
-      "approved": true
-    },
-    {
-      "id": "B-34",
-      "spec": "002",
-      "requirement": "spec.md / contracts/served-by.md / research.md shm-queue citations; FR-019",
-      "direction": "BACKFILL",
-      "before": "translate.rs:573, wire.rs:98-110, translate.rs:749-760",
-      "after": "translate.rs:1152, wire.rs:194-205, translate.rs:1149-1159; FR-019 note: LOOKUP_BLOCKS/LOOKUP_CHUNKS return the same byte",
-      "location": "lib/shmq-dispatcher/src/translate.rs:644-649, :1135-1143; wire.rs:60-68",
-      "rationale": "citations moved; behaviour of the new opcodes read from the code",
-      "confidence": "HIGH",
-      "approved": true
-    },
-    {
-      "id": "H-1",
-      "spec": "001",
-      "requirement": "contracts/idispatcher.md (whole file)",
-      "direction": "HUMAN_DECISION",
-      "before": "v0 IDispatcher contract: prepare_store/commit_store/cancel_store, dma_copy_to_host/to_device, 5-field DispatcherConfig, no memory tier, no batch/async/store-lifecycle methods",
-      "after": "option A: rewrite against components/interfaces/src/idispatcher.rs; option B: mark the file historical and point at the interface source and FR-001",
-      "location": "contracts/idispatcher.md:1-200; components/interfaces/src/idispatcher.rs",
-      "rationale": "no requirement cites the file; recorded out of scope on 2026-10-27; which option is a documentation-scope choice",
-      "confidence": "MEDIUM",
-      "approved": true,
-      "status": "applied",
-      "resolution": "marked historical: a header names the v0 contract and points to interfaces/src/idispatcher.rs, spec.md FR-001/039/056/059, data-model.md and the 002 served-by contract (user-approved alongside the data-model.md fix)"
-    }
+  "recorded_only": [
+    "Five #[path = \"repair_test_*\"] mod declarations without #[cfg(test)] (src/lib.rs:87, :8796, :8798, :8800, :8802; none of the five files has #![cfg(test)]) compile test mocks into the shipped library (was six on 2026-11-06; repair_test_lookup_async_stream removed by the revert).",
+    "DispatcherError::Timeout doc 'exceeded the 100ms timeout' (components/interfaces/src/idispatcher.rs:178, contracts/errors.md:21) is stale; interfaces edit, not proposed.",
+    "IDispatcher::lookup_async doc (components/interfaces/src/idispatcher.rs:569-574) and 001 FR-036 promise a non-blocking stream; code always blocks and returns null (as on unstable). Deferred with N-13 to the separate lookup_async issue; not proposed."
   ],
-  "previous": "backups/20261031T054807Z/proposals.json.prev"
+  "previous": "git show HEAD:components/dispatcher/.specify/sync/proposals.json (2026-10-31); 2026-11-06 analysis in git stash 'j33 spec-sync analysis 2026-11-06 (before repair 7 out)'"
 }

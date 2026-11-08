@@ -6,6 +6,40 @@ spec_sync_git_commit: 32ffa627f
 spec_sync_inputs_sha256: b547edf5d8dec0c46b152d4ba49561890e67bd46666c28c3a87896586e1ff954
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Apply 2026-11-07 (branch fix/dispatcher-j33-repairs, approved by Cornel).** Approval note on every proposal: *"Approved by Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as proposed)."* All 17 proposals of the 2026-11-07 analysis are `approved: true`, so all were taken. Applied at HEAD `f4579a41f` in BATCH mode; backup of the three edited specs in `.specify/sync/backups/20261108T002307Z/`. Every old text was checked to occur exactly once before it was replaced; none failed.
+>
+> - **Applied** with the exact proposal text (14 BACKFILL): **B-35** (001 FR-012: a failed `initialize` leaves the tunables unchanged), **B-36** (001 FR-056 `read_write_stats`: monotonic baseline), **B-37** (002 FR-033: variant mapping; a third cause increments neither counter), **B-38** (002 FR-035: `dispatcher`'s background-evictor gap declared — the BACKFILL option, as proposed), **B-39** (001 FR-039 step 1: exhausted retries are `Timeout`/`IoError`, attributed `ERROR`, not forwarded), **B-40** (`contracts/errors.md`: `Timeout` row adds `check`, `batch_lookup`; `IoError` row adds `check` and the persistent-map-error condition), **B-41** (001 FR-028: no-drives promotion; closes A-04), **B-42** (001 US-9 AS3), **B-44** (001 FR-061: a read timeout fails only its own job), **B-45** (001 FR-058 + SC-017, 002 FR-025: single-key route counters and the remote-on-fetch exception — the BACKFILL option, as proposed), **B-46** (001 FR-062 + US-13 AS1: the drive comes from the SSD location), **B-47** (001 FR-001: `clear_memory_tier`, `clear_all`, `tier_event_stats`), **B-48** (001 FR-034: registration in every mode, never fails `initialize`), **B-49** (001 FR-037 + FR-052: `warm_stream` has no reader; unknown-device fallbacks stated). Both specs got a `Last Synced 2026-11-07` header line. No SUPERSEDE or NEW_SPEC proposal was in this run.
+> - **Became tasks** in `align-tasks.md` (ALIGN, no code change): **A-15** (FR-028 vs FR-062: leak, do not free, the slot of a timed-out read), **A-16** (FR-056: hold the `data_drives` write lock across absorb + swap), **A-17** (002 FR-033: count unpersisted only for a MemoryTier entry). **A-04** is marked ✅ RESOLVED by `60838384e` there.
+> - **Not applied:** none. **Unapproved proposals with an `approval_note`:** none (the note's exception, gpu-services P-5, belongs to the gpu-services sync).
+> - **Stays open:** the new tasks A-15, A-16, A-17; carried over unchanged A-1, A-2, A-3 (decision), A-4, A-5, A-02, A-05, A-06, A-08, A-10, A-12, N-01, RH-03, DISP-RESERVE-REASON; note **N-13** and the FR-036 / `lookup_async` doc gap (deferred to the separate `lookup_async` issue); the recorded-only items (five `repair_test_*` modules without `#[cfg(test)]`, the stale "100ms timeout" doc in interfaces). Not done: the optional interfaces doc edits named by B-45 (`idispatcher.rs:346-349`) — outside this apply's scope.
+>
+> Drift stays **OPEN** until A-15…A-17 land. No `src/` or `components/interfaces` file changed. The frontmatter is left for the stamping script.
+
+> **Sync 2026-11-07 (branch fix/dispatcher-j33-repairs) — re-analysis after fix 7 was taken out; drift OPEN (17 proposals, all `approved: false`, nothing applied).** HEAD `f4579a41f` (merge of `origin/unstable` `7c12e427a`, which is also the merge-base). It replaces the 2026-11-06 analysis (note below, HEAD `01d9ec387`). Three commits since then. `209b01de5` reverts fix 7 (`9ff85fa51`): `lookup_async` is back to the synchronous copy and the null stream (`src/lib.rs:3423-3444`); fix 9's single-key route counter is kept, and `repair_test_lookup_async_stream.rs` is removed. `9a79224a1` fixes A-14 in gpu-services: SPDK registration only when `interfaces::is_spdk_env_active()` (`components/gpu-services/src/lib.rs:1176-1181`, `:1218-1225`). The merge `f4579a41f` changes no hashed input of this component. Every item of the 2026-11-06 analysis was checked again against today's code, and every active FR/SC of both specs was re-read (119: 79 aligned, 15 drifted new, 10 drifted carried, 0 not implemented, 15 not verifiable here; section "Sweep 2026-11-07" below). Read-only: no build or test was run.
+>
+> - **Fix 1 `11748983d`** (failed `initialize` keeps the eviction-attempt limit and the store-backpressure budget): `src/lib.rs:2142-2147`, `:2371-2379`. FR-012 says nothing → **B-35**.
+> - **Fix 2 `7ac879dd4`** (host memory registered with the GPU in every mode; a failure is a warning): `src/lib.rs:2246-2270`, `log_warn` at `:2263-2266`, `initialize` returns `Ok`. FR-034 already says this → **aligned**. Precision only: without an SPDK environment, gpu-services now only CUDA-pins (`9a79224a1`) → **B-48**. **A-14 is closed in code** by `9a79224a1`.
+> - **Fix 3 `d65de1fef`** (read/write stats never decrease): `src/lib.rs:1831-1837`, `:2168-2171`, `:2438-2440`, `:4595-4608`. The interface already says "Monotonic"; FR-056 says nothing → **B-36**. The hand-over race remains → **A-16**.
+> - **Fix 4 `03b05d505`** (eviction errors counted by real cause): `src/lib.rs:1215-1244`. 002 FR-033 is right in intent → **B-37** (variant mapping, third cause). The dispatcher's background evictor counts neither cause and the spec does not declare it → **B-38**. `InvalidState` still also means "not MemoryTier" → **A-17**.
+> - **Fix 5 `b0720fe6c`** (a map error that persists after the retries is an error): `src/lib.rs:2743-2756`; not forwarded to remote (`:3130-3137`) → **B-39** (FR-039 step 1), **B-40** (`contracts/errors.md`).
+> - **Fix 6 `60838384e`** (no-drives promotion delivers first, flips in place, releases on failure): `src/lib.rs:880-925`, `:2789-2847`. FR-028's A-04 exception is stale → **B-41** (closes **A-04**), **B-42** (US-9 AS3).
+> - **Fix 7 — taken out.** The code is the same as unstable's again, so **B-43 and A-13 are withdrawn**. A-13's finding is kept as **note N-13**: an async `lookup_async` must hold the read pin until the copy is done, not only until it is queued (the FR-039 step 2 rule), and the synchronous `lookup` needs the same. FR-036's "instead of blocking" is again not met, as on unstable. It is recorded as carried drift, deferred to the separate issue; no text is proposed. Found while re-checking: the shared `warm_stream` "fallback" of FR-037/FR-052 has no reader at all (fix 7 added the only one, and the revert removed it; unstable is the same) → **B-49**.
+> - **Fix 8 `408a568d0`** (one NVMe timeout fails only its own entry): `src/pipeline.rs:1402-1420`, `:1481-1495`. US-11 AS4 already says so → aligned. FR-061 does not say how → **B-44**. The freed-slot hazard remains → **A-15**.
+> - **Fix 9 `ec1b890ca`** (route counters add up): single lookups are now counted (`src/lib.rs:3434-3443`, `:3476-3490`). Remote hits are still counted when the peer answers (`:3212-3215`), as the brief says. Inside FR-058 and SC-017, and against 002 FR-025, this conflicts with the partition when a remote delivery then fails → **B-45**.
+> - **Pre-existing:** **B-46** (FR-062 / US-13 AS1 still say `drive_index`) and **B-47** (FR-001 inventory). Five `repair_test_*` modules are still compiled into the library without `#[cfg(test)]` (`src/lib.rs:87`, `:8796`, `:8798`, `:8800`, `:8802`). This is recorded only; it is not spec drift.
+> - **Open align tasks re-checked:** A-1 (`:4571-4593`), A-02 (`:2727`), A-3, A-08 (no `Remote`/`SizeMismatch` value test yet), A-10, A-12: all still open. Carried unchanged.
+>
+> **Status I would stamp: `drifted`** until B-35…B-42 and B-44…B-49 are applied and A-15…A-17 are decided. Proposals are in `proposals.md` / `proposals.json`: 17 in all, 14 BACKFILL and 3 ALIGN. **None edits `components/interfaces`**; two name an optional interfaces follow-up, marked. The frontmatter above is the previous stamp, left for the re-stamp script. Earlier versions are in git: `HEAD` (the 2026-10-31 run) and the stash `j33 spec-sync analysis 2026-11-06 (before repair 7 out)`.
+
+> **Sync 2026-11-06 (branch fix/dispatcher-j33-repairs) — SUPERSEDED by the 2026-11-07 note above (fix 7 since taken out; A-14 since fixed). Kept for the record; its line numbers refer to HEAD `01d9ec387`.** Nine formal-verification repairs were re-verified against both specs, with drift OPEN: 18 proposals, 13 BACKFILL (B-35…B-47) and 5 ALIGN (A-13…A-17), none approved. The main points:
+>
+> - **Fix 2:** a failed registration does not fail `initialize`; it warns, as FR-034 requires.
+> - **Fix 9:** remote hits are still counted at fetch.
+> - **Fix 7** (`9ff85fa51`) introduced A-13: `lookup_async` released its read pin while the H2D copy was still queued.
+> - **Fix 2** opened the A-14 risk: `spdk_mem_register` called without an SPDK environment.
+>
+> The full note, the "Sweep 2026-11-06" section and its proposals are in the git stash `j33 spec-sync analysis 2026-11-06 (before repair 7 out)`.
+
 > **Re-stamp 2026-11-05 (branch `certus-host-setup`, on unstable `bb0c9b9c`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them (its previous stamp was re-verified against `git archive origin/unstable`); its digest moves because `components/interfaces` changed (`ISPDKEnv::init_with_allowed`, added for the two-process drive race; see the spdk-env and interfaces syncs of the same date). This component does not implement `ISPDKEnv`. No analysis below changes.
 
 > **Re-stamp 2026-10-31 (layout only).** `specs/001-dispatcher-cache-interface/data-model.md`: the lifecycle diagrams are redrawn as box-and-arrow state diagrams within 80 columns, with the cases the picture leaves out listed under it. Same states, transitions and methods; no analysis below changes.
@@ -191,6 +225,205 @@ spec_sync_hash_tool: scripts/spec-sync-hash.sh
 > components/dispatcher` over `src/**` + `specs/**` (with `components/interfaces/`
 > folded in) and matches `spec_sync_inputs_sha256`; the digest here was recomputed
 > over a clean tree (no untracked files under `src/`/`specs/`) after the last edit.
+
+# Spec Drift Report — dispatcher (Sweep 2026-11-07, branch `fix/dispatcher-j33-repairs`)
+
+Generated: 2026-11-07T12:00:00Z
+Project: dispatcher (`components/dispatcher`)
+HEAD `f4579a41f` · merge-base with `origin/unstable` `7c12e427a`. Line numbers refer to HEAD and are relative to `components/dispatcher/` unless a crate is named.
+
+## Scope and method
+
+- **Inputs:**
+  - `specs/001-dispatcher-cache-interface/{spec.md, contracts/errors.md, data-model.md}`;
+  - `specs/002-served-by-tier-attribution/spec.md`;
+  - the `IDispatcher` / `TierEventStats` doc comments in `components/interfaces/src/idispatcher.rs`;
+  - `src/**` at HEAD;
+  - gpu-services `register_host_memory` / `unregister_host_memory`.
+
+  The fix reports in `verif/fixes/` were read for intent only. Every verdict was checked against the code.
+- **Delta:** `git diff origin/unstable...HEAD -- components/dispatcher/src` touches `src/lib.rs`, `src/pipeline.rs` and new `src/repair_test_*.rs` modules. `specs/**` and `components/interfaces/**` match the base.
+- **Since the 2026-11-06 analysis** (`01d9ec387`): `209b01de5` reverts fix 7, `9a79224a1` fixes A-14 in gpu-services, and the merge `f4579a41f` adds nothing for this component. Line numbers after `src/lib.rs:3420` moved up by about 20.
+- **Not run:** no build or test (BATCH mode, read-only). Test evidence is cited from the test sources.
+
+## Summary
+
+| Category | Count |
+|----------|-------|
+| Specs Analyzed | 2 |
+| Requirements Checked | 119 FR/SC (spec 001: 57 FR + 17 SC; spec 002: 36 FR + 9 SC; the 6 removed 001 FRs, 001 SC-008 and 002 FR-016 excluded) |
+| ✓ Aligned | 79 (66%) |
+| ⚠️ Drifted — new this run | 15 (13%) |
+| ⚠️ Drifted — carried (open align task, or FR-036 deferred) | 10 (8%) |
+| ✗ Not Implemented | 0 (0%) |
+| ⧗ Not verifiable here (hardware / benchmark / cluster / other component / process) | 15 (13%) |
+| 🆕 Unspecced Code | 1 |
+
+**Drifted, new (15 FR/SC):**
+- spec 001: FR-001, FR-012, FR-028, FR-034 (precision only), FR-037, FR-039, FR-052, FR-056, FR-058, FR-061, FR-062, SC-017;
+- spec 002: FR-025, FR-033, FR-035.
+
+Non-FR items drift with them and are not counted: US-9 AS3, US-13 AS1, and the `contracts/errors.md` `Timeout`/`IoError` rows.
+
+Compared with 2026-11-06: FR-036 moves from "new" to "carried" (fix 7 reverted). FR-034 becomes precision drift (B-48), because A-14 is now fixed. FR-037 and FR-052 are new (B-49).
+
+**Drifted, carried (10):**
+
+| Requirement | Task | State at HEAD |
+|---|---|---|
+| 001 FR-003 | A-05 | not re-checked |
+| 001 FR-013 | A-1 | re-checked: `schedule_write_through` still enqueues with no pin, `src/lib.rs:4571-4593` |
+| 001 FR-017 | A-5 | not re-checked |
+| 001 FR-018 | A-4 | not re-checked |
+| 001 FR-036 | (deferred) | fix 7 reverted; see below |
+| 001 FR-038 | A-3 | re-checked: `src/lib.rs:4440-4447` |
+| 001 FR-051 | A-02 | re-checked: the cold pin is released at classification, `:2727` |
+| 001 SC-003 | A-12 | re-checked: `:3582`, `:3634` |
+| 002 FR-027, SC-009 | A-08 | re-checked: no value test yet for `Remote` / `SizeMismatch` |
+
+## The nine fixes — where the spec covers each
+
+| # | Commit | Fix | Spec text that covers it | Spec already right? | Resolution |
+|---|---|---|---|---|---|
+| 1 | `11748983d` | a failed `initialize` changes neither `max_eviction_attempts` nor `store_backpressure_ms` (`src/lib.rs:2142-2147`, `:2371-2379`) | 001 FR-012 (`spec.md:342`), SC-005 (`:491`) | **No**: neither says anything about it | **B-35** |
+| 2 | `7ac879dd4` | pool registered whenever GPU + tier are bound; a failure is `log_warn`, `initialize` returns `Ok` (`src/lib.rs:2246-2270`, `:2263-2266`) | 001 FR-034 (`spec.md:364`) | **Yes**. Precision: without SPDK only the CUDA half runs (gpu-services `9a79224a1`) | **B-48**; A-14 closed |
+| 3 | `d65de1fef` | `read_write_stats` never decreases across `shutdown` / re-`initialize` (`src/lib.rs:1831-1837`, `:4595-4608`) | 001 FR-056 (`spec.md:396`); interfaces `idispatcher.rs:936-942` "Monotonic" | Interface yes; spec says nothing | **B-36**; **A-16** |
+| 4 | `03b05d505` | `ActiveReferences` → by pin, `InvalidState` → unpersisted, anything else → neither (`src/lib.rs:1215-1244`) | 002 FR-033 (`spec.md:573-590`), FR-035 | Intent yes; mapping and third cause unstated | **B-37**, **B-38**; **A-17** |
+| 5 | `b0720fe6c` | `batch_lookup`: a map error after the retries → `Timeout`/`IoError`, never `KeyNotFound`, not forwarded to remote (`src/lib.rs:2743-2756`, `:3130-3137`) | 001 FR-039 step (1) (`spec.md:369`); `contracts/errors.md:36-37` | Partly; errors.md **contradicts** | **B-39**, **B-40** |
+| 6 | `60838384e` | with no drives: deliver to GPU, then flip in place; release on failure (`src/lib.rs:880-925`, `:2789-2847`) | 001 FR-028 (`spec.md:358`), US-9 AS3 (`:182`) | **No**: FR-028 lists the old defect as A-04 | **B-41**, **B-42**; A-04 closed |
+| 7 | `9ff85fa51` → **reverted** `209b01de5` | (taken out) code is back to sync copy + null stream (`src/lib.rs:3423-3444`) | 001 FR-036 (`spec.md:366`) | n/a: same as unstable | B-43/A-13 **withdrawn**; note **N-13**; related **B-49** |
+| 8 | `408a568d0` | a tagless timeout fails only the incomplete job (`src/pipeline.rs:1402-1420`, `:1481-1495`) | 001 US-11 AS4 (`spec.md:217`), FR-061 (`:466`) | **Yes** (AS4); FR-061 does not say how | **B-44**; **A-15** |
+| 9 | `ec1b890ca` | single-key lookups in the route partition (`src/lib.rs:3434-3443`, `:3476-3490`); remote still counted at fetch (`:3212-3215`) | 001 FR-058 (`spec.md:405`), SC-017 (`:510`); 002 FR-025 | Partition yes; **conflicts** with remote-on-fetch | **B-45** |
+
+The brief matches the code on all nine points:
+- (2) a failed registration is a warning, not a failure (`src/lib.rs:2263-2266`, test `src/repair_test_register_host_memory.rs:432`);
+- (7) fix 7 is out (`src/lib.rs:3430` `true`, `:3444` `null_stream`);
+- (9) remote hits are still counted when the peer answers (`src/lib.rs:3212-3215`).
+
+## Detailed Findings
+
+### Spec: 001-dispatcher-cache-interface — Dispatcher Cache Interface (Memory-Tier Architecture)
+
+#### Aligned ✓
+
+- FR-002 → `components/interfaces/src/idispatcher.rs:166-183`.
+- FR-004 → `src/lib.rs:1645-1703`. FR-005 → `:1627-1640`.
+- FR-006 → `serve_memory_tier_to_gpu`, `src/lib.rs:1449-1520`: queued on `warm_raw` `:1470-1482`, synchronous fallback `:1483-1519`.
+- FR-007 → `:3405`.
+- FR-008 → `:3499-3543` (`Timeout` `:3538`, `IoError` `:3541`).
+- FR-009 → `:3545-3660`.
+- FR-010, FR-011 → `define_component!` and receptacles `:423-433`; remote `NotFound` → `KeyNotFound`, otherwise `IoError` `:3204-3209`.
+- FR-014 → `:2389-2475`.
+- FR-015, FR-016, FR-055 → `create_data_drives` `:1839-2110`.
+- FR-019 → `src/pipeline.rs:367`, `:605`, `:1086`.
+- FR-023 → `src/lib.rs` `touch`.
+- FR-024 → `:1199-1419`.
+- FR-025 → `:2173-2197`.
+- FR-029…FR-032 → `src/background.rs` SSD evictor; start gate `src/lib.rs:2307-2340`.
+- FR-033 → `components/interfaces/src/idispatcher.rs:45-116`.
+- FR-035 → `src/lib.rs:2416-2421`.
+- FR-040, FR-041 → `:4254-4400`; `src/pipeline.rs:1566`.
+- FR-042 → `src/lib.rs` `emit_eviction` / `EvictionSender`.
+- FR-043 → `src/metrics.rs`.
+- FR-045 → `:3128-3307`.
+- FR-046…FR-050 → `:2342-2369`; `src/background.rs:637-780`.
+- FR-053 → `:1066-1197`.
+- FR-054 → `src/pipeline.rs:443`, `:718`. Each single-object reader stops submitting and drains on a timeout (`:523-531`, `:809-820`).
+- FR-057 → `src/lib.rs:614-630`.
+- FR-059, FR-060 → `reserve_memory` / `batch_populate`.
+- FR-063 → `:4470-4570`.
+- SC-001, SC-002, SC-004…SC-007, SC-009…SC-011, SC-013, SC-015, SC-016, SC-018 → covered by the FRs above and by the `src/lib.rs` tests and `repair_test_*` modules (e.g. SC-018 `src/lib.rs:8497`, `:8541`).
+- US-11 AS4 → fix 8 (`src/pipeline.rs:1402-1420`, `:1481-1495`; tests `src/repair_test_nvme_timeout_fails_whole_drive.rs:817`, `:840`, `:862`). The other two cold readers still fail every object of the call on a timeout (`src/pipeline.rs:809-820`, `:1645-1650`), but their callers pass one entry per call (`src/lib.rs:997-1012`, `:4364`), so a failure there is per entry too.
+- FR-034 is aligned in substance (fix 2) and has a precision drift item below.
+
+#### Drifted ⚠️ (new)
+
+- **FR-012** (fix 1): the spec only requires the receptacle check (`spec.md:342`). The code commits the two tunables only after every validation (`src/lib.rs:2371-2379`). Tests `src/repair_test_failed_initialize_changes_config.rs:208`, `:242`. Minor → **B-35**.
+- **FR-034** (fix 2, precision): "CUDA-pin and SPDK-register … logged as a warning" (`spec.md:364`) holds. But registration now also runs with no SPDK environment or drives (`src/lib.rs:2246-2270`), and there gpu-services does only the CUDA half (`components/gpu-services/src/lib.rs:1176-1181`). Tests `src/repair_test_register_host_memory.rs:408`, `:432`. Minor → **B-48**.
+- **FR-056 `read_write_stats`** (fix 3): the spec does not mention monotonicity (`spec.md:396`). The code uses a baseline (`src/lib.rs:446`, `:1831-1837`, `:2168-2171`, `:2438-2440`, `:4595-4608`). Test `src/repair_test_rw_stats_after_shutdown.rs:620`. Minor → **B-36**; the race remains as **A-16**.
+- **FR-039 step (1)** (fix 5): the spec does not say what happens once the retries are used up (`spec.md:369`). The code returns `Timeout`/`IoError` (`src/lib.rs:2748-2755`), does not forward to remote (`:3130-3137`), and attributes `ERROR` (`:3349`). Test `src/repair_test_transient_map_error.rs:683`, `:780`. Moderate → **B-39**. `contracts/errors.md:36-37` contradicts it (and has missed `check` since `898bba7eb`) → **B-40**.
+- **FR-028 + US-9 AS3** (fix 6): FR-028's "Exception … A-04" (`spec.md:358`) is stale, and AS3's "zero-copied data" (`:182`) is inexact. Code `src/lib.rs:880-925`, `:2789-2847`; tests `src/repair_test_no_drives_promote_without_read.rs:582`, `:613`, `:645`, `:680`, `:724`. Moderate → **B-41**, **B-42**.
+- **FR-037 + FR-052** (found while checking the fix 7 revert; the gap is older): `warm_stream` "is retained as a fallback" (`spec.md:367`), and "When the device is unknown … fall back to the shared pipeline-ring / `warm_stream` streams" (`:382`). In the code `warm_stream` is only stored (`src/lib.rs:2205`) and swapped out (`:2425`); nothing reads it. For an unknown device the warm paths get `warm_raw = 0` (`:505-508`, `:2606`, `:3399`) and copy synchronously (`:1483-1519`). The cold paths use the ring streams (`:974-985`, `:1119-1125`), or two new streams in the scatter-gather (`:2953-2964`). Unstable is the same; fix 7 had added a reader and the revert removed it. Minor → **B-49**.
+- **FR-061** (fix 8): the spec does not say how a tagless timeout is attributed (`spec.md:466`). Code: `src/pipeline.rs:1402-1420`, `:1481-1495`; the channel-fault cases still fail the whole drive (`:1314-1320`, `:1421-1434`, `:1448-1463`). Minor → **B-44**; the hazard remains as **A-15**.
+- **FR-058 + SC-017** (fix 9): within FR-058 (`spec.md:405`), "MUST sum to the served count" conflicts with "remote hits counted at fetch, not delivery". The code counts a remote hit at `src/lib.rs:3215`, and a later delivery failure gives `Err` → `ERROR` (`:3248-3284`, `:3349`). The single-key path is now counted (`:3434-3443`, `:3476-3490`; tests `src/repair_test_route_partition_does_not_add_up.rs:544`, `:591`, `:633`, `:684`, `:717`). Moderate → **B-45**.
+- **FR-062 + US-13 AS1** (pre-existing): the spec still names `drive_index` (`spec.md:419`, `:260`). The code reads the drive the location records (`select_drive`, `src/lib.rs:4647-4670`). Moderate → **B-46**.
+- **FR-001** (pre-existing): the inventory omits `clear_memory_tier`, `clear_all` and `tier_event_stats` (`components/interfaces/src/idispatcher.rs:862`, `:889`, `:950`). Minor → **B-47**.
+
+#### Drifted ⚠️ (carried)
+
+- **FR-036 (fix 7 reverted — deferred).** The spec says "returns a `GpuStream` handle instead of blocking on the H2D DMA transfer" (`spec.md:366`). The code always blocks and returns the null stream: memory-tier hit `src/lib.rs:3424-3444`, promotion `:3491`. This is as on `origin/unstable`. The caller contract ("sync if non-null") holds; the non-blocking promise does not. This is not new. It belongs to the separate `lookup_async` issue named in `209b01de5`, so per the brief no text is proposed.
+  - **Note N-13 (kept from the withdrawn A-13):** an asynchronous `lookup_async` must hold the entry's read pin until its copy has **completed**, and record its hit counters only then. FR-039 step (2) states this rule for `batch_lookup`. The synchronous `lookup`, which syncs only after `lookup_async` returns (`src/lib.rs:2477-2488`), needs the same.
+  - **Today's code is safe on this point:** the pin is held across the synchronous copy (`:3424-3432`), and counters are recorded only on `Ok` (`:3434-3443`).
+- The open align tasks listed in the summary.
+
+#### Not Implemented ✗
+
+None.
+
+#### Not verifiable here ⧗
+
+- SC-012 and SC-014 (throughput and latency on NVMe hardware).
+- Not counted, but also not checked here:
+  - gpu-services' `tests/host_memory_without_spdk.rs`, which needs a real GPU;
+  - FR-011's NUMA auto-placement on a multi-node host.
+
+### Spec: 002-served-by-tier-attribution — Serving-Tier Attribution (`served_by`)
+
+#### Aligned ✓
+
+- FR-001…FR-007 → a single mapping, `src/lib.rs:3328-3353`.
+- FR-008 → warm `:2717`, cold `:2733`, remote `:3247`, recovery `:3320`. Fix 5's exhausted retry gives `Error` (`:2748-2755` → `:3349`).
+- FR-009…FR-012 → `:3320`, `:2733`, `:3204-3209`, `:3247`.
+- FR-013 → `:3328-3366`.
+- FR-017 → `:3184-3248`.
+- FR-019…FR-024, FR-026 → `lib/shmq-dispatcher/src/translate.rs`, unchanged since the 2026-10-31 sync.
+- FR-028 → the repair tests' mocks model residency (e.g. `src/repair_test_no_drives_promote_without_read.rs`).
+- FR-034, FR-036 → `src/lib.rs` `tier_event_stats` `:4610-4632`.
+- SC-001, SC-004.
+
+#### Drifted ⚠️
+
+- **FR-033** (fix 4): the spec does not name the variant, does not mention a third cause, and does not say which path is counted (`spec.md:573-590`). Code `src/lib.rs:1215-1244`, `components/dispatch-map/src/lib.rs:571-578`; test `src/repair_test_eviction_errors_counted_unpersisted.rs:273`. Minor → **B-37**; the remaining miscount is **A-17**.
+- **FR-035** (pre-existing): the dispatcher's own background `MemoryTierEvictor` counts neither cause (`src/background.rs:736-738`), and the spec does not declare this. Moderate → **B-38**.
+- **FR-025** (fix 9): a failed remote delivery is attributed `ERROR` but still counted as a remote hit (`src/lib.rs:3215`, `:3349`) → **B-45**.
+- *(carried A-08)* FR-027 and SC-009: there are value tests for `Dram`, `Miss`, `Ssd` (`src/repair_test_nvme_timeout_fails_whole_drive.rs:769`) and `Error` (`:749`; `src/repair_test_transient_map_error.rs:780`; `src/repair_test_sync_failure_error.rs:532`). There are none for `Remote` or `SizeMismatch`.
+
+#### Not verifiable here ⧗
+
+SC-002, SC-003, SC-005…SC-008 (cluster / benchmark / client); FR-014, FR-015 (`dispatcher-p2p`); FR-018 (remote-lookup wire); FR-029 (`integrity-check` configuration, not run); FR-030…FR-032 (documentation-process rules).
+
+### Code defects found while verifying the fixes (spec already right → ALIGN)
+
+| Id | Requirement | Code | Problem | Severity |
+|---|---|---|---|---|
+| A-15 | 001 FR-028 vs FR-062 | `src/pipeline.rs:1402-1420`, `:1481-1495`; `src/lib.rs:3068-3071`, `:1016-1023` | A timed-out read's slot is released at once, although the drive may still write into it (FR-062 leaks a bounce buffer for exactly this reason). | moderate |
+| A-16 | 001 FR-056 `read_write_stats` | `src/lib.rs:1831-1837`, `:2168-2171`, `:2438-2444`, `:4602-4606` | The absorb and the drive-list swap take separate locks, so a concurrent reader double-counts the outgoing drives. | minor |
+| A-17 | 002 FR-033 | `src/lib.rs:1225-1234`; `components/dispatch-map/src/lib.rs:576-578` | `InvalidState` also means "not MemoryTier", so a cold-prep slot is counted as unpersisted (A-02). | low |
+
+**Closed or withdrawn since 2026-11-06:**
+- **A-13** is withdrawn because fix 7 is out; its finding is kept as note N-13.
+- **A-14** is closed by `9a79224a1`. Without an SPDK environment, `register_host_memory` returns after the CUDA pin (`components/gpu-services/src/lib.rs:1176-1181`), and `unregister_host_memory` skips the SPDK half (`:1218-1225`). Per that commit, `initialize` crashed with SIGSEGV on node7 before it.
+- **B-43** is withdrawn.
+
+### Unspecced Code 🆕
+
+| Feature | Location | Lines | Suggested Spec |
+|---------|----------|-------|----------------|
+| Five `repair_test_*` modules compiled into the non-test library: no `#[cfg(test)]` on the `mod` declaration and no `#![cfg(test)]` in the file | `src/lib.rs:87` (route_partition), `:8796` (register_host_memory), `:8798` (rw_stats_after_shutdown), `:8800` (transient_map_error), `:8802` (no_drives_promote_without_read) | five test files | none. This is not a feature; it is recorded for the source owner and the repair acceptance check. On 2026-11-06 there were six; `repair_test_lookup_async_stream` went out with the revert. |
+
+## Inter-Spec Conflicts
+
+- **001 FR-058 partition / SC-017 / 002 FR-025 vs remote-on-fetch** (001 FR-058; interfaces `idispatcher.rs:375-377`). B-45 resolves this on the spec side, with no code or interface change.
+- **001 FR-039 step (1) vs `contracts/errors.md:37`**: resolved by B-39 + B-40.
+- **001 FR-028 (free the slot on a failed read) vs FR-062's rationale (never free a buffer a drive may still write)**: A-15.
+
+## Recommendations
+
+1. Approve B-35…B-42 and B-44…B-49. All are spec-only and none edits `components/interfaces`. B-41 closes A-04.
+2. Do **not** apply the withdrawn B-43, nor anything for FR-036, until the separate `lookup_async` issue settles the pin question (N-13). When it does, also reconsider B-49's ALIGN option (route unknown-device warm copies to `warm_stream`, or delete the field).
+3. Before merging fix 2 to a memory-tier-only deployment, run gpu-services `tests/host_memory_without_spdk.rs` on a GPU host. It was not run here.
+4. Add `#[cfg(test)]` to the five `repair_test_*` module declarations.
+5. A-15 is the most significant remaining code task. A-16 and A-17 are small. Carry A-02, A-08, A-10 and the other open tasks unchanged.
 
 # Spec Drift Report — dispatcher (branch `fix/dispatcher-remove-clear-mt`, second sweep)
 

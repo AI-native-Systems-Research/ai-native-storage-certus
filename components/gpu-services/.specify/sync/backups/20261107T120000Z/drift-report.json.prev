@@ -1,0 +1,57 @@
+{
+  "generated": "2026-10-31T06:30:00Z",
+  "project": "gpu-services",
+  "branch": "specsync-b",
+  "head": "0a71990e",
+  "base": "a0292be6 (origin/unstable; fresh stamp)",
+  "scope": "delta: git diff a0292be6 HEAD -- components/gpu-services components/interfaces/src",
+  "summary": {
+    "specs_analyzed": 3,
+    "requirements_checked": 4,
+    "aligned": 2,
+    "drifted": 0,
+    "not_implemented": 0,
+    "unspecced_features": 1
+  },
+  "items": [
+    {
+      "requirement": "memcpy_batch_async",
+      "code": "src/lib.rs:973-1038",
+      "verdict": "unspecced",
+      "resolution": "B-1, B-2"
+    },
+    {
+      "requirement": "FR-014 (no-gpu returns error)",
+      "code": "src/lib.rs:981-985",
+      "verdict": "aligned",
+      "resolution": "none"
+    },
+    {
+      "requirement": "not_unsafe_ptr_arg_deref attrs / build.rs expects",
+      "code": "src/lib.rs:300,517,750,811,862,923; build.rs",
+      "verdict": "no behaviour change",
+      "resolution": "none"
+    },
+    {
+      "requirement": "GpuDmaBuffer Debug (interfaces)",
+      "code": "components/interfaces/src/igpu_services.rs:222",
+      "verdict": "aligned (no spec quotes Debug output)",
+      "resolution": "none"
+    }
+  ],
+  "not_reverified": "FR-001..025, SC-001..008, specs 002/003 (unchanged)",
+  "unspecced": [
+    {
+      "feature": "memcpy_batch_async",
+      "location": "src/lib.rs:973-1038",
+      "lines": 66,
+      "suggested_spec": "001 FR-026 (applied)"
+    }
+  ],
+  "conflicts": [],
+  "notes": [
+    "FFI binds the CUDA 13.x cudaMemcpyBatchAsync signature; CUDA 12.8 has an extra failIdx argument under the same symbol. Stated in FR-026."
+  ],
+  "drift_status": "clean (after apply; not stamped this run)",
+  "previous": "backups/20261031T054807Z/drift-report.json.prev"
+}

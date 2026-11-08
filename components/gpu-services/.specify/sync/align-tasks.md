@@ -188,3 +188,28 @@ NVMe reads; the MDTS ceiling is an operator responsibility documented via CLI
 help, not a runtime-validated constraint that the code violates). It was
 resolved by spec backfill (see `proposals.md` / `apply-report.md`), so **no
 ALIGN task** was generated this run.
+
+---
+
+# 2026-11-07 Apply — branch `fix/dispatcher-j33-repairs` (approved by Cornel)
+
+Based on: `.specify/sync/proposals.{json,md}` (generated 2026-11-07T12:00:00Z,
+HEAD `f4579a41f`, commit `9a79224a1`, A-14). P-1…P-4 (BACKFILL) were applied to
+`specs/` (see `apply-report.md`). There were **no ALIGN proposals**, so no
+code-change task was generated this run. One unapproved proposal carries an
+approval note and is recorded below as an open item.
+
+## OPEN: P-5 — `IGpuServices::register_host_memory` / `unregister_host_memory` doc comments (interfaces)
+
+**Status**: ⏳ OPEN (not approved, deferred)
+**Approval note (verbatim)**: "Cornel 2026-11-07: not in this PR (edits components/interfaces, re-stamps every component); bundle with the next interfaces change."
+**Spec Requirement**: Interface doc for spec 001 FR-015 / FR-016 and spec 002 FR-019 / FR-020 (as backfilled 2026-11-07).
+**Current Doc**: `components/interfaces/src/igpu_services.rs:788-790` says `register_host_memory` "Calls `cudaHostRegister` … then `spdk_mem_register`", and `:808-809` says `unregister_host_memory` "Calls `spdk_mem_unregister` then `cudaHostUnregister`". Both describe the SPDK step as unconditional. The code (`components/gpu-services/src/lib.rs:1179-1181`, `:1220-1225`) skips it when `interfaces::is_spdk_env_active()` is false.
+**Required Change**: Replace the two doc passages with the "New text" given under P-5 in `proposals.md`: the SPDK step runs only if an SPDK environment is active, and without one the memory is CUDA-pinned only. Optionally reword the `:786` summary. Leave the `# Errors` line at `:802` as it is.
+**Files to Modify**: `components/interfaces/src/igpu_services.rs` (doc comments only). This file is outside this pass's scope and was not edited.
+**Estimated Effort**: small (doc only). The cost is that every component's spec-sync digest changes and has to be re-stamped, which is why it should be bundled with the next interfaces change.
+
+### Acceptance Criteria
+- [ ] Doc comments at `igpu_services.rs:788-790` and `:808-809` state that the SPDK step is conditional on an active SPDK environment.
+- [ ] `cargo doc -p interfaces --no-deps --features spdk` is warning-free (the intra-doc link `[`crate::is_spdk_env_active`]` resolves only under `spdk`; if it does not, use plain backticks).
+- [ ] Done in the same change as another `components/interfaces` edit, and every component re-stamped once.
