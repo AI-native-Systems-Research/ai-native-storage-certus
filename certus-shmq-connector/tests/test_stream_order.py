@@ -3,7 +3,8 @@
 certus-server copies to and from vLLM's KV cache from another process, so it cannot be
 ordered after vLLM's stream; under async scheduling a store could read KV the GPU had not
 written yet (LongDocQA: the first documents' first token differed from recompute). The
-worker records a mark on the submitting thread's stream and the pool thread waits for it.
+worker records a mark on the submitting thread's stream; the worker's gate hands the job to
+the transfer pool once the mark is ready, so no pool thread waits on the GPU.
 These tests run without CUDA: a fake mark stands in for the CUDA event."""
 import threading
 import time
@@ -28,6 +29,12 @@ class _Mark:
         if self.fail:
             raise RuntimeError("CUDA error surfaced at synchronize")
         assert self.released.wait(5), "mark never released"
+
+    def query(self):
+        self.waited.set()
+        if self.fail:
+            raise RuntimeError("CUDA error surfaced at query")
+        return self.released.is_set()
 
 
 def _worker(transfer):
@@ -126,3 +133,113 @@ def test_transfer_async_routes_by_compats_current_spec_class():
     finally:
         conftest.build_fake_vllm((0, 20))
         importlib.reload(compat)
+
+
+def test_a_ready_load_is_not_held_behind_a_waiting_store(monkeypatch):
+    """The gate hands each job to the pool as soon as its own mark is ready: a load
+    whose blocks are written runs while a store still waits for a long prefill."""
+    slow, fast = _Mark(), _Mark()
+    fast.released.set()
+    marks = iter([slow, fast])
+    monkeypatch.setattr(handler, "_compute_stream_mark", lambda: next(marks))
+    ran = []
+    w = handler.worker_class()(ring=SimpleNamespace(), kv_regions=[], block_size_bytes=4096,
+                               executor=ThreadPoolExecutor(max_workers=1))
+    w._do_store = lambda ids, keys, skip: ran.append("store") or True
+    w._do_load = lambda ids, keys, skip: ran.append("load") or True
+    w.submit_store(1, _spec([0]), _spec([0]))     # waits on `slow`
+    w.submit_load(2, _spec([1]), _spec([1]))      # `fast` is already ready
+    deadline = time.monotonic() + 5
+    while "load" not in ran and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert ran == ["load"], "the ready load waited behind the store"
+    slow.released.set()
+    while "store" not in ran and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert ran == ["load", "store"]
+
+
+def _gate_with(executor):
+    g = handler._ReadyGate(executor)
+    return g
+
+
+def test_gate_resolves_a_job_the_pool_rejects():
+    ex = ThreadPoolExecutor(max_workers=1)
+    ex.shutdown()                                # submit now raises RuntimeError
+    g = _gate_with(ex)
+    m = _Mark(); m.released.set()
+    f = g.submit(m, lambda: True)
+    with pytest.raises(RuntimeError):
+        f.result(timeout=5)
+    g.close(timeout=1)
+
+
+def test_gate_resolves_a_cancelled_job():
+    import concurrent.futures as cf
+    ex = ThreadPoolExecutor(max_workers=1)
+    block = threading.Event()
+    ex.submit(block.wait)                        # occupy the only thread
+    g = _gate_with(ex)
+    m = _Mark(); m.released.set()
+    f = g.submit(m, lambda: True)
+    deadline = time.monotonic() + 5
+    while g._held and time.monotonic() < deadline:   # the gate has forwarded it
+        time.sleep(0.01)
+    time.sleep(0.05)                             # and it is queued behind `block`
+    ex.shutdown(wait=False, cancel_futures=True)
+    block.set()
+    with pytest.raises(cf.CancelledError):
+        f.result(timeout=5)
+    g.close(timeout=1)
+
+
+def test_gate_close_dispatches_held_jobs_and_refuses_new_ones():
+    g = _gate_with(ThreadPoolExecutor(max_workers=1))
+    m = _Mark()
+    f = g.submit(m, lambda: "ran")
+    threading.Timer(0.1, m.released.set).start()  # becomes ready during close()
+    g.close(timeout=5)
+    assert f.result(timeout=5) == "ran"
+    late = g.submit(_Mark(), lambda: "late")
+    with pytest.raises(RuntimeError):
+        late.result(timeout=1)
+    assert not g._thread.is_alive()
+
+
+def test_gate_close_fails_a_job_whose_mark_never_comes():
+    g = _gate_with(ThreadPoolExecutor(max_workers=1))
+    f = g.submit(_Mark(), lambda: "never")
+    g.close(timeout=0.2)
+    with pytest.raises(RuntimeError):
+        f.result(timeout=5)
+
+
+def _count_queries(n_jobs, seconds):
+    queries = []
+
+    class Counting(_Mark):
+        def query(self):
+            queries.append(1)
+            return False
+
+    g = _gate_with(ThreadPoolExecutor(max_workers=1))
+    for _ in range(n_jobs):
+        g.submit(Counting(), lambda: None)
+    time.sleep(seconds)
+    n = len(queries)
+    g.close(timeout=0.05)
+    return n / n_jobs                            # passes over the held jobs
+
+
+def test_gate_polls_a_small_queue_at_the_fast_interval():
+    # A few held jobs (multi-turn holds ~4): polled every ~50 us, no backoff, so a
+    # ready job is dispatched promptly. 0.3 s at 50 us is ~6,000 passes; at 1 ms ~300.
+    passes = _count_queries(4, 0.3)
+    assert passes > 1000, passes
+
+
+def test_gate_backs_off_with_many_held_jobs():
+    # Above _BACKOFF_HELD the interval doubles to 1 ms, bounding the query work.
+    passes = _count_queries(handler._ReadyGate._BACKOFF_HELD + 16, 0.5)
+    assert passes < 700, passes
