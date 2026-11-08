@@ -12,13 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-
-def _handler():
-    # Imported inside each test, not at collection: certus_shmq_connector.handler binds
-    # vLLM classes (GPULoadStoreSpec) from the fake vLLM present at its first import,
-    # and test_manager's tests compare against the fake they install themselves.
-    from certus_shmq_connector import handler
-    return handler
+from certus_shmq_connector import handler
 
 
 class _Mark:
@@ -37,10 +31,7 @@ class _Mark:
 
 
 def _worker(transfer):
-    # A class of its own, not handler.worker_class(): that caches the class against the
-    # fake vLLM installed now, and later tests install another (isinstance checks in
-    # transfer_async would then fail against the cached class).
-    w = _handler()._build_worker_class()(
+    w = handler.worker_class()(
         ring=SimpleNamespace(), kv_regions=[], block_size_bytes=4096,
         executor=ThreadPoolExecutor(max_workers=2))
     w._do_store = transfer
@@ -62,14 +53,13 @@ def test_no_cuda_means_no_mark(monkeypatch):
         return real_import(name, *a, **kw)
 
     monkeypatch.setattr(builtins, "__import__", no_torch)
-    h = _handler()
-    assert h._compute_stream_mark() is None
+    assert handler._compute_stream_mark() is None
 
 
 @pytest.mark.parametrize("direction", ["store", "load"])
 def test_transfer_starts_only_after_the_mark(monkeypatch, direction):
     mark = _Mark()
-    monkeypatch.setattr(_handler(), "_compute_stream_mark", lambda: mark)
+    monkeypatch.setattr(handler, "_compute_stream_mark", lambda: mark)
     started = threading.Event()
 
     def transfer(ids, keys, skip):
@@ -95,7 +85,7 @@ def test_transfer_starts_only_after_the_mark(monkeypatch, direction):
 
 
 def test_a_failed_wait_is_a_failed_job_not_a_crash(monkeypatch):
-    monkeypatch.setattr(_handler(), "_compute_stream_mark", lambda: _Mark(fail=True))
+    monkeypatch.setattr(handler, "_compute_stream_mark", lambda: _Mark(fail=True))
     called = []
     w = _worker(lambda ids, keys, skip: called.append(1) or True)
     w.submit_store(7, _spec([0]), _spec([0]))
@@ -107,3 +97,32 @@ def test_a_failed_wait_is_a_failed_job_not_a_crash(monkeypatch):
     assert [r.job_id for r in done] == [7]
     assert done[0].success is False and not called
     assert done[0].transfer_time == 0 or done[0].transfer_time >= 0
+
+
+def test_transfer_async_routes_by_compats_current_spec_class():
+    """transfer_async tells a store from a load with compat's GPULoadStoreSpec, read
+    on each call: after compat is reloaded against another vLLM (the tests rebuild a
+    fake per version), a class bound at handler's first import would no longer match
+    and a store would be sent down the load path."""
+    import importlib
+    import conftest
+    from certus_shmq_connector import compat
+    from certus_shmq_connector.mediums import BlockLocation, CertusLoadStoreSpec
+
+    w = handler.worker_class()(ring=SimpleNamespace(), kv_regions=[], block_size_bytes=4096,
+                               executor=ThreadPoolExecutor(max_workers=1))
+    seen = []
+    w.submit_store = lambda job_id, src, dst: seen.append("store") or True
+    w.submit_load = lambda job_id, src, dst: seen.append("load") or True
+    try:
+        conftest.build_fake_vllm((0, 20))      # a new GPULoadStoreSpec class
+        importlib.reload(compat)
+        from vllm.v1.kv_offload.mediums import GPULoadStoreSpec
+        gpu = GPULoadStoreSpec(block_ids=[0], group_sizes=[1], block_indices=[0])
+        certus = CertusLoadStoreSpec([BlockLocation(key=1)])
+        w.transfer_async(1, (gpu, certus))
+        w.transfer_async(2, (certus, gpu))
+        assert seen == ["store", "load"]
+    finally:
+        conftest.build_fake_vllm((0, 20))
+        importlib.reload(compat)

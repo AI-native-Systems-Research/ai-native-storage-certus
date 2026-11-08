@@ -27,8 +27,8 @@ from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 
+from . import compat as _compat
 from .compat import (
-    GPULoadStoreSpec,
     gpu_block_ids,
     gpu_first_block_index,
     make_transfer_result,
@@ -38,6 +38,14 @@ from .compat import (
 from .gpu import KvCacheIpc, scratch_ipc
 from .mediums import CertusLoadStoreSpec, ns_key
 from .ring import CHUNK_ABSENT, CHUNK_SCRATCH, encode_layer_table
+
+def __getattr__(name: str):
+    # ``handler.GPULoadStoreSpec`` stays importable, but is compat's current class
+    # (see transfer_async), not one bound at this module's first import.
+    if name == "GPULoadStoreSpec":
+        return _compat.GPULoadStoreSpec
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 # Direction tags. Only used to populate the ≤0.24 ``TransferResult.transfer_type``
 # (dropped on 0.26); kept as the natural label for a job's direction either way.
@@ -582,11 +590,17 @@ def _build_worker_class():
             source medium type — the spec yields this one instance for both
             medium pairs, so the direction is recovered from the spec shapes."""
             src_spec, dst_spec = spec
-            if isinstance(src_spec, GPULoadStoreSpec):
+            # Looked up through compat on each call, not bound at import: compat
+            # resolves vLLM's class lazily and is reloaded when the vLLM it fronts
+            # changes (the tests rebuild a fake vLLM per version); a name bound here
+            # at first import would keep an earlier class, and isinstance would then
+            # send a store down the load path.
+            gpu_spec = _compat.GPULoadStoreSpec
+            if isinstance(src_spec, gpu_spec):
                 assert isinstance(dst_spec, CertusLoadStoreSpec)
                 return self.submit_store(job_id, src_spec, dst_spec)
             assert isinstance(src_spec, CertusLoadStoreSpec)
-            assert isinstance(dst_spec, GPULoadStoreSpec)
+            assert isinstance(dst_spec, gpu_spec)
             return self.submit_load(job_id, src_spec, dst_spec)
 
         # ── transport bodies (run on the pool; identical across versions) ──
