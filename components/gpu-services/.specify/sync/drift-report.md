@@ -1,9 +1,9 @@
 ---
 spec_sync_component: gpu-services
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-11-05T10:19:50Z
-spec_sync_git_commit: 32ffa627f
-spec_sync_inputs_sha256: 299729308fc55c12916f5c4450c85fbb75bdf540ba8f4f05d2d4dbb55cb7c767
+spec_sync_synced_at: 2026-11-08T00:39:49Z
+spec_sync_git_commit: b153ea11e
+spec_sync_inputs_sha256: 2f3894e6af01459e77889ddde1e3295937364762b7cfe62eae259147ff4c18ea
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Apply 2026-11-07 (branch fix/dispatcher-j33-repairs, approved by Cornel).** Applied **P-1** (001 FR-015), **P-2** (001 FR-016), **P-3** (002 FR-019) and **P-4** (002 FR-020) as BACKFILL. Each now says the `spdk_mem_register` / `spdk_mem_unregister` step runs only when an SPDK environment is active (`interfaces::is_spdk_env_active()` at call time). P-2 also records the early `Err` on SPDK failure and the SHOULD to register and unregister under the same SPDK state. Each old text occurred exactly once and was replaced with the exact text from `proposals.md`. `Last-Synced` lines were added to both specs. Backups are in `backups/20261108T001701Z/`. **Tasks:** none (no ALIGN proposals). **Open:** **P-5** (`IGpuServices` doc comments in `components/interfaces/src/igpu_services.rs`) is not approved ("not in this PR (edits components/interfaces, re-stamps every component); bundle with the next interfaces change"). It is recorded as an open item in `align-tasks.md`. The two observations (call-time flag; unguarded `allocate_pinned_dma_buffer` → `src/dma.rs:259`) remain for a human. No `src/` or interfaces file changed. Frontmatter is not touched. **Status to stamp: `clean`.** Details are in `apply-report.md`.
