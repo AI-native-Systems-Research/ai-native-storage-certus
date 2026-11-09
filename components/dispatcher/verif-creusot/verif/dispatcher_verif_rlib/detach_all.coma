@@ -1,0 +1,270 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 544 0 544 38 *)
+
+let%span score = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 305 16 305 50
+let%span smethods = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 545 23 545 27
+let%span smethods'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 546 23 546 26
+let%span smethods'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 547 23 547 24
+let%span smethods'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 550 16 550 138
+let%span smethods'3 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 549 16 549 85
+let%span smethods'4 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 548 16 548 113
+let%span smethods'5 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 552 8 552 23
+let%span smethods'6 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 553 13 553 14
+let%span smethods'7 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 553 8 553 14
+let%span smethods'8 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 540 10 540 70
+let%span smethods'9 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 541 10 541 54
+let%span smethods'10 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 542 10 542 93
+let%span smethods'11 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 543 10 543 142
+let%span sboundary = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/boundary.rs" 499 10 499 71
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use map.Map
+use creusot.int.Int32
+use creusot.prelude.Any
+use int.Int
+
+type t_P = {
+  init: bool;
+  has_dm: bool;
+  has_mt: bool;
+  has_gpu: bool;
+  has_spdk: bool;
+  has_factory: bool;
+  has_rl: bool;
+  has_logger: bool;
+  max_att: UInt64.t;
+  bp_ms: UInt64.t;
+  nd: UInt64.t;
+  writer: bool;
+  ssd_ev: bool;
+  mt_ev: bool;
+  ring: bool;
+  chunk: UInt64.t;
+  stg: bool;
+  stg_bytes: UInt64.t;
+  warm: UInt64.t }
+
+type t_FMap_u64_Ent
+
+type t_FMap_u64_Slot
+
+type t_Ctr = {
+  promo_mem: int;
+  promo_gpu: int;
+  ev_mem: int;
+  ev_ssd: int;
+  hit_dram: int;
+  hit_ssd: int;
+  r_hit: int;
+  r_miss: int;
+  bp: int;
+  drop_full: int;
+  already: int;
+  blk_pin: int;
+  exhausted: int;
+  blk_unp: int }
+
+type t_Job = { key: UInt64.t; size: UInt32.t; dev: UInt64.t }
+
+type t_Option_usize = None | Some UInt64.t
+
+type t_Ev =
+  | H2D UInt64.t UInt64.t UInt64.t UInt64.t
+  | D2H UInt64.t UInt64.t UInt64.t UInt64.t
+  | Sync UInt64.t
+  | MtTouch UInt64.t
+  | MtGet UInt64.t
+  | MtBatchTouch
+  | MtRemove UInt64.t
+  | MtInsert UInt64.t
+  | DmTouch UInt64.t
+  | DmDemote UInt64.t
+  | DmRemove UInt64.t
+  | DmCreate UInt64.t
+  | DmPromote UInt64.t
+  | RelRead UInt64.t int
+  | RelWrite UInt64.t int
+  | Enq t_Job
+  | ExtFree UInt64.t UInt64.t
+  | Recover UInt64.t UInt64.t UInt32.t
+  | EmFormat UInt64.t
+  | EmInit UInt64.t
+  | Checkpoint UInt64.t
+  | DevSignal UInt64.t
+  | DevShutdown UInt64.t
+  | DevDetach UInt64.t
+  | Register
+  | Unregister
+  | Join
+  | Leave
+  | SsdRead UInt64.t UInt64.t
+  | SsdWrite UInt64.t UInt64.t
+  | RemoteFwd UInt64.t UInt32.t
+  | Spawn
+  | Cpu UInt64.t t_Option_usize
+
+type t_Ext = { key'0: UInt64.t; off'0: UInt64.t; size'0: UInt32.t }
+
+type t_W = {
+  dm: t_FMap_u64_Ent;
+  mt: t_FMap_u64_Slot;
+  used: int;
+  cap: int;
+  c: t_Ctr;
+  wq: Seq.seq t_Job;
+  log: Seq.seq t_Ev;
+  tick: int;
+  ob: Map.map int bool;
+  ob2: Map.map int bool;
+  og: Map.map int bool;
+  os: Map.map int bool;
+  ov: Map.map int UInt64.t;
+  ok: Map.map int (Seq.seq UInt64.t);
+  ext: Map.map int (Seq.seq t_Ext);
+  pool: bool;
+  cluster: bool;
+  threads: int;
+  rw: Map.map int UInt64.t;
+  cfree: Map.map int int;
+  wf: Map.map UInt64.t bool;
+  sdev: Map.map UInt64.t Int32.t }
+
+type t_S = { p: t_P; g: t_W }
+
+function lg [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 304 0 304 27] (w: t_W) (e: t_Ev) : t_W
+ = [%#score] { dm = w.dm;
+               mt = w.mt;
+               used = w.used;
+               cap = w.cap;
+               c = w.c;
+               wq = w.wq;
+               log = Seq.snoc w.log e;
+               tick = w.tick;
+               ob = w.ob;
+               ob2 = w.ob2;
+               og = w.og;
+               os = w.os;
+               ov = w.ov;
+               ok = w.ok;
+               ext = w.ext;
+               pool = w.pool;
+               cluster = w.cluster;
+               threads = w.threads;
+               rw = w.rw;
+               cfree = w.cfree;
+               wf = w.wf;
+               sdev = w.sdev }
+
+let bd_detach (s: MutBorrow.t t_S) (drive: UInt64.t) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:bd_detach ensures] [%#sboundary] s.final.p = s.current.p
+    /\ s.final.g = lg s.current.g (DevDetach drive)}
+    (! return {result}) ]
+
+predicate resolve_refmut_S [@inline:trivial] (_1: MutBorrow.t t_S) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_S
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let detach_all [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 544 0 544 38]
+  (s: MutBorrow.t t_S) (n: UInt64.t) (return (x: ())) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &g0 <- [%#smethods] s.current.g ] s1
+    | s1 = [ &p0 <- [%#smethods'0] s.current.p ] s2
+    | s2 = [ &i <- [%#smethods'1] (0: UInt64.t) ] s3
+    | s3 = [ &_old <- s.final ] s4
+    | s4 = bb3 ]
+  | bb3 = bb3
+    [ bb3 = {[@expl:inferred invariant: unchanged value] _old = s.final}
+      {[@expl:loop invariant #0] [%#smethods'4] s.current.p = p0
+      /\ UInt64.t'int i <= UInt64.t'int n
+      /\ s.current.g
+        = { dm = g0.dm;
+            mt = g0.mt;
+            used = g0.used;
+            cap = g0.cap;
+            c = g0.c;
+            wq = g0.wq;
+            log = s.current.g.log;
+            tick = g0.tick;
+            ob = g0.ob;
+            ob2 = g0.ob2;
+            og = g0.og;
+            os = g0.os;
+            ov = g0.ov;
+            ok = g0.ok;
+            ext = g0.ext;
+            pool = g0.pool;
+            cluster = g0.cluster;
+            threads = g0.threads;
+            rw = g0.rw;
+            cfree = g0.cfree;
+            wf = g0.wf;
+            sdev = g0.sdev }
+      /\ Seq.length s.current.g.log = Seq.length g0.log + UInt64.t'int i}
+      {[@expl:loop invariant #1] [%#smethods'3] forall q: int. 0 <= q /\ q < Seq.length g0.log
+        -> Seq.get s.current.g.log q = Seq.get g0.log q}
+      {[@expl:loop invariant #2] [%#smethods'2] forall j: int. 0 <= j /\ j < UInt64.t'int i
+        -> match Seq.get s.current.g.log (Seq.length g0.log + j) with
+          | DevDetach drive -> UInt64.t'int drive = j
+          | _ -> false
+          end}
+      (! s0)
+      [ s0 = [ &_36 <- UInt64.lt i n ] s1 | s1 = any [ br0 -> {_36 = false} (! bb7) | br1 -> {_36} (! bb5) ] ]
+      [ bb5 = s0
+        [ s0 = MutBorrow.borrow_mut <t_S> {s.current}
+            (fun (_bor: MutBorrow.t t_S) -> [ &_40 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
+        | s1 = bd_detach [%#smethods'5] {_40} {i} (fun (_x: ()) -> [ &_39 <- _x ] s2)
+        | s2 = UInt64.add [%#smethods'7] {i} {[%#smethods'6] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s3)
+        | s3 = bb3 ] ] ]
+  | bb7 = s0 [ s0 = -{resolve_refmut_S s}- s1 | s1 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & s: MutBorrow.t t_S = s
+  | & n: UInt64.t = n
+  | & g0: t_W = Any.any_l ()
+  | & p0: t_P = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _36: bool = Any.any_l ()
+  | & _39: () = Any.any_l ()
+  | & _40: MutBorrow.t t_S = Any.any_l ()
+  | & _old: t_S = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:detach_all ensures] ([@stop_split] [@expl:detach_all ensures #0] [%#smethods'8] s.final.p
+        = s.current.p
+      /\ s.final.g
+      = { dm = s.current.g.dm;
+          mt = s.current.g.mt;
+          used = s.current.g.used;
+          cap = s.current.g.cap;
+          c = s.current.g.c;
+          wq = s.current.g.wq;
+          log = s.final.g.log;
+          tick = s.current.g.tick;
+          ob = s.current.g.ob;
+          ob2 = s.current.g.ob2;
+          og = s.current.g.og;
+          os = s.current.g.os;
+          ov = s.current.g.ov;
+          ok = s.current.g.ok;
+          ext = s.current.g.ext;
+          pool = s.current.g.pool;
+          cluster = s.current.g.cluster;
+          threads = s.current.g.threads;
+          rw = s.current.g.rw;
+          cfree = s.current.g.cfree;
+          wf = s.current.g.wf;
+          sdev = s.current.g.sdev })
+    /\ ([@stop_split] [@expl:detach_all ensures #1] [%#smethods'9] Seq.length s.final.g.log
+      = Seq.length s.current.g.log + UInt64.t'int n)
+    /\ ([@stop_split] [@expl:detach_all ensures #2] [%#smethods'10] forall i: int. 0 <= i
+          /\ i < Seq.length s.current.g.log -> Seq.get s.final.g.log i = Seq.get s.current.g.log i)
+    /\ ([@stop_split] [@expl:detach_all ensures #3] [%#smethods'11] forall j: int. 0 <= j /\ j < UInt64.t'int n
+      -> match Seq.get s.final.g.log (Seq.length s.current.g.log + j) with
+        | DevDetach drive -> UInt64.t'int drive = j
+        | _ -> false
+        end)}
+    (! return {result}) ]

@@ -1,0 +1,338 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 134 0 134 49 *)
+
+let%span score = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 336 16 336 32
+let%span score'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 427 16 427 111
+let%span score'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 433 16 434 86
+let%span score'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 305 16 305 50
+let%span smethods = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 135 10 135 31
+let%span smethods'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 142 10 142 24
+let%span smethods'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 147 8 147 22
+let%span smethods'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 124 10 124 23
+let%span smethods'3 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 125 10 125 85
+let%span smethods'4 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 126 10 132 1
+let%span smethods'5 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 133 10 133 115
+let%span smethods'6 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 7 10 7 102
+let%span sboundary = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/boundary.rs" 105 10 105 23
+let%span sboundary'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/boundary.rs" 106 10 110 1
+let%span sboundary'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/boundary.rs" 311 10 311 70
+let%span sfmap = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+let%span sfmap'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use map.Map
+use creusot.int.Int32
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_P = {
+  init: bool;
+  has_dm: bool;
+  has_mt: bool;
+  has_gpu: bool;
+  has_spdk: bool;
+  has_factory: bool;
+  has_rl: bool;
+  has_logger: bool;
+  max_att: UInt64.t;
+  bp_ms: UInt64.t;
+  nd: UInt64.t;
+  writer: bool;
+  ssd_ev: bool;
+  mt_ev: bool;
+  ring: bool;
+  chunk: UInt64.t;
+  stg: bool;
+  stg_bytes: UInt64.t;
+  warm: UInt64.t }
+
+type t_FMap_u64_Ent
+
+type t_FMap_u64_Slot
+
+type t_Ctr = {
+  promo_mem: int;
+  promo_gpu: int;
+  ev_mem: int;
+  ev_ssd: int;
+  hit_dram: int;
+  hit_ssd: int;
+  r_hit: int;
+  r_miss: int;
+  bp: int;
+  drop_full: int;
+  already: int;
+  blk_pin: int;
+  exhausted: int;
+  blk_unp: int }
+
+type t_Job = { key: UInt64.t; size: UInt32.t; dev: UInt64.t }
+
+type t_Option_usize = None | Some UInt64.t
+
+type t_Ev =
+  | H2D UInt64.t UInt64.t UInt64.t UInt64.t
+  | D2H UInt64.t UInt64.t UInt64.t UInt64.t
+  | Sync UInt64.t
+  | MtTouch UInt64.t
+  | MtGet UInt64.t
+  | MtBatchTouch
+  | MtRemove UInt64.t
+  | MtInsert UInt64.t
+  | DmTouch UInt64.t
+  | DmDemote UInt64.t
+  | DmRemove UInt64.t
+  | DmCreate UInt64.t
+  | DmPromote UInt64.t
+  | RelRead UInt64.t int
+  | RelWrite UInt64.t int
+  | Enq t_Job
+  | ExtFree UInt64.t UInt64.t
+  | Recover UInt64.t UInt64.t UInt32.t
+  | EmFormat UInt64.t
+  | EmInit UInt64.t
+  | Checkpoint UInt64.t
+  | DevSignal UInt64.t
+  | DevShutdown UInt64.t
+  | DevDetach UInt64.t
+  | Register
+  | Unregister
+  | Join
+  | Leave
+  | SsdRead UInt64.t UInt64.t
+  | SsdWrite UInt64.t UInt64.t
+  | RemoteFwd UInt64.t UInt32.t
+  | Spawn
+  | Cpu UInt64.t t_Option_usize
+
+type t_Ext = { key'0: UInt64.t; off'0: UInt64.t; size'0: UInt32.t }
+
+type t_W = {
+  dm: t_FMap_u64_Ent;
+  mt: t_FMap_u64_Slot;
+  used: int;
+  cap: int;
+  c: t_Ctr;
+  wq: Seq.seq t_Job;
+  log: Seq.seq t_Ev;
+  tick: int;
+  ob: Map.map int bool;
+  ob2: Map.map int bool;
+  og: Map.map int bool;
+  os: Map.map int bool;
+  ov: Map.map int UInt64.t;
+  ok: Map.map int (Seq.seq UInt64.t);
+  ext: Map.map int (Seq.seq t_Ext);
+  pool: bool;
+  cluster: bool;
+  threads: int;
+  rw: Map.map int UInt64.t;
+  cfree: Map.map int int;
+  wf: Map.map UInt64.t bool;
+  sdev: Map.map UInt64.t Int32.t }
+
+type t_S = { p: t_P; g: t_W }
+
+type t_Ni = Dispatcher | DispatchMap | MemoryTier | Gpu | Spdk | Logger | Ring
+
+type t_IoK =
+  | Partition'0 UInt64.t UInt64.t UInt64.t
+  | Drive'0 UInt64.t
+  | Gpu'0
+  | Sync'0
+  | Ssd'0
+  | Promote'0
+  | Dm'0
+  | Remote'0
+  | Stream'0
+  | Channel'0
+  | Other'0
+
+type t_DE = NotInit t_Ni | InvalidParam | KeyNotFound UInt64.t | AlreadyExists UInt64.t | Alloc | Io t_IoK | Timeout
+
+type t_Result_unit_DE = Ok () | Err t_DE
+
+let ensure_initialized (s: t_S) (return (x: t_Result_unit_DE)) = any
+  [ return (result: t_Result_unit_DE) ->
+  {[@stop_split] [@expl:ensure_initialized ensures] [%#smethods'6] match result with
+      | Ok () -> s.p.init
+      | Err e -> not s.p.init /\ e = NotInit (Dispatcher)
+      end}
+    (! return {result}) ]
+
+predicate resolve_refmut_S [@inline:trivial] (_1: MutBorrow.t t_S) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_S
+
+let elim_Err (_x: t_Result_unit_DE) (return (f0: t_DE)) = any
+  [ _k (f0: t_DE) -> {Err f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Err] match _x with
+      | Err _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+type t_DmE =
+  | KeyNotFound'1
+  | AlreadyExists'1
+  | ActiveRefs'1
+  | Timeout'1
+  | InvalidSize'1
+  | Underflow'1
+  | Overflow'1
+  | NoWrite'1
+  | InvalidState'1
+  | Other'1
+
+type t_Result_unit_DmE = Ok'0 () | Err'0 t_DmE
+
+type t_Option_u64 = None'0 | Some'0 UInt64.t
+
+type t_Loc = Mem UInt64.t UInt32.t t_Option_u64 | Blk UInt64.t
+
+type t_Ent = { loc: t_Loc; es: UInt32.t; rr: UInt32.t; wr: UInt32.t }
+
+type t_Option_Ent = None'1 | Some'1 t_Ent
+
+function to_mapping_u64 (self: t_FMap_u64_Ent) : Map.map UInt64.t t_Option_Ent
+
+function get_u64 [@inline:trivial] (self: t_FMap_u64_Ent) (k: UInt64.t) : t_Option_Ent =
+  [%#sfmap'0] Map.get (to_mapping_u64 self) k
+
+meta "rewrite_def" function get_u64
+
+predicate contains_u64 [@inline:trivial] (self: t_FMap_u64_Ent) (k: UInt64.t) = [%#sfmap] get_u64 self k <> None'1
+
+meta "rewrite_def" predicate contains_u64
+
+predicate has [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 335 0 335 32] (w: t_W) (k: UInt64.t) =
+  [%#score] contains_u64 w.dm k
+
+function lg [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 304 0 304 27] (w: t_W) (e: t_Ev) : t_W
+ = [%#score'2] { dm = w.dm;
+                 mt = w.mt;
+                 used = w.used;
+                 cap = w.cap;
+                 c = w.c;
+                 wq = w.wq;
+                 log = Seq.snoc w.log e;
+                 tick = w.tick;
+                 ob = w.ob;
+                 ob2 = w.ob2;
+                 og = w.og;
+                 os = w.os;
+                 ov = w.ov;
+                 ok = w.ok;
+                 ext = w.ext;
+                 pool = w.pool;
+                 cluster = w.cluster;
+                 threads = w.threads;
+                 rw = w.rw;
+                 cfree = w.cfree;
+                 wf = w.wf;
+                 sdev = w.sdev }
+
+let dm_touch (s: MutBorrow.t t_S) (k: UInt64.t) (return (x: t_Result_unit_DmE)) = any
+  [ return (result: t_Result_unit_DmE) ->
+  {[@stop_split] [@expl:dm_touch ensures] ([@stop_split] [@expl:dm_touch ensures #0] [%#sboundary] s.final.p
+      = s.current.p)
+    /\ ([@stop_split] [@expl:dm_touch ensures #1] [%#sboundary'0] match result with
+      | Ok'0 () -> has s.current.g k /\ s.final.g = lg s.current.g (DmTouch k)
+      | Err'0 (KeyNotFound'1) -> not has s.current.g k /\ s.final.g = s.current.g
+      | Err'0 _ -> false
+      end)}
+    (! return {result}) ]
+
+let mt_touch (s: MutBorrow.t t_S) (k: UInt64.t) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:mt_touch ensures] [%#sboundary'1] s.final.p = s.current.p
+    /\ s.final.g = lg s.current.g (MtTouch k)}
+    (! return {result}) ]
+
+predicate log_ext [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 426 0 426 34] (a: t_W) (b: t_W) =
+  [%#score'0] Seq.length a.log <= Seq.length b.log
+  /\ (forall i: int. 0 <= i /\ i < Seq.length a.log -> Seq.get b.log i = Seq.get a.log i)
+
+predicate no_dma [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 432 0 432 33] (a: t_W) (b: t_W) =
+  [%#score'1] forall i: int. Seq.length a.log <= i /\ i < Seq.length b.log
+    -> match Seq.get b.log i with
+      | H2D _ _ _ _ -> false
+      | D2H _ _ _ _ -> false
+      | _ -> true
+      end
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let touch [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 134 0 134 49]
+  (s: MutBorrow.t t_S) (k: UInt64.t) (return (x: t_Result_unit_DE)) = (! bb0
+  [ bb0 = s0
+    [ s0 = ensure_initialized [%#smethods] {s.current} (fun (_x: t_Result_unit_DE) -> [ &_13 <- _x ] s1)
+    | s1 = any [ br0 (x0: ()) -> {_13 = Ok x0} (! bb4) | br1 (x0: t_DE) -> {_13 = Err x0} (! bb3) ] ]
+  | bb3 = s0
+    [ s0 = -{resolve_refmut_S s}- s1
+    | s1 = elim_Err {_13} (fun (r0: t_DE) -> [ &e <- r0 ] s2)
+    | s2 = [ &_ret <- Err e ] s3
+    | s3 = return {_ret} ]
+  | bb4 = any [ br0 -> {s.current.p.has_dm = false} (! bb7) | br1 -> {s.current.p.has_dm} (! bb6) ]
+  | bb6 = s0
+    [ s0 = MutBorrow.borrow_mut <t_S> {s.current}
+        (fun (_bor: MutBorrow.t t_S) -> [ &_26 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
+    | s1 = dm_touch [%#smethods'0] {_26} {k} (fun (_x: t_Result_unit_DmE) -> [ &_25 <- _x ] s2)
+    | s2 = any [ br0 (x0: ()) -> {_25 = Ok'0 x0} (! bb12) | br1 (x0: t_DmE) -> {_25 = Err'0 x0} (! bb11) ] ]
+  | bb11 = s0
+    [ s0 = -{resolve_refmut_S s}- s1
+    | s1 = [ &_30 <- KeyNotFound k ] s2
+    | s2 = [ &_ret <- Err _30 ] s3
+    | s3 = return {_ret} ]
+  | bb12 = any [ br0 -> {s.current.p.has_mt = false} (! bb14) | br1 -> {s.current.p.has_mt} (! bb13) ]
+  | bb13 = s0
+    [ s0 = MutBorrow.borrow_final <t_S> {s.current} {MutBorrow.get_id s}
+        (fun (_bor: MutBorrow.t t_S) -> [ &_35 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
+    | s1 = mt_touch [%#smethods'1] {_35} {k} (fun (_x: ()) -> [ &_34 <- _x ] s2)
+    | s2 = -{resolve_refmut_S s}- s3
+    | s3 = bb16 ]
+  | bb14 = s0 [ s0 = -{resolve_refmut_S s}- s1 | s1 = bb16 ]
+  | bb16 = s0 [ s0 = [ &_ret <- Ok _37 ] s1 | s1 = return {_ret} ]
+  | bb7 = s0
+    [ s0 = -{resolve_refmut_S s}- s1
+    | s1 = [ &_23 <- DispatchMap ] s2
+    | s2 = [ &_22 <- NotInit _23 ] s3
+    | s3 = [ &_ret <- Err _22 ] s4
+    | s4 = return {_ret} ] ]
+  [ & _ret: t_Result_unit_DE = Any.any_l ()
+  | & s: MutBorrow.t t_S = s
+  | & k: UInt64.t = k
+  | & _13: t_Result_unit_DE = Any.any_l ()
+  | & e: t_DE = Any.any_l ()
+  | & _22: t_DE = Any.any_l ()
+  | & _23: t_Ni = Any.any_l ()
+  | & _25: t_Result_unit_DmE = Any.any_l ()
+  | & _26: MutBorrow.t t_S = Any.any_l ()
+  | & _30: t_DE = Any.any_l ()
+  | & _34: () = Any.any_l ()
+  | & _35: MutBorrow.t t_S = Any.any_l ()
+  | & _37: () = Any.any_l () ])
+  [ return (result: t_Result_unit_DE) ->
+  {[@stop_split] [@expl:touch ensures] ([@stop_split] [@expl:touch ensures #0] [%#smethods'2] s.final.p = s.current.p)
+    /\ ([@stop_split] [@expl:touch ensures #1] [%#smethods'3] not s.current.p.init
+      -> result = Err (NotInit (Dispatcher)) /\ s.final.g = s.current.g)
+    /\ ([@stop_split] [@expl:touch ensures #2] [%#smethods'4] s.current.p.init /\ s.current.p.has_dm
+      -> match result with
+        | Ok () -> has s.current.g k
+        /\ s.final.g.dm = s.current.g.dm
+        /\ s.final.g.mt = s.current.g.mt
+        /\ s.final.g.log
+        = (if s.current.p.has_mt then
+          Seq.snoc (Seq.snoc s.current.g.log (DmTouch k)) (MtTouch k)
+        else
+          Seq.snoc s.current.g.log (DmTouch k)
+        )
+        | Err (KeyNotFound j) -> j = k /\ not has s.current.g k /\ s.final.g = s.current.g
+        | Err _ -> false
+        end)
+    /\ ([@stop_split] [@expl:touch ensures #3] [%#smethods'5] s.final.g.dm = s.current.g.dm
+    /\ s.final.g.mt = s.current.g.mt /\ log_ext s.current.g s.final.g /\ no_dma s.current.g s.final.g)}
+    (! return {result}) ]

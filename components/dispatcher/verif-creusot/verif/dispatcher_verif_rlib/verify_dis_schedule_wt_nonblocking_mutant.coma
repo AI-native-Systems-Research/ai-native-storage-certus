@@ -1,0 +1,251 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2020 0 2020 99 *)
+
+let%span score = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 611 16 611 102
+let%span score'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 305 16 305 50
+let%span smethods = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 424 11 424 20
+let%span smethods'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 425 10 425 23
+let%span smethods'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 426 10 426 85
+let%span smethods'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 427 10 429 120
+let%span sdrivers = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2021 4 2021 40
+let%span sdrivers'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2018 11 2018 32
+let%span sdrivers'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2019 10 2019 35
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use map.Map
+use creusot.int.Int32
+use creusot.prelude.Any
+
+type t_P = {
+  init: bool;
+  has_dm: bool;
+  has_mt: bool;
+  has_gpu: bool;
+  has_spdk: bool;
+  has_factory: bool;
+  has_rl: bool;
+  has_logger: bool;
+  max_att: UInt64.t;
+  bp_ms: UInt64.t;
+  nd: UInt64.t;
+  writer: bool;
+  ssd_ev: bool;
+  mt_ev: bool;
+  ring: bool;
+  chunk: UInt64.t;
+  stg: bool;
+  stg_bytes: UInt64.t;
+  warm: UInt64.t }
+
+type t_FMap_u64_Ent
+
+type t_FMap_u64_Slot
+
+type t_Ctr = {
+  promo_mem: int;
+  promo_gpu: int;
+  ev_mem: int;
+  ev_ssd: int;
+  hit_dram: int;
+  hit_ssd: int;
+  r_hit: int;
+  r_miss: int;
+  bp: int;
+  drop_full: int;
+  already: int;
+  blk_pin: int;
+  exhausted: int;
+  blk_unp: int }
+
+type t_Job = { key: UInt64.t; size: UInt32.t; dev: UInt64.t }
+
+type t_Option_usize = None | Some UInt64.t
+
+type t_Ev =
+  | H2D UInt64.t UInt64.t UInt64.t UInt64.t
+  | D2H UInt64.t UInt64.t UInt64.t UInt64.t
+  | Sync UInt64.t
+  | MtTouch UInt64.t
+  | MtGet UInt64.t
+  | MtBatchTouch
+  | MtRemove UInt64.t
+  | MtInsert UInt64.t
+  | DmTouch UInt64.t
+  | DmDemote UInt64.t
+  | DmRemove UInt64.t
+  | DmCreate UInt64.t
+  | DmPromote UInt64.t
+  | RelRead UInt64.t int
+  | RelWrite UInt64.t int
+  | Enq t_Job
+  | ExtFree UInt64.t UInt64.t
+  | Recover UInt64.t UInt64.t UInt32.t
+  | EmFormat UInt64.t
+  | EmInit UInt64.t
+  | Checkpoint UInt64.t
+  | DevSignal UInt64.t
+  | DevShutdown UInt64.t
+  | DevDetach UInt64.t
+  | Register
+  | Unregister
+  | Join
+  | Leave
+  | SsdRead UInt64.t UInt64.t
+  | SsdWrite UInt64.t UInt64.t
+  | RemoteFwd UInt64.t UInt32.t
+  | Spawn
+  | Cpu UInt64.t t_Option_usize
+
+type t_Ext = { key'0: UInt64.t; off'0: UInt64.t; size'0: UInt32.t }
+
+type t_W = {
+  dm: t_FMap_u64_Ent;
+  mt: t_FMap_u64_Slot;
+  used: int;
+  cap: int;
+  c: t_Ctr;
+  wq: Seq.seq t_Job;
+  log: Seq.seq t_Ev;
+  tick: int;
+  ob: Map.map int bool;
+  ob2: Map.map int bool;
+  og: Map.map int bool;
+  os: Map.map int bool;
+  ov: Map.map int UInt64.t;
+  ok: Map.map int (Seq.seq UInt64.t);
+  ext: Map.map int (Seq.seq t_Ext);
+  pool: bool;
+  cluster: bool;
+  threads: int;
+  rw: Map.map int UInt64.t;
+  cfree: Map.map int int;
+  wf: Map.map UInt64.t bool;
+  sdev: Map.map UInt64.t Int32.t }
+
+type t_S = { p: t_P; g: t_W }
+
+type t_Ni = Dispatcher | DispatchMap | MemoryTier | Gpu | Spdk | Logger | Ring
+
+type t_IoK =
+  | Partition'0 UInt64.t UInt64.t UInt64.t
+  | Drive'0 UInt64.t
+  | Gpu'0
+  | Sync'0
+  | Ssd'0
+  | Promote'0
+  | Dm'0
+  | Remote'0
+  | Stream'0
+  | Channel'0
+  | Other'0
+
+type t_DE = NotInit t_Ni | InvalidParam | KeyNotFound UInt64.t | AlreadyExists UInt64.t | Alloc | Io t_IoK | Timeout
+
+type t_Result_unit_DE = Ok () | Err t_DE
+
+predicate pinv [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 610 0 610 25] (p'0: t_P) =
+  [%#score] (p'0.init -> p'0.has_dm /\ p'0.has_mt /\ p'0.writer) /\ (not p'0.init -> not p'0.ssd_ev /\ not p'0.mt_ev)
+
+function lg [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 304 0 304 27] (w: t_W) (e: t_Ev) : t_W
+ = [%#score'0] { dm = w.dm;
+                 mt = w.mt;
+                 used = w.used;
+                 cap = w.cap;
+                 c = w.c;
+                 wq = w.wq;
+                 log = Seq.snoc w.log e;
+                 tick = w.tick;
+                 ob = w.ob;
+                 ob2 = w.ob2;
+                 og = w.og;
+                 os = w.os;
+                 ov = w.ov;
+                 ok = w.ok;
+                 ext = w.ext;
+                 pool = w.pool;
+                 cluster = w.cluster;
+                 threads = w.threads;
+                 rw = w.rw;
+                 cfree = w.cfree;
+                 wf = w.wf;
+                 sdev = w.sdev }
+
+function di [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 628 0 628 36] (k: UInt64.t) (n: UInt64.t) : UInt64.t
+
+let schedule_write_through (s: MutBorrow.t t_S) (key'1: UInt64.t) (size'1: UInt32.t) (return (x: t_Result_unit_DE)) =
+{[@stop_split] [@expl:schedule_write_through requires] [%#smethods] pinv s.current.p}
+  any
+  [ return (result: t_Result_unit_DE) ->
+  {[@stop_split] [@expl:schedule_write_through ensures] ([@stop_split] [@expl:schedule_write_through ensures #0] [%#smethods'0] s.final.p
+      = s.current.p)
+    /\ ([@stop_split] [@expl:schedule_write_through ensures #1] [%#smethods'1] not s.current.p.init
+      -> result = Err (NotInit (Dispatcher)) /\ s.final.g = s.current.g)
+    /\ ([@stop_split] [@expl:schedule_write_through ensures #2] [%#smethods'2] s.current.p.init
+    -> result = Ok ()
+    /\ s.final.g
+    = lg { dm = s.current.g.dm;
+           mt = s.current.g.mt;
+           used = s.current.g.used;
+           cap = s.current.g.cap;
+           c = s.current.g.c;
+           wq = Seq.snoc s.current.g.wq { key = key'1;
+                                          size = size'1;
+                                          dev = di key'1 (if UInt64.t'int s.current.p.nd = 0 then
+                                            (1: UInt64.t)
+                                          else
+                                            s.current.p.nd
+                                          ) };
+           log = s.current.g.log;
+           tick = s.current.g.tick;
+           ob = s.current.g.ob;
+           ob2 = s.current.g.ob2;
+           og = s.current.g.og;
+           os = s.current.g.os;
+           ov = s.current.g.ov;
+           ok = s.current.g.ok;
+           ext = s.current.g.ext;
+           pool = s.current.g.pool;
+           cluster = s.current.g.cluster;
+           threads = s.current.g.threads;
+           rw = s.current.g.rw;
+           cfree = s.current.g.cfree;
+           wf = s.current.g.wf;
+           sdev = s.current.g.sdev } (Enq { key = key'1;
+                                            size = size'1;
+                                            dev = di key'1 (if UInt64.t'int s.current.p.nd = 0 then
+                                              (1: UInt64.t)
+                                            else
+                                              s.current.p.nd
+                                            ) }))}
+    (! return {result}) ]
+
+predicate resolve_refmut_S [@inline:trivial] (_1: MutBorrow.t t_S) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_S
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dis_schedule_wt_nonblocking__mutant [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2020 0 2020 99]
+  (s: MutBorrow.t t_S) (key'1: UInt64.t) (size'1: UInt32.t) (return (x: t_Result_unit_DE)) =
+{[@stop_split] [@expl:verify_dis_schedule_wt_nonblocking__mutant requires] [%#sdrivers'0] pinv s.current.p
+  /\ s.current.p.init}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = MutBorrow.borrow_final <t_S> {s.current} {MutBorrow.get_id s}
+        (fun (_bor: MutBorrow.t t_S) -> [ &_8 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
+    | s1 = schedule_write_through [%#sdrivers] {_8} {key'1} {size'1} (fun (_x: t_Result_unit_DE) -> [ &_ret <- _x ] s2)
+    | s2 = -{resolve_refmut_S s}- s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: t_Result_unit_DE = Any.any_l ()
+  | & s: MutBorrow.t t_S = s
+  | & key'1: UInt64.t = key'1
+  | & size'1: UInt32.t = size'1
+  | & _8: MutBorrow.t t_S = Any.any_l () ])
+  [ return (result: t_Result_unit_DE) ->
+  {[@stop_split] [@expl:verify_dis_schedule_wt_nonblocking__mutant ensures] [%#sdrivers'1] s.final.g.wq
+    = s.current.g.wq}
+    (! return {result}) ]

@@ -1,0 +1,28 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_flush_to_ssd": { "prover": "alt-ergo", "time": 0.052 },
+      "vc_p_zero": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_refute_dis_flush_returns_count": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.084 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  null,
+                  { "prover": "alt-ergo", "time": 0.126 },
+                  { "prover": "z3", "time": 0.022 }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

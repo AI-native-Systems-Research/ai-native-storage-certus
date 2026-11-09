@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_bd_shutdown": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_shutdown_all_rev": { "prover": "alt-ergo", "time": 0.527 }
+    }
+  }
+}

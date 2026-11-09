@@ -1,0 +1,27 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_initialize": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_verify_dis_initialize_register_host_memory__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.046 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  { "prover": "alt-ergo", "time": 0.097 },
+                  null,
+                  { "prover": "alt-ergo", "time": 0.093 }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_rec_store_drop_on_full": { "prover": "z3", "time": 0.017 }
+    }
+  }
+}

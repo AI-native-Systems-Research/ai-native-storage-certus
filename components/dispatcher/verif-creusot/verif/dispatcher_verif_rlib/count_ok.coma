@@ -1,0 +1,52 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 1021 0 1021 47 *)
+
+let%span swell_founded = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span sbatch = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 1020 10 1020 11
+
+use creusot.int.UInt64
+use seq.Seq
+use int.Int
+
+type t_ServedBy = Dram | Ssd | Remote | Miss | SizeMismatch | Error
+
+type t_Ni = Dispatcher | DispatchMap | MemoryTier | Gpu | Spdk | Logger | Ring
+
+type t_IoK =
+  | Partition'0 UInt64.t UInt64.t UInt64.t
+  | Drive'0 UInt64.t
+  | Gpu'0
+  | Sync'0
+  | Ssd'0
+  | Promote'0
+  | Dm'0
+  | Remote'0
+  | Stream'0
+  | Channel'0
+  | Other'0
+
+type t_DE = NotInit t_Ni | InvalidParam | KeyNotFound UInt64.t | AlreadyExists UInt64.t | Alloc | Io t_IoK | Timeout
+
+type t_Result_unit_DE = Ok () | Err t_DE
+
+type t_Outcome = { served_by: t_ServedBy; result: t_Result_unit_DE }
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant o : Seq.seq t_Outcome
+
+constant n : int
+
+function count_ok [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 1021 0 1021 47] (o: Seq.seq t_Outcome) (n: int) : int
+
+goal vc_count_ok: if n <= 0 then
+    true
+  else
+    [@expl:variant decreases] well_founded_relation_Int ([%#sbatch] n) ([%#sbatch] n - 1)
+  

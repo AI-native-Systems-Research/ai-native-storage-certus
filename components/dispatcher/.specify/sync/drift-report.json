@@ -1,205 +1,118 @@
 {
-  "generated": "2026-10-31T06:30:00Z",
-  "analysis_run": "2026-10-31",
+  "generated": "2026-11-09T06:53:49Z",
+  "analysis_run": "2026-11-08",
   "project": "dispatcher",
-  "component_path": "components/dispatcher",
-  "branch": "specsync-b",
-  "head": "0a71990e",
-  "base": "a0292be6 (origin/unstable; fresh stamp)",
-  "scope": "delta: git diff a0292be6 HEAD -- components/dispatcher/src components/dispatcher/specs components/interfaces/src; plus data-model.md (approved) and spec 002 wire citations",
+  "branch": "fix/dispatcher-j33-repairs",
+  "head": "d45ab524d",
+  "base": "7c12e427a (merge-base with origin/unstable)",
+  "previous_analysis": "2026-11-07 at f4579a41f (applied 2026-11-07 as b153ea11e)",
+  "delta_since_previous": [
+    "709153326 takes fix 8 (408a568d0) out: src/pipeline.rs:1398-1411 again fails every job of the drive on Completion::Timeout; repair_test_nvme_timeout_fails_whole_drive.rs deleted",
+    "d45ab524d: repair_test modules #[cfg(test)]; absorb_drive_rw_stats under the data_drives write lock and read_write_stats under the read lock (A-16 closed in code); gpu-services unregister_host_memory always calls cudaHostUnregister",
+    "b153ea11e / 0eb3d3955: the 2026-11-07 apply in specs/** and its stamp"
+  ],
+  "mode": "BATCH, read-only; no build or test run",
   "summary": {
     "specs_analyzed": 2,
-    "requirements_checked": 25,
-    "aligned": 14,
-    "drifted": 11,
+    "requirements_checked": 119,
+    "aligned": 92,
+    "drifted": 12,
+    "drifted_new": 2,
+    "drifted_carried": 10,
     "not_implemented": 0,
+    "not_verifiable": 15,
     "unspecced_features": 0
   },
-  "items": [
+  "fixes": [
+    {"fix": 1, "commit": "11748983d", "code": "src/lib.rs:2143-2148, :2376-2382", "spec": "001 FR-012 (spec.md:344)", "spec_right": true, "proposals": []},
+    {"fix": 2, "commit": "7ac879dd4", "code": "src/lib.rs:2251-2275 (log_warn :2268-2271)", "spec": "001 FR-034 (spec.md:366), FR-035", "spec_right": true, "proposals": [], "note": "gpu-services d45ab524d (components/gpu-services/src/lib.rs:1218-1242) needs no dispatcher text; dispatcher ignores the result (src/lib.rs:2424)"},
+    {"fix": 3, "commit": "d65de1fef + d45ab524d", "code": "src/lib.rs:1833-1838, :2172-2176, :2445-2449, :4610-4615", "spec": "001 FR-056 read_write_stats (spec.md:398)", "spec_right": "rule yes; A-16 known-gap sentence now false", "proposals": ["B-52"]},
+    {"fix": 4, "commit": "03b05d505", "code": "src/lib.rs:1213-1242", "spec": "002 FR-033, FR-035", "spec_right": true, "proposals": [], "note": "A-17 still open (components/dispatch-map/src/lib.rs:576-578)"},
+    {"fix": 5, "commit": "b0720fe6c", "code": "src/lib.rs:2674-2683, :2748-2760, :3135-3142", "spec": "001 FR-039 step 1 (spec.md:371); contracts/errors.md:36-37", "spec_right": true, "proposals": [], "note": "N-14: single-key lookup_async maps any dm.lookup error to KeyNotFound (src/lib.rs:3500), documented in errors.md:37"},
+    {"fix": 6, "commit": "60838384e", "code": "src/lib.rs:878-923, :2794-2852", "spec": "001 FR-028 (spec.md:360), US-9 AS3", "spec_right": true, "proposals": []},
+    {"fix": 7, "commit": "9ff85fa51 reverted by 209b01de5", "code": "src/lib.rs:3428-3449, :3496 (sync copy, null stream)", "spec": "001 FR-036 (spec.md:368)", "spec_right": "as on unstable; carried, deferred", "proposals": [], "note": "B-43 and A-13 do not apply; N-13 kept"},
+    {"fix": 8, "commit": "408a568d0 reverted by 709153326", "code": "src/pipeline.rs:1398-1411 (whole drive failed on a timeout)", "spec": "001 FR-061 drain bullet (spec.md:471, applied B-44); US-11 AS4 (spec.md:219); header spec.md:43", "spec_right": false, "proposals": ["B-50", "B-51", "A-18"]},
+    {"fix": 9, "commit": "ec1b890ca", "code": "src/lib.rs:3439-3448, :3483-3495, :3365-3371; remote at fetch :3217-3220", "spec": "001 FR-058, SC-017; 002 FR-025", "spec_right": true, "proposals": []}
+  ],
+  "specs": [
     {
-      "requirement": "FR-003",
-      "spec": "001 spec.md:333",
-      "code": "src/lib.rs:3568-3580, :3826-3915",
-      "verdict": "aligned",
-      "resolution": "none (2026-10-30 entry verified)"
+      "id": "001-dispatcher-cache-interface",
+      "title": "Dispatcher Cache Interface (Memory-Tier Architecture)",
+      "aligned_changed_this_run": ["FR-001", "FR-012", "FR-028", "FR-034", "FR-035", "FR-037", "FR-039", "FR-052", "FR-058", "FR-062", "SC-017"],
+      "drifted": [
+        {
+          "requirement": "FR-061 (drain-all-on-error bullet)",
+          "spec_text": "A read timeout (`Completion::Timeout`) ... MUST NOT fail the drive's other jobs. Submission and draining continue, and after the loop each job whose segments did not all complete is reported `Err` with the timeout message — that job only (User Story 11 scenario 4).",
+          "actual": "Completion::Timeout sets every still-Ok job of drive d to Err, fills obj_failed[d] and stops submissions to d; landed objects are not delivered; no incomplete-object pass (fix 8 reverted)",
+          "location": "components/dispatcher/src/pipeline.rs:1398-1411, :1361, :1462-1472",
+          "spec_location": "specs/001-dispatcher-cache-interface/spec.md:471 (+ header :43)",
+          "severity": "major",
+          "fix": 8,
+          "proposal": "B-50"
+        },
+        {
+          "requirement": "US-11 AS4 (not counted)",
+          "spec_text": "the error is reported for that entry only; other entries in the batch continue to be processed independently",
+          "actual": "true for a per-segment read error and a GPU copy error; a timeout, invalid tag, unexpected completion, disconnect or failed send fail every job of that drive",
+          "location": "components/dispatcher/src/pipeline.rs:1253-1256, :1310-1322, :1385-1389, :1398-1454",
+          "spec_location": "specs/001-dispatcher-cache-interface/spec.md:219",
+          "severity": "moderate",
+          "fix": 8,
+          "proposal": "B-51, A-18"
+        },
+        {
+          "requirement": "FR-056 read_write_stats",
+          "spec_text": "Known gap, tracked as A-16: a call made while the drive list is being handed over can count the outgoing drives twice, so the next call can read lower.",
+          "actual": "fold and swap/clear under one data_drives write guard; reader holds the read guard across baseline + live drives; gap closed",
+          "location": "components/dispatcher/src/lib.rs:1833-1838, :2172-2176, :2445-2449, :4610-4615",
+          "spec_location": "specs/001-dispatcher-cache-interface/spec.md:398",
+          "severity": "minor",
+          "fix": 3,
+          "proposal": "B-52"
+        }
+      ],
+      "drifted_carried": [
+        {"requirement": "FR-003", "task": "A-05"},
+        {"requirement": "FR-013", "task": "A-1"},
+        {"requirement": "FR-017", "task": "A-5"},
+        {"requirement": "FR-018", "task": "A-4"},
+        {"requirement": "FR-036", "task": "deferred (lookup_async issue; N-13)"},
+        {"requirement": "FR-038", "task": "A-3"},
+        {"requirement": "FR-051", "task": "A-02", "location": "src/lib.rs:2732"},
+        {"requirement": "SC-003", "task": "A-12"}
+      ],
+      "not_implemented": [],
+      "not_verifiable": ["SC-012", "SC-014"]
     },
     {
-      "requirement": "FR-006",
-      "spec": "001 spec.md:336",
-      "code": "src/lib.rs:1421-1474; src/pipeline.rs:131-167",
-      "verdict": "drifted (zero-size rule unstated)",
-      "resolution": "B-32"
-    },
-    {
-      "requirement": "FR-019",
-      "spec": "001 spec.md:349",
-      "code": "src/pipeline.rs:1357-1383, :1474-1491",
-      "verdict": "drifted",
-      "resolution": "B-26"
-    },
-    {
-      "requirement": "FR-028",
-      "spec": "001 spec.md:358",
-      "code": "src/lib.rs:2932-2948 (slot released on Err incl. failed final sync)",
-      "verdict": "aligned",
-      "resolution": "none"
-    },
-    {
-      "requirement": "FR-036",
-      "spec": "001 spec.md:366",
-      "code": "src/lib.rs:3273-3305 (serve_memory_tier_to_gpu, synchronize=true)",
-      "verdict": "aligned",
-      "resolution": "none"
-    },
-    {
-      "requirement": "FR-037",
-      "spec": "001 spec.md:367",
-      "code": "src/lib.rs:1421-1435, :3568-3580",
-      "verdict": "aligned",
-      "resolution": "none"
-    },
-    {
-      "requirement": "FR-039 step (2)",
-      "spec": "001 spec.md:369",
-      "code": "src/lib.rs:2912-2932, :2978-2981",
-      "verdict": "drifted",
-      "resolution": "B-25"
-    },
-    {
-      "requirement": "FR-039 steps (4)-(6)",
-      "spec": "001 spec.md:369",
-      "code": "src/lib.rs:2751-2955",
-      "verdict": "aligned",
-      "resolution": "none"
-    },
-    {
-      "requirement": "FR-051",
-      "spec": "001 spec.md:381",
-      "code": "src/lib.rs:1485-1500, :3190",
-      "verdict": "aligned",
-      "resolution": "none"
-    },
-    {
-      "requirement": "FR-052",
-      "spec": "001 spec.md:382",
-      "code": "src/lib.rs:2517-2523, :2826-2832",
-      "verdict": "aligned",
-      "resolution": "none"
-    },
-    {
-      "requirement": "FR-053",
-      "spec": "001 spec.md:383",
-      "code": "src/lib.rs:1091-1141, :2781-2804, :2956-2975",
-      "verdict": "drifted (multi-region staged delivery unstated)",
-      "resolution": "B-31"
-    },
-    {
-      "requirement": "FR-056 copy_gpu_to_memory_async",
-      "spec": "001 spec.md:390",
-      "code": "src/lib.rs:3826-3915",
-      "verdict": "aligned",
-      "resolution": "none (2026-10-30 entry verified)"
-    },
-    {
-      "requirement": "FR-059",
-      "spec": "001 spec.md:405",
-      "code": "src/lib.rs:3601-3700",
-      "verdict": "aligned",
-      "resolution": "none"
-    },
-    {
-      "requirement": "FR-061",
-      "spec": "001 spec.md:462-467",
-      "code": "src/pipeline.rs:569-579, :1086-1512",
-      "verdict": "aligned",
-      "resolution": "none (optimizer's edit verified)"
-    },
-    {
-      "requirement": "Q&A pipelined reader",
-      "spec": "001 spec.md:317",
-      "code": "src/pipeline.rs:1474-1491",
-      "verdict": "drifted",
-      "resolution": "B-27"
-    },
-    {
-      "requirement": "Key Entities Pipelined Reader",
-      "spec": "001 spec.md:478",
-      "code": "src/pipeline.rs:1357-1491",
-      "verdict": "drifted",
-      "resolution": "B-28"
-    },
-    {
-      "requirement": "Implementation Notes",
-      "spec": "001 spec.md:518",
-      "code": "src/pipeline.rs:1366-1383",
-      "verdict": "drifted",
-      "resolution": "B-29"
-    },
-    {
-      "requirement": "US-11 AS4",
-      "spec": "001 spec.md:217",
-      "code": "src/pipeline.rs:1481-1491",
-      "verdict": "drifted",
-      "resolution": "B-30"
-    },
-    {
-      "requirement": "US-11 AS2/AS6",
-      "spec": "001 spec.md:215,219",
-      "code": "src/lib.rs:2978-2995",
-      "verdict": "aligned",
-      "resolution": "none"
-    },
-    {
-      "requirement": "data-model.md",
-      "spec": "001 data-model.md",
-      "code": "see drift-report.md note",
-      "verdict": "drifted (pre-existing, v0 model)",
-      "resolution": "B-33"
-    },
-    {
-      "requirement": "contracts/idispatcher.md",
-      "spec": "001 contracts/idispatcher.md",
-      "code": "components/interfaces/src/idispatcher.rs",
-      "verdict": "drifted (pre-existing, v0 contract, cited by no requirement)",
-      "resolution": "H-1 (not approved)"
-    },
-    {
-      "requirement": "contracts/errors.md",
-      "spec": "001 contracts/errors.md",
-      "code": "no change on this branch",
-      "verdict": "aligned",
-      "resolution": "none"
-    },
-    {
-      "requirement": "002 FR-008/FR-009, invariant 6",
-      "spec": "002 spec.md:476-481; contracts/idispatcher.md:116",
-      "code": "src/lib.rs:2643, :3207-3224",
-      "verdict": "aligned",
-      "resolution": "none"
-    },
-    {
-      "requirement": "002 shm-queue citations / FR-019",
-      "spec": "002 spec.md:75,82,269,270,527,536; served-by.md:115,119; research.md:50",
-      "code": "lib/shmq-dispatcher/src/translate.rs:1143-1152, wire.rs:194-205",
-      "verdict": "drifted (stale lines, pre-existing)",
-      "resolution": "B-34"
-    },
-    {
-      "requirement": "55a4ddd4 clippy",
-      "spec": "-",
-      "code": "src/lib.rs (rustfmt), repair_test_warm_copy_stops_at_zero_region.rs (rustfmt)",
-      "verdict": "no behaviour change",
-      "resolution": "none"
+      "id": "002-served-by-tier-attribution",
+      "title": "Serving-Tier Attribution (served_by)",
+      "aligned_changed_this_run": ["FR-025", "FR-033", "FR-035"],
+      "drifted": [],
+      "drifted_carried": [
+        {"requirement": "FR-027", "task": "A-08", "note": "worse: the only ServedBy::Ssd value test (repair_test_nvme_timeout_fails_whole_drive.rs) was deleted by 709153326; no Ssd, Remote, SizeMismatch tests"},
+        {"requirement": "SC-009", "task": "A-08"}
+      ],
+      "not_implemented": [],
+      "not_verifiable": ["SC-002", "SC-003", "SC-005", "SC-006", "SC-007", "SC-008", "FR-014", "FR-015", "FR-018", "FR-029", "FR-030", "FR-031", "FR-032"]
     }
   ],
-  "not_reverified": "FR-001..002, FR-004..005, FR-007..018, FR-020..035 except FR-028, FR-038, FR-040..050, FR-054..055, FR-057..058, FR-060, FR-062..063, all SCs, US-1..8 and 10, spec 002 beyond FR-008/009/019 (unchanged by the diff; 2026-10-27 verdicts stand)",
-  "unspecced": [],
-  "notes": [
-    "interfaces IDispatcher::copy_gpu_to_memory_async doc (components/interfaces/src/idispatcher.rs:748) says one cudaMemcpyAsync per region; now batched. Interfaces belongs to another agent; recorded only.",
-    "info/FLOW.svg shows the v0 flow; outside hashed inputs, not edited.",
-    "dispatcher lib tests: 145 passed (deps/spdk symlinked from the main checkout, gitignored)."
+  "align_tasks": [
+    {"id": "A-15", "state": "OPEN", "evidence": "src/pipeline.rs:1398-1411; src/lib.rs:3074-3076, :1014-1022"},
+    {"id": "A-16", "state": "CLOSED in code by d45ab524d", "evidence": "src/lib.rs:1833-1838, :2172-2176, :2445-2449, :4610-4615", "proposal": "B-52"},
+    {"id": "A-17", "state": "OPEN", "evidence": "components/dispatch-map/src/lib.rs:571-578; src/lib.rs:1223-1232"},
+    {"id": "A-18", "state": "NEW (proposed)", "evidence": "709153326 commit message; src/pipeline.rs:61, :1398-1411"}
   ],
-  "conflicts": [],
-  "drift_status": "clean (after apply; not stamped this run)",
-  "previous": "backups/20261031T054807Z/drift-report.json.prev"
+  "notes": [
+    {"id": "N-13", "from": "A-13 (2026-11-06)", "text": "An asynchronous lookup_async must hold the entry's read pin until its copy has completed (not merely queued) and record hit counters only then; lookup (src/lib.rs:2482-2493) inherits it. Today's synchronous code is safe (src/lib.rs:3429-3437). Deferred to the lookup_async issue."},
+    {"id": "N-14", "text": "lookup_async maps every dm.lookup error to KeyNotFound without retry (src/lib.rs:3500); documented in contracts/errors.md:37, so not drift; a writer-held live key reads as a miss on the single-key path. Decision needed, with the lookup_async issue."}
+  ],
+  "unspecced": [],
+  "closed_unspecced": [
+    {"feature": "repair_test_* modules compiled into the library", "closed_by": "d45ab524d", "location": "src/lib.rs:72-86, :4740-4754, :8754-8816 (25 declarations, all #[cfg(test)])"}
+  ],
+  "conflicts": [
+    "001 US-11 AS4 vs FR-061 after B-50 (resolved by B-51; code by A-18)",
+    "001 FR-028 vs FR-062 rationale (A-15)"
+  ]
 }

@@ -1,0 +1,31 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 531 0 531 33 *)
+
+let%span score = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 530 10 530 17
+let%span swell_founded = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use int.Int
+
+type t_Ipc = { addr: UInt64.t; size: UInt32.t }
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant r : Seq.seq t_Ipc
+
+function sum_sz [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 531 0 531 33] (r: Seq.seq t_Ipc) : int
+
+goal vc_sum_sz: if Seq.length r = 0 then
+    true
+  else
+    [@expl:variant decreases] well_founded_relation_Int ([%#score] Seq.length r) ([%#score] Seq.length (Seq.([..]) r 0 (Seq.length r
+    - 1)))
+  

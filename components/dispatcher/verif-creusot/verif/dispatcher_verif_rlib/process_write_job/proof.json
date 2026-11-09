@@ -1,0 +1,53 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_dm_convert_to_storage": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_dm_release_read": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_elim_Some'0": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_em_reserve": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_mt_peek": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_process_write_job": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "z3", "time": 0.064 },
+              { "prover": "alt-ergo", "time": 0.048 },
+              { "prover": "alt-ergo", "time": 0.056 },
+              { "prover": "z3", "time": 1.8 },
+              {
+                "tactic": "split_vc",
+                "children": [
+                  { "prover": "alt-ergo", "time": 0.057 },
+                  {
+                    "tactic": "split_vc",
+                    "children": [
+                      { "prover": "z3", "time": 0.08 },
+                      { "prover": "cvc5", "time": 0.36 },
+                      { "prover": "cvc5", "time": 0.633 },
+                      { "prover": "z3", "time": 0.105 }
+                    ]
+                  },
+                  { "prover": "z3", "time": 0.083 },
+                  { "prover": "z3", "time": 0.091 },
+                  { "prover": "z3", "time": 0.094 },
+                  { "prover": "z3", "time": 0.071 },
+                  { "prover": "z3", "time": 0.088 }
+                ]
+              },
+              { "prover": "z3", "time": 2.4 },
+              { "prover": "alt-ergo", "time": 0.068 },
+              { "prover": "alt-ergo", "time": 0.059 },
+              { "prover": "z3", "time": 0.039 },
+              { "prover": "alt-ergo", "time": 0.051 }
+            ]
+          }
+        ]
+      },
+      "vc_ssd_write": { "prover": "alt-ergo", "time": 0.026 }
+    }
+  }
+}

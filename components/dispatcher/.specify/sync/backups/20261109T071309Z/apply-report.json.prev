@@ -1,0 +1,56 @@
+{
+  "applied": "2026-11-08T00:23:07Z",
+  "sync_date": "2026-11-07",
+  "project": "dispatcher",
+  "branch": "fix/dispatcher-j33-repairs",
+  "head": "f4579a41f",
+  "base": "7c12e427a",
+  "mode": "BATCH: apply approved proposals only",
+  "approved_by": "Cornel",
+  "approval_note": "Approved by Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as proposed).",
+  "backup": "backups/20261108T002307Z",
+  "backed_up_files": [
+    "specs/001-dispatcher-cache-interface/spec.md",
+    "specs/001-dispatcher-cache-interface/contracts/errors.md",
+    "specs/002-served-by-tier-attribution/spec.md",
+    ".specify/sync/apply-report.md (as apply-report.md.prev)",
+    ".specify/sync/apply-report.json (as apply-report.json.prev)"
+  ],
+  "uniqueness_check": "every old_text occurred exactly once before replacement; 0 failures",
+  "changes": [
+    {"id": "B-35", "direction": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "FR-012", "change": "Modified"},
+    {"id": "B-36", "direction": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "FR-056 read_write_stats", "change": "Modified"},
+    {"id": "B-37", "direction": "BACKFILL", "spec": "002", "file": "specs/002-served-by-tier-attribution/spec.md", "requirement": "FR-033", "change": "Modified"},
+    {"id": "B-38", "direction": "BACKFILL", "spec": "002", "file": "specs/002-served-by-tier-attribution/spec.md", "requirement": "FR-035", "change": "Added sub-bullet", "option": "BACKFILL as proposed (ALIGN option not taken)"},
+    {"id": "B-39", "direction": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "FR-039 step (1)", "change": "Modified"},
+    {"id": "B-40", "direction": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/contracts/errors.md", "requirement": "Timeout row; IoError row (raised-by cell, condition cell)", "change": "Modified"},
+    {"id": "B-41", "direction": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "FR-028", "change": "Modified", "also": "A-04 marked RESOLVED in align-tasks.md"},
+    {"id": "B-42", "direction": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "User Story 9 AS3", "change": "Modified"},
+    {"id": "B-44", "direction": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "FR-061 drain-all-on-error bullet", "change": "Modified"},
+    {"id": "B-45", "direction": "BACKFILL", "spec": "001+002", "file": "specs/001-dispatcher-cache-interface/spec.md; specs/002-served-by-tier-attribution/spec.md", "requirement": "001 FR-058, 001 SC-017, 002 FR-025", "change": "Modified", "option": "BACKFILL as proposed (ALIGN option not taken; optional interfaces doc edit not made)"},
+    {"id": "B-46", "direction": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "FR-062 drive bullet; US-13 AS1", "change": "Modified"},
+    {"id": "B-47", "direction": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "FR-001 method inventory", "change": "Modified"},
+    {"id": "B-48", "direction": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "FR-034", "change": "Modified"},
+    {"id": "B-49", "direction": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "FR-037, FR-052", "change": "Modified"}
+  ],
+  "header_lines": ["spec 001: Last Synced 2026-11-07", "spec 002: Last Synced 2026-11-07"],
+  "new_specs": [],
+  "align_tasks_generated": [
+    {"id": "A-15", "spec": "001", "requirement": "FR-028 vs FR-062", "severity": "moderate", "confidence": "MEDIUM", "file": ".specify/sync/align-tasks.md"},
+    {"id": "A-16", "spec": "001", "requirement": "FR-056 read_write_stats", "severity": "minor", "confidence": "HIGH", "file": ".specify/sync/align-tasks.md"},
+    {"id": "A-17", "spec": "002", "requirement": "FR-033", "severity": "low", "confidence": "MEDIUM", "file": ".specify/sync/align-tasks.md"}
+  ],
+  "align_tasks_closed": [
+    {"id": "A-04", "by": "60838384e", "via": "B-41"}
+  ],
+  "not_applied": [],
+  "unapproved_with_note": [],
+  "withdrawn": ["B-43", "A-13"],
+  "closed_before_apply": ["A-14"],
+  "notes_recorded": ["N-13"],
+  "still_open": ["A-15", "A-16", "A-17", "A-1", "A-2", "A-3", "A-4", "A-5", "A-02", "A-05", "A-06", "A-08", "A-10", "A-12", "N-01", "RH-03", "DISP-RESERVE-REASON", "N-13"],
+  "source_files_changed": [],
+  "interfaces_files_changed": [],
+  "drift_report": "one Apply 2026-11-07 note inserted below the frontmatter; spec_sync_* frontmatter untouched",
+  "previous": "backups/20261108T002307Z/apply-report.json.prev"
+}

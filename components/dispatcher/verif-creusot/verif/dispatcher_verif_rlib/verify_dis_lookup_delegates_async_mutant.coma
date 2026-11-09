@@ -1,0 +1,233 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 765 0 765 134 *)
+
+let%span score = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 611 16 611 102
+let%span slookup = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/lookup.rs" 461 11 461 20
+let%span slookup'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/lookup.rs" 462 10 462 23
+let%span slookup'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/lookup.rs" 463 10 463 105
+let%span slookup'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/lookup.rs" 464 10 464 131
+let%span slookup'3 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/lookup.rs" 465 10 465 34
+let%span slookup'4 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/lookup.rs" 466 10 466 53
+let%span slookup'5 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/lookup.rs" 445 8 448 9
+let%span sdrivers = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 766 4 766 21
+let%span sdrivers'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 763 11 763 32
+let%span sdrivers'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 764 10 764 82
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use map.Map
+use creusot.int.Int32
+use creusot.prelude.Any
+
+type t_P = {
+  init: bool;
+  has_dm: bool;
+  has_mt: bool;
+  has_gpu: bool;
+  has_spdk: bool;
+  has_factory: bool;
+  has_rl: bool;
+  has_logger: bool;
+  max_att: UInt64.t;
+  bp_ms: UInt64.t;
+  nd: UInt64.t;
+  writer: bool;
+  ssd_ev: bool;
+  mt_ev: bool;
+  ring: bool;
+  chunk: UInt64.t;
+  stg: bool;
+  stg_bytes: UInt64.t;
+  warm: UInt64.t }
+
+type t_FMap_u64_Ent
+
+type t_FMap_u64_Slot
+
+type t_Ctr = {
+  promo_mem: int;
+  promo_gpu: int;
+  ev_mem: int;
+  ev_ssd: int;
+  hit_dram: int;
+  hit_ssd: int;
+  r_hit: int;
+  r_miss: int;
+  bp: int;
+  drop_full: int;
+  already: int;
+  blk_pin: int;
+  exhausted: int;
+  blk_unp: int }
+
+type t_Job = { key: UInt64.t; size: UInt32.t; dev: UInt64.t }
+
+type t_Option_usize = None | Some UInt64.t
+
+type t_Ev =
+  | H2D UInt64.t UInt64.t UInt64.t UInt64.t
+  | D2H UInt64.t UInt64.t UInt64.t UInt64.t
+  | Sync UInt64.t
+  | MtTouch UInt64.t
+  | MtGet UInt64.t
+  | MtBatchTouch
+  | MtRemove UInt64.t
+  | MtInsert UInt64.t
+  | DmTouch UInt64.t
+  | DmDemote UInt64.t
+  | DmRemove UInt64.t
+  | DmCreate UInt64.t
+  | DmPromote UInt64.t
+  | RelRead UInt64.t int
+  | RelWrite UInt64.t int
+  | Enq t_Job
+  | ExtFree UInt64.t UInt64.t
+  | Recover UInt64.t UInt64.t UInt32.t
+  | EmFormat UInt64.t
+  | EmInit UInt64.t
+  | Checkpoint UInt64.t
+  | DevSignal UInt64.t
+  | DevShutdown UInt64.t
+  | DevDetach UInt64.t
+  | Register
+  | Unregister
+  | Join
+  | Leave
+  | SsdRead UInt64.t UInt64.t
+  | SsdWrite UInt64.t UInt64.t
+  | RemoteFwd UInt64.t UInt32.t
+  | Spawn
+  | Cpu UInt64.t t_Option_usize
+
+type t_Ext = { key'0: UInt64.t; off'0: UInt64.t; size'0: UInt32.t }
+
+type t_W = {
+  dm: t_FMap_u64_Ent;
+  mt: t_FMap_u64_Slot;
+  used: int;
+  cap: int;
+  c: t_Ctr;
+  wq: Seq.seq t_Job;
+  log: Seq.seq t_Ev;
+  tick: int;
+  ob: Map.map int bool;
+  ob2: Map.map int bool;
+  og: Map.map int bool;
+  os: Map.map int bool;
+  ov: Map.map int UInt64.t;
+  ok: Map.map int (Seq.seq UInt64.t);
+  ext: Map.map int (Seq.seq t_Ext);
+  pool: bool;
+  cluster: bool;
+  threads: int;
+  rw: Map.map int UInt64.t;
+  cfree: Map.map int int;
+  wf: Map.map UInt64.t bool;
+  sdev: Map.map UInt64.t Int32.t }
+
+type t_S = { p: t_P; g: t_W }
+
+type t_Ipc = { addr'1: UInt64.t; size'1: UInt32.t }
+
+type t_Ni = Dispatcher | DispatchMap | MemoryTier | Gpu | Spdk | Logger | Ring
+
+type t_IoK =
+  | Partition'0 UInt64.t UInt64.t UInt64.t
+  | Drive'0 UInt64.t
+  | Gpu'0
+  | Sync'0
+  | Ssd'0
+  | Promote'0
+  | Dm'0
+  | Remote'0
+  | Stream'0
+  | Channel'0
+  | Other'0
+
+type t_DE = NotInit t_Ni | InvalidParam | KeyNotFound UInt64.t | AlreadyExists UInt64.t | Alloc | Io t_IoK | Timeout
+
+type t_Result_unit_DE = Ok () | Err t_DE
+
+type t_Result_u64_DE = Ok'0 UInt64.t | Err'0 t_DE
+
+type t_LPath = Early'0 | Miss'0 | Timeout'0 | Warm'0 | Cold'0
+
+type t_ServeG = { base: int; m: int; gpu_ok: bool }
+
+type t_Path = NoSlot | NoDrives | Slot | Staged
+
+type t_PsG = { path: t_Path; ptr: UInt64.t; read_ok: bool; promoted: bool; mid: t_W }
+
+type t_LaG = { path'0: t_LPath; after_lookup'0: t_W; warm'0: UInt64.t; dev'0: Int32.t; sv'0: t_ServeG; ps'0: t_PsG }
+
+type tup3_Result_u64_DE_LaG_W = { f0: t_Result_u64_DE; f1: t_LaG; f2: t_W }
+
+type tup2_Result_unit_DE_Snapshot_tup3_Result_u64_DE_LaG_W = { f0'0: t_Result_unit_DE; f1'0: tup3_Result_u64_DE_LaG_W }
+
+predicate pinv [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 610 0 610 25] (p'0: t_P) =
+  [%#score] (p'0.init -> p'0.has_dm /\ p'0.has_mt /\ p'0.writer) /\ (not p'0.init -> not p'0.ssd_ev /\ not p'0.mt_ev)
+
+predicate ret_stream_ok [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/lookup.rs" 443 0 443 56] (r: t_Result_u64_DE) (g'0: t_LaG) =
+  [%#slookup'5] match g'0.path'0 with
+    | Warm'0 -> match r with
+      | Ok'0 st -> UInt64.t'int st = UInt64.t'int g'0.warm'0
+      | _ -> true
+      end
+    | _ -> match r with
+      | Ok'0 st -> UInt64.t'int st = 0
+      | _ -> true
+      end
+    end
+
+let lookup (s: MutBorrow.t t_S) (key'1: UInt64.t) (h: t_Ipc)
+  (return (x: tup2_Result_unit_DE_Snapshot_tup3_Result_u64_DE_LaG_W)) =
+{[@stop_split] [@expl:lookup requires] [%#slookup] pinv s.current.p}
+  any
+  [ return (result: tup2_Result_unit_DE_Snapshot_tup3_Result_u64_DE_LaG_W) ->
+  {[@stop_split] [@expl:lookup ensures] ([@stop_split] [@expl:lookup ensures #0] [%#slookup'0] s.final.p = s.current.p)
+    /\ ([@stop_split] [@expl:lookup ensures #1] [%#slookup'1] match result.f1'0.f0 with
+        | Err'0 e -> result.f0'0 = Err e
+        | Ok'0 st -> UInt64.t'int st = 0 -> result.f0'0 = Ok ()
+        end)
+    /\ ([@stop_split] [@expl:lookup ensures #2] [%#slookup'2] match result.f1'0.f0 with
+        | Ok'0 st -> UInt64.t'int st <> 0 -> result.f0'0 = Ok () \/ result.f0'0 = Err (Io (Sync'0))
+        | Err'0 _ -> true
+        end)
+    /\ ([@stop_split] [@expl:lookup ensures #3] [%#slookup'3] s.final.g = result.f1'0.f2)
+    /\ ([@stop_split] [@expl:lookup ensures #4] [%#slookup'4] ret_stream_ok result.f1'0.f0 result.f1'0.f1)}
+    (! return {result}) ]
+
+predicate resolve_refmut_S [@inline:trivial] (_1: MutBorrow.t t_S) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_S
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dis_lookup_delegates_async__mutant [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 765 0 765 134]
+  (s: MutBorrow.t t_S) (key'1: UInt64.t) (h: t_Ipc)
+  (return (x: tup2_Result_unit_DE_Snapshot_tup3_Result_u64_DE_LaG_W)) =
+{[@stop_split] [@expl:verify_dis_lookup_delegates_async__mutant requires] [%#sdrivers'0] pinv s.current.p
+  /\ s.current.p.init}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = MutBorrow.borrow_final <t_S> {s.current} {MutBorrow.get_id s}
+        (fun (_bor: MutBorrow.t t_S) -> [ &_7 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
+    | s1 = lookup [%#sdrivers] {_7} {key'1} {h}
+        (fun (_x: tup2_Result_unit_DE_Snapshot_tup3_Result_u64_DE_LaG_W) -> [ &_ret <- _x ] s2)
+    | s2 = -{resolve_refmut_S s}- s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: tup2_Result_unit_DE_Snapshot_tup3_Result_u64_DE_LaG_W = Any.any_l ()
+  | & s: MutBorrow.t t_S = s
+  | & key'1: UInt64.t = key'1
+  | & h: t_Ipc = h
+  | & _7: MutBorrow.t t_S = Any.any_l () ])
+  [ return (result: tup2_Result_unit_DE_Snapshot_tup3_Result_u64_DE_LaG_W) ->
+  {[@stop_split] [@expl:verify_dis_lookup_delegates_async__mutant ensures] [%#sdrivers'1] result.f0'0 = Ok ()
+    /\ match result.f1'0.f0 with
+      | Err'0 _ -> true
+      | _ -> false
+      end}
+    (! return {result}) ]

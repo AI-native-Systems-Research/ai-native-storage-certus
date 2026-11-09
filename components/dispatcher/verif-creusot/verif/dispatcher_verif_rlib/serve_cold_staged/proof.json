@@ -1,0 +1,18 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_chan_checkout": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_deref_Vec_Ipc_Global": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_device_streams_for": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_drive_index": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_index_Vec_Ipc_Global": { "prover": "alt-ergo", "time": 0.014 },
+      "vc_len_Ipc": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_pipe_read_gpu": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_serve_cold_staged": { "prover": "z3", "time": 1.1 },
+      "vc_serve_memory_tier_to_gpu": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_ssd_read_dram": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_stg_checkout": { "prover": "alt-ergo", "time": 0.019 }
+    }
+  }
+}

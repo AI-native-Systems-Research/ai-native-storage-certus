@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lookup_async": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_verify_dis_lookup_async_warm_stream": {
+        "prover": "z3",
+        "time": 0.055
+      }
+    }
+  }
+}

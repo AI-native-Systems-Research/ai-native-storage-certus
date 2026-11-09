@@ -1,0 +1,441 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 40 0 40 61 *)
+
+let%span score = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 427 16 427 111
+let%span score'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 336 16 336 32
+let%span score'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 341 16 341 30
+let%span score'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 366 16 369 5
+let%span score'3 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 602 16 603 96
+let%span score'4 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 590 16 590 40
+let%span score'5 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 596 16 596 65
+let%span score'6 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 305 16 305 50
+let%span score'7 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 584 16 584 68
+let%span smapping = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
+let%span sboundary = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/boundary.rs" 13 10 13 23
+let%span sboundary'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/boundary.rs" 14 10 23 1
+let%span sboundary'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/boundary.rs" 45 10 45 23
+let%span sboundary'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/boundary.rs" 46 10 52 1
+let%span sfmap = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sfmap'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+let%span sfmap'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/fmap.rs" 96 8 96 34
+let%span soption = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/std/option.rs" 796 15 796 27
+let%span soption'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/std/option.rs" 798 8 801 9
+let%span slogic = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic.rs" 39 11 39 28
+let%span slogic'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic.rs" 40 10 40 19
+let%span sbg = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 41 10 41 25
+let%span sbg'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 47 52 47 53
+let%span sbg'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 47 20 47 55
+let%span sbg'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 43 52 43 53
+let%span sbg'3 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 43 20 43 55
+let%span sbg'4 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 37 10 37 114
+let%span sbg'5 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 38 10 38 64
+let%span sbg'6 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 39 10 39 106
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use map.Map
+use creusot.int.Int32
+use creusot.prelude.Any
+use int.Int
+
+type t_P = {
+  init: bool;
+  has_dm: bool;
+  has_mt: bool;
+  has_gpu: bool;
+  has_spdk: bool;
+  has_factory: bool;
+  has_rl: bool;
+  has_logger: bool;
+  max_att: UInt64.t;
+  bp_ms: UInt64.t;
+  nd: UInt64.t;
+  writer: bool;
+  ssd_ev: bool;
+  mt_ev: bool;
+  ring: bool;
+  chunk: UInt64.t;
+  stg: bool;
+  stg_bytes: UInt64.t;
+  warm: UInt64.t }
+
+type t_FMap_u64_Ent
+
+type t_FMap_u64_Slot
+
+type t_Ctr = {
+  promo_mem: int;
+  promo_gpu: int;
+  ev_mem: int;
+  ev_ssd: int;
+  hit_dram: int;
+  hit_ssd: int;
+  r_hit: int;
+  r_miss: int;
+  bp: int;
+  drop_full: int;
+  already: int;
+  blk_pin: int;
+  exhausted: int;
+  blk_unp: int }
+
+type t_Job = { key: UInt64.t; size: UInt32.t; dev: UInt64.t }
+
+type t_Option_usize = None | Some UInt64.t
+
+type t_Ev =
+  | H2D UInt64.t UInt64.t UInt64.t UInt64.t
+  | D2H UInt64.t UInt64.t UInt64.t UInt64.t
+  | Sync UInt64.t
+  | MtTouch UInt64.t
+  | MtGet UInt64.t
+  | MtBatchTouch
+  | MtRemove UInt64.t
+  | MtInsert UInt64.t
+  | DmTouch UInt64.t
+  | DmDemote UInt64.t
+  | DmRemove UInt64.t
+  | DmCreate UInt64.t
+  | DmPromote UInt64.t
+  | RelRead UInt64.t int
+  | RelWrite UInt64.t int
+  | Enq t_Job
+  | ExtFree UInt64.t UInt64.t
+  | Recover UInt64.t UInt64.t UInt32.t
+  | EmFormat UInt64.t
+  | EmInit UInt64.t
+  | Checkpoint UInt64.t
+  | DevSignal UInt64.t
+  | DevShutdown UInt64.t
+  | DevDetach UInt64.t
+  | Register
+  | Unregister
+  | Join
+  | Leave
+  | SsdRead UInt64.t UInt64.t
+  | SsdWrite UInt64.t UInt64.t
+  | RemoteFwd UInt64.t UInt32.t
+  | Spawn
+  | Cpu UInt64.t t_Option_usize
+
+type t_Ext = { key'0: UInt64.t; off'0: UInt64.t; size'0: UInt32.t }
+
+type t_W = {
+  dm: t_FMap_u64_Ent;
+  mt: t_FMap_u64_Slot;
+  used: int;
+  cap: int;
+  c: t_Ctr;
+  wq: Seq.seq t_Job;
+  log: Seq.seq t_Ev;
+  tick: int;
+  ob: Map.map int bool;
+  ob2: Map.map int bool;
+  og: Map.map int bool;
+  os: Map.map int bool;
+  ov: Map.map int UInt64.t;
+  ok: Map.map int (Seq.seq UInt64.t);
+  ext: Map.map int (Seq.seq t_Ext);
+  pool: bool;
+  cluster: bool;
+  threads: int;
+  rw: Map.map int UInt64.t;
+  cfree: Map.map int int;
+  wf: Map.map UInt64.t bool;
+  sdev: Map.map UInt64.t Int32.t }
+
+type t_S = { p: t_P; g: t_W }
+
+type t_Lr = NotExist | Mismatch | Blk UInt64.t | Mem UInt64.t UInt32.t
+
+type t_DmE =
+  | KeyNotFound
+  | AlreadyExists
+  | ActiveRefs
+  | Timeout
+  | InvalidSize
+  | Underflow
+  | Overflow
+  | NoWrite
+  | InvalidState
+  | Other
+
+type t_Result_Lr_DmE = Ok t_Lr | Err t_DmE
+
+type t_Option_u64 = None'0 | Some'0 UInt64.t
+
+type t_Loc = Mem'0 UInt64.t UInt32.t t_Option_u64 | Blk'0 UInt64.t
+
+type t_Ent = { loc: t_Loc; es: UInt32.t; rr: UInt32.t; wr: UInt32.t }
+
+type t_Option_Ent = None'1 | Some'1 t_Ent
+
+function to_mapping_u64 (self: t_FMap_u64_Ent) : Map.map UInt64.t t_Option_Ent
+
+function get_u64 [@inline:trivial] (self: t_FMap_u64_Ent) (k: UInt64.t) : t_Option_Ent =
+  [%#sfmap] Map.get (to_mapping_u64 self) k
+
+meta "rewrite_def" function get_u64
+
+predicate contains_u64 [@inline:trivial] (self: t_FMap_u64_Ent) (k: UInt64.t) = [%#sfmap'0] get_u64 self k <> None'1
+
+meta "rewrite_def" predicate contains_u64
+
+predicate has [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 335 0 335 32] (w: t_W) (k: UInt64.t) =
+  [%#score'0] contains_u64 w.dm k
+
+predicate index_Mapping_Ent_bool [@inline:trivial] (self: Map.map t_Ent bool) (a: t_Ent) = [%#smapping] Map.get self a
+
+meta "rewrite_def" predicate index_Mapping_Ent_bool
+
+function such_that_Ent (p'0: Map.map t_Ent bool) : t_Ent
+
+axiom such_that_Ent_spec:
+  forall p'0: Map.map t_Ent bool [such_that_Ent p'0]. ([%#slogic] exists x: t_Ent. index_Mapping_Ent_bool p'0 x)
+    -> ([%#slogic'0] index_Mapping_Ent_bool p'0 (such_that_Ent p'0))
+
+function unwrap_Option_Ent (self: t_Option_Ent) : t_Ent = [%#soption'0] match self with
+    | Some'1 x -> x
+    | None'1 -> such_that_Ent (fun (__0: t_Ent) -> true)
+    end
+
+function lookup_u64 [@inline:trivial] (self: t_FMap_u64_Ent) (k: UInt64.t) : t_Ent =
+  [%#sfmap'1] unwrap_Option_Ent (get_u64 self k)
+
+meta "rewrite_def" function lookup_u64
+
+function ent [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 340 0 340 31] (w: t_W) (k: UInt64.t) : t_Ent
+ = [%#score'1] lookup_u64 w.dm k
+
+constant const_MAX: UInt32.t = (4294967295: UInt32.t)
+
+function lr_of [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 365 0 365 26] (l: t_Loc) : t_Lr
+ = [%#score'2] match l with
+    | Blk'0 off -> Blk off
+    | Mem'0 ptr size'1 _ -> Mem ptr size'1
+    end
+
+predicate others [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 583 0 583 41] (a: t_W) (b: t_W) (k: UInt64.t) =
+  [%#score'7] forall j: UInt64.t. j <> k -> get_u64 b.dm j = get_u64 a.dm j
+
+predicate ent_rr [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 601 0 601 49] (a: t_W) (b: t_W) (k: UInt64.t) (d: int) =
+  [%#score'3] has a k
+  /\ has b k
+  /\ (ent b k).loc = (ent a k).loc
+  /\ (ent b k).es = (ent a k).es
+  /\ (ent b k).wr = (ent a k).wr /\ UInt32.t'int (ent b k).rr = UInt32.t'int (ent a k).rr + d /\ others a b k
+
+predicate only_dm [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 589 0 589 34] (a: t_W) (b: t_W) =
+  [%#score'4] b
+  = { dm = b.dm;
+      mt = a.mt;
+      used = a.used;
+      cap = a.cap;
+      c = a.c;
+      wq = a.wq;
+      log = a.log;
+      tick = a.tick;
+      ob = a.ob;
+      ob2 = a.ob2;
+      og = a.og;
+      os = a.os;
+      ov = a.ov;
+      ok = a.ok;
+      ext = a.ext;
+      pool = a.pool;
+      cluster = a.cluster;
+      threads = a.threads;
+      rw = a.rw;
+      cfree = a.cfree;
+      wf = a.wf;
+      sdev = a.sdev }
+
+let dm_lookup (s: MutBorrow.t t_S) (k: UInt64.t) (return (x: t_Result_Lr_DmE)) = any
+  [ return (result: t_Result_Lr_DmE) ->
+  {[@stop_split] [@expl:dm_lookup ensures] ([@stop_split] [@expl:dm_lookup ensures #0] [%#sboundary] s.final.p
+      = s.current.p)
+    /\ ([@stop_split] [@expl:dm_lookup ensures #1] [%#sboundary'0] match result with
+      | Ok (NotExist) -> not has s.current.g k /\ s.final.g = s.current.g
+      | Ok (Mismatch) -> false
+      | Ok r -> has s.current.g k
+      /\ UInt32.t'int (ent s.current.g k).wr = 0
+      /\ UInt32.t'int (ent s.current.g k).rr < UInt32.t'int const_MAX
+      /\ r = lr_of (ent s.current.g k).loc /\ ent_rr s.current.g s.final.g k 1 /\ only_dm s.current.g s.final.g
+      | Err (Timeout) -> has s.current.g k /\ UInt32.t'int (ent s.current.g k).wr > 0 /\ s.final.g = s.current.g
+      | Err (Overflow) -> has s.current.g k
+      /\ UInt32.t'int (ent s.current.g k).wr = 0
+      /\ UInt32.t'int (ent s.current.g k).rr = UInt32.t'int const_MAX /\ s.final.g = s.current.g
+      | Err _ -> false
+      end)}
+    (! return {result}) ]
+
+predicate resolve_refmut_S [@inline:trivial] (_1: MutBorrow.t t_S) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_S
+
+let elim_Ok (_x: t_Result_Lr_DmE) (return (f0: t_Lr)) = any
+  [ _k (f0: t_Lr) -> {Ok f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Ok] match _x with
+      | Ok _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+type t_Result_unit_DmE = Ok'0 () | Err'0 t_DmE
+
+predicate only_dm_log [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 595 0 595 45] (a: t_W) (b: t_W) (e: t_Ev) =
+  [%#score'5] b
+  = { dm = b.dm;
+      mt = a.mt;
+      used = a.used;
+      cap = a.cap;
+      c = a.c;
+      wq = a.wq;
+      log = Seq.snoc a.log e;
+      tick = a.tick;
+      ob = a.ob;
+      ob2 = a.ob2;
+      og = a.og;
+      os = a.os;
+      ov = a.ov;
+      ok = a.ok;
+      ext = a.ext;
+      pool = a.pool;
+      cluster = a.cluster;
+      threads = a.threads;
+      rw = a.rw;
+      cfree = a.cfree;
+      wf = a.wf;
+      sdev = a.sdev }
+
+function lg [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 304 0 304 27] (w: t_W) (e: t_Ev) : t_W
+ = [%#score'6] { dm = w.dm;
+                 mt = w.mt;
+                 used = w.used;
+                 cap = w.cap;
+                 c = w.c;
+                 wq = w.wq;
+                 log = Seq.snoc w.log e;
+                 tick = w.tick;
+                 ob = w.ob;
+                 ob2 = w.ob2;
+                 og = w.og;
+                 os = w.os;
+                 ov = w.ov;
+                 ok = w.ok;
+                 ext = w.ext;
+                 pool = w.pool;
+                 cluster = w.cluster;
+                 threads = w.threads;
+                 rw = w.rw;
+                 cfree = w.cfree;
+                 wf = w.wf;
+                 sdev = w.sdev }
+
+let dm_release_read (s: MutBorrow.t t_S) (k: UInt64.t) (own: int) (return (x: t_Result_unit_DmE)) = any
+  [ return (result: t_Result_unit_DmE) ->
+  {[@stop_split] [@expl:dm_release_read ensures] ([@stop_split] [@expl:dm_release_read ensures #0] [%#sboundary'1] s.final.p
+      = s.current.p)
+    /\ ([@stop_split] [@expl:dm_release_read ensures #1] [%#sboundary'2] match result with
+      | Ok'0 () -> has s.current.g k
+      /\ UInt32.t'int (ent s.current.g k).rr > 0
+      /\ ent_rr s.current.g s.final.g k (- 1) /\ only_dm_log s.current.g s.final.g (RelRead k own)
+      | Err'0 (KeyNotFound) -> not has s.current.g k /\ s.final.g = lg s.current.g (RelRead k own)
+      | Err'0 (Underflow) -> has s.current.g k
+      /\ UInt32.t'int (ent s.current.g k).rr = 0 /\ s.final.g = lg s.current.g (RelRead k own)
+      | Err'0 _ -> false
+      end)}
+    (! return {result}) ]
+
+let elim_Blk (_x: t_Lr) (return (off: UInt64.t)) = any
+  [ _k (off: UInt64.t) -> {Blk off = _x} (! return {off})
+  | _chk -> (! {[@expl:elim Blk] match _x with
+      | Blk _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+predicate log_ext [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 426 0 426 34] (a: t_W) (b: t_W) =
+  [%#score] Seq.length a.log <= Seq.length b.log
+  /\ (forall i: int. 0 <= i /\ i < Seq.length a.log -> Seq.get b.log i = Seq.get a.log i)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let get_evictable_offset [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 40 0 40 61]
+  (s: MutBorrow.t t_S) (k: UInt64.t) (return (x: t_Option_u64)) = (! bb0
+  [ bb0 = s0
+    [ s0 = MutBorrow.borrow_mut <t_S> {s.current}
+        (fun (_bor: MutBorrow.t t_S) -> [ &_11 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
+    | s1 = dm_lookup [%#sbg] {_11} {k} (fun (_x: t_Result_Lr_DmE) -> [ &_10 <- _x ] s2)
+    | s2 = any [ br0 (x0: t_Lr) -> {_10 = Ok x0} (! bb3) | br1 (x0: t_DmE) -> {_10 = Err x0} (! bb7) ] ]
+  | bb7 = s0 [ s0 = -{resolve_refmut_S s}- s1 | s1 = [ &_ret <- None'0 ] s2 | s2 = return {_ret} ]
+  | bb3 = elim_Ok {_10}
+      (fun (r0: t_Lr) ->
+        any
+        [ br0 -> {r0 = NotExist} (! bb4)
+        | br1 -> {r0 = Mismatch} (! bb4)
+        | br2 (x0: UInt64.t) -> {r0 = Blk x0} (! bb10)
+        | br3 (x0: UInt64.t) (x1: UInt32.t) -> {r0 = Mem x0 x1} (! bb13) ])
+  | bb4 = s0 [ s0 = -{resolve_refmut_S s}- s1 | s1 = [ &_ret <- None'0 ] s2 | s2 = return {_ret} ]
+  | bb13 = s0
+    [ s0 = MutBorrow.borrow_final <t_S> {s.current} {MutBorrow.get_id s}
+        (fun (_bor: MutBorrow.t t_S) -> [ &_23 <- _bor ] [ &s <- { s with current = _bor.final } ] s1)
+    | s1 = dm_release_read [%#sbg'1] {_23} {k} {[%#sbg'0] 1} (fun (_x: t_Result_unit_DmE) -> [ &_22 <- _x ] s2)
+    | s2 = -{resolve_refmut_S s}- s3
+    | s3 = [ &_ret <- None'0 ] s4
+    | s4 = return {_ret} ]
+  | bb10 = s0
+    [ s0 = elim_Ok {_10} (fun (r0: t_Lr) -> elim_Blk {r0} (fun (roff: UInt64.t) -> [ &off <- roff ] s1))
+    | s1 = MutBorrow.borrow_final <t_S> {s.current} {MutBorrow.get_id s}
+        (fun (_bor: MutBorrow.t t_S) -> [ &_17 <- _bor ] [ &s <- { s with current = _bor.final } ] s2)
+    | s2 = dm_release_read [%#sbg'3] {_17} {k} {[%#sbg'2] 1} (fun (_x: t_Result_unit_DmE) -> [ &_16 <- _x ] s3)
+    | s3 = -{resolve_refmut_S s}- s4
+    | s4 = [ &_ret <- Some'0 off ] s5
+    | s5 = return {_ret} ] ]
+  [ & _ret: t_Option_u64 = Any.any_l ()
+  | & s: MutBorrow.t t_S = s
+  | & k: UInt64.t = k
+  | & _10: t_Result_Lr_DmE = Any.any_l ()
+  | & _11: MutBorrow.t t_S = Any.any_l ()
+  | & off: UInt64.t = Any.any_l ()
+  | & _16: t_Result_unit_DmE = Any.any_l ()
+  | & _17: MutBorrow.t t_S = Any.any_l ()
+  | & _22: t_Result_unit_DmE = Any.any_l ()
+  | & _23: MutBorrow.t t_S = Any.any_l () ])
+  [ return (result: t_Option_u64) ->
+  {[@stop_split] [@expl:get_evictable_offset ensures] ([@stop_split] [@expl:get_evictable_offset ensures #0] [%#sbg'4] s.final.p
+        = s.current.p
+      /\ s.final.g
+        = { dm = s.final.g.dm;
+            mt = s.current.g.mt;
+            used = s.current.g.used;
+            cap = s.current.g.cap;
+            c = s.current.g.c;
+            wq = s.current.g.wq;
+            log = s.final.g.log;
+            tick = s.current.g.tick;
+            ob = s.current.g.ob;
+            ob2 = s.current.g.ob2;
+            og = s.current.g.og;
+            os = s.current.g.os;
+            ov = s.current.g.ov;
+            ok = s.current.g.ok;
+            ext = s.current.g.ext;
+            pool = s.current.g.pool;
+            cluster = s.current.g.cluster;
+            threads = s.current.g.threads;
+            rw = s.current.g.rw;
+            cfree = s.current.g.cfree;
+            wf = s.current.g.wf;
+            sdev = s.current.g.sdev }
+      /\ log_ext s.current.g s.final.g)
+    /\ ([@stop_split] [@expl:get_evictable_offset ensures #1] [%#sbg'5] forall j: UInt64.t. get_u64 s.final.g.dm j
+        = get_u64 s.current.g.dm j)
+    /\ ([@stop_split] [@expl:get_evictable_offset ensures #2] [%#sbg'6] match result with
+      | Some'0 off -> has s.current.g k /\ (ent s.current.g k).loc = Blk'0 off
+      | None'0 -> true
+      end)}
+    (! return {result}) ]

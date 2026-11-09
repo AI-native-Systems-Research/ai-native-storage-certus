@@ -1,0 +1,68 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 571 0 571 44 *)
+
+let%span score = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 570 10 570 15
+let%span score'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 568 11 568 43
+let%span score'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 569 10 569 32
+let%span score'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 549 11 549 32
+let%span score'3 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 550 10 550 49
+let%span score'4 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 545 16 545 43
+let%span score'5 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 552 4 552 86
+let%span score'6 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 530 10 530 17
+let%span score'7 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 532 16 532 107
+let%span swell_founded = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use int.Int
+
+type t_Ipc = { addr: UInt64.t; size: UInt32.t }
+
+function sum_sz [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 531 0 531 33] (r: Seq.seq t_Ipc) : int
+
+axiom sum_sz_def: forall r: Seq.seq t_Ipc [sum_sz r]. sum_sz r
+    = ([%#score'7] if Seq.length r = 0 then
+      0
+    else
+      sum_sz (Seq.([..]) r 0 (Seq.length r - 1)) + UInt32.t'int (Seq.get r (Seq.length r - 1)).size
+    )
+
+function pre [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 544 0 544 38] (r: Seq.seq t_Ipc) (i: int) : int
+ = [%#score'4] sum_sz (Seq.([..]) r 0 i)
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+function pre_step [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 551 0 551 36] (r: Seq.seq t_Ipc) (i: int) : ()
+ = [%#score'5] ()
+
+axiom pre_step_spec: forall r: Seq.seq t_Ipc, i: int. ([%#score'2] 0 <= i /\ i < Seq.length r)
+    -> ([%#score'3] pre r (i + 1) = pre r i + UInt32.t'int (Seq.get r i).size)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant r : Seq.seq t_Ipc
+
+constant i : int
+
+constant j : int
+
+function pre_mono [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 571 0 571 44] (r: Seq.seq t_Ipc) (i: int) (j: int) : ()
+
+goal vc_pre_mono: ([%#score'0] 0 <= i /\ i <= j /\ j <= Seq.length r)
+  -> (if i < j then
+    (([@stop_split] [@expl:pre_mono requires] [%#score'0] 0 <= i /\ i <= j - 1 /\ j - 1 <= Seq.length r)
+      /\ ([@expl:variant decreases] well_founded_relation_Int ([%#score] j - i) ([%#score] j - 1 - i)))
+    /\ (([@stop_split] [@expl:pre_mono ensures] [%#score'1] pre r i <= pre r (j - 1))
+    -> (let _ = pre_mono r i (j - 1) in ([@stop_split] [@expl:pre_step requires] [%#score'2] 0 <= j - 1
+      /\ j - 1 < Seq.length r)
+    /\ (([@stop_split] [@expl:pre_step ensures] [%#score'3] pre r (j - 1 + 1)
+      = pre r (j - 1) + UInt32.t'int (Seq.get r (j - 1)).size)
+    -> (let _ = pre_step r (j - 1) in [@stop_split] [@expl:pre_mono ensures] [%#score'1] pre r i <= pre r j))))
+  else
+    [@stop_split] [@expl:pre_mono ensures] [%#score'1] pre r i <= pre r j
+  )

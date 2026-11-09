@@ -1,0 +1,45 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_create_data_drives": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_gpu_create_stream": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_gpu_register": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_initialize": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.132 },
+              { "prover": "alt-ergo", "time": 0.123 },
+              { "prover": "alt-ergo", "time": 0.124 },
+              { "prover": "alt-ergo", "time": 0.109 },
+              { "prover": "z3", "time": 0.042 },
+              { "prover": "z3", "time": 0.008 },
+              { "prover": "z3", "time": 0.054 },
+              { "prover": "z3", "time": 0.023 },
+              { "prover": "z3", "time": 0.033 },
+              { "prover": "z3", "time": 0.061 },
+              { "prover": "z3", "time": 0.135 },
+              { "prover": "z3", "time": 0.009 },
+              { "prover": "cvc4", "time": 0.92 },
+              { "prover": "alt-ergo", "time": 0.183 },
+              { "prover": "z3", "time": 3.7 },
+              { "prover": "z3", "time": 0.209 },
+              { "prover": "z3", "time": 0.014 },
+              { "prover": "cvc4", "time": 2.0 },
+              { "prover": "z3", "time": 0.015 },
+              { "prover": "z3", "time": 5.8 }
+            ]
+          }
+        ]
+      },
+      "vc_mt_pool_info": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_recover_all": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_ring_new": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_rl_join": { "prover": "alt-ergo", "time": 0.026 }
+    }
+  }
+}

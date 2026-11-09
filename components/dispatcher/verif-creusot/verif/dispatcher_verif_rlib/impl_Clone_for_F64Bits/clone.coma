@@ -1,0 +1,17 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/misc.rs" 367 9 367 29 *)
+
+(* <F64Bits as std::clone::Clone> *)
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_F64Bits = { bits: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_F64Bits [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/misc.rs" 367 9 367 29]
+  (self: t_F64Bits) (return (x: t_F64Bits)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_F64Bits = Any.any_l () | & self: t_F64Bits = self ]) [ return (result: t_F64Bits) -> (! return {result}) ]

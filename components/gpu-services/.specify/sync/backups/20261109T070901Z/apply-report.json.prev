@@ -1,0 +1,84 @@
+{
+  "applied_at": "2026-11-08T00:17:01Z",
+  "proposals_generated": "2026-11-07T12:00:00Z",
+  "based_on": "proposals.json (generated 2026-11-07T12:00:00Z)",
+  "branch": "fix/dispatcher-j33-repairs",
+  "head": "f4579a41f",
+  "mode": "batch",
+  "approved_by": "Cornel 2026-11-07",
+  "backup": "backups/20261108T001701Z",
+  "changes": [
+    {
+      "id": "P-1",
+      "direction": "BACKFILL",
+      "spec": "001-gpu-cuda-services",
+      "file": "specs/001-gpu-cuda-services/spec.md",
+      "requirement": "FR-015",
+      "change": "Modified",
+      "old_text_occurrences": 1,
+      "summary": "spdk_mem_register only when an SPDK environment is active; without one returns Ok(()) after CUDA pinning alone"
+    },
+    {
+      "id": "P-2",
+      "direction": "BACKFILL",
+      "spec": "001-gpu-cuda-services",
+      "file": "specs/001-gpu-cuda-services/spec.md",
+      "requirement": "FR-016",
+      "change": "Modified",
+      "old_text_occurrences": 1,
+      "summary": "spdk_mem_unregister only when active; SPDK failure returns Err without cudaHostUnregister; SHOULD register/unregister under same SPDK state"
+    },
+    {
+      "id": "P-3",
+      "direction": "BACKFILL",
+      "spec": "002-gpu-ssd-dma-prepare",
+      "file": "specs/002-gpu-ssd-dma-prepare/spec.md",
+      "requirement": "FR-019",
+      "change": "Modified",
+      "old_text_occurrences": 1,
+      "summary": "consistent with 001 FR-015"
+    },
+    {
+      "id": "P-4",
+      "direction": "BACKFILL",
+      "spec": "002-gpu-ssd-dma-prepare",
+      "file": "specs/002-gpu-ssd-dma-prepare/spec.md",
+      "requirement": "FR-020",
+      "change": "Modified",
+      "old_text_occurrences": 1,
+      "summary": "consistent with 001 FR-016"
+    },
+    {
+      "id": "P-1,P-2",
+      "spec": "001-gpu-cuda-services",
+      "requirement": "Last-Synced header",
+      "change": "Added"
+    },
+    {
+      "id": "P-3,P-4",
+      "spec": "002-gpu-ssd-dma-prepare",
+      "requirement": "Last-Synced header",
+      "change": "Added"
+    }
+  ],
+  "new_specs": [],
+  "align_tasks": [],
+  "open_items": [
+    {
+      "id": "P-5",
+      "file": "align-tasks.md",
+      "target": "components/interfaces/src/igpu_services.rs (doc comments)",
+      "approval_note": "Cornel 2026-11-07: not in this PR (edits components/interfaces, re-stamps every component); bundle with the next interfaces change."
+    }
+  ],
+  "not_applied": [
+    {
+      "id": "P-5",
+      "reason": "not approved (approval_note: defer, bundle with the next interfaces change)"
+    }
+  ],
+  "source_files_changed": [],
+  "frontmatter_touched": false,
+  "result": "4 proposals applied (P-1..P-4), 0 align tasks, 1 open (P-5)",
+  "previous": "backups/20261108T001701Z/apply-report.json.prev"
+}

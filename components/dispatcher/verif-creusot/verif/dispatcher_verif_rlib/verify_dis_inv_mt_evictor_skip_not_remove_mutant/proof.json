@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_mt_evictor_pass": { "prover": "alt-ergo", "time": 0.026 },
+      "vc_verify_dis_inv_mt_evictor_skip_not_remove__mutant": null
+    }
+  }
+}

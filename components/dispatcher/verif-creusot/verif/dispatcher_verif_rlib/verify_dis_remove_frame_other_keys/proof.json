@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_remove": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_verify_dis_remove_frame_other_keys": {
+        "prover": "alt-ergo",
+        "time": 0.192
+      }
+    }
+  }
+}

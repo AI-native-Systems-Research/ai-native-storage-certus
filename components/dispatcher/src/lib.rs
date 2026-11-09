@@ -77,6 +77,14 @@ mod repair_test_eviction_events_dropped;
 #[path = "repair_test_failed_promotion_releases_slot.rs"]
 mod repair_test_failed_promotion_releases_slot;
 
+#[cfg(test)]
+#[path = "repair_test_eviction_errors_counted_unpersisted.rs"]
+mod repair_test_eviction_errors_counted_unpersisted;
+
+#[cfg(test)]
+#[path = "repair_test_route_partition_does_not_add_up.rs"]
+mod repair_test_route_partition_does_not_add_up;
+
 use parking_lot::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -428,6 +436,12 @@ define_component! {
             bg_evictor: Mutex<Option<BackgroundEvictor>>,
             bg_mt_evictor: Mutex<Option<MemoryTierEvictor>>,
             data_drives: RwLock<Vec<DataDrive>>,
+            // Cumulative read/write counters of data drives already torn down
+            // (shutdown) or replaced (re-initialize). `read_write_stats`
+            // starts from this baseline and merges the live drives on top, so
+            // the dispatcher-wide total never decreases over the lifetime of
+            // the component (FR-056 monotonicity). See absorb_drive_rw_stats.
+            rw_stats_baseline: RwLock<interfaces::ReadWriteStats>,
             pipeline_ring: RwLock<Option<pipeline::PipelineRing>>,
             warm_stream: AtomicU64,
             block_device_factory: Mutex<Option<BlockDeviceFactory>>,
@@ -862,29 +876,50 @@ impl DispatcherComponent {
         // Read from SSD into memory-tier using pipelined reader.
         let drives = self.data_drives.read();
         if drives.is_empty() {
-            // No hardware: just copy zeros to GPU (test/staging-only mode).
+            // No hardware (test/staging-only mode): the fresh memory-tier slot
+            // stands in for the SSD read. Run the same serve-then-promote
+            // sequence as the with-drives path below, so a memory-tier-only
+            // promotion lands the same end state: deliver the slot to the GPU
+            // destination, then re-register the entry in place. The flip must
+            // be `promote_block_to_memory_tier` — `create_memory_tier_entry`
+            // refuses existing keys, and this key's entry exists (BlockDevice)
+            // by construction, so it could only ever answer AlreadyExists and
+            // leave the entry unregistered and the slot stranded.
             let aligned = total_bytes.next_multiple_of(4096).max(4096);
             let temp_buf = unsafe {
                 DmaBuffer::from_raw(mem_ptr as *mut std::ffi::c_void, aligned, noop_free, -1)
             }
             .map_err(|e| DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}")))?;
-            let result = gpu.dma_copy_to_device(
+            let copy = gpu.dma_copy_to_device(
                 &temp_buf,
                 ipc_handle.address as *mut std::ffi::c_void,
                 total_bytes,
             );
             std::mem::forget(temp_buf);
-            // Register promoted entry in dispatch-map.
-            if dm
-                .create_memory_tier_entry(key, mem_ptr, ipc_handle.size)
-                .is_ok()
-            {
-                self.tier_counters.record_promotion_to_memory();
+            if let Err(e) = copy {
+                // The GPU delivery failed: release the reserved slot — the
+                // dispatch map still points the key at the SSD, so keeping it
+                // would strand dead tier capacity.
+                if !staged {
+                    let _ = mt.remove(key);
+                }
+                return Err(DispatcherError::IoError(format!(
+                    "GPU DMA copy (promote) failed: {e}"
+                )));
             }
-            let _ = dm.release_write(key);
-            return result.map_err(|e| {
-                DispatcherError::IoError(format!("GPU DMA copy (promote) failed: {e}"))
-            });
+            // In-place BlockDevice->MemoryTier transition, as the with-drives
+            // path (retains the SSD offset, preserves the pin the lookup
+            // holds, no remove/recreate).
+            if let Err(e) = dm.promote_block_to_memory_tier(key, mem_ptr, ipc_handle.size) {
+                if !staged {
+                    let _ = mt.remove(key);
+                }
+                return Err(DispatcherError::IoError(format!(
+                    "promote transition failed: {e}"
+                )));
+            }
+            self.tier_counters.record_promotion_to_memory();
+            return Ok(());
         }
 
         let (idx, raw_offset) = decode_loc(offset);
@@ -1185,13 +1220,24 @@ impl DispatcherComponent {
                 Err(interfaces::DispatchMapError::ActiveReferences(_)) => {
                     self.tier_counters.record_eviction_blocked_by_pin();
                 }
-                Err(_) => {
-                    // The only other refusal for a resident entry is a missing
-                    // ssd_offset, i.e. write-through has not landed. Counted rather
-                    // than inferred by subtraction, so a third cause appearing later
-                    // shows up as the two counters failing to sum to the scanned
-                    // total instead of being silently attributed to this one.
+                Err(interfaces::DispatchMapError::InvalidState(_)) => {
+                    // The dispatch-map signals "memory-tier entry has no SSD
+                    // offset (write-through not complete)" with InvalidState,
+                    // so that refusal is the unpersisted one. Counted rather
+                    // than inferred by subtraction, so a third cause appearing
+                    // later shows up as the two counters failing to sum to the
+                    // scanned total instead of being silently attributed to
+                    // this one.
                     self.tier_counters.record_eviction_blocked_unpersisted();
+                }
+                Err(_) => {
+                    // A refusal that is neither a pin nor a missing ssd_offset
+                    // (e.g. KeyNotFound: a memory-tier slot `reserve_memory`
+                    // inserted whose dispatch-map entry is not registered yet).
+                    // FR-033 reserves each counter for its own cause, so this
+                    // must increment NEITHER — a third cause has to stay
+                    // visible as the two counters failing to sum to the
+                    // scanned total, not be absorbed into the unpersisted one.
                 }
             }
             // Write-through incomplete (no ssd_offset) so it can't be demoted.
@@ -1773,6 +1819,24 @@ impl DispatcherComponent {
         }
     }
 
+    /// Fold the live data drives' read/write counters into
+    /// `rw_stats_baseline`.
+    ///
+    /// Called before the drive list is cleared (`shutdown`) or replaced
+    /// (`initialize`): the baseline is what `read_write_stats` aggregates
+    /// from, so the counters of drives that are about to be dropped stay
+    /// part of the cumulative total and the aggregate never decreases.
+    /// Fold the counters of the drives in `drives` into the baseline. The caller holds the
+    /// `data_drives` write lock across this fold and the swap or clear of the drive list, so that
+    /// `read_write_stats` (which holds the read lock across both of its reads) never sees the same
+    /// drives in the baseline and in the live list (A-16).
+    fn absorb_drive_rw_stats(&self, drives: &[DataDrive]) {
+        let mut baseline = self.rw_stats_baseline.write();
+        for drive in drives.iter() {
+            baseline.merge_from(&drive.block_dev_iface.read_write_stats());
+        }
+    }
+
     fn create_data_drives(
         &self,
         config: &DispatcherConfig,
@@ -2076,10 +2140,12 @@ impl IDispatcher for DispatcherComponent {
     fn initialize(&self, config: DispatcherConfig) -> Result<(), DispatcherError> {
         self.log_info("dispatcher: initializing");
 
-        self.max_eviction_attempts
-            .store(config.max_eviction_attempts, Ordering::Relaxed);
-        self.store_backpressure_ms
-            .store(config.store_backpressure_ms, Ordering::Relaxed);
+        // The config's tunables (eviction-attempt limit, store-backpressure
+        // budget) are committed only once every validation below has passed:
+        // an initialize that fails — unbound receptacle, invalid config, drive
+        // creation — changes nothing (DIS-INITIALIZE-FAILURE-NO-CONFIG-CHANGE).
+        // Nothing reads them before `initialized` is set, so committing them
+        // just before that release store also publishes them with it.
 
         self.dispatch_map
             .get()
@@ -2100,7 +2166,14 @@ impl IDispatcher for DispatcherComponent {
         let has_bd_factory = self.block_device_factory.lock().unwrap().is_some();
         if self.spdk_env.is_connected() || has_bd_factory {
             let drives = self.create_data_drives(&config)?;
-            *self.data_drives.write() = drives;
+            // Replacing the drive list must not lower the cumulative counters:
+            // fold the outgoing drives' totals into the baseline, under the same
+            // write lock as the swap.
+            {
+                let mut g = self.data_drives.write();
+                self.absorb_drive_rw_stats(&g);
+                *g = drives;
+            }
 
             // Rebuild dispatch-map from recovered extents when not formatting.
             if !config.format_on_init {
@@ -2128,7 +2201,7 @@ impl IDispatcher for DispatcherComponent {
                 ));
             }
 
-            // Pre-allocate pipeline ring and register memory with SPDK.
+            // Pre-allocate the pipeline ring's SPDK DMA buffers.
             // Only when SPDK is available — spdk_mem_register segfaults otherwise.
             if let Ok(gpu) = self.gpu_services.get() {
                 // Dedicated CUDA stream for warm-path DMA (avoids pipeline_ring lock).
@@ -2171,27 +2244,31 @@ impl IDispatcher for DispatcherComponent {
                             ));
                         }
                     }
+                }
+            }
+        }
 
-                    // Register memory-tier pool as CUDA-pinned + SPDK DMA-capable
-                    // for zero-copy NVMe reads and async GPU transfers.
-                    if let Ok(mt) = self.memory_tier.get() {
-                        if let Some((pool_ptr, pool_size)) = mt.pool_info() {
-                            match gpu
-                                .register_host_memory(pool_ptr as *mut std::ffi::c_void, pool_size)
-                            {
-                                Ok(()) => {
-                                    self.log_info(&format!(
-                                        "dispatcher: registered memory-tier pool ({} MiB) for zero-copy DMA",
-                                        pool_size / (1024 * 1024)
-                                    ));
-                                }
-                                Err(e) => {
-                                    self.log_info(&format!(
-                                        "memory-tier pool registration failed (non-fatal): {e}"
-                                    ));
-                                }
-                            }
-                        }
+        // Register the memory-tier pool with the GPU services as CUDA-pinned +
+        // SPDK DMA-capable for zero-copy NVMe reads and async GPU transfers
+        // (FR-034). This runs whenever the GPU and the memory tier are ready —
+        // not only when an SPDK environment is connected: factory-mode and
+        // memory-tier-only deployments have a GPU and a pool too. A failure is
+        // a warning, never an initialization failure (the DRAM path does not
+        // need the pinning; the zero-copy pipelines do). Mirrors `shutdown`'s
+        // unregister, which FR-035 gates the same way.
+        if let (Ok(gpu), Ok(mt)) = (self.gpu_services.get(), self.memory_tier.get()) {
+            if let Some((pool_ptr, pool_size)) = mt.pool_info() {
+                match gpu.register_host_memory(pool_ptr as *mut std::ffi::c_void, pool_size) {
+                    Ok(()) => {
+                        self.log_info(&format!(
+                            "dispatcher: registered memory-tier pool ({} MiB) for zero-copy DMA",
+                            pool_size / (1024 * 1024)
+                        ));
+                    }
+                    Err(e) => {
+                        self.log_warn(&format!(
+                            "dispatcher: memory-tier pool registration failed (non-fatal): {e}"
+                        ));
                     }
                 }
             }
@@ -2296,6 +2373,14 @@ impl IDispatcher for DispatcherComponent {
             *self.bg_mt_evictor.lock().unwrap() = Some(mt_evictor);
         }
 
+        // Every validation has passed: commit the config's tunables now, right
+        // before publishing `initialized`, so only a successful initialize
+        // applies them (see the comment at the top of this function).
+        self.max_eviction_attempts
+            .store(config.max_eviction_attempts, Ordering::Relaxed);
+        self.store_backpressure_ms
+            .store(config.store_backpressure_ms, Ordering::Relaxed);
+
         self.initialized.store(true, Ordering::Release);
 
         if let Ok(rl) = self.remote_lookup.get() {
@@ -2355,8 +2440,11 @@ impl IDispatcher for DispatcherComponent {
         // Two-phase block device shutdown: signal all actors to stop first,
         // then join threads. This prevents crashes from SPDK transport teardown
         // invalidating memory that other actors are still actively polling.
+        // The drives are about to be dropped; keep their read/write counters
+        // in the baseline so read_write_stats stays monotonic after shutdown.
         let drives = {
             let mut g = self.data_drives.write();
+            self.absorb_drive_rw_stats(&g);
             std::mem::take(&mut *g)
         };
         // Phase 1: Signal all actors to stop (closes channels, actors exit poll loops)
@@ -2576,6 +2664,13 @@ impl IDispatcher for DispatcherComponent {
             // loads no longer take the no-staging inline fast path). This guards
             // the one remaining fatal classification — Err(Timeout) misread as
             // KeyNotFound — should lock contention ever widen that window.
+            //
+            // And when every retry DOES time out, the map's own error is what
+            // this entry reports (FR-039 step 1): the key is live — held by a
+            // writer — so an exhausted retry is a `Timeout` to surface (as
+            // `check` does, FR-008), never a `KeyNotFound`, which would both
+            // attribute the live key a Miss and forward it to remote lookup
+            // (the remote pass below collects exactly the KeyNotFound results).
             const LOOKUP_RETRIES: u32 = 5;
             let lookup = {
                 let mut lk = dm.lookup(key);
@@ -2650,8 +2745,18 @@ impl IDispatcher for DispatcherComponent {
                         });
                     }
                 },
-                Err(_) => {
-                    results[i] = Some(Err(DispatcherError::KeyNotFound(key)));
+                // Every retry timed out behind a writer (or the read count
+                // overflowed): the key's presence could not be determined,
+                // but the entry is live. That is a wait to report — the
+                // map's own error, never an absent key (see the comment
+                // above the retry loop).
+                Err(interfaces::DispatchMapError::Timeout(k)) => {
+                    results[i] = Some(Err(DispatcherError::Timeout(format!(
+                        "timeout waiting on key: {k}"
+                    ))));
+                }
+                Err(other) => {
+                    results[i] = Some(Err(DispatcherError::IoError(other.to_string())));
                 }
             }
         }
@@ -2693,20 +2798,6 @@ impl IDispatcher for DispatcherComponent {
                         .ok();
                     let res = mt
                         .insert(entry.key, entry.total_size)
-                        .map(|mem_ptr| {
-                            // In-place, pin-safe promote (no remove/recreate).
-                            if dm
-                                .promote_block_to_memory_tier(entry.key, mem_ptr, entry.total_size)
-                                .is_ok()
-                            {
-                                self.tier_counters.record_promotion_to_memory();
-                            } else {
-                                // The promotion did not land: release the
-                                // slot — the dispatch map still points the
-                                // key at the SSD.
-                                let _ = mt.remove(entry.key);
-                            }
-                        })
                         .map_err(|e| match e {
                             // Preserve AlreadyExists so the recovery pass below
                             // can re-serve the block warm (concurrent promotion).
@@ -2716,6 +2807,46 @@ impl IDispatcher for DispatcherComponent {
                             other => DispatcherError::AllocationFailed(format!(
                                 "promote insert failed: {other}"
                             )),
+                        })
+                        .and_then(|mem_ptr| {
+                            // No hardware: the fresh slot stands in for the SSD
+                            // read. Run the same serve-then-promote sequence as
+                            // the with-drives cold path: deliver the slot to the
+                            // entry's GPU destination, then re-register the
+                            // entry in place. The synchronous DmaBuffer copy
+                            // (no warm stream) has completed when this returns,
+                            // and it leaves the deferred warm-stream sync below
+                            // covering only the warm hits' queued copies.
+                            if let Err(e) = self.serve_memory_tier_to_gpu(
+                                &gpu,
+                                mem_ptr,
+                                entry.total_size,
+                                &entry.regions,
+                                0,
+                                true,
+                            ) {
+                                // The GPU delivery failed: release the reserved
+                                // slot — the dispatch map still points the key
+                                // at the SSD.
+                                let _ = mt.remove(entry.key);
+                                return Err(e);
+                            }
+                            // In-place, pin-safe promote (no remove/recreate).
+                            if let Err(e) = dm.promote_block_to_memory_tier(
+                                entry.key,
+                                mem_ptr,
+                                entry.total_size,
+                            ) {
+                                // The promotion did not land: release the
+                                // slot — the dispatch map still points the
+                                // key at the SSD.
+                                let _ = mt.remove(entry.key);
+                                return Err(DispatcherError::IoError(format!(
+                                    "promote transition failed: {e}"
+                                )));
+                            }
+                            self.tier_counters.record_promotion_to_memory();
+                            Ok(())
                         });
                     results[entry.idx] = Some(res);
                 }
@@ -3307,6 +3438,13 @@ impl IDispatcher for DispatcherComponent {
                         mt.touch(key);
                         if r.is_ok() {
                             self.tier_counters.record_promotion_to_gpu();
+                            // The local half of the route partition (FR-058,
+                            // SC-017): a memory-tier serve is a DRAM-route hit,
+                            // recorded where this path derives its route so the
+                            // counters cannot disagree with the per-key
+                            // `ServedBy` the batch path attributes to the same
+                            // hit.
+                            self.tier_counters.record_local_hits(1, 0);
                         }
                         r.map(|()| null_stream)
                     }
@@ -3315,6 +3453,7 @@ impl IDispatcher for DispatcherComponent {
                         // what stops a concurrent remove or SSD eviction deleting the
                         // entry, or freeing the fresh slot, while the SSD read and the
                         // in-place promotion are still running.
+                        let mut recovered_warm = false;
                         let r = match self.promote_and_serve(
                             key,
                             offset,
@@ -3327,19 +3466,33 @@ impl IDispatcher for DispatcherComponent {
                             // A concurrent cold lookup of this key won the mt.insert
                             // race: a hit, not a failure — serve it warm once that
                             // promotion lands, as batch_lookup's recovery pass does.
-                            Err(DispatcherError::AlreadyExists(_)) => self
-                                .serve_concurrently_promoted(
+                            Err(DispatcherError::AlreadyExists(_)) => {
+                                recovered_warm = true;
+                                self.serve_concurrently_promoted(
                                     &dm,
                                     &gpu,
                                     key,
                                     std::slice::from_ref(&ipc_handle),
                                     warm_raw,
-                                ),
+                                )
+                            }
                             r => r,
                         };
                         let _ = dm.release_read(key);
                         r?;
                         self.tier_counters.record_promotion_to_gpu();
+                        // The local half of the route partition (FR-058, SC-017),
+                        // with the same taxonomy batch_lookup derives: a cold
+                        // serve read a data drive (SSD route), but the
+                        // concurrent-promotion recovery served the key out of
+                        // DRAM after the winner's promotion (DRAM route, no
+                        // drive read) — the two must not drift apart, or the
+                        // same hit would be counted differently by the two
+                        // lookup paths.
+                        self.tier_counters.record_local_hits(
+                            u64::from(recovered_warm),
+                            u64::from(!recovered_warm),
+                        );
                         Ok(null_stream)
                     }
                 }
@@ -4448,8 +4601,15 @@ impl IDispatcher for DispatcherComponent {
         // Aggregate per-direction counters across every data drive. Each drive's
         // block device tracks its own SSD read/write bytes+ops (zeroed unless
         // built with the telemetry feature); sum for the dispatcher-wide total.
-        let mut agg = interfaces::ReadWriteStats::default();
-        for drive in self.data_drives.read().iter() {
+        // The baseline carries the counters of drives already torn down, so the
+        // cumulative total keeps holding (and never drops below) what the
+        // removed drives had accumulated.
+        // Hold the drive list's read lock across both reads: a swap or clear of the
+        // list folds the outgoing drives into the baseline under the write lock, so
+        // the baseline and the live drives are always read as one state (A-16).
+        let drives = self.data_drives.read();
+        let mut agg = self.rw_stats_baseline.read().clone();
+        for drive in drives.iter() {
             // merge_from sums every counter and both size histograms.
             agg.merge_from(&drive.block_dev_iface.read_write_stats());
         }
@@ -5571,6 +5731,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -5737,6 +5898,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -5786,6 +5948,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -5808,6 +5971,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -5832,6 +5996,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -5861,6 +6026,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -5891,6 +6057,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -5921,6 +6088,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -5946,6 +6114,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -5971,6 +6140,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -6001,6 +6171,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -6034,6 +6205,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -6058,6 +6230,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -6083,6 +6256,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -6139,6 +6313,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -6174,6 +6349,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -6253,6 +6429,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -7148,6 +7325,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -7185,6 +7363,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -7257,6 +7436,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -7319,6 +7499,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -7419,6 +7600,7 @@ mod tests {
                 Mutex::new(None),
                 Mutex::new(None),
                 RwLock::new(Vec::new()),
+                RwLock::new(interfaces::ReadWriteStats::default()),
                 RwLock::new(None),
                 AtomicU64::new(0),
                 Mutex::new(None),
@@ -7504,6 +7686,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -7561,6 +7744,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -7631,6 +7815,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            RwLock::new(interfaces::ReadWriteStats::default()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -8613,3 +8798,19 @@ mod repair_test_duplicate_check_after_eviction;
 #[cfg(test)]
 #[path = "repair_test_check_present_map_timeout.rs"]
 mod repair_test_check_present_map_timeout;
+
+#[cfg(test)]
+#[path = "repair_test_failed_initialize_changes_config.rs"]
+mod repair_test_failed_initialize_changes_config;
+#[cfg(test)]
+#[path = "repair_test_register_host_memory.rs"]
+mod repair_test_register_host_memory;
+#[cfg(test)]
+#[path = "repair_test_rw_stats_after_shutdown.rs"]
+mod repair_test_rw_stats_after_shutdown;
+#[cfg(test)]
+#[path = "repair_test_transient_map_error.rs"]
+mod repair_test_transient_map_error;
+#[cfg(test)]
+#[path = "repair_test_no_drives_promote_without_read.rs"]
+mod repair_test_no_drives_promote_without_read;

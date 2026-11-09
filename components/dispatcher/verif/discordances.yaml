@@ -1,0 +1,874 @@
+component: dispatcher
+pin: 7d280cd3
+level: 1
+what: 'spec<->code discordances found while reconciling the specification with the code. Each is EXCLUDED from formal
+  verification (level 2). status: candidate until a test confirms it (confirmed) or shows it was a misreading (withdrawn).'
+counts:
+  discordances: 30
+  spec_and_code_differ: 9
+  spec_not_found_in_code: 16
+  input_range_mismatch: 5
+  properties_excluded_from_level2: 28
+  routed_to_other_tools: 3
+  reader_missed_sent_to_level2: 32
+  confirmed: 0
+  withdrawn: 0
+discordances:
+- id: D-FR-015-nocode-83374f
+  name: Initialize format params
+  kind: spec-not-found-in-code
+  methods:
+  - initialize
+  spec_says: During initialize each extent manager's format step is given the size of its own data block device
+    and the computed format parameters, and its metadata lives on that same data device.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-015
+  - FR-016
+  code_pointers: []
+  status: candidate
+  excluded_properties:
+  - DIS-INITIALIZE-FORMAT-PARAMS
+  extraction_sides:
+    spec:
+    - DIS-INITIALIZE-FORMAT-PARAMS
+    code: []
+  classified: classifiers disagree - needs a person
+- id: D-FR-034-nocode-797202
+  name: Initialize register host memory
+  kind: spec-not-found-in-code
+  methods:
+  - initialize
+  spec_says: During initialize, once the GPU and memory tier are ready, the dispatcher registers the memory-tier
+    pool with the GPU services for pinned zero-copy access, and a registration failure is reported as a warning
+    rather than failing initialization.
+  code_does: The pool is registered only when spdk_env is connected (not whenever the GPU and memory tier are ready,
+    e.g. not in factory mode), and a registration failure is logged at info level, not as a warning.
+  spec_pointers:
+  - FR-034
+  code_pointers: []
+  status: candidate
+  excluded_properties:
+  - DIS-INITIALIZE-REGISTER-HOST-MEMORY
+  extraction_sides:
+    spec:
+    - DIS-INITIALIZE-REGISTER-HOST-MEMORY
+    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - components/dispatcher/src/lib.rs:1947
+  - components/dispatcher/src/lib.rs:1980
+  - components/dispatcher/src/lib.rs:1991
+  - components/dispatcher/src/lib.rs:1992
+  - components/dispatcher/src/lib.rs:1983
+- id: D-US-9AS-3-nocode-e2391b
+  name: Lookup no hw promote
+  kind: spec-not-found-in-code
+  methods:
+  - lookup
+  spec_says: In memory-tier-only mode a cold promotion creates a memory-tier slot, copies it to the GPU, and re-registers
+    the entry as a memory-tier entry.
+  code_does: In no-drive mode the slot is created and copied, but re-registration uses create_memory_tier_entry
+    on a key that already exists (BlockDevice), which returns AlreadyExists and is ignored, so the entry stays in
+    block-device state.
+  spec_pointers:
+  - US-9 AS-3
+  code_pointers: []
+  status: candidate
+  excluded_properties:
+  - DIS-LOOKUP-NO-HW-PROMOTE
+  extraction_sides:
+    spec:
+    - DIS-LOOKUP-NO-HW-PROMOTE
+    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - components/dispatcher/src/lib.rs:802
+  - components/dispatcher/src/lib.rs:809
+  - components/dispatcher/src/lib.rs:810
+  - components/dispatcher/src/lib.rs:815
+  - components/dispatch-map/src/lib.rs:395
+  - components/dispatcher/src/lib.rs:795
+- id: D-FR-036-idispatcher.rs-6e23e1
+  name: Lookup async warm stream
+  kind: spec-and-code-differ
+  methods:
+  - lookup_async
+  spec_says: For a memory-tier hit, lookup_async returns the GPU stream on which the copy was queued, and after
+    that stream is synchronized the caller's destination holds the cached data. For an entry served by SSD promotion,
+    lookup_async completes the copy before returning and returns a null stream.
+  code_does: On success, lookup_async returns the null stream, meaning the copy has already completed and the caller
+    does not need to synchronize.
+  spec_pointers:
+  - FR-036
+  - FR-037
+  code_pointers:
+  - idispatcher.rs
+  - lib.rs:3061
+  - lib.rs:3067
+  - idispatcher.rs:550
+  status: candidate
+  excluded_properties:
+  - DIS-LOOKUP-ASYNC-WARM-STREAM
+  extraction_sides:
+    spec:
+    - DIS-LOOKUP-ASYNC-WARM-STREAM
+    - DIS-LOOKUP-ASYNC-COLD-NULL-STREAM
+    code:
+    - DIS-LOOKUP-ASYNC-NULL-STREAM
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - components/dispatcher/src/lib.rs:3048
+  - components/dispatcher/src/lib.rs:3054
+  - components/dispatcher/src/lib.rs:3061
+- id: D-FR-037-nocode-6c332d
+  name: Lookup async device stream
+  kind: spec-not-found-in-code
+  methods:
+  - lookup_async
+  spec_says: When the destination GPU device is known, lookup_async issues the copy on a stream bound to the device
+    that owns the destination pointer, and falls back to the shared warm stream only when the device is unknown.
+  code_does: With a known device it uses that device's warm stream, but with an unknown device warm_raw is 0 and
+    it falls back to the synchronous DmaBuffer copy; the shared warm_stream is stored but never used by lookup.
+  spec_pointers:
+  - FR-037
+  - FR-052
+  code_pointers: []
+  status: candidate
+  excluded_properties:
+  - DIS-LOOKUP-ASYNC-DEVICE-STREAM
+  extraction_sides:
+    spec:
+    - DIS-LOOKUP-ASYNC-DEVICE-STREAM
+    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - components/dispatcher/src/lib.rs:3022
+  - components/dispatcher/src/lib.rs:3023
+  - components/dispatcher/src/lib.rs:1279
+  - components/dispatcher/src/lib.rs:1306
+  - components/dispatcher/src/lib.rs:1940
+  - components/dispatcher/src/lib.rs:1324
+- id: D-US-11AS-4-nocode-03117a
+  name: Batch lookup error isolation
+  kind: spec-not-found-in-code
+  methods:
+  - batch_lookup
+  spec_says: A read or DMA failure on one cold entry of a batch is reported only for that entry; the other entries
+    are processed and reported independently.
+  code_does: A read error is per object, but an NVMe read Timeout on one entry fails every entry on that drive,
+    and a channel checkout failure stops checkout for all remaining drives.
+  spec_pointers:
+  - US-11 AS-4
+  code_pointers: []
+  status: candidate
+  excluded_properties:
+  - DIS-BATCH-LOOKUP-ERROR-ISOLATION
+  extraction_sides:
+    spec:
+    - DIS-BATCH-LOOKUP-ERROR-ISOLATION
+    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - components/dispatcher/src/pipeline.rs:1050
+  - components/dispatcher/src/pipeline.rs:1054
+  - components/dispatcher/src/pipeline.rs:1061
+  - components/dispatcher/src/lib.rs:2645
+  - components/dispatcher/src/lib.rs:2650
+  - components/dispatcher/src/pipeline.rs:1091
+  - components/dispatcher/src/lib.rs:2618
+- id: D-US-11AS-1-lib.rs:2681-a0df90
+  name: Batch lookup cold promotes
+  kind: spec-and-code-differ
+  methods:
+  - batch_lookup
+  spec_says: Each successfully served block-device entry of a batch is delivered to its GPU destination and is afterwards
+    registered as a memory-tier entry, unless it was served through the staging fallback.
+  code_does: A cold key whose SSD read succeeds into a newly obtained memory-tier slot is switched in place to memory-tier
+    residency in the dispatch map, keeping its SSD offset and its reference counts.
+  spec_pointers:
+  - US-11 AS-1
+  - FR-039
+  - FR-061
+  code_pointers:
+  - lib.rs:2681
+  - idispatch_map.rs:146
+  status: candidate
+  excluded_properties:
+  - DIS-BATCH-LOOKUP-COLD-PROMOTES
+  extraction_sides:
+    spec:
+    - DIS-BATCH-LOOKUP-COLD-PROMOTES
+    code:
+    - DIS-BATCH-LOOKUP-COLD-PROMOTE
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - components/dispatcher/src/lib.rs:2481
+  - components/dispatcher/src/lib.rs:2484
+  - components/dispatcher/src/lib.rs:2486
+  - components/dispatcher/src/lib.rs:2490
+  - components/dispatcher/src/lib.rs:2507
+- id: D-US-11AS-6-nocode-7dc79d
+  name: Batch lookup one warm sync after cold
+  kind: spec-not-found-in-code
+  methods:
+  - batch_lookup
+  spec_says: For a batch mixing memory-tier and block-device keys, exactly one warm-stream synchronization occurs,
+    and it runs after the cold keys have been promoted into the memory tier.
+  code_does: The batched warm sync runs once after the cold block, but every multi-region cold entry also synchronizes
+    the warm stream inside serve_memory_tier_to_gpu(synchronize=true), so more than one warm-stream sync can occur.
+  spec_pointers:
+  - US-11 AS-6
+  - US-11 AS-2
+  - FR-039 step 2
+  code_pointers: []
+  status: candidate
+  excluded_properties:
+  - DIS-BATCH-LOOKUP-ONE-WARM-SYNC-AFTER-COLD
+  extraction_sides:
+    spec:
+    - DIS-BATCH-LOOKUP-ONE-WARM-SYNC-AFTER-COLD
+    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - components/dispatcher/src/lib.rs:2697
+  - components/dispatcher/src/lib.rs:2698
+  - components/dispatcher/src/lib.rs:2704
+  - components/dispatcher/src/lib.rs:2745
+  - components/dispatcher/src/lib.rs:1300
+- id: D-FR-039STEP1-lib.rs:2377-f2679a
+  name: Batch lookup transient retry
+  kind: spec-and-code-differ
+  methods:
+  - batch_lookup
+  spec_says: A transient dispatch-map lookup error caused by a concurrent writer is retried up to five times and
+    is not reported as KeyNotFound or forwarded to remote lookup merely because of that error.
+  code_does: When the dispatch map's lookup of a key returns an error, the batch lookup retries that lookup up to
+    five more times before giving up on the key. A key whose dispatch-map lookup still fails after the retries is
+    a live key that could not be read, so it is not reported as a cache miss and is not forwarded to remote lookup
+    as if it were absent.
+  spec_pointers:
+  - FR-039 step 1
+  code_pointers:
+  - lib.rs:2377
+  - lib.rs:2358
+  - lib.rs:2445
+  status: candidate
+  excluded_properties:
+  - DIS-BATCH-LOOKUP-TRANSIENT-RETRY
+  extraction_sides:
+    spec:
+    - DIS-BATCH-LOOKUP-TRANSIENT-RETRY
+    code:
+    - DIS-BATCH-LOOKUP-DM-RETRY
+    - DIS-BATCH-LOOKUP-DM-ERROR-NOT-MISS
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - components/dispatcher/src/lib.rs:2377
+  - components/dispatcher/src/lib.rs:2381
+  - components/dispatcher/src/lib.rs:2445
+  - components/dispatcher/src/lib.rs:2446
+  - components/dispatcher/src/lib.rs:2762
+- id: D-NOSPEC-lib.rs:2745-71cc9b
+  name: Batch lookup sync failure error
+  kind: spec-and-code-differ
+  methods:
+  - batch_lookup
+  spec_says: If the batched GPU stream synchronization fails, every entry whose copy was in flight is reported as
+    an error with the Error attribution, and none of them is reported as a hit.
+  code_does: If waiting for the batched warm copies to finish fails, none of the keys whose copies were waited on
+    is reported as a successful hit. If waiting for the remote-delivery copies fails, every key whose copy was submitted
+    in that wait is reported as an IoError rather than a hit.
+  spec_pointers: []
+  code_pointers:
+  - lib.rs:2745
+  - idispatcher.rs:276
+  - lib.rs:2902
+  status: candidate
+  excluded_properties:
+  - DIS-BATCH-LOOKUP-SYNC-FAILURE-ERROR
+  extraction_sides:
+    spec:
+    - DIS-BATCH-LOOKUP-SYNC-FAILURE-ERROR
+    code:
+    - DIS-BATCH-LOOKUP-WARM-SYNC-FAILURE-NOT-HIT
+    - DIS-BATCH-LOOKUP-REMOTE-SYNC-FAILURE
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - components/dispatcher/src/lib.rs:2745
+  - components/dispatcher/src/lib.rs:2747
+  - components/dispatcher/src/lib.rs:2748
+  - components/dispatcher/src/lib.rs:2425
+  - components/dispatcher/src/lib.rs:2426
+  - components/dispatcher/src/lib.rs:2910
+- id: D-NOSPEC-nocode-437451
+  name: Batch lookup servedby concurrent dram
+  kind: spec-not-found-in-code
+  methods:
+  - batch_lookup
+  spec_says: A key served from the memory tier after waiting for another thread's concurrent promotion is attributed
+    DRAM, not SSD.
+  code_does: The key is tagged Ssd at classification, and the concurrent-promotion recovery rewrites only the result,
+    so a key served from DRAM after waiting is attributed SSD.
+  spec_pointers: []
+  code_pointers: []
+  status: candidate
+  excluded_properties:
+  - DIS-BATCH-LOOKUP-SERVEDBY-CONCURRENT-DRAM
+  extraction_sides:
+    spec:
+    - DIS-BATCH-LOOKUP-SERVEDBY-CONCURRENT-DRAM
+    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - components/dispatcher/src/lib.rs:2435
+  - components/dispatcher/src/lib.rs:2942
+  - components/dispatcher/src/lib.rs:2944
+  - components/dispatcher/src/lib.rs:2958
+- id: D-NOSPEC-nocode-9767d0
+  name: Batch lookup servedby overwrite
+  kind: spec-not-found-in-code
+  methods:
+  - batch_lookup
+  spec_says: Whenever batch_lookup rewrites an entry's result after first assigning it, it rewrites that entry's
+    attribution at the same time so that the two always agree.
+  code_does: The concurrent-promotion recovery overwrites results[i] without updating tier[i], so the result and
+    its recorded serving pass can disagree.
+  spec_pointers: []
+  code_pointers: []
+  status: candidate
+  excluded_properties:
+  - DIS-BATCH-LOOKUP-SERVEDBY-OVERWRITE
+  extraction_sides:
+    spec:
+    - DIS-BATCH-LOOKUP-SERVEDBY-OVERWRITE
+    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - components/dispatcher/src/lib.rs:2942
+  - components/dispatcher/src/lib.rs:2943
+  - components/dispatcher/src/lib.rs:2435
+  - components/dispatcher/src/lib.rs:2958
+- id: D-NOSPEC-lib.rs:3117-e35410
+  name: Remove order
+  kind: spec-and-code-differ
+  methods:
+  - remove
+  spec_says: Remove frees the memory-tier slot first, then deletes the dispatch-map entry, and then frees the SSD
+    extent if there is one.
+  code_does: Remove takes the key out of the dispatch map before it frees the memory-tier slot, and it does not
+    free the slot if the dispatch-map removal fails.
+  spec_pointers: []
+  code_pointers:
+  - lib.rs:3117
+  status: candidate
+  excluded_properties:
+  - DIS-REMOVE-ORDER
+  extraction_sides:
+    spec:
+    - DIS-REMOVE-ORDER
+    code:
+    - DIS-REMOVE-DM-BEFORE-SLOT
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - components/dispatcher/src/lib.rs:3119
+  - components/dispatcher/src/lib.rs:3120
+  - components/dispatcher/src/lib.rs:3123
+  - components/dispatcher/src/lib.rs:3124
+- id: D-FR-018-idispatcher.rs-e388e9
+  name: Remove no wait
+  kind: spec-not-found-in-code
+  methods:
+  - remove
+  spec_says: Remove proceeds immediately without waiting for a pending background write-through of the key to complete.
+  code_does: A pending write-through holds a read reference, so dm.remove refuses with ActiveReferences and remove
+    returns KeyNotFound instead of going ahead.
+  spec_pointers:
+  - FR-018
+  code_pointers:
+  - idispatcher.rs
+  status: candidate
+  excluded_properties:
+  - DIS-REMOVE-NO-WAIT
+  extraction_sides:
+    spec:
+    - DIS-REMOVE-NO-WAIT
+    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - components/dispatcher/src/lib.rs:3552
+  - components/dispatcher/src/lib.rs:3119
+  - components/dispatcher/src/lib.rs:3120
+  - components/dispatch-map/src/lib.rs:331
+- id: D-SC-003-nocode-e706c8
+  name: Remove resources reusable
+  kind: spec-not-found-in-code
+  methods:
+  - remove
+  spec_says: After remove succeeds, the memory-tier bytes and SSD extent the entry used are available for reuse
+    by later entries.
+  code_does: The SSD extent is freed only when the entry was in BlockDevice state; a memory-tier entry that already
+    has a write-through extent has its slot freed but its SSD extent is never released.
+  spec_pointers:
+  - SC-003
+  code_pointers: []
+  status: candidate
+  excluded_properties:
+  - DIS-REMOVE-RESOURCES-REUSABLE
+  extraction_sides:
+    spec:
+    - DIS-REMOVE-RESOURCES-REUSABLE
+    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - components/dispatcher/src/lib.rs:3105
+  - components/dispatcher/src/lib.rs:3110
+  - components/dispatcher/src/lib.rs:3112
+  - components/dispatcher/src/lib.rs:3127
+  - components/dispatcher/src/lib.rs:3131
+- id: D-NOSPEC-idispatcher.rs-dd8812-1
+  name: Tier stats blocked causes
+  kind: spec-and-code-differ
+  methods:
+  - reserve_memory
+  - tier_event_stats
+  spec_says: Each eviction candidate refused because it holds a read pin increases evictions_blocked_by_pin by one,
+    and each candidate refused for lacking an SSD offset increases evictions_blocked_unpersisted by one, counted
+    per candidate examined. Each clean-eviction scan that examined all its candidates and freed none increases eviction_scans_exhausted
+    by one, whatever blocked the candidates.
+  code_does: During eviction scans, each candidate demoted increases the evictions-from-memory counter by one and
+    emits a Demoted eviction event, each candidate skipped for a held reference increases the blocked-by-pin counter
+    by one, each other refused candidate increases the blocked-unpersisted counter by one, and each scan that frees
+    nothing increases the scans-exhausted counter by one.
+  spec_pointers: []
+  code_pointers:
+  - idispatcher.rs
+  - lib.rs:1066
+  - lib.rs:1106
+  status: candidate
+  excluded_properties:
+  - DIS-TIER-STATS-BLOCKED-CAUSES
+  extraction_sides:
+    spec:
+    - DIS-TIER-STATS-BLOCKED-CAUSES
+    - DIS-TIER-STATS-SCANS-EXHAUSTED
+    code:
+    - DIS-RESERVE-EVICTION-COUNTERS
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - components/dispatcher/src/lib.rs:1073
+  - components/dispatcher/src/lib.rs:1074
+  - components/dispatcher/src/lib.rs:1076
+  - components/dispatcher/src/lib.rs:1082
+  - components/interfaces/src/idispatch_map.rs:181
+- id: D-FR-042-lib.rs:568-6048df
+  name: Eviction events
+  kind: spec-and-code-differ
+  methods: []
+  spec_says: Each entry demoted by the evictor produces an eviction event with reason Demoted, sending an event
+    never blocks the evictor, and an event that does not fit in the bounded channel is counted in the dropped-event
+    counter.
+  code_does: When an eviction channel is installed and is full, an eviction event the dispatcher fails to send is
+    counted in the dropped-events counter, which is returned and reset to zero when read.
+  spec_pointers:
+  - FR-042
+  - FR-050
+  code_pointers:
+  - lib.rs:568
+  - lib.rs:572
+  status: candidate
+  excluded_properties:
+  - DIS-INV-EVICTION-EVENTS
+  extraction_sides:
+    spec:
+    - DIS-INV-EVICTION-EVENTS
+    code:
+    - DIS-INV-EVICTION-EVENT-DROP-COUNT
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - components/dispatcher/src/background.rs:539
+  - components/dispatcher/src/background.rs:540
+  - components/dispatcher/src/background.rs:335
+  - components/dispatcher/src/background.rs:336
+  - components/dispatcher/src/lib.rs:575
+  - components/dispatcher/src/lib.rs:2054
+- id: D-NOSPEC-idispatcher.rs-dd8812-2
+  name: Flush then clear demotes
+  kind: spec-not-found-in-code
+  methods:
+  - flush_to_ssd
+  spec_says: After flush_to_ssd returns, a clear_memory_tier call converts the memory-tier entries to block-device
+    state rather than dropping them.
+  code_does: Flush only waits for the queues to drain; a job whose extent reservation or SSD write failed leaves
+    the entry unpersisted, and clear_memory_tier then force-removes it instead of demoting it.
+  spec_pointers: []
+  code_pointers:
+  - idispatcher.rs
+  status: candidate
+  excluded_properties:
+  - DIS-FLUSH-THEN-CLEAR-DEMOTES
+  extraction_sides:
+    spec:
+    - DIS-FLUSH-THEN-CLEAR-DEMOTES
+    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - components/dispatcher/src/background.rs:198
+  - components/dispatcher/src/lib.rs:1439
+  - components/dispatcher/src/lib.rs:1451
+  - components/dispatcher/src/lib.rs:3814
+  - components/dispatcher/src/lib.rs:3818
+  - components/dispatcher/src/lib.rs:3819
+  - components/dispatcher/src/lib.rs:3817
+  - components/dispatcher/src/lib.rs:1452
+- id: D-FR-056-idispatcher.rs-e6d9ef
+  name: Read write stats monotonic
+  kind: spec-not-found-in-code
+  methods:
+  - read_write_stats
+  spec_says: The read/write statistics never decrease between two successive calls, and they are all zero when the
+    dispatcher is built without the telemetry features.
+  code_does: The stats are summed over the current data_drives, which shutdown empties, so a call after shutdown
+    (or after re-initialize) returns lower values than a previous call.
+  spec_pointers:
+  - FR-056
+  code_pointers:
+  - idispatcher.rs
+  status: candidate
+  excluded_properties:
+  - DIS-READ-WRITE-STATS-MONOTONIC
+  extraction_sides:
+    spec:
+    - DIS-READ-WRITE-STATS-MONOTONIC
+    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - components/dispatcher/src/lib.rs:2161
+  - components/dispatcher/src/lib.rs:2163
+  - components/dispatcher/src/lib.rs:3871
+  - components/dispatcher/src/lib.rs:3873
+- id: D-FR-058-idispatcher.rs-c69d68
+  name: Tier stats route partition
+  kind: spec-and-code-differ
+  methods:
+  - batch_lookup
+  - tier_event_stats
+  spec_says: Over any interval, the increase of lookup_hits_dram plus lookup_hits_ssd plus remote_lookup_hits equals
+    the number of keys served by lookups in that interval, and matches the per-key attributions returned for the
+    same batches.
+  code_does: For each batch lookup, the increases in the DRAM-hit, SSD-hit and remote-hit counters add up to the
+    number of keys served in that batch. A batch lookup increases the DRAM-hit counter by exactly the number of
+    outcomes attributed to DRAM and the SSD-hit counter by exactly the number attributed to SSD.
+  spec_pointers:
+  - FR-058
+  - SC-017
+  code_pointers:
+  - idispatcher.rs
+  - idispatcher.rs:323
+  - lib.rs:179
+  - lib.rs:2988
+  status: candidate
+  excluded_properties:
+  - DIS-TIER-STATS-ROUTE-PARTITION
+  extraction_sides:
+    spec:
+    - DIS-TIER-STATS-ROUTE-PARTITION
+    code:
+    - DIS-BATCH-LOOKUP-ROUTE-PARTITION
+    - DIS-BATCH-LOOKUP-LOCAL-HIT-COUNTERS
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - components/dispatcher/src/lib.rs:2843
+  - components/dispatcher/src/lib.rs:2881
+  - components/dispatcher/src/lib.rs:2891
+  - components/dispatcher/src/lib.rs:2909
+  - components/dispatcher/src/lib.rs:3059
+  - components/dispatcher/src/lib.rs:3066
+  - components/dispatcher/src/lib.rs:2883
+  - components/dispatcher/src/lib.rs:2892
+  - components/dispatcher/src/lib.rs:2910
+  - components/dispatcher/src/lib.rs:2919
+- id: D-US-7-nocode-ecdf3d
+  name: Eviction stops when fits
+  kind: spec-not-found-in-code
+  methods:
+  - capacity
+  - used
+  spec_says: Making space stops evicting as soon as used bytes plus the needed bytes are at most the memory tier's
+    capacity.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - US-7
+  - US-7 AS-1
+  code_pointers: []
+  status: candidate
+  excluded_properties:
+  - DIS-INV-EVICTION-STOPS-WHEN-FITS
+  extraction_sides:
+    spec:
+    - DIS-INV-EVICTION-STOPS-WHEN-FITS
+    code: []
+  classified: classifiers disagree - needs a person
+- id: D-US-12AS-1-nocode-d502bd
+  name: Mt evictor watermark
+  kind: spec-not-found-in-code
+  methods:
+  - used
+  spec_says: Once memory-tier utilization exceeds memory_tier_eviction_threshold, the background evictor demotes
+    evictable least-recently-used entries until utilization falls below memory_tier_eviction_low_watermark or its
+    scan runs out of candidates.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - US-12 AS-1
+  - FR-048
+  code_pointers: []
+  status: candidate
+  excluded_properties:
+  - DIS-INV-MT-EVICTOR-WATERMARK
+  extraction_sides:
+    spec:
+    - DIS-INV-MT-EVICTOR-WATERMARK
+    code: []
+  classified: classifiers disagree - needs a person
+- id: D-US-10AS-1-background.rs:302-52a5d0
+  name: Ssd evictor watermark
+  kind: spec-and-code-differ
+  methods: []
+  spec_says: Once combined SSD utilization across all drives exceeds ssd_eviction_threshold, the SSD evictor evicts
+    the oldest block-device entries until utilization falls below ssd_eviction_low_watermark or the batch is exhausted.
+  code_does: The background SSD evictor removes nothing in a cycle where SSD utilization is below the configured
+    threshold, and stops a cycle once utilization drops below the low-water mark.
+  spec_pointers:
+  - US-10 AS-1
+  - FR-030
+  - FR-031
+  - SC-013
+  code_pointers:
+  - background.rs:302
+  - background.rs:357
+  status: candidate
+  excluded_properties:
+  - DIS-INV-SSD-EVICTOR-WATERMARK
+  extraction_sides:
+    spec:
+    - DIS-INV-SSD-EVICTOR-WATERMARK
+    code:
+    - DIS-INV-SSD-EVICTOR-THRESHOLD
+  classified: classifiers disagree - needs a person
+- id: D-FR-054-nocode-2b1f28
+  name: Pipeline drain all
+  kind: spec-not-found-in-code
+  methods:
+  - error
+  spec_says: A cold-read pipeline returns only after every NVMe read it submitted has completed, even when one of
+    them failed, stops submitting new reads after the first error, and reports that first error.
+  code_does: The multi-object and scatter-gather pipelines keep submitting new reads after a per-object read error,
+    and the multi-object pipeline returns at once with reads still outstanding when an initial send fails.
+  spec_pointers:
+  - FR-054
+  - FR-061
+  - FR-019
+  code_pointers: []
+  status: candidate
+  excluded_properties:
+  - DIS-INV-PIPELINE-DRAIN-ALL
+  extraction_sides:
+    spec:
+    - DIS-INV-PIPELINE-DRAIN-ALL
+    code: []
+  classified: real disagreement (both classifiers agree)
+  code_evidence:
+  - components/dispatcher/src/pipeline.rs:591
+  - components/dispatcher/src/pipeline.rs:602
+  - components/dispatcher/src/pipeline.rs:549
+  - components/dispatcher/src/pipeline.rs:552
+  - components/dispatcher/src/pipeline.rs:988
+  - components/dispatcher/src/pipeline.rs:999
+  - components/dispatcher/src/pipeline.rs:309
+- id: D-FR-052-nocode-014680
+  name: Device stream binding
+  kind: spec-not-found-in-code
+  methods: []
+  spec_says: Every warm or cold GPU copy whose destination or source device is known is issued on a stream created
+    on that same device.
+  code_does: No matching guarantee stated by the code reader.
+  spec_pointers:
+  - FR-052
+  - FR-037
+  code_pointers: []
+  status: candidate
+  excluded_properties:
+  - DIS-INV-DEVICE-STREAM-BINDING
+  extraction_sides:
+    spec:
+    - DIS-INV-DEVICE-STREAM-BINDING
+    code: []
+  classified: classifiers disagree - needs a person
+- id: D-RANGE-FR-019-73b5ad
+  name: 'Input range: At every cold read (lookup, lookup_async, batch_lookup, promote_to_memory_tier), every data
+    drive''s max_transfer_size is at least the read chunk size. The read chunk size is the first drive''s max_transfer_size,
+    or 131072 bytes when no pipeline ring was allocated.'
+  kind: input-range-mismatch
+  methods:
+  - lookup
+  - lookup_async
+  - batch_lookup
+  - promote_to_memory_tier
+  spec_says: Every block-device I/O must respect the MDTS of the device it is issued to. The dispatcher queries
+    IBlockDevice::max_transfer_size() for each device. Nothing requires all data drives to share one MDTS.
+  code_does: 'All cold-read pipelines segment reads by a single chunk_size: the FIRST drive''s max_transfer_size
+    (lib.rs:1948-1952), or 131072 when no pipeline ring exists (lib.rs:2473-2476, 840-842, 960-962, 3703-3705).
+    That one value is used for every drive (pipeline.rs:250-254, 812-816). Only the write path uses each drive''s
+    own MDTS (lib.rs:674-683).'
+  spec_pointers:
+  - FR-019
+  - SC-012
+  - research.md MDTS decision
+  - DIS-INV-PIPELINE-SEGMENT-MDTS
+  code_pointers:
+  - dispatcher/src/lib.rs:1948
+  - dispatcher/src/lib.rs:2475
+  - dispatcher/src/lib.rs:842
+  - dispatcher/src/lib.rs:962
+  - dispatcher/src/lib.rs:3705
+  - dispatcher/src/pipeline.rs:250
+  - dispatcher/src/pipeline.rs:812
+  status: candidate
+  assume_in_level2: At every cold read (lookup, lookup_async, batch_lookup, promote_to_memory_tier), every data
+    drive's max_transfer_size is at least the read chunk size. The read chunk size is the first drive's max_transfer_size,
+    or 131072 bytes when no pipeline ring was allocated.
+  assume_rust: drives.iter().all(|d| d.block_dev_iface.max_transfer_size() as usize >= chunk_size)
+  excluded_properties: []
+- id: D-RANGE-FR-019-319d26
+  name: 'Input range: At every call of segment_io (every SSD write-through and every cold read), the transfer size
+    it is given is a multiple of the drive''s block size.'
+  kind: input-range-mismatch
+  methods:
+  - populate
+  - batch_populate
+  - copy_gpu_to_memory_completed
+  - schedule_write_through
+  - lookup
+  - lookup_async
+  - batch_lookup
+  - promote_to_memory_tier
+  spec_says: I/O is split into segments of at most MDTS (FR-019). The spec places no constraint relating MDTS to
+    the drive's block size.
+  code_does: segment_io advances the LBA by length / sector_size with truncating division (io_segmenter.rs:50).
+    It therefore assumes every non-final segment, that is the transfer size, is a whole number of blocks. The transfer
+    size is max_transfer_size on writes (lib.rs:674-683) and chunk_size on reads (pipeline.rs:247-254). Otherwise
+    later segments land at the wrong LBA.
+  spec_pointers:
+  - FR-019
+  - DIS-INV-PIPELINE-SEGMENT-MDTS
+  code_pointers:
+  - dispatcher/src/io_segmenter.rs:43
+  - dispatcher/src/io_segmenter.rs:50
+  - dispatcher/src/lib.rs:683
+  - dispatcher/src/pipeline.rs:250
+  - dispatcher/src/pipeline.rs:486
+  - dispatcher/src/pipeline.rs:812
+  status: candidate
+  assume_in_level2: At every call of segment_io (every SSD write-through and every cold read), the transfer size
+    it is given is a multiple of the drive's block size.
+  assume_rust: max_transfer_size % sector_size == 0
+  excluded_properties: []
+- id: D-RANGE-US-5AS-4-a11766
+  name: 'Input range: In memory-tier-only mode (no data drives), every key that reaches a background write-through
+    is at most u64::MAX / 4096.'
+  kind: input-range-mismatch
+  methods:
+  - populate
+  - batch_populate
+  - copy_gpu_to_memory_completed
+  - schedule_write_through
+  spec_says: With no SPDK environment, write-throughs assign synthetic offsets (US-5 AS-4). A CacheKey may be any
+    u64.
+  code_does: The synthetic offset is computed as job.key * 4096 with an unchecked multiplication (lib.rs:1409).
+    It panics in debug builds and wraps in release builds, where two keys can receive the same offset, for any key
+    above u64::MAX / 4096.
+  spec_pointers:
+  - US-5 AS-4
+  - DIS-INITIALIZE-NO-SPDK-MEMORY-ONLY
+  - idispatcher.rs CacheKey
+  code_pointers:
+  - dispatcher/src/lib.rs:1407
+  - dispatcher/src/lib.rs:1409
+  status: candidate
+  assume_in_level2: In memory-tier-only mode (no data drives), every key that reaches a background write-through
+    is at most u64::MAX / 4096.
+  assume_rust: key <= u64::MAX / 4096
+  excluded_properties: []
+- id: D-RANGE-IDISPATCHER.RSIPCHANDLE.SIZE-926281
+  name: 'Input range: At every background write-through, the entry size rounded up to the target drive''s block
+    size is at most u32::MAX.'
+  kind: input-range-mismatch
+  methods:
+  - populate
+  - batch_populate
+  - copy_gpu_to_memory_completed
+  - schedule_write_through
+  spec_says: Entry sizes are u32 values greater than zero. The spec states no tighter upper bound.
+  code_does: The write-through rounds the size up to the drive's block size and passes it to reserve_extent as aligned_bytes
+    as u32 (lib.rs:1418, 1439). A size within one block of u32::MAX rounds past u32::MAX and is truncated.
+  spec_pointers:
+  - idispatcher.rs IpcHandle.size
+  - idispatcher.rs reserve_memory
+  - FR-004
+  code_pointers:
+  - dispatcher/src/lib.rs:1418
+  - dispatcher/src/lib.rs:1439
+  status: candidate
+  assume_in_level2: At every background write-through, the entry size rounded up to the target drive's block size
+    is at most u32::MAX.
+  assume_rust: (size as usize).next_multiple_of(block_size) <= u32::MAX as usize
+  excluded_properties: []
+- id: D-RANGE-FR-039-d29c77
+  name: 'Input range: At every call of batch_lookup, the sizes of each entry''s GPU regions add up to at most u32::MAX.'
+  kind: input-range-mismatch
+  methods:
+  - batch_lookup
+  spec_says: Each batch_lookup entry carries a Vec of GPU destination regions, each with a u32 size (FR-039). The
+    spec does not bound their total.
+  code_does: batch_lookup adds up each entry's region sizes in u32 (lib.rs:2356 for the slot size, lib.rs:2775 for
+    the remote-lookup size). The sum overflows when the regions total more than u32::MAX. copy_gpu_to_memory_async
+    adds them up in usize instead (lib.rs:3441).
+  spec_pointers:
+  - FR-039
+  - idispatcher.rs batch_lookup
+  code_pointers:
+  - dispatcher/src/lib.rs:2356
+  - dispatcher/src/lib.rs:2775
+  status: candidate
+  assume_in_level2: At every call of batch_lookup, the sizes of each entry's GPU regions add up to at most u32::MAX.
+  assume_rust: entries.iter().all(|(_, rs)| rs.iter().map(|r| r.size as u64).sum::<u64>() <= u32::MAX as u64)
+  excluded_properties: []
+routed_to_other_tools:
+- property: DIS-LOOKUP-CONCURRENT-READERS
+  name: Lookup concurrent readers
+  methods:
+  - lookup
+  statement: Several concurrent lookups of the same cached key may all succeed, because multiple readers of one
+    entry are allowed.
+  reason: interleaving
+  checked_by: loom
+  why: Depends on how several concurrent lookups of one key interleave on the dispatch-map read references.
+- property: DIS-LOOKUP-NO-DATA-CORRUPTION-CONCURRENT
+  name: Lookup no data corruption concurrent
+  methods:
+  - lookup
+  statement: Concurrent populates and lookups on different keys each deliver the correct data for their own key
+    and all complete.
+  reason: interleaving
+  checked_by: loom
+  why: Concerns concurrent populates and lookups on different keys interleaving without corrupting each other.
+- property: DIS-RESERVE-MEMORY-BACKPRESSURE-RETRIES
+  name: Reserve memory backpressure retries
+  methods:
+  - reserve_memory
+  statement: While the memory tier is full and the deadline has not passed, reserve_memory keeps retrying the allocation
+    and succeeds if room appears before the deadline.
+  reason: timing
+  checked_by: test
+  why: The obligation is defined by a wall-clock deadline (Instant::now against store_backpressure_ms) and retry
+    polling over time.

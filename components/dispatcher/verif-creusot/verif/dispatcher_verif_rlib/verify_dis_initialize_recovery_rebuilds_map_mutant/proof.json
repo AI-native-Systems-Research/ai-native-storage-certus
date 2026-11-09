@@ -1,0 +1,17 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_initialize": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_dis_initialize_recovery_rebuilds_map__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "alt-ergo", "time": 0.038 }, null ]
+          }
+        ]
+      }
+    }
+  }
+}

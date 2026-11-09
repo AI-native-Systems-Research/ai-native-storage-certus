@@ -1,0 +1,83 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 168 0 168 35 *)
+
+let%span svec = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span svec'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span sbg = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 169 31 169 41
+let%span sbg'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 170 23 170 24
+let%span sbg'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 171 16 171 107
+let%span sbg'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 173 8 173 20
+let%span sbg'3 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 174 13 174 14
+let%span sbg'4 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 174 8 174 14
+let%span sbg'5 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 176 41 176 42
+let%span sbg'6 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 167 10 167 73
+let%span sbg'7 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 162 16 163 80
+
+use seq.Seq
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Vec_usize_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_usize_Global (self: t_Vec_usize_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_usize_Global_spec:
+  forall self: t_Vec_usize_Global [view_Vec_usize_Global self]. [%#svec'0] Seq.length (view_Vec_usize_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_usize (return (x: t_Vec_usize_Global)) = any
+  [ return (result: t_Vec_usize_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_usize_Global result) = 0}
+    (! return {result}) ]
+
+let push_usize (self_: MutBorrow.t t_Vec_usize_Global) (v: UInt64.t) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'1] view_Vec_usize_Global self_.final
+    = Seq.snoc (view_Vec_usize_Global self_.current) v}
+    (! return {result}) ]
+
+type t_Stg = { slots: UInt64.t; free: t_Vec_usize_Global; leased: int }
+
+predicate stg_inv [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 161 0 161 30] (p: t_Stg) =
+  [%#sbg'7] p.leased >= 0
+  /\ p.leased + Seq.length (view_Vec_usize_Global p.free) = UInt64.t'int p.slots
+  /\ (forall i: int. 0 <= i /\ i < Seq.length (view_Vec_usize_Global p.free)
+    -> UInt64.t'int (Seq.get (view_Vec_usize_Global p.free) i) < UInt64.t'int p.slots)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let stg_new [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 168 0 168 35]
+  (slots'0: UInt64.t) (return (x: t_Stg)) = (! bb0
+  [ bb0 = s0
+    [ s0 = new_usize [%#sbg] (fun (_x: t_Vec_usize_Global) -> [ &free'0 <- _x ] s1)
+    | s1 = [ &i <- [%#sbg'0] (0: UInt64.t) ] s2
+    | s2 = bb2 ]
+  | bb2 = bb2
+    [ bb2 = {[@expl:loop invariant] [%#sbg'1] UInt64.t'int i <= UInt64.t'int slots'0
+      /\ Seq.length (view_Vec_usize_Global free'0) = UInt64.t'int i
+      /\ (forall j: int. 0 <= j /\ j < UInt64.t'int i
+        -> UInt64.t'int (Seq.get (view_Vec_usize_Global free'0) j) < UInt64.t'int slots'0)}
+      (! s0)
+      [ s0 = [ &_13 <- UInt64.lt i slots'0 ] s1 | s1 = any [ br0 -> {_13 = false} (! bb7) | br1 -> {_13} (! bb4) ] ]
+      [ bb4 = s0
+        [ s0 = MutBorrow.borrow_mut <t_Vec_usize_Global> {free'0}
+            (fun (_bor: MutBorrow.t t_Vec_usize_Global) -> [ &_17 <- _bor ] [ &free'0 <- _bor.final ] s1)
+        | s1 = push_usize [%#sbg'2] {_17} {i} (fun (_x: ()) -> [ &_16 <- _x ] s2)
+        | s2 = UInt64.add [%#sbg'4] {i} {[%#sbg'3] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &i <- _x ] s3)
+        | s3 = bb2 ] ] ]
+  | bb7 = s0 [ s0 = [ &_ret <- { slots = slots'0; free = free'0; leased = ([%#sbg'5] 0) } ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Stg = Any.any_l ()
+  | & slots'0: UInt64.t = slots'0
+  | & free'0: t_Vec_usize_Global = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _13: bool = Any.any_l ()
+  | & _16: () = Any.any_l ()
+  | & _17: MutBorrow.t t_Vec_usize_Global = Any.any_l () ])
+  [ return (result: t_Stg) -> {[@stop_split] [@expl:stg_new ensures] [%#sbg'6] stg_inv result
+    /\ result.leased = 0 /\ result.slots = slots'0}
+    (! return {result}) ]

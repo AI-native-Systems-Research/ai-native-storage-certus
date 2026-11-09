@@ -1,0 +1,16 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_copy_gpu_to_memory_completed": {
+        "prover": "alt-ergo",
+        "time": 0.056
+      },
+      "vc_p_zero": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_refute_dis_copy_completed_already_exists": {
+        "prover": "z3",
+        "time": 0.025
+      }
+    }
+  }
+}

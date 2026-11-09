@@ -1,0 +1,131 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 1222 0 1222 59 *)
+
+let%span score = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 427 16 427 111
+let%span sbatch = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 1220 11 1220 85
+let%span sbatch'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 1221 10 1221 37
+let%span sbatch'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 995 16 996 98
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use map.Map
+use creusot.int.Int32
+use int.Int
+
+type t_FMap_u64_Ent
+
+type t_FMap_u64_Slot
+
+type t_Ctr = {
+  promo_mem: int;
+  promo_gpu: int;
+  ev_mem: int;
+  ev_ssd: int;
+  hit_dram: int;
+  hit_ssd: int;
+  r_hit: int;
+  r_miss: int;
+  bp: int;
+  drop_full: int;
+  already: int;
+  blk_pin: int;
+  exhausted: int;
+  blk_unp: int }
+
+type t_Job = { key: UInt64.t; size: UInt32.t; dev: UInt64.t }
+
+type t_Option_usize = None | Some UInt64.t
+
+type t_Ev =
+  | H2D UInt64.t UInt64.t UInt64.t UInt64.t
+  | D2H UInt64.t UInt64.t UInt64.t UInt64.t
+  | Sync UInt64.t
+  | MtTouch UInt64.t
+  | MtGet UInt64.t
+  | MtBatchTouch
+  | MtRemove UInt64.t
+  | MtInsert UInt64.t
+  | DmTouch UInt64.t
+  | DmDemote UInt64.t
+  | DmRemove UInt64.t
+  | DmCreate UInt64.t
+  | DmPromote UInt64.t
+  | RelRead UInt64.t int
+  | RelWrite UInt64.t int
+  | Enq t_Job
+  | ExtFree UInt64.t UInt64.t
+  | Recover UInt64.t UInt64.t UInt32.t
+  | EmFormat UInt64.t
+  | EmInit UInt64.t
+  | Checkpoint UInt64.t
+  | DevSignal UInt64.t
+  | DevShutdown UInt64.t
+  | DevDetach UInt64.t
+  | Register
+  | Unregister
+  | Join
+  | Leave
+  | SsdRead UInt64.t UInt64.t
+  | SsdWrite UInt64.t UInt64.t
+  | RemoteFwd UInt64.t UInt32.t
+  | Spawn
+  | Cpu UInt64.t t_Option_usize
+
+type t_Ext = { key'0: UInt64.t; off'0: UInt64.t; size'0: UInt32.t }
+
+type t_W = {
+  dm: t_FMap_u64_Ent;
+  mt: t_FMap_u64_Slot;
+  used: int;
+  cap: int;
+  c: t_Ctr;
+  wq: Seq.seq t_Job;
+  log: Seq.seq t_Ev;
+  tick: int;
+  ob: Map.map int bool;
+  ob2: Map.map int bool;
+  og: Map.map int bool;
+  os: Map.map int bool;
+  ov: Map.map int UInt64.t;
+  ok: Map.map int (Seq.seq UInt64.t);
+  ext: Map.map int (Seq.seq t_Ext);
+  pool: bool;
+  cluster: bool;
+  threads: int;
+  rw: Map.map int UInt64.t;
+  cfree: Map.map int int;
+  wf: Map.map UInt64.t bool;
+  sdev: Map.map UInt64.t Int32.t }
+
+predicate fwd_logged [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 994 0 994 58] (a: t_W) (b: t_W) (key'1: UInt64.t) (size'1: int) =
+  [%#sbatch'1] exists i: int. Seq.length a.log <= i
+    /\ i < Seq.length b.log
+    /\ match Seq.get b.log i with
+      | RemoteFwd k z -> k = key'1 /\ UInt32.t'int z = size'1
+      | _ -> false
+      end
+
+predicate log_ext [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 426 0 426 34] (a: t_W) (b: t_W) =
+  [%#score] Seq.length a.log <= Seq.length b.log
+  /\ (forall i: int. 0 <= i /\ i < Seq.length a.log -> Seq.get b.log i = Seq.get a.log i)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant g : t_W
+
+constant a : t_W
+
+constant b : t_W
+
+constant c'0 : t_W
+
+constant key'1 : UInt64.t
+
+constant size'1 : int
+
+function fwd_ext [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 1222 0 1222 59] (g: t_W) (a: t_W) (b: t_W) (c'0: t_W) (key'1: UInt64.t) (size'1: int) : ()
+
+goal vc_fwd_ext: ([%#sbatch] fwd_logged a b key'1 size'1 /\ log_ext b c'0 /\ Seq.length g.log <= Seq.length a.log)
+  -> ([@stop_split] [@expl:fwd_ext ensures] [%#sbatch'0] fwd_logged g c'0 key'1 size'1)

@@ -1,0 +1,37 @@
+{
+  "applied_at": "2026-10-31T06:30:00Z",
+  "based_on": "proposals.json (same run)",
+  "backup": "backups/20261031T054807Z",
+  "changes": [
+    {
+      "id": "B-1",
+      "spec": "001",
+      "requirement": "FR-026",
+      "change": "Added"
+    },
+    {
+      "id": "B-1",
+      "spec": "001",
+      "requirement": "Assumptions (feature flags)",
+      "change": "Modified"
+    },
+    {
+      "id": "B-1",
+      "spec": "001",
+      "requirement": "Last-Synced header",
+      "change": "Added"
+    },
+    {
+      "id": "B-2",
+      "spec": "001",
+      "requirement": "contracts/igpu_services.md",
+      "change": "Added section"
+    }
+  ],
+  "new_specs": [],
+  "align_tasks": [],
+  "not_applied": [],
+  "source_files_changed": [],
+  "result": "2 proposals applied",
+  "previous": "backups/20261031T054807Z/apply-report.json.prev"
+}

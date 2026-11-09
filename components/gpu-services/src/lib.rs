@@ -1173,6 +1173,13 @@ impl IGpuServices for GpuServicesComponent {
                 ) -> std::os::raw::c_int;
             }
 
+            // Without an SPDK environment there is no SPDK memory map to register
+            // in: spdk_mem_register would dereference it and crash. The CUDA
+            // pinning above is still useful for async GPU transfers.
+            if !interfaces::is_spdk_env_active() {
+                return Ok(());
+            }
+
             let rc = unsafe { spdk_mem_register(ptr, size) };
             if rc != 0 && rc != -16 {
                 // rc == -16 (EBUSY): memory already registered with SPDK (e.g. allocated
@@ -1208,10 +1215,17 @@ impl IGpuServices for GpuServicesComponent {
                 ) -> std::os::raw::c_int;
             }
 
-            let rc = unsafe { spdk_mem_unregister(ptr, size) };
-            if rc != 0 {
-                return Err(format!("spdk_mem_unregister failed (rc={})", rc));
-            }
+            // Registered with SPDK only when an SPDK environment was active (see
+            // register_host_memory); without one there is nothing to unregister.
+            // A failure here must not skip the CUDA unregister below: if SPDK became
+            // active only after the region was registered, the SPDK step fails on a
+            // range it never registered, and returning early would leak the CUDA pin.
+            let spdk_err = if interfaces::is_spdk_env_active() {
+                let rc = unsafe { spdk_mem_unregister(ptr, size) };
+                (rc != 0).then(|| format!("spdk_mem_unregister failed (rc={})", rc))
+            } else {
+                None
+            };
 
             // SAFETY: ptr was previously registered with cudaHostRegister.
             let err = unsafe { cuda_ffi::cudaHostUnregister(ptr) };
@@ -1222,7 +1236,10 @@ impl IGpuServices for GpuServicesComponent {
                 ));
             }
 
-            Ok(())
+            match spdk_err {
+                Some(e) => Err(e),
+                None => Ok(()),
+            }
         }
     }
 }

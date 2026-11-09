@@ -1,0 +1,55 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 160 9 160 29 *)
+
+(* <Ev as std::clone::Clone> *)
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_Job = { key: UInt64.t; size: UInt32.t; dev: UInt64.t }
+
+type t_Option_usize = None | Some UInt64.t
+
+type t_Ev =
+  | H2D UInt64.t UInt64.t UInt64.t UInt64.t
+  | D2H UInt64.t UInt64.t UInt64.t UInt64.t
+  | Sync UInt64.t
+  | MtTouch UInt64.t
+  | MtGet UInt64.t
+  | MtBatchTouch
+  | MtRemove UInt64.t
+  | MtInsert UInt64.t
+  | DmTouch UInt64.t
+  | DmDemote UInt64.t
+  | DmRemove UInt64.t
+  | DmCreate UInt64.t
+  | DmPromote UInt64.t
+  | RelRead UInt64.t int
+  | RelWrite UInt64.t int
+  | Enq t_Job
+  | ExtFree UInt64.t UInt64.t
+  | Recover UInt64.t UInt64.t UInt32.t
+  | EmFormat UInt64.t
+  | EmInit UInt64.t
+  | Checkpoint UInt64.t
+  | DevSignal UInt64.t
+  | DevShutdown UInt64.t
+  | DevDetach UInt64.t
+  | Register
+  | Unregister
+  | Join
+  | Leave
+  | SsdRead UInt64.t UInt64.t
+  | SsdWrite UInt64.t UInt64.t
+  | RemoteFwd UInt64.t UInt32.t
+  | Spawn
+  | Cpu UInt64.t t_Option_usize
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_Ev [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 160 9 160 29] (self: t_Ev)
+  (return (x: t_Ev)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ] [ & _ret: t_Ev = Any.any_l () | & self: t_Ev = self ])
+  [ return (result: t_Ev) -> (! return {result}) ]

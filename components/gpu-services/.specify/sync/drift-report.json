@@ -1,57 +1,87 @@
 {
-  "generated": "2026-10-31T06:30:00Z",
+  "generated": "2026-11-08T12:00:00Z",
   "project": "gpu-services",
-  "branch": "specsync-b",
-  "head": "0a71990e",
-  "base": "a0292be6 (origin/unstable; fresh stamp)",
-  "scope": "delta: git diff a0292be6 HEAD -- components/gpu-services components/interfaces/src",
+  "branch": "fix/dispatcher-j33-repairs",
+  "head": "d45ab524d",
+  "base": "0eb3d3955 (last stamp; covered 9a79224a1, P-1..P-4 applied 2026-11-07)",
+  "scope": "delta: git log/diff 0eb3d3955..HEAD -- components/gpu-services components/interfaces; one commit d45ab524d (review of PR #591): src/lib.rs +12/-6 (unregister_host_memory), tests/host_memory_without_spdk.rs +5/-1 (skip without GPU). components/interfaces unchanged.",
   "summary": {
     "specs_analyzed": 3,
-    "requirements_checked": 4,
-    "aligned": 2,
-    "drifted": 0,
+    "requirements_checked": 8,
+    "aligned": 7,
+    "drifted": 1,
     "not_implemented": 0,
-    "unspecced_features": 1
+    "unspecced_features": 0,
+    "interface_doc_drift": 1,
+    "interface_doc_drift_new_this_run": 0
   },
-  "items": [
+  "specs": [
     {
-      "requirement": "memcpy_batch_async",
-      "code": "src/lib.rs:973-1038",
-      "verdict": "unspecced",
-      "resolution": "B-1, B-2"
+      "id": "001-gpu-cuda-services",
+      "title": "GPU CUDA Services",
+      "aligned": [
+        "FR-007 (last sentence: host un/registration only via FR-015/016, spec.md:248-251)",
+        "FR-014 (no-gpu paths, src/lib.rs:1138-1142, :1203-1207)",
+        "FR-015 (unchanged code; citation src/lib.rs:1179-1181 still exact)",
+        "SC-006 (cargo test --features gpu; the new test needs p2p and is outside it)"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-016",
+          "spec_text": "If `spdk_mem_unregister` fails, the method returns the error without calling `cudaHostUnregister`.",
+          "spec_location": "specs/001-gpu-cuda-services/spec.md:342-343 (FR-016 is :336-348; provenance citation src/lib.rs:1220-1225 at :347-348)",
+          "actual": "spdk_mem_unregister failure is kept as spdk_err (src/lib.rs:1223-1228); cudaHostUnregister always runs (:1231); a CUDA failure returns the CUDA error (:1232-1237, SPDK error dropped); otherwise the SPDK error is returned (:1239-1242). Reason in comment :1218-1222: avoid leaking the CUDA pin when SPDK became active after registration.",
+          "location": "src/lib.rs:1218-1242",
+          "commit": "d45ab524d",
+          "severity": "moderate"
+        }
+      ],
+      "not_implemented": []
     },
     {
-      "requirement": "FR-014 (no-gpu returns error)",
-      "code": "src/lib.rs:981-985",
-      "verdict": "aligned",
-      "resolution": "none"
+      "id": "002-gpu-ssd-dma-prepare",
+      "title": "GPU SSD DMA Prepare",
+      "aligned": [
+        "FR-019 (specs/002-gpu-ssd-dma-prepare/spec.md:96; code unchanged, src/lib.rs:1179-1181)",
+        "FR-020 (spec.md:97: 'calls spdk_mem_unregister (only when an SPDK environment is active at call time) then cudaHostUnregister' - still true; silent on the error path, so no contradiction)"
+      ],
+      "drifted": [],
+      "not_implemented": []
     },
     {
-      "requirement": "not_unsafe_ptr_arg_deref attrs / build.rs expects",
-      "code": "src/lib.rs:300,517,750,811,862,923; build.rs",
-      "verdict": "no behaviour change",
-      "resolution": "none"
-    },
-    {
-      "requirement": "GpuDmaBuffer Debug (interfaces)",
-      "code": "components/interfaces/src/igpu_services.rs:222",
-      "verdict": "aligned (no spec quotes Debug output)",
-      "resolution": "none"
+      "id": "003-gpu-p2p-server",
+      "title": "GPU P2P Server",
+      "aligned": ["unchanged; not touched by the delta"],
+      "drifted": [],
+      "not_implemented": []
     }
   ],
-  "not_reverified": "FR-001..025, SC-001..008, specs 002/003 (unchanged)",
-  "unspecced": [
+  "interface_docs": [
     {
-      "feature": "memcpy_batch_async",
-      "location": "src/lib.rs:973-1038",
-      "lines": 66,
-      "suggested_spec": "001 FR-026 (applied)"
+      "item": "IGpuServices::register_host_memory / unregister_host_memory doc comments",
+      "location": "components/interfaces/src/igpu_services.rs:786-815",
+      "doc_text": "Register existing host memory as CUDA-pinned and SPDK DMA-capable. Calls `cudaHostRegister` ... then `spdk_mem_register` ... (:786-790). # Errors: Returns an error if CUDA host registration or SPDK registration fails (:802). / Calls `spdk_mem_unregister` then `cudaHostUnregister` (:808-809). # Errors: Returns an error if unregistration fails (:813).",
+      "actual": "SPDK step conditional on is_spdk_env_active() in both methods (9a79224a1, src/lib.rs:1179-1181, :1223). d45ab524d makes unregister call both steps whenever SPDK is active, even after an SPDK failure, so the 'spdk_mem_unregister then cudaHostUnregister' order is now always honoured; :802 and :813 aligned.",
+      "new_drift_from_d45ab524d": false,
+      "open_item": "P-5 (from 2026-11-07, not approved, deferred); wording refreshed this run",
+      "severity": "minor",
+      "touches_interfaces": true
     }
   ],
+  "unspecced": [],
   "conflicts": [],
-  "notes": [
-    "FFI binds the CUDA 13.x cudaMemcpyBatchAsync signature; CUDA 12.8 has an extra failIdx argument under the same symbol. Stated in FR-026."
+  "observations": [
+    "tests/host_memory_without_spdk.rs:35-39 now returns early (SKIP on stderr) when initialize fails; on a GPU-less runner the test passes without checking anything, and stderr is printed only on failure (:70-86). A green result is evidence for A-14 only on a GPU host.",
+    "No test covers the d45ab524d error path (SPDK unregister fails -> CUDA unregister still runs -> SPDK Err); needs real SPDK + GPU.",
+    "After the SPDK-failure Err the region is no longer CUDA-pinned; a retry would get a cudaHostUnregister error. In-tree callers ignore the result (components/dispatcher/src/lib.rs:2424, components/dispatcher-p2p/src/lib.rs:1735).",
+    "Carried over: allocate_pinned_dma_buffer -> src/dma.rs:259 spdk_mem_register unguarded; aligned with 001 FR-020, same crash class without SPDK; dispatcher-side check recommended."
   ],
-  "drift_status": "clean (after apply; not stamped this run)",
-  "previous": "backups/20261031T054807Z/drift-report.json.prev"
+  "tests": {
+    "changed": "tests/host_memory_without_spdk.rs (skip without GPU)",
+    "run_this_session": false,
+    "note": "cargo test not approved in this session; the GPU test needs --features p2p and a real GPU; d45ab524d reports dispatcher lib tests only"
+  },
+  "not_reverified": "every other FR/SC of 001/002/003 (no input changed since the 2026-10-31 / 2026-11-07 syncs)",
+  "drift_status": "drifted (until P-6 applied)",
+  "previous": "git show 0eb3d3955:components/gpu-services/.specify/sync/drift-report.json (2026-11-07); older: backups/20261107T120000Z/drift-report.json.prev"
 }

@@ -1,0 +1,18 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 36 9 36 29 *)
+
+(* <Slot as std::clone::Clone> *)
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_Slot = { ptr: UInt64.t; size: UInt32.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_Slot [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 36 9 36 29]
+  (self: t_Slot) (return (x: t_Slot)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Slot = Any.any_l () | & self: t_Slot = self ]) [ return (result: t_Slot) -> (! return {result}) ]

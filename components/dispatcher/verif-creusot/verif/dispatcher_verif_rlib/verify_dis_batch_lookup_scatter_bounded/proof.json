@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_serve_memory_tier_to_gpu": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_verify_dis_batch_lookup_scatter_bounded": {
+        "prover": "alt-ergo",
+        "time": 0.059
+      }
+    }
+  }
+}

@@ -1,0 +1,35 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 665 0 665 49 *)
+
+let%span score = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 664 10 664 11
+let%span swell_founded = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span smapping = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
+
+use creusot.int.UInt64
+use map.Map
+use int.Int
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+function index_Mapping_Int_u64 [@inline:trivial] (self: Map.map int UInt64.t) (a: int) : UInt64.t =
+  [%#smapping] Map.get self a
+
+meta "rewrite_def" function index_Mapping_Int_u64
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant m : Map.map int UInt64.t
+
+constant n : int
+
+function rwsum [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 665 0 665 49] (m: Map.map int UInt64.t) (n: int) : int
+
+goal vc_rwsum: if n <= 0 then
+    true
+  else
+    [@expl:variant decreases] well_founded_relation_Int ([%#score] n) ([%#score] n - 1)
+  

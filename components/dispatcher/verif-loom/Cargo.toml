@@ -1,0 +1,16 @@
+[package]
+name = "dispatcher-verif-loom"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Loom concurrency mirror of dispatcher (src/lib.rs lookup/populate/batch_lookup/remove/clear/flush, src/background.rs writer + evictors) over a dispatch-map mirror"
+
+# Standalone: not a member of the repository workspace.
+[workspace]
+
+[dependencies]
+loom = "0.7"
+
+[profile.release]
+debug-assertions = true
+overflow-checks = true

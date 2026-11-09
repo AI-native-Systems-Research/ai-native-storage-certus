@@ -1,0 +1,164 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 248 0 248 79 *)
+
+let%span score = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 545 16 545 43
+let%span score'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 530 10 530 17
+let%span score'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 532 16 532 107
+let%span slookup = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/lookup.rs" 12 16 12 92
+let%span slookup'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/lookup.rs" 6 16 6 42
+let%span sbatch = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 245 11 245 46
+let%span sbatch'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 246 11 246 106
+let%span sbatch'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 247 10 247 45
+let%span sbatch'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 266 16 270 76
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use map.Map
+use creusot.int.Int32
+use int.Int
+
+type t_FMap_u64_Ent
+
+type t_FMap_u64_Slot
+
+type t_Ctr = {
+  promo_mem: int;
+  promo_gpu: int;
+  ev_mem: int;
+  ev_ssd: int;
+  hit_dram: int;
+  hit_ssd: int;
+  r_hit: int;
+  r_miss: int;
+  bp: int;
+  drop_full: int;
+  already: int;
+  blk_pin: int;
+  exhausted: int;
+  blk_unp: int }
+
+type t_Job = { key: UInt64.t; size: UInt32.t; dev: UInt64.t }
+
+type t_Option_usize = None | Some UInt64.t
+
+type t_Ev =
+  | H2D UInt64.t UInt64.t UInt64.t UInt64.t
+  | D2H UInt64.t UInt64.t UInt64.t UInt64.t
+  | Sync UInt64.t
+  | MtTouch UInt64.t
+  | MtGet UInt64.t
+  | MtBatchTouch
+  | MtRemove UInt64.t
+  | MtInsert UInt64.t
+  | DmTouch UInt64.t
+  | DmDemote UInt64.t
+  | DmRemove UInt64.t
+  | DmCreate UInt64.t
+  | DmPromote UInt64.t
+  | RelRead UInt64.t int
+  | RelWrite UInt64.t int
+  | Enq t_Job
+  | ExtFree UInt64.t UInt64.t
+  | Recover UInt64.t UInt64.t UInt32.t
+  | EmFormat UInt64.t
+  | EmInit UInt64.t
+  | Checkpoint UInt64.t
+  | DevSignal UInt64.t
+  | DevShutdown UInt64.t
+  | DevDetach UInt64.t
+  | Register
+  | Unregister
+  | Join
+  | Leave
+  | SsdRead UInt64.t UInt64.t
+  | SsdWrite UInt64.t UInt64.t
+  | RemoteFwd UInt64.t UInt32.t
+  | Spawn
+  | Cpu UInt64.t t_Option_usize
+
+type t_Ext = { key'0: UInt64.t; off'0: UInt64.t; size'0: UInt32.t }
+
+type t_W = {
+  dm: t_FMap_u64_Ent;
+  mt: t_FMap_u64_Slot;
+  used: int;
+  cap: int;
+  c: t_Ctr;
+  wq: Seq.seq t_Job;
+  log: Seq.seq t_Ev;
+  tick: int;
+  ob: Map.map int bool;
+  ob2: Map.map int bool;
+  og: Map.map int bool;
+  os: Map.map int bool;
+  ov: Map.map int UInt64.t;
+  ok: Map.map int (Seq.seq UInt64.t);
+  ext: Map.map int (Seq.seq t_Ext);
+  pool: bool;
+  cluster: bool;
+  threads: int;
+  rw: Map.map int UInt64.t;
+  cfree: Map.map int int;
+  wf: Map.map UInt64.t bool;
+  sdev: Map.map UInt64.t Int32.t }
+
+type t_ServeG = { base: int; m: int; gpu_ok: bool }
+
+type t_Ipc = { addr'1: UInt64.t; size'1: UInt32.t }
+
+function sum_sz [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 531 0 531 33] (r: Seq.seq t_Ipc) : int
+
+axiom sum_sz_def: forall r: Seq.seq t_Ipc [sum_sz r]. sum_sz r
+    = ([%#score'1] if Seq.length r = 0 then
+      0
+    else
+      sum_sz (Seq.([..]) r 0 (Seq.length r - 1)) + UInt32.t'int (Seq.get r (Seq.length r - 1)).size'1
+    )
+
+function pre [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 544 0 544 38] (r: Seq.seq t_Ipc) (i: int) : int
+ = [%#score] sum_sz (Seq.([..]) r 0 i)
+
+function min_int [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/lookup.rs" 5 0 5 37] (a: int) (b: int) : int
+ = [%#slookup'0] if a <= b then a else b
+
+function chunk_of [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/lookup.rs" 11 0 11 54] (r: Seq.seq t_Ipc) (l: int) (size'2: int) : int
+ = [%#slookup] min_int (UInt32.t'int (Seq.get r l).size'1) (if size'2 - pre r l > 0 then size'2 - pre r l else 0)
+
+predicate h2d_scatter_ok [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 265 0 265 81] (w: t_W) (sv: t_ServeG) (r: Seq.seq t_Ipc) (ptr: UInt64.t) (size'2: UInt32.t) =
+  [%#sbatch'2] 0 <= sv.base
+  /\ 0 <= sv.m
+  /\ sv.m <= Seq.length r
+  /\ sv.base + sv.m <= Seq.length w.log
+  /\ (forall l: int. 0 <= l /\ l < sv.m
+    -> match Seq.get w.log (sv.base + l) with
+      | H2D src dst len _ -> UInt64.t'int src = UInt64.t'int ptr + pre r l
+      /\ dst = (Seq.get r l).addr'1
+      /\ UInt64.t'int len = chunk_of r l (UInt32.t'int size'2)
+      /\ UInt64.t'int len > 0
+      /\ UInt64.t'int ptr <= UInt64.t'int src
+      /\ UInt64.t'int src + UInt64.t'int len <= UInt64.t'int ptr + UInt32.t'int size'2
+      | _ -> false
+      end)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+constant a : t_W
+
+constant b : t_W
+
+constant sv : t_ServeG
+
+constant r : Seq.seq t_Ipc
+
+constant ptr : UInt64.t
+
+constant size'2 : UInt32.t
+
+function scatter_ok_ext [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 248 0 248 79] (a: t_W) (b: t_W) (sv: t_ServeG) (r: Seq.seq t_Ipc) (ptr: UInt64.t) (size'2: UInt32.t) : ()
+
+goal vc_scatter_ok_ext: ([%#sbatch] h2d_scatter_ok a sv r ptr size'2)
+  -> ([%#sbatch'0] Seq.length a.log <= Seq.length b.log
+    /\ (forall q: int. 0 <= q /\ q < Seq.length a.log -> Seq.get b.log q = Seq.get a.log q))
+  -> ([@stop_split] [@expl:scatter_ok_ext ensures] [%#sbatch'1] h2d_scatter_ok b sv r ptr size'2)

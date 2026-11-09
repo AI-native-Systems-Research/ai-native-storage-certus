@@ -1,0 +1,67 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 191 0 191 50 *)
+
+let%span smisc = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/misc.rs" 399 10 406 92
+let%span sdrivers = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 192 4 192 20
+let%span sdrivers'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 190 10 190 44
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_F64Bits = { bits: UInt64.t }
+
+type t_Option_usize = None | Some UInt64.t
+
+type t_Cfg = {
+  max_cache_entries: UInt64.t;
+  format_on_init: bool;
+  ssd_eviction_threshold: t_F64Bits;
+  ssd_eviction_low_watermark: t_F64Bits;
+  ssd_eviction_batch_size: UInt64.t;
+  ssd_eviction_interval_secs: UInt64.t;
+  poller_base_cpu: t_Option_usize;
+  max_eviction_attempts: UInt64.t;
+  store_backpressure_ms: UInt64.t;
+  backfill_delay_ms: UInt64.t;
+  metadata_partition_size: UInt64.t;
+  extended_metadata_partition_size: UInt64.t;
+  memory_tier_eviction_threshold: t_F64Bits;
+  memory_tier_eviction_low_watermark: t_F64Bits;
+  memory_tier_eviction_batch_size: UInt64.t;
+  memory_tier_eviction_interval_secs: UInt64.t;
+  cold_staging_slots: UInt64.t;
+  cold_staging_buf_bytes: UInt64.t }
+
+let config_default (return (x: t_Cfg)) = any
+  [ return (result: t_Cfg) ->
+  {[@stop_split] [@expl:config_default ensures] [%#smisc] UInt64.t'int result.max_cache_entries = 10000
+    /\ result.format_on_init
+    /\ UInt64.t'int result.ssd_eviction_threshold.bits = 4606281698874543309
+    /\ UInt64.t'int result.ssd_eviction_low_watermark.bits = 4605380978949069210
+    /\ UInt64.t'int result.ssd_eviction_batch_size = 64
+    /\ UInt64.t'int result.ssd_eviction_interval_secs = 5
+    /\ result.poller_base_cpu = None
+    /\ UInt64.t'int result.max_eviction_attempts = 2048
+    /\ UInt64.t'int result.store_backpressure_ms = 5000
+    /\ UInt64.t'int result.backfill_delay_ms = 10
+    /\ UInt64.t'int result.metadata_partition_size = 128 * 1024 * 1024
+    /\ UInt64.t'int result.extended_metadata_partition_size = 128 * 1024 * 1024
+    /\ UInt64.t'int result.memory_tier_eviction_threshold.bits = 0
+    /\ UInt64.t'int result.memory_tier_eviction_low_watermark.bits = 4604480259023595110
+    /\ UInt64.t'int result.memory_tier_eviction_batch_size = 64
+    /\ UInt64.t'int result.memory_tier_eviction_interval_secs = 2
+    /\ UInt64.t'int result.cold_staging_slots = 64 /\ UInt64.t'int result.cold_staging_buf_bytes = 4 * 1024 * 1024}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dis_config_defaults__mutant [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 191 0 191 50]
+  (return (x: t_Cfg)) = (! bb0
+  [ bb0 = s0 [ s0 = config_default [%#sdrivers] (fun (_x: t_Cfg) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ] ]
+  [ & _ret: t_Cfg = Any.any_l () ])
+  [ return (result: t_Cfg) ->
+  {[@stop_split] [@expl:verify_dis_config_defaults__mutant ensures] [%#sdrivers'0] UInt64.t'int result.max_cache_entries
+    = 10001}
+    (! return {result}) ]

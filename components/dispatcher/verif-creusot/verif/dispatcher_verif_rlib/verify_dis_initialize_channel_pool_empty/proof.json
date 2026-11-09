@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_initialize": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_verify_dis_initialize_channel_pool_empty": {
+        "prover": "z3",
+        "time": 0.016
+      }
+    }
+  }
+}

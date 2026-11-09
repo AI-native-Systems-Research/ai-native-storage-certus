@@ -1,0 +1,39 @@
+{
+  "generated": "2026-10-31T06:30:00Z",
+  "based_on": "drift-report.json (same run)",
+  "branch": "specsync-b",
+  "summary": {
+    "backfill": 2,
+    "align": 0,
+    "human_decision": 0,
+    "new_specs": 0,
+    "approved": 2
+  },
+  "proposals": [
+    {
+      "id": "B-1",
+      "spec": "001-gpu-cuda-services",
+      "requirement": "FR-026 (new) + Assumptions feature-flag line",
+      "direction": "BACKFILL",
+      "before": "(no requirement for memcpy_batch_async)",
+      "after": "FR-026: one cudaMemcpyBatchAsync (CUDA 13.x signature), srcAccessOrder Stream, empty batch Ok, errors: no gpu / not initialized / length mismatch / CUDA failure; caller contract; requires a 13.x runtime",
+      "location": "src/lib.rs:973-1038; src/cuda_ffi.rs:87-106, :157-167; interfaces/src/igpu_services.rs:745-768",
+      "rationale": "code authoritative: added by the optimizer branch, reviewed, exercised by the dispatcher's PieceBatch",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": "B-2",
+      "spec": "001-gpu-cuda-services",
+      "requirement": "contracts/igpu_services.md",
+      "direction": "BACKFILL",
+      "before": "trait listing of the original 10 methods only",
+      "after": "new section mapping later methods to their FRs + memcpy_batch_async method contract",
+      "location": "contracts/igpu_services.md",
+      "rationale": "contract did not name the method the component now implements",
+      "confidence": "HIGH",
+      "approved": true
+    }
+  ],
+  "previous": "backups/20261031T054807Z/proposals.json.prev"
+}

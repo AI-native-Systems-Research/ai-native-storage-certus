@@ -1,0 +1,209 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2195 0 2195 81 *)
+
+let%span score = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 611 16 611 102
+let%span svec = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+let%span sbg = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 167 10 167 73
+let%span sbg'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 180 11 180 22
+let%span sbg'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 181 10 181 104
+let%span sbg'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 162 16 163 80
+let%span sdrivers = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2196 16 2196 30
+let%span sdrivers'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2197 12 2197 37
+let%span sdrivers'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2198 18 2198 36
+let%span sdrivers'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2194 11 2194 32
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use map.Map
+use creusot.int.Int32
+use creusot.prelude.Any
+use int.Int
+
+type t_P = {
+  init: bool;
+  has_dm: bool;
+  has_mt: bool;
+  has_gpu: bool;
+  has_spdk: bool;
+  has_factory: bool;
+  has_rl: bool;
+  has_logger: bool;
+  max_att: UInt64.t;
+  bp_ms: UInt64.t;
+  nd: UInt64.t;
+  writer: bool;
+  ssd_ev: bool;
+  mt_ev: bool;
+  ring: bool;
+  chunk: UInt64.t;
+  stg: bool;
+  stg_bytes: UInt64.t;
+  warm: UInt64.t }
+
+type t_FMap_u64_Ent
+
+type t_FMap_u64_Slot
+
+type t_Ctr = {
+  promo_mem: int;
+  promo_gpu: int;
+  ev_mem: int;
+  ev_ssd: int;
+  hit_dram: int;
+  hit_ssd: int;
+  r_hit: int;
+  r_miss: int;
+  bp: int;
+  drop_full: int;
+  already: int;
+  blk_pin: int;
+  exhausted: int;
+  blk_unp: int }
+
+type t_Job = { key: UInt64.t; size: UInt32.t; dev: UInt64.t }
+
+type t_Option_usize = None | Some UInt64.t
+
+type t_Ev =
+  | H2D UInt64.t UInt64.t UInt64.t UInt64.t
+  | D2H UInt64.t UInt64.t UInt64.t UInt64.t
+  | Sync UInt64.t
+  | MtTouch UInt64.t
+  | MtGet UInt64.t
+  | MtBatchTouch
+  | MtRemove UInt64.t
+  | MtInsert UInt64.t
+  | DmTouch UInt64.t
+  | DmDemote UInt64.t
+  | DmRemove UInt64.t
+  | DmCreate UInt64.t
+  | DmPromote UInt64.t
+  | RelRead UInt64.t int
+  | RelWrite UInt64.t int
+  | Enq t_Job
+  | ExtFree UInt64.t UInt64.t
+  | Recover UInt64.t UInt64.t UInt32.t
+  | EmFormat UInt64.t
+  | EmInit UInt64.t
+  | Checkpoint UInt64.t
+  | DevSignal UInt64.t
+  | DevShutdown UInt64.t
+  | DevDetach UInt64.t
+  | Register
+  | Unregister
+  | Join
+  | Leave
+  | SsdRead UInt64.t UInt64.t
+  | SsdWrite UInt64.t UInt64.t
+  | RemoteFwd UInt64.t UInt32.t
+  | Spawn
+  | Cpu UInt64.t t_Option_usize
+
+type t_Ext = { key'0: UInt64.t; off'0: UInt64.t; size'0: UInt32.t }
+
+type t_W = {
+  dm: t_FMap_u64_Ent;
+  mt: t_FMap_u64_Slot;
+  used: int;
+  cap: int;
+  c: t_Ctr;
+  wq: Seq.seq t_Job;
+  log: Seq.seq t_Ev;
+  tick: int;
+  ob: Map.map int bool;
+  ob2: Map.map int bool;
+  og: Map.map int bool;
+  os: Map.map int bool;
+  ov: Map.map int UInt64.t;
+  ok: Map.map int (Seq.seq UInt64.t);
+  ext: Map.map int (Seq.seq t_Ext);
+  pool: bool;
+  cluster: bool;
+  threads: int;
+  rw: Map.map int UInt64.t;
+  cfree: Map.map int int;
+  wf: Map.map UInt64.t bool;
+  sdev: Map.map UInt64.t Int32.t }
+
+type t_S = { p: t_P; g: t_W }
+
+predicate resolve_refmut_S [@inline:trivial] (_1: MutBorrow.t t_S) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_S
+
+type t_Vec_usize_Global
+
+type t_Stg = { slots: UInt64.t; free: t_Vec_usize_Global; leased: int }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_usize_Global (self: t_Vec_usize_Global) : Seq.seq UInt64.t
+
+axiom view_Vec_usize_Global_spec:
+  forall self: t_Vec_usize_Global [view_Vec_usize_Global self]. [%#svec] Seq.length (view_Vec_usize_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate stg_inv [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/bg.rs" 161 0 161 30] (p'0: t_Stg) =
+  [%#sbg'2] p'0.leased >= 0
+  /\ p'0.leased + Seq.length (view_Vec_usize_Global p'0.free) = UInt64.t'int p'0.slots
+  /\ (forall i: int. 0 <= i /\ i < Seq.length (view_Vec_usize_Global p'0.free)
+    -> UInt64.t'int (Seq.get (view_Vec_usize_Global p'0.free) i) < UInt64.t'int p'0.slots)
+
+let stg_new (slots'0: UInt64.t) (return (x: t_Stg)) = any
+  [ return (result: t_Stg) -> {[@stop_split] [@expl:stg_new ensures] [%#sbg] stg_inv result
+    /\ result.leased = 0 /\ result.slots = slots'0}
+    (! return {result}) ]
+
+let stg_pool_checkout (p'0: MutBorrow.t t_Stg) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:stg_pool_checkout requires] [%#sbg'0] stg_inv p'0.current}
+  any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:stg_pool_checkout ensures] [%#sbg'1] stg_inv p'0.final
+    /\ p'0.final.leased = p'0.current.leased + 1
+    /\ p'0.final.leased <= UInt64.t'int p'0.current.slots /\ UInt64.t'int result < UInt64.t'int p'0.current.slots}
+    (! return {result}) ]
+
+predicate resolve_refmut_Stg [@inline:trivial] (_1: MutBorrow.t t_Stg) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_Stg
+
+type t_ICfg = {
+  n_addrs'0: UInt64.t;
+  format_on_init'0: bool;
+  ssd_thr_pos'0: bool;
+  mt_thr_pos'0: bool;
+  max_att'0: UInt64.t;
+  bp_ms'0: UInt64.t;
+  stg_slots'0: UInt64.t;
+  stg_bytes'0: UInt64.t }
+
+predicate pinv [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 610 0 610 25] (p'0: t_P) =
+  [%#score] (p'0.init -> p'0.has_dm /\ p'0.has_mt /\ p'0.writer) /\ (not p'0.init -> not p'0.ssd_ev /\ not p'0.mt_ev)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dis_inv_staging_bounded__mutant [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2195 0 2195 81]
+  (slots'0: UInt64.t) (s: MutBorrow.t t_S) (cfg: t_ICfg) (return (x: ())) =
+{[@stop_split] [@expl:verify_dis_inv_staging_bounded__mutant requires] [%#sdrivers'2] pinv s.current.p
+  /\ not s.current.p.stg}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = -{resolve_refmut_S s}- s1
+    | s1 = stg_new [%#sdrivers] {slots'0} (fun (_x: t_Stg) -> [ &p'0 <- _x ] s2)
+    | s2 = MutBorrow.borrow_mut <t_Stg> {p'0}
+        (fun (_bor: MutBorrow.t t_Stg) -> [ &_10 <- _bor ] [ &p'0 <- _bor.final ] s3)
+    | s3 = MutBorrow.borrow_final <t_Stg> {_10.current} {MutBorrow.get_id _10}
+        (fun (_bor: MutBorrow.t t_Stg) -> [ &_9 <- _bor ] [ &_10 <- { _10 with current = _bor.final } ] s4)
+    | s4 = stg_pool_checkout [%#sdrivers'0] {_9} (fun (_x: UInt64.t) -> [ &i <- _x ] s5)
+    | s5 = -{resolve_refmut_Stg _10}- s6
+    | s6 = {[@expl:assertion] [%#sdrivers'1] p'0.leased > UInt64.t'int slots'0} s7
+    | s7 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & slots'0: UInt64.t = slots'0
+  | & s: MutBorrow.t t_S = s
+  | & p'0: t_Stg = Any.any_l ()
+  | & i: UInt64.t = Any.any_l ()
+  | & _9: MutBorrow.t t_Stg = Any.any_l ()
+  | & _10: MutBorrow.t t_Stg = Any.any_l () ]) [ return (result: ()) -> (! return {result}) ]

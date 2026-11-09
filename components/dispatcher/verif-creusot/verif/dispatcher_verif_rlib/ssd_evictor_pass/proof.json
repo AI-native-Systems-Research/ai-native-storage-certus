@@ -1,0 +1,19 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_below_low_watermark": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_dm_oldest": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_dm_remove": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_drive_index": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_em_remove_extent": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_get_evictable_offset": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_index_Vec_u64_Global": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_len_u64": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_max1": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_mt_remove": { "prover": "alt-ergo", "time": 0.013 },
+      "vc_ssd_evictor_pass": { "prover": "z3", "time": 0.837 }
+    }
+  }
+}

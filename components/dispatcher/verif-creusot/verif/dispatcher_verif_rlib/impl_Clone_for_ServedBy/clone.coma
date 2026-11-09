@@ -1,0 +1,17 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 118 9 118 29 *)
+
+(* <ServedBy as std::clone::Clone> *)
+
+use creusot.prelude.Any
+
+type t_ServedBy = Dram | Ssd | Remote | Miss | SizeMismatch | Error
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_ServedBy [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 118 9 118 29]
+  (self: t_ServedBy) (return (x: t_ServedBy)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_ServedBy = Any.any_l () | & self: t_ServedBy = self ])
+  [ return (result: t_ServedBy) -> (! return {result}) ]

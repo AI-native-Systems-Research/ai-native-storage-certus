@@ -1,0 +1,36 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 259 9 259 29 *)
+
+(* <P as std::clone::Clone> *)
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_P = {
+  init: bool;
+  has_dm: bool;
+  has_mt: bool;
+  has_gpu: bool;
+  has_spdk: bool;
+  has_factory: bool;
+  has_rl: bool;
+  has_logger: bool;
+  max_att: UInt64.t;
+  bp_ms: UInt64.t;
+  nd: UInt64.t;
+  writer: bool;
+  ssd_ev: bool;
+  mt_ev: bool;
+  ring: bool;
+  chunk: UInt64.t;
+  stg: bool;
+  stg_bytes: UInt64.t;
+  warm: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_P [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 259 9 259 29] (self: t_P)
+  (return (x: t_P)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ] [ & _ret: t_P = Any.any_l () | & self: t_P = self ])
+  [ return (result: t_P) -> (! return {result}) ]

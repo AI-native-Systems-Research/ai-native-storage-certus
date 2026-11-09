@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_batch_lookup": { "prover": "alt-ergo", "time": 0.042 },
+      "vc_lookup_async": { "prover": "alt-ergo", "time": 0.029 },
+      "vc_verify_dis_tier_stats_route_partition": {
+        "prover": "z3",
+        "time": 0.35
+      }
+    }
+  }
+}

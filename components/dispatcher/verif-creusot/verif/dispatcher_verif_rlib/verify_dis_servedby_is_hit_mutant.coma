@@ -1,0 +1,35 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2209 0 2209 63 *)
+
+let%span smisc = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/misc.rs" 432 10 432 116
+let%span sdrivers = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2210 4 2210 24
+let%span sdrivers'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2207 10 2207 42
+let%span sdrivers'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2208 10 2208 101
+
+use creusot.prelude.Any
+
+type t_ServedBy = Dram | Ssd | Remote | Miss | SizeMismatch | Error
+
+let served_by_is_hit (sb: t_ServedBy) (return (x: bool)) = any
+  [ return (result: bool) -> {[@stop_split] [@expl:served_by_is_hit ensures] [%#smisc] result
+    = match sb with
+      | Dram -> true
+      | Ssd -> true
+      | Remote -> true
+      | _ -> false
+      end}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let verify_dis_servedby_is_hit__mutant [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2209 0 2209 63]
+  (sb: t_ServedBy) (return (x: bool)) = (! bb0
+  [ bb0 = s0 [ s0 = served_by_is_hit [%#sdrivers] {sb} (fun (_x: bool) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l () | & sb: t_ServedBy = sb ])
+  [ return (result: bool) ->
+  {[@stop_split] [@expl:verify_dis_servedby_is_hit__mutant ensures] ([@stop_split] [@expl:verify_dis_servedby_is_hit__mutant ensures #0] [%#sdrivers'0] result
+      = (sb = Dram))
+    /\ ([@stop_split] [@expl:verify_dis_servedby_is_hit__mutant ensures #1] [%#sdrivers'1] sb = Miss
+      \/ sb = SizeMismatch \/ sb = Error -> not result)}
+    (! return {result}) ]

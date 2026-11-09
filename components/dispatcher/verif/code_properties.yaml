@@ -1,0 +1,2010 @@
+component: dispatcher
+source: code
+artifact: components/dispatcher/src/** + components/interfaces/src/idispatcher.rs (+ consumed interface declarations)
+pin: sandbox snapshot read 2026-10-14
+method: blind-extraction
+generated: 2026-10-14
+counts:
+  total: 186
+  methods: 22
+  verifiable: 173
+  not_verifiable: 13
+properties:
+- id: DIS-INITIALIZE-DISPATCH-MAP-REQUIRED
+  subject: initialize
+  kind: error-case
+  verifiable: true
+  statement: 'If no dispatch map is connected to the dispatcher, initialize fails with a NotInitialized error and
+    the dispatcher stays uninitialized.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1892
+  - interfaces/src/idispatcher.rs:474
+- id: DIS-INITIALIZE-MEMORY-TIER-REQUIRED
+  subject: initialize
+  kind: error-case
+  verifiable: true
+  statement: 'If no memory tier is connected to the dispatcher, initialize fails with a NotInitialized error and
+    the dispatcher stays uninitialized.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1896
+  - interfaces/src/idispatcher.rs:474
+- id: DIS-INITIALIZE-EMPTY-PCI-ADDRS
+  subject: initialize
+  kind: error-case
+  verifiable: true
+  statement: 'If the configuration lists no data-drive PCI addresses (and both required components are connected),
+    initialize fails with an InvalidParameter error and the dispatcher stays uninitialized.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1900
+  - interfaces/src/idispatcher.rs:476
+- id: DIS-INITIALIZE-INVALID-PCI-ADDRESS
+  subject: initialize
+  kind: error-case
+  verifiable: true
+  statement: 'When drives are being created, a PCI address that is not of the form "domain:bus:device.function"
+    with hexadecimal parts makes initialize fail with an InvalidParameter error.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1469
+  - dispatcher/src/lib.rs:1626
+- id: DIS-INITIALIZE-DRIVE-FAILURE-IO-ERROR
+  subject: initialize
+  kind: error-case
+  verifiable: true
+  statement: 'If creating, wiring, partitioning or formatting/recovering any data drive fails, initialize returns
+    an IoError and the dispatcher stays uninitialized.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1504
+  - dispatcher/src/lib.rs:1586
+  - dispatcher/src/lib.rs:1910
+- id: DIS-INITIALIZE-INCOMPATIBLE-PARTITION-TABLE
+  subject: initialize
+  kind: error-case
+  verifiable: true
+  statement: 'If a data drive''s partition table has fewer than the three expected Certus partitions (metadata,
+    extended metadata, data), initialize fails with an IoError instead of crashing.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1773
+- id: DIS-INITIALIZE-SUCCESS-INITIALIZED
+  subject: initialize
+  kind: postcondition
+  verifiable: true
+  statement: 'After initialize returns success, the dispatcher is initialized, so operations that require initialization
+    no longer fail with NotInitialized for that reason.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2102
+- id: DIS-INITIALIZE-FAILURE-LEAVES-UNINITIALIZED
+  subject: initialize
+  kind: postcondition
+  verifiable: true
+  statement: 'Whenever initialize returns an error, the dispatcher is left uninitialized (it was not initialized
+    before the call), so later operations still fail with NotInitialized.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1884
+  - dispatcher/src/lib.rs:2102
+- id: DIS-INITIALIZE-FAILURE-NO-CONFIG-CHANGE
+  subject: initialize
+  kind: frame
+  verifiable: true
+  statement: 'A call to initialize that fails validation does not change the dispatcher''s eviction-attempt limit
+    or store-backpressure budget from what they were before the call.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1887
+  - dispatcher/src/lib.rs:1889
+- id: DIS-INITIALIZE-RECOVER-EXTENTS
+  subject: initialize
+  kind: postcondition
+  verifiable: true
+  statement: 'When drives are created and the configuration says not to format on initialization, every extent the
+    drives'' extent managers report is handed to the dispatch map as a recovered block-device entry before initialize
+    returns.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1914
+- id: DIS-INITIALIZE-ONE-DRIVE-PER-ADDRESS
+  subject: initialize
+  kind: postcondition
+  verifiable: true
+  statement: 'When drives are created, a successful initialize leaves exactly one data drive (block device plus
+    extent manager) per configured PCI address, in the configured order.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1623
+  - dispatcher/src/lib.rs:1911
+- id: DIS-INITIALIZE-POLLER-BASE-CPU
+  subject: initialize
+  kind: postcondition
+  verifiable: true
+  statement: 'When the configuration sets a base poller CPU, drive number i is assigned to poller CPU base plus
+    i.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1612
+  - interfaces/src/idispatcher.rs:48
+- id: DIS-INITIALIZE-NUMA-CPU-ASSIGNMENT
+  subject: initialize
+  kind: postcondition
+  verifiable: true
+  statement: 'When no base poller CPU is configured, each drive with a known NUMA node that has more than two cores
+    is assigned a core from that node, round-robin over the node''s cores excluding its first two; drives whose
+    node is unknown or too small get no assignment, and if the NUMA topology is unavailable no drive is assigned.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:599
+  - interfaces/src/idispatcher.rs:49
+- id: DIS-INITIALIZE-SSD-EVICTOR-GATED
+  subject: initialize
+  kind: postcondition
+  verifiable: true
+  statement: 'The background SSD evictor is started by initialize only if the SSD eviction threshold is greater
+    than zero and at least one data drive exists.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2038
+  - dispatcher/src/lib.rs:2053
+- id: DIS-INITIALIZE-MT-EVICTOR-GATED
+  subject: initialize
+  kind: postcondition
+  verifiable: true
+  statement: 'The background memory-tier demotion worker is started by initialize only if the memory-tier eviction
+    threshold is greater than zero.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2074
+- id: DIS-INITIALIZE-WRITER-STARTED
+  subject: initialize
+  kind: postcondition
+  verifiable: true
+  statement: 'After a successful initialize, a background write-through writer exists with one worker per data drive
+    (at least one worker even when there are no drives).
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2023
+  - dispatcher/src/lib.rs:2035
+- id: DIS-INITIALIZE-JOINS-CLUSTER
+  subject: initialize
+  kind: postcondition
+  verifiable: true
+  statement: 'When a remote-lookup component is connected, a successful initialize asks it to join the cluster,
+    and a failure to join does not make initialize fail.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2104
+- id: DIS-SHUTDOWN-ALWAYS-OK
+  subject: shutdown
+  kind: postcondition
+  verifiable: true
+  statement: 'Shutdown always returns success, including when the dispatcher was never initialized and when it has
+    already been shut down.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2112
+  - dispatcher/src/lib.rs:2194
+- id: DIS-SHUTDOWN-UNINITIALIZED-AFTER
+  subject: shutdown
+  kind: postcondition
+  verifiable: true
+  statement: 'After shutdown returns, the dispatcher is uninitialized, so every operation that requires initialization
+    fails with NotInitialized until initialize succeeds again.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2192
+  - interfaces/src/idispatcher.rs:511
+- id: DIS-SHUTDOWN-DRAINS-WRITES
+  subject: shutdown
+  kind: postcondition
+  verifiable: true
+  statement: 'Every write-through job that was queued before shutdown was called has been processed by the time
+    shutdown returns.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2123
+  - dispatcher/src/background.rs:108
+  - interfaces/src/idispatcher.rs:501
+- id: DIS-SHUTDOWN-STOPS-WORKERS
+  subject: shutdown
+  kind: postcondition
+  verifiable: true
+  statement: 'After shutdown returns, the background SSD evictor, the memory-tier demotion worker and the write-through
+    writer have all been stopped and removed.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2115
+  - dispatcher/src/lib.rs:2119
+  - dispatcher/src/lib.rs:2123
+- id: DIS-SHUTDOWN-CHECKPOINT-BEFORE-TEARDOWN
+  subject: shutdown
+  kind: postcondition
+  verifiable: true
+  statement: 'During shutdown, every data drive''s extent manager is asked to checkpoint its metadata after the
+    write-through writer has stopped and before the drives are shut down.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2128
+- id: DIS-SHUTDOWN-DRIVE-PHASES
+  subject: shutdown
+  kind: postcondition
+  verifiable: true
+  statement: 'During shutdown, all drives are signalled to stop before any drive is shut down, and all drives are
+    shut down before any drive''s controller is detached; after shutdown the dispatcher holds no data drives.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2161
+- id: DIS-SHUTDOWN-RELEASES-GPU-RESOURCES
+  subject: shutdown
+  kind: postcondition
+  verifiable: true
+  statement: 'When a GPU service is connected, shutdown unregisters the memory-tier pool from the GPU, destroys
+    the warm stream if one exists and destroys the pipeline ring, leaving no warm stream recorded.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2140
+  - dispatcher/src/lib.rs:2147
+- id: DIS-SHUTDOWN-LEAVES-CLUSTER
+  subject: shutdown
+  kind: postcondition
+  verifiable: true
+  statement: 'When a remote-lookup component is connected, shutdown asks it to leave the cluster, and a failure
+    to leave does not make shutdown fail.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2188
+- id: DIS-SHUTDOWN-REINITIALIZE
+  subject: shutdown
+  kind: postcondition
+  verifiable: true
+  statement: 'After shutdown, calling initialize again with a valid configuration succeeds and makes the dispatcher
+    usable again.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2112
+  - dispatcher/src/lib.rs:1884
+- id: DIS-LOOKUP-NOT-INITIALIZED
+  subject: lookup
+  kind: error-case
+  verifiable: true
+  statement: 'Calling lookup (or lookup_async) before initialize, or after shutdown, fails with a NotInitialized
+    error and copies nothing.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2999
+  - interfaces/src/idispatcher.rs:526
+- id: DIS-LOOKUP-KEY-NOT-FOUND
+  subject: lookup
+  kind: error-case
+  verifiable: true
+  statement: 'Looking up a key that the dispatch map does not hold fails with KeyNotFound for that key.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3029
+  - interfaces/src/idispatcher.rs:525
+- id: DIS-LOOKUP-SIZE-MISMATCH
+  subject: lookup
+  kind: error-case
+  verifiable: true
+  statement: 'If the dispatch map reports that the key exists at a different size, lookup fails with InvalidParameter
+    and leaves the entry''s read-reference count as it was before the call.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3030
+- id: DIS-LOOKUP-DM-ERROR-KEY-NOT-FOUND
+  subject: lookup
+  kind: error-case
+  verifiable: true
+  statement: 'If the dispatch map''s own lookup returns an error (for example a timeout waiting for a writer), lookup
+    reports KeyNotFound for the key.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3071
+- id: DIS-LOOKUP-WARM-COPY
+  subject: lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'When the key is resident in the memory tier, a successful lookup has copied the first min(destination
+    size, stored size) bytes of the stored slot into the caller''s GPU buffer before returning.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3036
+  - dispatcher/src/lib.rs:1262
+  - interfaces/src/idispatcher.rs:519
+- id: DIS-LOOKUP-WARM-RELEASES-PIN
+  subject: lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'When the key is resident in the memory tier, lookup releases the read reference it took on the entry
+    before returning, whether or not the copy succeeded.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3056
+- id: DIS-LOOKUP-WARM-REFRESHES-RECENCY
+  subject: lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'Serving a memory-tier-resident key through lookup refreshes that key''s position in the memory tier''s
+    eviction order.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3057
+- id: DIS-LOOKUP-WARM-COPY-FAILURE
+  subject: lookup
+  kind: error-case
+  verifiable: true
+  statement: 'If the GPU copy (or the stream synchronization after it) fails for a memory-tier-resident key, lookup
+    returns an IoError.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1293
+  - dispatcher/src/lib.rs:2204
+  - interfaces/src/idispatcher.rs:556
+- id: DIS-LOOKUP-COLD-PROMOTES
+  subject: lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'When the key is on SSD and a memory-tier slot can be obtained, a successful lookup copies the data
+    to the caller''s GPU buffer and leaves the dispatch-map entry resident in the memory tier, still remembering
+    its SSD offset.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3063
+  - dispatcher/src/lib.rs:903
+- id: DIS-LOOKUP-COLD-STAGED-NO-PROMOTE
+  subject: lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'When the key is on SSD, the memory tier is full and a staging buffer large enough is available, lookup
+    serves the data through the staging buffer and leaves the dispatch-map entry on SSD (not promoted).
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:770
+  - dispatcher/src/lib.rs:893
+- id: DIS-LOOKUP-COLD-NO-SLOT
+  subject: lookup
+  kind: error-case
+  verifiable: true
+  statement: 'When the key is on SSD, no memory-tier slot can be freed and no suitable staging buffer exists, lookup
+    fails with AllocationFailed.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:781
+- id: DIS-LOOKUP-COLD-FAILURE-RELEASES-SLOT
+  subject: lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'If a cold lookup reserves a memory-tier slot but the SSD read or the promotion in the dispatch map
+    then fails, the reserved slot is released so the memory tier holds no slot for the key that the dispatch map
+    does not point to.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:768
+  - dispatcher/src/lib.rs:882
+  - dispatcher/src/lib.rs:903
+- id: DIS-LOOKUP-NO-FOREIGN-WRITE-RELEASE
+  subject: lookup
+  kind: invariant
+  verifiable: true
+  statement: 'A cold lookup only releases a write reference on the entry if it acquired one itself, so it never
+    drops a write reference held by another caller.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:809
+  - dispatcher/src/lib.rs:815
+- id: DIS-LOOKUP-COUNTS-GPU-PROMOTION
+  subject: lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'Each successful lookup increases the promotions-to-GPU counter by exactly one, and a failed lookup
+    does not increase it.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3059
+  - dispatcher/src/lib.rs:3066
+- id: DIS-LOOKUP-COUNTS-MEMORY-PROMOTION
+  subject: lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'Each cold lookup that promotes the entry into the memory tier increases the promotions-to-memory counter
+    by exactly one; a staged (uncached) serve does not.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:905
+  - dispatcher/src/lib.rs:893
+- id: DIS-LOOKUP-SYNC-BEFORE-RETURN
+  subject: lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'When lookup returns success, the copy to the caller''s GPU buffer has completed (lookup waits on any
+    non-null stream returned by the asynchronous variant).
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2197
+- id: DIS-LOOKUP-ASYNC-NULL-STREAM
+  subject: lookup_async
+  kind: postcondition
+  verifiable: true
+  statement: 'On success, lookup_async returns the null stream, meaning the copy has already completed and the caller
+    does not need to synchronize.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3061
+  - dispatcher/src/lib.rs:3067
+  - interfaces/src/idispatcher.rs:550
+- id: DIS-BATCH-LOOKUP-EMPTY
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'A batch lookup with no entries returns an empty list and has no other effect.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2229
+- id: DIS-BATCH-LOOKUP-ONE-OUTCOME-PER-ENTRY
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'A batch lookup returns exactly one outcome per input entry, in the same order as the input.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2952
+  - interfaces/src/idispatcher.rs:589
+- id: DIS-BATCH-LOOKUP-NOT-INITIALIZED
+  subject: batch_lookup
+  kind: error-case
+  verifiable: true
+  statement: 'If the dispatcher is not initialized, or the dispatch map, memory tier or GPU service is not connected,
+    every outcome of a non-empty batch lookup is a NotInitialized error attributed as Error (not Miss).
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2233
+  - dispatcher/src/lib.rs:2248
+- id: DIS-BATCH-LOOKUP-HIT-IFF-OK
+  subject: batch_lookup
+  kind: invariant
+  verifiable: true
+  statement: 'For every outcome a batch lookup returns, the result is success if and only if the reported route
+    is a hit (DRAM, SSD or Remote).
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2957
+  - interfaces/src/idispatcher.rs:278
+  - interfaces/src/idispatcher.rs:308
+- id: DIS-BATCH-LOOKUP-MISS-ATTRIBUTION
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'An outcome whose error is KeyNotFound is attributed as Miss, an outcome whose error is InvalidParameter
+    is attributed as SizeMismatch, and any other error is attributed as Error.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2968
+- id: DIS-BATCH-LOOKUP-WARM-ROUTE
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'A key found resident in the memory tier and copied successfully is reported as served from DRAM.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2425
+- id: DIS-BATCH-LOOKUP-COLD-ROUTE
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'A key found on SSD and served successfully is reported as served from SSD, even though serving promoted
+    it into the memory tier.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2435
+  - interfaces/src/idispatcher.rs:231
+- id: DIS-BATCH-LOOKUP-REMOTE-ROUTE
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'A key missing locally that a peer supplies and that is then delivered successfully to the caller''s
+    GPU buffer is reported as served Remote.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2875
+- id: DIS-BATCH-LOOKUP-WARM-DATA-DELIVERED
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'For every key reported as served, the stored bytes have been copied to the caller''s GPU regions,
+    with region L receiving the bytes starting at the sum of the sizes of the regions before it, before the batch
+    lookup returns.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1262
+  - dispatcher/src/lib.rs:2745
+  - interfaces/src/idispatcher.rs:591
+- id: DIS-BATCH-LOOKUP-SCATTER-BOUNDED
+  subject: batch_lookup
+  kind: invariant
+  verifiable: true
+  statement: 'When scattering a stored slot to several GPU regions, the batch lookup never reads beyond the end
+    of the stored slot, even if the regions add up to more than the stored size.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1283
+  - dispatcher/src/lib.rs:1309
+- id: DIS-BATCH-LOOKUP-WARM-SYNC-FAILURE-NOT-HIT
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'If waiting for the batched warm copies to finish fails, none of the keys whose copies were waited
+    on is reported as a successful hit.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2745
+  - interfaces/src/idispatcher.rs:276
+- id: DIS-BATCH-LOOKUP-WARM-PIN-UNTIL-SYNC
+  subject: batch_lookup
+  kind: invariant
+  verifiable: true
+  statement: 'A memory-tier entry being served by a batch lookup keeps its read reference until after its copy to
+    the GPU has been waited on, so it cannot be evicted while the copy is in progress.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2351
+  - dispatcher/src/lib.rs:2423
+  - dispatcher/src/lib.rs:2754
+  - dispatcher/src/pins.rs:48
+- id: DIS-BATCH-LOOKUP-PINS-BALANCED
+  subject: batch_lookup
+  kind: invariant
+  verifiable: true
+  statement: 'When a batch lookup returns, every read reference it acquired on dispatch-map entries has been released
+    exactly once, and it has released no read reference it did not acquire.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2393
+  - dispatcher/src/lib.rs:2429
+  - dispatcher/src/lib.rs:2754
+  - dispatcher/src/lib.rs:2882
+  - dispatcher/src/lib.rs:2915
+- id: DIS-BATCH-LOOKUP-WARM-TOUCH
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'Every key served from the memory tier during a batch lookup has its eviction-order position refreshed
+    in the memory tier.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2455
+- id: DIS-BATCH-LOOKUP-DM-RETRY
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'When the dispatch map''s lookup of a key returns an error, the batch lookup retries that lookup up
+    to five more times before giving up on the key.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2377
+- id: DIS-BATCH-LOOKUP-DM-ERROR-NOT-MISS
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'A key whose dispatch-map lookup still fails after the retries is a live key that could not be read,
+    so it is not reported as a cache miss and is not forwarded to remote lookup as if it were absent.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2358
+  - dispatcher/src/lib.rs:2445
+- id: DIS-BATCH-LOOKUP-COLD-STAGING-FALLBACK
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'With data drives present, a cold key that cannot get a memory-tier slot is served through a staging
+    buffer when staging is available, and its dispatch-map entry stays on SSD.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2576
+  - dispatcher/src/lib.rs:2725
+  - dispatcher/src/lib.rs:919
+- id: DIS-BATCH-LOOKUP-COLD-PROMOTE
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'A cold key whose SSD read succeeds into a newly obtained memory-tier slot is switched in place to
+    memory-tier residency in the dispatch map, keeping its SSD offset and its reference counts.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2681
+  - interfaces/src/idispatch_map.rs:146
+- id: DIS-BATCH-LOOKUP-COLD-FAILURE-RELEASES-SLOT
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'If a cold key obtains a memory-tier slot but its SSD read, stream setup, channel checkout or dispatch-map
+    promotion fails, the slot is released so the memory tier holds no slot the dispatch map does not point to.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2619
+  - dispatcher/src/lib.rs:2645
+  - dispatcher/src/lib.rs:2710
+- id: DIS-BATCH-LOOKUP-CONCURRENT-PROMOTION
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'If a cold key''s promotion loses a race because the key is already in the memory tier, the batch lookup
+    waits (up to about five seconds) for the entry to become memory-tier resident and then serves it, instead of
+    failing it as already existing.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2941
+  - dispatcher/src/lib.rs:1349
+- id: DIS-BATCH-LOOKUP-REMOTE-ONLY-MISSES
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'When a remote-lookup component is connected, exactly the keys whose local result is KeyNotFound are
+    forwarded to it, each with the sum of its region sizes; keys served or failed locally for another reason are
+    not forwarded.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2757
+- id: DIS-BATCH-LOOKUP-REMOTE-NOT-FOUND-IS-MISS
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'A forwarded key that no peer holds is reported as KeyNotFound (a Miss), while a remote transport failure
+    is reported as an IoError (an Error).
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2832
+- id: DIS-BATCH-LOOKUP-REMOTE-NOT-RESIDENT
+  subject: batch_lookup
+  kind: error-case
+  verifiable: true
+  statement: 'If a peer reports success but the key is not then resident in the local memory tier, the key is reported
+    as KeyNotFound.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2881
+  - dispatcher/src/lib.rs:2888
+- id: DIS-BATCH-LOOKUP-REMOTE-SYNC-FAILURE
+  subject: batch_lookup
+  kind: error-case
+  verifiable: true
+  statement: 'If waiting for the remote-delivery copies fails, every key whose copy was submitted in that wait is
+    reported as an IoError rather than a hit.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2902
+- id: DIS-BATCH-LOOKUP-REMOTE-PIN-UNTIL-SYNC
+  subject: batch_lookup
+  kind: invariant
+  verifiable: true
+  statement: 'A remotely fetched entry being delivered keeps its read reference until after its copy to the GPU
+    has been waited on.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2802
+  - dispatcher/src/lib.rs:2853
+  - dispatcher/src/lib.rs:2915
+- id: DIS-BATCH-LOOKUP-REMOTE-COUNTERS
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'For each forwarded batch, the remote-hits counter increases by the number of keys a peer returned
+    data for and the remote-misses counter by the number a peer reported as not found; transport failures increase
+    neither.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2809
+  - dispatcher/src/lib.rs:2919
+  - interfaces/src/idispatcher.rs:346
+- id: DIS-BATCH-LOOKUP-GPU-COUNTER
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'A batch lookup increases the promotions-to-GPU counter by exactly the number of outcomes that are
+    successful.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2980
+- id: DIS-BATCH-LOOKUP-LOCAL-HIT-COUNTERS
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'A batch lookup increases the DRAM-hit counter by exactly the number of outcomes attributed to DRAM
+    and the SSD-hit counter by exactly the number attributed to SSD.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2988
+- id: DIS-BATCH-LOOKUP-ROUTE-PARTITION
+  subject: batch_lookup
+  kind: invariant
+  verifiable: true
+  statement: 'For each batch lookup, the increases in the DRAM-hit, SSD-hit and remote-hit counters add up to the
+    number of keys served in that batch.
+
+    '
+  traces:
+  - interfaces/src/idispatcher.rs:323
+  - dispatcher/src/lib.rs:179
+- id: DIS-BATCH-LOOKUP-MEMORY-PROMOTION-COUNTER
+  subject: batch_lookup
+  kind: postcondition
+  verifiable: true
+  statement: 'Each cold key that a batch lookup successfully promotes into the memory tier increases the promotions-to-memory
+    counter by exactly one.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:2693
+  - dispatcher/src/lib.rs:2494
+- id: DIS-CHECK-NOT-INITIALIZED
+  subject: check
+  kind: error-case
+  verifiable: true
+  statement: 'Calling check before initialize, or after shutdown, fails with NotInitialized.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3076
+- id: DIS-CHECK-PRESENT-TRUE
+  subject: check
+  kind: postcondition
+  verifiable: true
+  statement: 'Check returns true for a key that is present in any tier (memory tier or SSD).
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3086
+  - interfaces/src/idispatcher.rs:604
+- id: DIS-CHECK-ABSENT-FALSE
+  subject: check
+  kind: postcondition
+  verifiable: true
+  statement: 'Check returns false for a key that is not present in the dispatch map.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3086
+- id: DIS-CHECK-NO-NET-PIN
+  subject: check
+  kind: frame
+  verifiable: true
+  statement: 'Check transfers no data and leaves the entry''s read-reference count the same as before the call.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3087
+  - interfaces/src/idispatcher.rs:602
+- id: DIS-REMOVE-NOT-INITIALIZED
+  subject: remove
+  kind: error-case
+  verifiable: true
+  statement: 'Calling remove before initialize, or after shutdown, fails with NotInitialized.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3097
+- id: DIS-REMOVE-KEY-NOT-FOUND
+  subject: remove
+  kind: error-case
+  verifiable: true
+  statement: 'Removing a key that does not exist, or whose dispatch-map removal is refused, fails with KeyNotFound
+    for that key.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3114
+  - dispatcher/src/lib.rs:3119
+  - interfaces/src/idispatcher.rs:630
+- id: DIS-REMOVE-ENTRY-GONE
+  subject: remove
+  kind: postcondition
+  verifiable: true
+  statement: 'After remove succeeds, the key is absent from the dispatch map and the memory tier, so check reports
+    false for it.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3119
+  - dispatcher/src/lib.rs:3123
+  - interfaces/src/idispatcher.rs:639
+- id: DIS-REMOVE-FREES-EXTENT
+  subject: remove
+  kind: postcondition
+  verifiable: true
+  statement: 'When the removed key lived on SSD, remove frees its extent on the drive the key maps to.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3127
+- id: DIS-REMOVE-DM-BEFORE-SLOT
+  subject: remove
+  kind: invariant
+  verifiable: true
+  statement: 'Remove takes the key out of the dispatch map before it frees the memory-tier slot, and it does not
+    free the slot if the dispatch-map removal fails.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3117
+- id: DIS-REMOVE-NO-FOREIGN-PIN-RELEASE
+  subject: remove
+  kind: invariant
+  verifiable: true
+  statement: 'Remove only releases a read reference that its own lookup acquired, so removing a key never decrements
+    a read reference held by another caller.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3110
+  - dispatcher/src/lib.rs:2885
+- id: DIS-REMOVE-FRAME-OTHER-KEYS
+  subject: remove
+  kind: frame
+  verifiable: true
+  statement: 'Removing one key does not change whether any other key is present.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3096
+- id: DIS-POPULATE-NOT-INITIALIZED
+  subject: populate
+  kind: error-case
+  verifiable: true
+  statement: 'Calling populate before initialize, or after shutdown, fails with NotInitialized (this check comes
+    before the size check).
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3144
+- id: DIS-POPULATE-ZERO-SIZE
+  subject: populate
+  kind: error-case
+  verifiable: true
+  statement: 'On an initialized dispatcher, populating with a zero-size GPU handle fails with InvalidParameter and
+    caches nothing.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3147
+  - interfaces/src/idispatcher.rs:654
+- id: DIS-POPULATE-ALREADY-EXISTS
+  subject: populate
+  kind: error-case
+  verifiable: true
+  statement: 'Populating a key that is already cached fails with AlreadyExists and leaves the existing entry and
+    its data unchanged.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1208
+  - dispatcher/src/lib.rs:3510
+  - interfaces/src/idispatcher.rs:655
+- id: DIS-POPULATE-SUCCESS-CACHED
+  subject: populate
+  kind: postcondition
+  verifiable: true
+  statement: 'After populate succeeds with space available, the key is present (check returns true), it is resident
+    in the memory tier with the handle''s size, and its bytes equal the GPU source bytes.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3159
+  - dispatcher/src/lib.rs:3192
+  - dispatcher/src/lib.rs:3198
+  - interfaces/src/idispatcher.rs:671
+- id: DIS-POPULATE-ENQUEUES-WRITE-THROUGH
+  subject: populate
+  kind: postcondition
+  verifiable: true
+  statement: 'A populate that caches its key enqueues exactly one background write-through job for that key and
+    size, routed to the drive the key maps to.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3559
+- id: DIS-POPULATE-DROP-ON-FULL
+  subject: populate
+  kind: postcondition
+  verifiable: true
+  statement: 'If the memory tier is still full after the backpressure budget, populate reports success without caching
+    the key and increases the stores-dropped-on-full counter by one.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3161
+  - interfaces/src/idispatcher.rs:374
+- id: DIS-POPULATE-FAILURE-RELEASES-SLOT
+  subject: populate
+  kind: postcondition
+  verifiable: true
+  statement: 'If populate fails after reserving a memory-tier slot (for example the GPU copy or its synchronization
+    fails, or the GPU service is missing), the reserved slot is released and the key is not cached.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3182
+  - dispatcher/src/lib.rs:3193
+  - dispatcher/src/lib.rs:3476
+- id: DIS-POPULATE-COPY-FAILURE-IO-ERROR
+  subject: populate
+  kind: error-case
+  verifiable: true
+  statement: 'If the GPU-to-memory copy or its stream synchronization fails, populate returns an IoError.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3192
+  - dispatcher/src/lib.rs:3193
+- id: DIS-BATCH-POPULATE-EMPTY
+  subject: batch_populate
+  kind: postcondition
+  verifiable: true
+  statement: 'A batch populate with no entries returns an empty list and has no other effect.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3215
+- id: DIS-BATCH-POPULATE-ONE-RESULT-PER-ENTRY
+  subject: batch_populate
+  kind: postcondition
+  verifiable: true
+  statement: 'A batch populate returns exactly one result per input entry, in the same order as the input.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3315
+  - interfaces/src/idispatcher.rs:685
+- id: DIS-BATCH-POPULATE-NOT-INITIALIZED
+  subject: batch_populate
+  kind: error-case
+  verifiable: true
+  statement: 'If the dispatcher is not initialized or the GPU service is not connected, every result of a non-empty
+    batch populate is a NotInitialized error and nothing is cached.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3219
+  - dispatcher/src/lib.rs:3223
+- id: DIS-BATCH-POPULATE-ZERO-SIZE
+  subject: batch_populate
+  kind: error-case
+  verifiable: true
+  statement: 'An entry with a zero-size GPU handle gets an InvalidParameter result, and the other entries in the
+    batch are still processed.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3249
+- id: DIS-BATCH-POPULATE-DROP-ON-FULL
+  subject: batch_populate
+  kind: postcondition
+  verifiable: true
+  statement: 'An entry that cannot get a memory-tier slot after the backpressure budget is reported as success without
+    being cached, and the stores-dropped-on-full counter increases by one for it.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3270
+- id: DIS-BATCH-POPULATE-SYNC-FAILURE
+  subject: batch_populate
+  kind: error-case
+  verifiable: true
+  statement: 'If the single batch stream synchronization fails, every entry whose copy was submitted gets an IoError,
+    its reserved slot is released, and none of them is registered in the dispatch map.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3294
+- id: DIS-BATCH-POPULATE-REGISTER-AFTER-SYNC
+  subject: batch_populate
+  kind: invariant
+  verifiable: true
+  statement: 'No entry of a batch populate is registered in the dispatch map before all of the batch''s GPU-to-memory
+    copies have been waited on.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3292
+  - dispatcher/src/lib.rs:3306
+  - interfaces/src/idispatcher.rs:680
+- id: DIS-BATCH-POPULATE-EQUIVALENT
+  subject: batch_populate
+  kind: postcondition
+  verifiable: true
+  statement: 'Each successful entry of a batch populate ends in the same state as a successful single populate of
+    that entry: present, memory-tier resident, and enqueued for write-through.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3307
+  - interfaces/src/idispatcher.rs:679
+- id: DIS-BATCH-POPULATE-COPY-FAILURE-RELEASES
+  subject: batch_populate
+  kind: postcondition
+  verifiable: true
+  statement: 'When submitting an entry''s GPU-to-memory copy fails, that entry gets the error and its reserved memory-tier
+    slot is released.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3264
+- id: DIS-RESERVE-NOT-INITIALIZED
+  subject: reserve_memory
+  kind: error-case
+  verifiable: true
+  statement: 'Calling reserve_memory before initialize, or after shutdown, fails with NotInitialized.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3325
+- id: DIS-RESERVE-ZERO-SIZE
+  subject: reserve_memory
+  kind: error-case
+  verifiable: true
+  statement: 'Reserving zero bytes fails with InvalidParameter and allocates nothing.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3344
+- id: DIS-RESERVE-ALREADY-EXISTS
+  subject: reserve_memory
+  kind: error-case
+  verifiable: true
+  statement: 'Reserving a key that already has a memory-tier slot fails with AlreadyExists immediately, without
+    backpressure retries, and increases the store-already-resident counter by one.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1208
+  - interfaces/src/idispatcher.rs:696
+  - interfaces/src/idispatcher.rs:381
+- id: DIS-RESERVE-SUCCESS-SLOT
+  subject: reserve_memory
+  kind: postcondition
+  verifiable: true
+  statement: 'After reserve_memory succeeds, the memory tier holds a slot for the key of at least the requested
+    size and the returned pointer is that slot''s address.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1188
+  - interfaces/src/idispatcher.rs:690
+- id: DIS-RESERVE-NO-DISPATCH-MAP-ENTRY
+  subject: reserve_memory
+  kind: frame
+  verifiable: true
+  statement: 'Reserve_memory does not create or change a dispatch-map entry for the key and does not issue any GPU
+    copy.
+
+    '
+  traces:
+  - interfaces/src/idispatcher.rs:692
+  - dispatcher/src/lib.rs:3318
+- id: DIS-RESERVE-ALLOCATION-FAILED
+  subject: reserve_memory
+  kind: error-case
+  verifiable: true
+  statement: 'If the memory tier still cannot fit the request once eviction is exhausted and the backpressure deadline
+    has passed, reserve_memory fails with AllocationFailed.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3401
+  - interfaces/src/idispatcher.rs:697
+- id: DIS-RESERVE-ZERO-BUDGET-FAIL-FAST
+  subject: reserve_memory
+  kind: postcondition
+  verifiable: true
+  statement: 'With no caller deadline and a backpressure budget of zero, reserve_memory makes a single allocation
+    attempt and does not retry or count a backpressure event.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3391
+- id: DIS-RESERVE-PAST-DEADLINE-SINGLE-ATTEMPT
+  subject: reserve_memory
+  kind: postcondition
+  verifiable: true
+  statement: 'When the caller''s deadline has already passed, reserve_memory makes one allocation attempt and, if
+    the tier is full, fails with AllocationFailed without retrying.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3385
+  - dispatcher/src/lib.rs:3403
+  - interfaces/src/idispatcher.rs:708
+- id: DIS-RESERVE-BACKPRESSURE-COUNTER
+  subject: reserve_memory
+  kind: postcondition
+  verifiable: true
+  statement: 'Each retry that reserve_memory takes while waiting on a full memory tier increases the store-backpressure
+    counter by exactly one.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3406
+- id: DIS-RESERVE-EVICTION-PIN-SAFE
+  subject: reserve_memory
+  kind: invariant
+  verifiable: true
+  statement: 'To make room, reserve_memory only frees memory-tier slots of entries that have no read or write reference
+    and whose write-through to SSD has completed, and each such entry is first switched to SSD residency in the
+    dispatch map.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1050
+  - dispatcher/src/lib.rs:1066
+  - interfaces/src/idispatch_map.rs:173
+- id: DIS-RESERVE-EVICTION-NO-UNPERSISTED-DROP
+  subject: reserve_memory
+  kind: invariant
+  verifiable: true
+  statement: 'Making room for a reservation never removes from the dispatch map an entry whose write-through has
+    not yet landed; such entries stay cached and are skipped.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1085
+- id: DIS-RESERVE-EVICTION-COUNTERS
+  subject: reserve_memory
+  kind: postcondition
+  verifiable: true
+  statement: 'During eviction scans, each candidate demoted increases the evictions-from-memory counter by one and
+    emits a Demoted eviction event, each candidate skipped for a held reference increases the blocked-by-pin counter
+    by one, each other refused candidate increases the blocked-unpersisted counter by one, and each scan that frees
+    nothing increases the scans-exhausted counter by one.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1066
+  - dispatcher/src/lib.rs:1106
+- id: DIS-RESERVE-EVICTION-ATTEMPT-BOUND
+  subject: reserve_memory
+  kind: postcondition
+  verifiable: true
+  statement: 'A single allocation attempt performs no more eviction rounds than the configured maximum number of
+    eviction attempts before reporting AllocationFailed.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1136
+  - dispatcher/src/lib.rs:1192
+  - interfaces/src/idispatcher.rs:57
+- id: DIS-COPY-ASYNC-NOT-INITIALIZED
+  subject: copy_gpu_to_memory_async
+  kind: error-case
+  verifiable: true
+  statement: 'Calling copy_gpu_to_memory_async before initialize, or after shutdown, fails with NotInitialized.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3428
+- id: DIS-COPY-ASYNC-NO-SLOT
+  subject: copy_gpu_to_memory_async
+  kind: error-case
+  verifiable: true
+  statement: 'If no memory-tier slot exists for the key, copy_gpu_to_memory_async fails with KeyNotFound and copies
+    nothing.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3435
+  - interfaces/src/idispatcher.rs:728
+- id: DIS-COPY-ASYNC-OVERFLOW
+  subject: copy_gpu_to_memory_async
+  kind: error-case
+  verifiable: true
+  statement: 'If the GPU regions together are larger than the reserved slot, copy_gpu_to_memory_async fails with
+    InvalidParameter and writes nothing into memory.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3441
+- id: DIS-COPY-ASYNC-GATHER-LAYOUT
+  subject: copy_gpu_to_memory_async
+  kind: postcondition
+  verifiable: true
+  statement: 'Once the copy completes, region L''s bytes are placed in the slot starting at the sum of the sizes
+    of the regions before it, so the regions are stored back to back in order.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3467
+  - interfaces/src/idispatcher.rs:719
+- id: DIS-COPY-ASYNC-NULL-STREAM-SYNC
+  subject: copy_gpu_to_memory_async
+  kind: postcondition
+  verifiable: true
+  statement: 'When called with the null stream, copy_gpu_to_memory_async returns only after the copy has completed.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3457
+  - dispatcher/src/lib.rs:3481
+- id: DIS-COPY-ASYNC-FAILURE-RELEASES-SLOT
+  subject: copy_gpu_to_memory_async
+  kind: error-case
+  verifiable: true
+  statement: 'If submitting a region copy (or the synchronization for a null stream) fails, copy_gpu_to_memory_async
+    returns an IoError and the key''s reserved slot is released.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3475
+  - dispatcher/src/lib.rs:3482
+- id: DIS-COPY-ASYNC-FRAME-DISPATCH-MAP
+  subject: copy_gpu_to_memory_async
+  kind: frame
+  verifiable: true
+  statement: 'Copy_gpu_to_memory_async does not create or change any dispatch-map entry.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3422
+- id: DIS-COPY-COMPLETED-PRECONDITION-SIZE
+  subject: copy_gpu_to_memory_completed
+  kind: precondition
+  verifiable: true
+  statement: 'The size passed to copy_gpu_to_memory_completed must not exceed the size of the key''s reserved memory-tier
+    slot, since that many bytes are registered and later written to SSD from the slot.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3489
+  - dispatcher/src/lib.rs:1417
+- id: DIS-COPY-COMPLETED-NOT-INITIALIZED
+  subject: copy_gpu_to_memory_completed
+  kind: error-case
+  verifiable: true
+  statement: 'Calling copy_gpu_to_memory_completed before initialize, or after shutdown, fails with NotInitialized.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3494
+- id: DIS-COPY-COMPLETED-NO-SLOT
+  subject: copy_gpu_to_memory_completed
+  kind: error-case
+  verifiable: true
+  statement: 'If the key has no memory-tier slot, copy_gpu_to_memory_completed fails with KeyNotFound.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3506
+  - interfaces/src/idispatcher.rs:739
+- id: DIS-COPY-COMPLETED-ALREADY-EXISTS
+  subject: copy_gpu_to_memory_completed
+  kind: error-case
+  verifiable: true
+  statement: 'If the dispatch map already holds an entry for the key, copy_gpu_to_memory_completed fails with AlreadyExists.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3510
+- id: DIS-COPY-COMPLETED-EXISTING-ENTRY-PRESERVED
+  subject: copy_gpu_to_memory_completed
+  kind: frame
+  verifiable: true
+  statement: 'When copy_gpu_to_memory_completed fails because the key is already registered, the existing entry
+    stays readable: the memory the dispatch map points to for that key is not freed.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3506
+  - dispatcher/src/lib.rs:3511
+- id: DIS-COPY-COMPLETED-REGISTERS
+  subject: copy_gpu_to_memory_completed
+  kind: postcondition
+  verifiable: true
+  statement: 'After copy_gpu_to_memory_completed succeeds, the dispatch map has a memory-tier entry for the key
+    pointing at its slot with the given size, holding no write reference.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3508
+  - dispatcher/src/lib.rs:3552
+- id: DIS-COPY-COMPLETED-ENQUEUES
+  subject: copy_gpu_to_memory_completed
+  kind: postcondition
+  verifiable: true
+  statement: 'After copy_gpu_to_memory_completed succeeds and a writer is running, exactly one write-through job
+    for the key and size has been queued on the writer of the drive the key maps to.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3559
+- id: DIS-COPY-COMPLETED-REGISTER-FAILURE-RELEASES
+  subject: copy_gpu_to_memory_completed
+  kind: error-case
+  verifiable: true
+  statement: 'If registering a new entry in the dispatch map fails for a reason other than the key already existing,
+    the call returns an IoError and the reserved slot is released.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3514
+- id: DIS-RELEASE-MEMORY-PRECONDITION
+  subject: release_memory
+  kind: precondition
+  verifiable: true
+  statement: 'Release_memory is only to be used on a slot that was reserved but never registered in the dispatch
+    map, so it never frees memory a dispatch-map entry still points to.
+
+    '
+  traces:
+  - interfaces/src/idispatcher.rs:742
+  - dispatcher/src/lib.rs:3571
+- id: DIS-RELEASE-MEMORY-NOT-INITIALIZED
+  subject: release_memory
+  kind: error-case
+  verifiable: true
+  statement: 'Calling release_memory before initialize, or after shutdown, fails with NotInitialized.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3572
+- id: DIS-RELEASE-MEMORY-IDEMPOTENT
+  subject: release_memory
+  kind: postcondition
+  verifiable: true
+  statement: 'Release_memory on a key with no memory-tier slot returns success and changes nothing.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3579
+  - interfaces/src/idispatcher.rs:745
+- id: DIS-RELEASE-MEMORY-FREES
+  subject: release_memory
+  kind: postcondition
+  verifiable: true
+  statement: 'After release_memory succeeds, the memory tier no longer holds a slot for the key.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3580
+- id: DIS-PIN-NOT-INITIALIZED
+  subject: pin
+  kind: error-case
+  verifiable: true
+  statement: 'Calling pin or unpin before initialize, or after shutdown, fails with NotInitialized.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3587
+  - dispatcher/src/lib.rs:3604
+- id: DIS-PIN-INCREMENTS
+  subject: pin
+  kind: postcondition
+  verifiable: true
+  statement: 'Each successful pin increases the entry''s read-reference count by exactly one, and while the count
+    is above zero the entry is not evicted.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3594
+  - interfaces/src/idispatcher.rs:750
+- id: DIS-PIN-KEY-NOT-FOUND
+  subject: pin
+  kind: error-case
+  verifiable: true
+  statement: 'Pinning a key that does not exist fails with KeyNotFound.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3595
+- id: DIS-PIN-TIMEOUT
+  subject: pin
+  kind: error-case
+  verifiable: true
+  statement: 'If a writer holds the key exclusively until the dispatch map''s wait times out, pin fails with Timeout.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3596
+  - interfaces/src/idispatcher.rs:757
+- id: DIS-UNPIN-DECREMENTS
+  subject: unpin
+  kind: postcondition
+  verifiable: true
+  statement: 'Each successful unpin decreases the entry''s read-reference count by exactly one.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3611
+  - interfaces/src/idispatcher.rs:762
+- id: DIS-UNPIN-UNDERFLOW
+  subject: unpin
+  kind: error-case
+  verifiable: true
+  statement: 'Unpinning a key that does not exist, or whose read-reference count is already zero, fails with KeyNotFound
+    and leaves the count unchanged.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3612
+  - dispatcher/src/lib.rs:3613
+  - interfaces/src/idispatcher.rs:767
+- id: DIS-TOUCH-NOT-INITIALIZED
+  subject: touch
+  kind: error-case
+  verifiable: true
+  statement: 'Calling touch before initialize, or after shutdown, fails with NotInitialized.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3619
+- id: DIS-TOUCH-KEY-NOT-FOUND
+  subject: touch
+  kind: error-case
+  verifiable: true
+  statement: 'Touching a key that the dispatch map does not hold fails with KeyNotFound.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3626
+  - interfaces/src/idispatcher.rs:778
+- id: DIS-TOUCH-REFRESHES
+  subject: touch
+  kind: postcondition
+  verifiable: true
+  statement: 'A successful touch refreshes the key''s timestamp in the dispatch map and its eviction-order position
+    in the memory tier, without copying any data.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3626
+  - dispatcher/src/lib.rs:3630
+- id: DIS-PROMOTE-NOT-INITIALIZED-NOOP
+  subject: promote_to_memory_tier
+  kind: postcondition
+  verifiable: true
+  statement: 'Calling promote_to_memory_tier on an uninitialized dispatcher does nothing.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3637
+- id: DIS-PROMOTE-COLD-KEYS
+  subject: promote_to_memory_tier
+  kind: postcondition
+  verifiable: true
+  statement: 'For each SSD-resident key in the list whose read from SSD succeeds and for which a memory-tier slot
+    is obtained, the key becomes memory-tier resident in the dispatch map, keeping its SSD offset, and the promotions-to-memory
+    counter increases by one.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3659
+  - dispatcher/src/lib.rs:3782
+  - interfaces/src/idispatcher.rs:795
+- id: DIS-PROMOTE-WARM-KEYS-TOUCHED
+  subject: promote_to_memory_tier
+  kind: postcondition
+  verifiable: true
+  statement: 'Keys already resident in the memory tier only have their timestamps refreshed in the dispatch map
+    and the memory tier.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3665
+  - interfaces/src/idispatcher.rs:796
+- id: DIS-PROMOTE-MISSING-SKIPPED
+  subject: promote_to_memory_tier
+  kind: frame
+  verifiable: true
+  statement: 'Keys that do not exist are skipped: promote_to_memory_tier creates no entry for them.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3670
+  - interfaces/src/idispatcher.rs:797
+- id: DIS-PROMOTE-READ-FAILURE-RELEASES
+  subject: promote_to_memory_tier
+  kind: postcondition
+  verifiable: true
+  statement: 'If a key''s SSD read or its dispatch-map promotion fails, the memory-tier slot obtained for it is
+    released and the key remains SSD resident.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3770
+  - dispatcher/src/lib.rs:3782
+- id: DIS-PROMOTE-PINS-BALANCED
+  subject: promote_to_memory_tier
+  kind: invariant
+  verifiable: true
+  statement: 'Promote_to_memory_tier leaves every entry''s read-reference count as it was before the call.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3660
+  - dispatcher/src/lib.rs:3666
+- id: DIS-CLEAR-MT-NOT-INITIALIZED
+  subject: clear_memory_tier
+  kind: error-case
+  verifiable: true
+  statement: 'Calling clear_memory_tier before initialize, or after shutdown, fails with NotInitialized.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3795
+- id: DIS-CLEAR-MT-PERSISTED-DEMOTED
+  subject: clear_memory_tier
+  kind: postcondition
+  verifiable: true
+  statement: 'Entries whose write-through has completed are converted to SSD residency in the dispatch map and remain
+    present after clear_memory_tier.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3814
+  - interfaces/src/idispatcher.rs:806
+- id: DIS-CLEAR-MT-UNPERSISTED-REMOVED
+  subject: clear_memory_tier
+  kind: postcondition
+  verifiable: true
+  statement: 'Entries whose write-through has not completed are removed entirely by clear_memory_tier.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3817
+  - interfaces/src/idispatcher.rs:807
+- id: DIS-CLEAR-MT-EMPTY-AFTER
+  subject: clear_memory_tier
+  kind: postcondition
+  verifiable: true
+  statement: 'When clear_memory_tier returns, the memory tier holds no entries, and the returned count equals the
+    number of entries it cleared.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3808
+  - interfaces/src/idispatcher.rs:808
+- id: DIS-CLEAR-MT-PIN-SAFE
+  subject: clear_memory_tier
+  kind: invariant
+  verifiable: true
+  statement: 'Clear_memory_tier never frees the memory-tier slot of an entry that still holds a read or write reference
+    while the dispatch map still points to that slot.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3816
+- id: DIS-FLUSH-NOT-INITIALIZED
+  subject: flush_to_ssd
+  kind: error-case
+  verifiable: true
+  statement: 'Calling flush_to_ssd before initialize, or after shutdown, fails with NotInitialized.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3828
+- id: DIS-FLUSH-DRAINS
+  subject: flush_to_ssd
+  kind: postcondition
+  verifiable: true
+  statement: 'When flush_to_ssd returns, every write-through job queued before the call has been processed.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3831
+  - dispatcher/src/background.rs:198
+  - interfaces/src/idispatcher.rs:824
+- id: DIS-FLUSH-RETURN-COUNT
+  subject: flush_to_ssd
+  kind: postcondition
+  verifiable: true
+  statement: 'Flush_to_ssd returns the number of entries that have a valid SSD offset after the flush.
+
+    '
+  traces:
+  - interfaces/src/idispatcher.rs:829
+  - dispatcher/src/lib.rs:3832
+- id: DIS-SCHEDULE-WT-NOT-INITIALIZED
+  subject: schedule_write_through
+  kind: error-case
+  verifiable: true
+  statement: 'Calling schedule_write_through before initialize, or after shutdown, fails with NotInitialized.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3847
+- id: DIS-SCHEDULE-WT-ENQUEUES
+  subject: schedule_write_through
+  kind: postcondition
+  verifiable: true
+  statement: 'On an initialized dispatcher, schedule_write_through returns success and queues one write-through
+    job for the key and size on the writer of the same drive the store path would use for that key.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3853
+  - dispatcher/src/lib.rs:3857
+- id: DIS-SCHEDULE-WT-NONBLOCKING
+  subject: schedule_write_through
+  kind: postcondition
+  verifiable: true
+  statement: 'Schedule_write_through returns without waiting for the queued write to be processed.
+
+    '
+  traces:
+  - interfaces/src/idispatcher.rs:852
+  - dispatcher/src/lib.rs:3863
+- id: DIS-SCHEDULE-WT-PIN-NEUTRAL
+  subject: schedule_write_through
+  kind: invariant
+  verifiable: true
+  statement: 'Processing a write-through job queued by schedule_write_through leaves the entry''s read-reference
+    count as it was before scheduling, since that path took no reference of its own.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1402
+  - dispatcher/src/lib.rs:1464
+  - interfaces/src/idispatcher.rs:835
+- id: DIS-READ-WRITE-STATS-SUM
+  subject: read_write_stats
+  kind: postcondition
+  verifiable: true
+  statement: 'Read_write_stats returns the sum of every data drive''s read/write counters, and all-zero counters
+    when there are no data drives.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3866
+- id: DIS-TIER-STATS-MONOTONIC
+  subject: tier_event_stats
+  kind: invariant
+  verifiable: true
+  statement: 'Every counter field returned by tier_event_stats (all fields except the two oldest-key gauges) is
+    never smaller than in any earlier snapshot, and taking a snapshot does not reset anything.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:249
+  - interfaces/src/idispatcher.rs:314
+- id: DIS-TIER-STATS-GAUGE-BOUNDS
+  subject: tier_event_stats
+  kind: postcondition
+  verifiable: true
+  statement: 'In every tier_event_stats snapshot, the number of demotable oldest keys is at most the number of oldest
+    keys sampled, which is at most 64.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3892
+- id: DIS-TIER-STATS-GAUGE-DEFINITION
+  subject: tier_event_stats
+  kind: postcondition
+  verifiable: true
+  statement: 'Tier_event_stats reports as demotable exactly those sampled oldest keys that the dispatch map says
+    are evictable (memory-tier resident, persisted to SSD, and with no read or write reference).
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3896
+  - interfaces/src/idispatcher.rs:451
+- id: DIS-TIER-STATS-READ-ONLY
+  subject: tier_event_stats
+  kind: frame
+  verifiable: true
+  statement: 'Taking a tier_event_stats snapshot does not change any cache entry, reference count or eviction order.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:3878
+- id: DIS-INV-WRITE-THROUGH-PERSISTS
+  subject: INV-WRITE-THROUGH
+  kind: invariant
+  verifiable: true
+  statement: 'A write-through job whose extent reservation and SSD write succeed publishes the extent and records
+    its offset in the dispatch map; a job that fails at any step leaves the entry without an SSD offset and publishes
+    nothing.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1390
+  - dispatcher/src/lib.rs:1463
+- id: DIS-INV-WRITE-THROUGH-SAME-DRIVE
+  subject: INV-DRIVE-PLACEMENT
+  kind: invariant
+  verifiable: true
+  statement: 'A key is always mapped to the same drive, computed by the same hash of the key modulo the number of
+    drives, for its write-through, its cold reads, its removal and its SSD eviction.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:581
+  - dispatcher/src/lib.rs:3564
+  - dispatcher/src/lib.rs:3129
+  - dispatcher/src/background.rs:345
+- id: DIS-INV-SSD-SEGMENTATION
+  subject: INV-SSD-SEGMENTATION
+  kind: invariant
+  verifiable: true
+  statement: 'A transfer to SSD is split into segments of at most the drive''s maximum transfer size that cover
+    the whole transfer back to back, with each segment''s block address advancing by its length divided by the block
+    size; a zero-byte transfer produces no segments.
+
+    '
+  traces:
+  - dispatcher/src/io_segmenter.rs:22
+- id: DIS-INV-MT-EVICTOR-SAFE-DEMOTION
+  subject: INV-BACKGROUND-DEMOTION
+  kind: invariant
+  verifiable: true
+  statement: 'The background memory-tier demotion worker frees a slot only after the dispatch map has switched that
+    entry to SSD residency, and each such demotion increases the evictions-from-memory counter by one.
+
+    '
+  traces:
+  - dispatcher/src/background.rs:531
+  - dispatcher/src/background.rs:547
+- id: DIS-INV-SSD-EVICTOR-ONLY-BLOCK-ENTRIES
+  subject: INV-BACKGROUND-SSD-EVICTION
+  kind: invariant
+  verifiable: true
+  statement: 'The background SSD evictor removes only entries that are SSD resident (never ones in the memory tier),
+    frees their extent after removing them from the dispatch map, and increases the evictions-from-SSD counter by
+    one for each.
+
+    '
+  traces:
+  - dispatcher/src/background.rs:322
+  - dispatcher/src/background.rs:331
+  - dispatcher/src/background.rs:352
+- id: DIS-INV-SSD-EVICTOR-THRESHOLD
+  subject: INV-BACKGROUND-SSD-EVICTION
+  kind: invariant
+  verifiable: true
+  statement: 'The background SSD evictor removes nothing in a cycle where SSD utilization is below the configured
+    threshold, and stops a cycle once utilization drops below the low-water mark.
+
+    '
+  traces:
+  - dispatcher/src/background.rs:302
+  - dispatcher/src/background.rs:357
+- id: DIS-INV-EVICTION-EVENT-DROP-COUNT
+  subject: INV-EVICTION-EVENTS
+  kind: invariant
+  verifiable: true
+  statement: 'When an eviction channel is installed and is full, an eviction event the dispatcher fails to send
+    is counted in the dropped-events counter, which is returned and reset to zero when read.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:568
+  - dispatcher/src/lib.rs:572
+- id: DIS-INV-CHANNEL-EXCLUSIVE
+  subject: INV-READ-CHANNELS
+  kind: invariant
+  verifiable: true
+  statement: 'A drive''s client channel is used by at most one reader at a time, and any leftover completions are
+    discarded before a channel is handed to a new reader.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:295
+  - dispatcher/src/lib.rs:310
+- id: NV-1
+  scope: Consumed-interface methods (dispatch map, memory tier, GPU services, block device, extent manager, remote
+    lookup, logger, greeter, zyre, SPDK env, partition table)
+  kind: not-verifiable
+  verifiable: false
+  reason: 'Methods such as allocate_pinned_dma_buffer, take_read, oldest_keys, join_cluster, info or example belong
+    to interfaces the dispatcher calls, not ones it provides. Their contracts were read only as assumptions about
+    the callee; checking them belongs to the components that implement them.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:78
+  - dispatcher/src/lib.rs:404
+- id: NV-2
+  scope: Backpressure and wait durations (store_backpressure_ms, 20 ms poll, 5 s concurrent-promotion wait, evictor
+    intervals)
+  kind: not-verifiable
+  reason: 'These are wall-clock durations; whether a retry or timeout happens can be checked, but how long it takes
+    cannot.
+
+    '
+  verifiable: false
+  traces:
+  - dispatcher/src/lib.rs:3399
+  - dispatcher/src/lib.rs:1358
+  - dispatcher/src/background.rs:290
+- id: NV-3
+  scope: Background worker liveness (writer, SSD evictor, memory-tier evictor loops)
+  kind: not-verifiable
+  verifiable: false
+  reason: 'That the background threads eventually make progress and terminate, and that flush and shutdown do not
+    hang, are unbounded liveness properties.
+
+    '
+  traces:
+  - dispatcher/src/background.rs:117
+  - dispatcher/src/background.rs:279
+  - dispatcher/src/background.rs:471
+- id: NV-4
+  scope: GPU and DMA pointer validity (IpcHandle addresses, memory-tier pointers, staging buffers)
+  kind: not-verifiable
+  verifiable: false
+  reason: 'Whether GPU addresses and DMA buffers handed in by callers or the environment are valid for the stated
+    sizes is a caller/environment assumption.
+
+    '
+  traces:
+  - interfaces/src/idispatcher.rs:150
+  - dispatcher/src/pipeline.rs:230
+- id: NV-5
+  scope: Hardware I/O (NVMe reads/writes, CUDA copies, SPDK registration)
+  kind: not-verifiable
+  verifiable: false
+  reason: 'The actual movement of bytes by NVMe and the GPU copy engines is environment I/O; only the dispatcher''s
+    handling of their reported results is checkable.
+
+    '
+  traces:
+  - dispatcher/src/pipeline.rs:235
+  - dispatcher/src/lib.rs:666
+- id: NV-6
+  scope: Logging (log_info, log_warn, log_error, one-shot backpressure/drop lines, remote probe output)
+  kind: not-verifiable
+  verifiable: false
+  reason: 'Log content and frequency are not behaviour the caller can rely on.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:519
+  - dispatcher/src/lib.rs:3168
+  - dispatcher/src/remote_probe.rs:1
+- id: NV-7
+  scope: Pipeline metrics and remote-probe timings
+  kind: not-verifiable
+  verifiable: false
+  reason: 'These report elapsed microseconds, which are timing quantities and not deterministic.
+
+    '
+  traces:
+  - dispatcher/src/metrics.rs:1
+  - dispatcher/src/lib.rs:2418
+  - dispatcher/src/lib.rs:2779
+- id: NV-8
+  scope: Relaxed-ordering counter reads across threads
+  kind: not-verifiable
+  verifiable: false
+  reason: 'Counters are updated with relaxed atomics, so a snapshot taken concurrently with updates may combine
+    fields from different moments; any exact cross-field relation can only be checked in a quiescent state.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:146
+  - dispatcher/src/lib.rs:249
+- id: NV-9
+  scope: NUMA topology discovery and SPDK device enumeration
+  kind: not-verifiable
+  verifiable: false
+  reason: 'Which cores and NUMA nodes exist is supplied by the host environment.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:606
+  - dispatcher/src/lib.rs:615
+- id: NV-10
+  scope: Process-global per-device CUDA stream cache (DEVICE_STREAMS)
+  kind: not-verifiable
+  verifiable: false
+  reason: 'Streams are created lazily per GPU device and live until process exit; whether a stream is bound to the
+    right device is a CUDA environment fact.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:463
+  - dispatcher/src/lib.rs:470
+- id: NV-11
+  scope: Integrity-check feature (CRC-32 on store and before load)
+  kind: not-verifiable
+  verifiable: false
+  reason: 'Compiled only under the integrity-check feature, which is not part of the default build in this snapshot;
+    its properties depend on a feature configuration this pass cannot fix.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:1232
+  - dispatcher/src/lib.rs:3526
+- id: NV-12
+  scope: Block-device and extent-manager factory selection, default SPDK backend
+  kind: not-verifiable
+  verifiable: false
+  reason: 'Which concrete block device or extent manager is built depends on injected factories and compile-time
+    features; it is configuration, not checkable behaviour.
+
+    '
+  traces:
+  - dispatcher/src/lib.rs:540
+  - dispatcher/src/lib.rs:1504
+- id: NV-13
+  scope: Configured-but-unused fields (max_cache_entries, backfill_delay_ms, session_id)
+  kind: not-verifiable
+  verifiable: false
+  reason: 'These values are accepted but have no effect on behaviour in this code (session_id is used only for opt-in
+    logging), so there is nothing to check.
+
+    '
+  traces:
+  - interfaces/src/idispatcher.rs:30
+  - interfaces/src/idispatcher.rs:73
+  - dispatcher/src/lib.rs:3338
+driver_pin: 7d280cd3

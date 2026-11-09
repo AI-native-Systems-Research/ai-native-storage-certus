@@ -1,0 +1,23 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_batch_lookup": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_verify_dis_batch_lookup_servedby_remote__mutant": {
+        "tactic": "compute_specified",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.044 },
+              {
+                "tactic": "split_vc",
+                "children": [ null, { "prover": "alt-ergo", "time": 0.083 } ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

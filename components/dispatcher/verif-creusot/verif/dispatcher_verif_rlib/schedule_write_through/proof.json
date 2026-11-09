@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_drive_index": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_ensure_initialized": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_max1": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_schedule_write_through": { "prover": "z3", "time": 0.018 },
+      "vc_writer_enqueue": { "prover": "alt-ergo", "time": 0.015 }
+    }
+  }
+}

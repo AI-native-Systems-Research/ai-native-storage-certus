@@ -1,0 +1,28 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 88 9 88 29 *)
+
+(* <IoK as std::clone::Clone> *)
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_IoK =
+  | Partition UInt64.t UInt64.t UInt64.t
+  | Drive UInt64.t
+  | Gpu
+  | Sync
+  | Ssd
+  | Promote
+  | Dm
+  | Remote
+  | Stream
+  | Channel
+  | Other
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_IoK [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 88 9 88 29] (self: t_IoK)
+  (return (x: t_IoK)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_IoK = Any.any_l () | & self: t_IoK = self ]) [ return (result: t_IoK) -> (! return {result}) ]

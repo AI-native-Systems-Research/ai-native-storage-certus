@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_clear_memory_tier": { "prover": "alt-ergo", "time": 0.056 },
+      "vc_p_zero": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_refute_dis_clear_mt_demotes_persisted": {
+        "prover": "z3",
+        "time": 0.026
+      }
+    }
+  }
+}

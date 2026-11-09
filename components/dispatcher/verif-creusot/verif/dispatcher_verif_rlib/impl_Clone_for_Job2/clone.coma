@@ -1,0 +1,17 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 345 9 345 29 *)
+
+(* <Job2 as std::clone::Clone> *)
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_Job2 = { d: UInt64.t; q: UInt64.t; ptr: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_Job2 [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 345 9 345 29]
+  (self: t_Job2) (return (x: t_Job2)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Job2 = Any.any_l () | & self: t_Job2 = self ]) [ return (result: t_Job2) -> (! return {result}) ]

@@ -11,6 +11,8 @@
 
 **Last Synced**: 2026-10-31 — spec-sync on branch `specsync-b`. BACKFILL: shm-queue line citations re-anchored (`translate.rs:573` → `:1152`, `wire.rs:98-110` → `:194-205`, research `translate.rs:749-760` → `:1149-1159`; all were already stale on unstable); FR-019 notes that the new `LOOKUP_BLOCKS`/`LOOKUP_CHUNKS` opcodes return the same byte. No source changes.
 
+**Last Synced**: 2026-11-07 — spec-sync apply on branch `fix/dispatcher-j33-repairs` (approved by Cornel, 2026-11-07). BACKFILL (code authoritative): FR-033 (a refusal that is neither cause increments neither counter; `03b05d505`), FR-035 (`dispatcher`'s background-evictor gap declared), FR-025 (the remote-on-fetch exception). Code-side follow-up A-17 in `.specify/sync/align-tasks.md`. No source changes.
+
 **Input**: Expose, per looked-up key, **which tier actually served it** — local DRAM, local
 SSD, a peer's DRAM, a peer's SSD — or why it was not served. Today a successful `Lookup`
 is indistinguishable across all four, so no tiered hit rate is measurable.
@@ -552,7 +554,9 @@ assert identical attribution for identical residency, except where FR-014 specif
 - **FR-024**: The servers' aggregate lookup counters MUST account for every requested entry,
   such that hits plus misses plus errors equals the number of entries requested.
 - **FR-025**: The aggregate counters MUST agree with the per-entry attribution in the same
-  responses.
+  responses. One deliberate exception: `remote_lookup_hits` counts a key when the peer returns it,
+  so a key whose local delivery then fails is attributed `ERROR` but still counted as a remote hit
+  (spec 001 FR-058). *(Sync 2026-11-07.)*
 - **FR-026**: Lookup attribution MUST NOT depend on any client draining the eviction event
   stream.
 
@@ -573,9 +577,18 @@ assert identical attribution for identical residency, except where FR-014 specif
 - **FR-033** *(New 2026-10-02)*: A clean eviction that fails MUST record **which** of its two
   causes applied, as separate counters on `TierEventStats`: `evictions_blocked_by_pin` when
   `IDispatchMap::try_evict_to_block` returns `ActiveReferences`, and
-  `evictions_blocked_unpersisted` when it refuses for want of an `ssd_offset`. The call site MUST
+  `evictions_blocked_unpersisted` when it refuses for want of an `ssd_offset` (the dispatch map
+  answers `InvalidState` for a memory-tier entry without one). The call site MUST
   match the error variant; testing `is_ok()` and incrementing a single "eviction failed" counter
-  does NOT satisfy this.
+  does NOT satisfy this. A refusal that is neither — e.g. `KeyNotFound` for a memory-tier slot
+  whose dispatch-map entry is not registered yet — MUST increment **neither** counter, so that a
+  third cause shows up as the two counters falling short of the scanned total rather than being
+  absorbed into one of them. In `dispatcher` both counters are recorded by the foreground
+  clean-eviction scan (`evict_one_clean`); for the background evictor see FR-035.
+  *(Sync 2026-11-07, branch `fix/dispatcher-j33-repairs` — code authoritative, commit
+  `03b05d505`, `components/dispatcher/src/lib.rs:1215-1244`. Known gap, tracked as A-17:
+  `InvalidState` is also the answer for an entry that is not in memory-tier state, which is
+  still counted as unpersisted.)*
   - **Rationale.** The two causes mean opposite things and are indistinguishable at the call site.
     A held read pin implicates a *reader* — an in-flight load, or a peer being served over RDMA.
     A missing `ssd_offset` means write-through has not landed, which is expected under write load
@@ -602,6 +615,12 @@ assert identical attribution for identical residency, except where FR-014 specif
   both that component's code and its spec, and here, for as long as it exists.
   - *Previously (2026-10-02 to 2026-10-09):* p2p reported none of FR-033/FR-034, because those
     eviction paths were free functions holding no counter handle.
+  - **`dispatcher` has the same gap.** Its background `MemoryTierEvictor` skips a refused
+    candidate without recording either cause (`components/dispatcher/src/background.rs:736-738`),
+    so in `dispatcher` too `evictions_blocked_by_pin` and `evictions_blocked_unpersisted` count
+    the foreground scan only, and are a lower bound whenever `memory_tier_eviction_threshold > 0`
+    starts that evictor. Declared here under this requirement's own rule. *(Sync 2026-11-07,
+    branch `fix/dispatcher-j33-repairs` — pre-existing, found while verifying `03b05d505`.)*
   - This is distinguished deliberately from the route-counter defect recorded in SC-008: reporting
     hits with `lookup_hits_dram == 0` was **self-contradictory** and therefore a defect, whereas an
     unmeasured counter is a gap — acceptable only while declared. Adding fields to `TierEventStats`

@@ -1,0 +1,1072 @@
+groups:
+- origin: spec+code
+  spec:
+  - DIS-INITIALIZE-REQUIRES-DISPATCH-MAP
+  code:
+  - DIS-INITIALIZE-DISPATCH-MAP-REQUIRED
+- origin: spec+code
+  spec:
+  - DIS-INITIALIZE-REQUIRES-MEMORY-TIER
+  code:
+  - DIS-INITIALIZE-MEMORY-TIER-REQUIRED
+- origin: spec+code
+  spec:
+  - DIS-INITIALIZE-EMPTY-PCI-LIST-INVALID
+  code:
+  - DIS-INITIALIZE-EMPTY-PCI-ADDRS
+- origin: spec+code
+  spec:
+  - DIS-INITIALIZE-SUCCESS-OPERATIONAL
+  code:
+  - DIS-INITIALIZE-SUCCESS-INITIALIZED
+  - DIS-INITIALIZE-ONE-DRIVE-PER-ADDRESS
+  - DIS-INITIALIZE-WRITER-STARTED
+- origin: spec-only
+  spec:
+  - DIS-INITIALIZE-NO-SPDK-MEMORY-ONLY
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-INITIALIZE-PARTITION-GUARD
+  code:
+  - DIS-INITIALIZE-INCOMPATIBLE-PARTITION-TABLE
+- origin: spec-only
+  spec:
+  - DIS-INITIALIZE-FORMAT-PARAMS
+  code: []
+- origin: spec-only
+  spec:
+  - DIS-INITIALIZE-NO-FORMAT-PRESERVES
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-INITIALIZE-RECOVERY-REBUILDS-MAP
+  code:
+  - DIS-INITIALIZE-RECOVER-EXTENTS
+- origin: spec+code
+  spec:
+  - DIS-INITIALIZE-SSD-EVICTOR-START
+  code:
+  - DIS-INITIALIZE-SSD-EVICTOR-GATED
+- origin: spec+code
+  spec:
+  - DIS-INITIALIZE-MT-EVICTOR-START
+  code:
+  - DIS-INITIALIZE-MT-EVICTOR-GATED
+- origin: spec-only
+  spec:
+  - DIS-INITIALIZE-REGISTER-HOST-MEMORY
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-INITIALIZE-POLLER-CPU-EXPLICIT
+  code:
+  - DIS-INITIALIZE-POLLER-BASE-CPU
+- origin: spec+code
+  spec:
+  - DIS-INITIALIZE-POLLER-CPU-AUTO
+  code:
+  - DIS-INITIALIZE-NUMA-CPU-ASSIGNMENT
+- origin: spec-only
+  spec:
+  - DIS-INITIALIZE-CHANNEL-POOL-EMPTY
+  code: []
+- origin: spec-only
+  spec:
+  - DIS-CONFIG-DEFAULTS
+  code: []
+- origin: code-only
+  spec: []
+  code:
+  - DIS-INITIALIZE-INVALID-PCI-ADDRESS
+- origin: code-only
+  spec: []
+  code:
+  - DIS-INITIALIZE-DRIVE-FAILURE-IO-ERROR
+- origin: code-only
+  spec: []
+  code:
+  - DIS-INITIALIZE-FAILURE-LEAVES-UNINITIALIZED
+- origin: code-only
+  spec: []
+  code:
+  - DIS-INITIALIZE-FAILURE-NO-CONFIG-CHANGE
+- origin: code-only
+  spec: []
+  code:
+  - DIS-INITIALIZE-JOINS-CLUSTER
+- origin: spec+code
+  spec:
+  - DIS-INV-NOT-INITIALIZED
+  code:
+  - DIS-SHUTDOWN-UNINITIALIZED-AFTER
+  - DIS-LOOKUP-NOT-INITIALIZED
+  - DIS-CHECK-NOT-INITIALIZED
+  - DIS-REMOVE-NOT-INITIALIZED
+  - DIS-POPULATE-NOT-INITIALIZED
+  - DIS-BATCH-POPULATE-NOT-INITIALIZED
+  - DIS-RESERVE-NOT-INITIALIZED
+  - DIS-COPY-ASYNC-NOT-INITIALIZED
+  - DIS-COPY-COMPLETED-NOT-INITIALIZED
+  - DIS-RELEASE-MEMORY-NOT-INITIALIZED
+  - DIS-PIN-NOT-INITIALIZED
+  - DIS-TOUCH-NOT-INITIALIZED
+  - DIS-CLEAR-MT-NOT-INITIALIZED
+  - DIS-FLUSH-NOT-INITIALIZED
+  - DIS-SCHEDULE-WT-NOT-INITIALIZED
+- origin: spec+code
+  spec:
+  - DIS-SHUTDOWN-DRAINS-WRITES
+  code:
+  - DIS-SHUTDOWN-DRAINS-WRITES
+- origin: spec+code
+  spec:
+  - DIS-SHUTDOWN-CHECKPOINT-BEFORE-DEVICES
+  code:
+  - DIS-SHUTDOWN-CHECKPOINT-BEFORE-TEARDOWN
+- origin: spec+code
+  spec:
+  - DIS-SHUTDOWN-REVERSE-ORDER
+  code:
+  - DIS-SHUTDOWN-DRIVE-PHASES
+- origin: spec+code
+  spec:
+  - DIS-SHUTDOWN-NO-THREADS
+  code:
+  - DIS-SHUTDOWN-STOPS-WORKERS
+- origin: divergent
+  spec:
+  - DIS-SHUTDOWN-UNREGISTER-HOST-MEMORY
+  - DIS-SHUTDOWN-DESTROY-STREAMS
+  code:
+  - DIS-SHUTDOWN-RELEASES-GPU-RESOURCES
+  note: The spec says shutdown unregisters the host pool and destroys every per-device GPU stream it created. The
+    code unregisters the pool but destroys only the warm stream and pipeline ring (components/dispatcher/src/lib.rs:2147);
+    the per-device streams in the process-global DEVICE_STREAMS cache (lib.rs:463) are never destroyed.
+- origin: code-only
+  spec: []
+  code:
+  - DIS-SHUTDOWN-ALWAYS-OK
+- origin: code-only
+  spec: []
+  code:
+  - DIS-SHUTDOWN-LEAVES-CLUSTER
+- origin: code-only
+  spec: []
+  code:
+  - DIS-SHUTDOWN-REINITIALIZE
+- origin: spec+code
+  spec:
+  - DIS-POPULATE-ZERO-SIZE-INVALID
+  code:
+  - DIS-POPULATE-ZERO-SIZE
+- origin: spec+code
+  spec:
+  - DIS-POPULATE-DUPLICATE-ALREADY-EXISTS
+  code:
+  - DIS-POPULATE-ALREADY-EXISTS
+- origin: spec+code
+  spec:
+  - DIS-POPULATE-REGISTERS-MEMORY-TIER
+  code:
+  - DIS-POPULATE-SUCCESS-CACHED
+- origin: spec-only
+  spec:
+  - DIS-POPULATE-NOT-WAIT-SSD
+  code: []
+- origin: spec-only
+  spec:
+  - DIS-POPULATE-EVICTS-WHEN-FULL
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-POPULATE-DROP-ON-FULL
+  - DIS-POPULATE-DROP-COUNTER
+  - DIS-POPULATE-DROP-UNCONDITIONAL
+  code:
+  - DIS-POPULATE-DROP-ON-FULL
+- origin: spec-only
+  spec:
+  - DIS-POPULATE-NO-LRU-REFRESH-BY-WRITER
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-POPULATE-WRITE-THROUGH-RECORDS-OFFSET
+  - DIS-POPULATE-WRITE-THROUGH-FAILURE-KEEPS-ENTRY
+  code:
+  - DIS-INV-WRITE-THROUGH-PERSISTS
+- origin: spec+code
+  spec:
+  - DIS-POPULATE-WRITE-THROUGH-DRIVE-PLACEMENT
+  - DIS-BATCH-LOOKUP-DRIVE-GROUPING
+  code:
+  - DIS-INV-WRITE-THROUGH-SAME-DRIVE
+- origin: code-only
+  spec: []
+  code:
+  - DIS-POPULATE-ENQUEUES-WRITE-THROUGH
+- origin: code-only
+  spec: []
+  code:
+  - DIS-POPULATE-FAILURE-RELEASES-SLOT
+- origin: code-only
+  spec: []
+  code:
+  - DIS-POPULATE-COPY-FAILURE-IO-ERROR
+- origin: spec+code
+  spec:
+  - DIS-BATCH-POPULATE-LENGTH-ORDER
+  code:
+  - DIS-BATCH-POPULATE-ONE-RESULT-PER-ENTRY
+- origin: spec+code
+  spec:
+  - DIS-BATCH-POPULATE-EQUIV-POPULATE
+  code:
+  - DIS-BATCH-POPULATE-EQUIVALENT
+- origin: spec-only
+  spec:
+  - DIS-BATCH-POPULATE-INDEPENDENT
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-BATCH-POPULATE-REGISTER-AFTER-SYNC
+  code:
+  - DIS-BATCH-POPULATE-REGISTER-AFTER-SYNC
+- origin: spec+code
+  spec:
+  - DIS-BATCH-POPULATE-DROP-ON-FULL
+  code:
+  - DIS-BATCH-POPULATE-DROP-ON-FULL
+- origin: code-only
+  spec: []
+  code:
+  - DIS-BATCH-POPULATE-EMPTY
+- origin: code-only
+  spec: []
+  code:
+  - DIS-BATCH-POPULATE-ZERO-SIZE
+- origin: code-only
+  spec: []
+  code:
+  - DIS-BATCH-POPULATE-SYNC-FAILURE
+- origin: code-only
+  spec: []
+  code:
+  - DIS-BATCH-POPULATE-COPY-FAILURE-RELEASES
+- origin: spec+code
+  spec:
+  - DIS-LOOKUP-MISS-KEY-NOT-FOUND
+  code:
+  - DIS-LOOKUP-KEY-NOT-FOUND
+- origin: spec+code
+  spec:
+  - DIS-LOOKUP-SIZE-MISMATCH
+  code:
+  - DIS-LOOKUP-SIZE-MISMATCH
+- origin: spec+code
+  spec:
+  - DIS-LOOKUP-WARM-COPIES-DATA
+  code:
+  - DIS-LOOKUP-WARM-COPY
+- origin: spec+code
+  spec:
+  - DIS-LOOKUP-WARM-TOUCHES-LRU
+  code:
+  - DIS-LOOKUP-WARM-REFRESHES-RECENCY
+- origin: spec+code
+  spec:
+  - DIS-LOOKUP-COLD-PROMOTES
+  - DIS-LOOKUP-COLD-PRESERVES-OFFSET
+  code:
+  - DIS-LOOKUP-COLD-PROMOTES
+- origin: spec-only
+  spec:
+  - DIS-LOOKUP-COLD-EVICTS-FIRST
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-LOOKUP-COLD-STAGING-FALLBACK
+  code:
+  - DIS-LOOKUP-COLD-STAGED-NO-PROMOTE
+- origin: spec-only
+  spec:
+  - DIS-LOOKUP-NO-HW-PROMOTE
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-LOOKUP-DELEGATES-ASYNC
+  code:
+  - DIS-LOOKUP-SYNC-BEFORE-RETURN
+- origin: spec-only
+  spec:
+  - DIS-LOOKUP-CONCURRENT-READERS
+  code: []
+- origin: spec-only
+  spec:
+  - DIS-LOOKUP-AFTER-DOWNGRADE
+  code: []
+- origin: spec-only
+  spec:
+  - DIS-LOOKUP-NO-DATA-CORRUPTION-CONCURRENT
+  code: []
+- origin: spec-only
+  spec:
+  - DIS-LOOKUP-ASYNC-MISS
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-LOOKUP-ASYNC-DMA-ERROR
+  code:
+  - DIS-LOOKUP-WARM-COPY-FAILURE
+- origin: divergent
+  spec:
+  - DIS-LOOKUP-ASYNC-WARM-STREAM
+  - DIS-LOOKUP-ASYNC-COLD-NULL-STREAM
+  code:
+  - DIS-LOOKUP-ASYNC-NULL-STREAM
+  note: The spec says a memory-tier hit returns the GPU stream the copy was queued on (only SSD promotion returns
+    a null stream). The code serves warm hits synchronously and returns the null stream for every success (components/dispatcher/src/lib.rs:3061
+    and 3067).
+- origin: spec-only
+  spec:
+  - DIS-LOOKUP-ASYNC-DEVICE-STREAM
+  code: []
+- origin: code-only
+  spec: []
+  code:
+  - DIS-LOOKUP-DM-ERROR-KEY-NOT-FOUND
+- origin: code-only
+  spec: []
+  code:
+  - DIS-LOOKUP-WARM-RELEASES-PIN
+- origin: code-only
+  spec: []
+  code:
+  - DIS-LOOKUP-COLD-NO-SLOT
+- origin: code-only
+  spec: []
+  code:
+  - DIS-LOOKUP-COLD-FAILURE-RELEASES-SLOT
+- origin: code-only
+  spec: []
+  code:
+  - DIS-LOOKUP-NO-FOREIGN-WRITE-RELEASE
+- origin: code-only
+  spec: []
+  code:
+  - DIS-LOOKUP-COUNTS-MEMORY-PROMOTION
+- origin: code-only
+  spec: []
+  code:
+  - DIS-BATCH-LOOKUP-MEMORY-PROMOTION-COUNTER
+- origin: spec+code
+  spec:
+  - DIS-BATCH-LOOKUP-LENGTH-ORDER
+  code:
+  - DIS-BATCH-LOOKUP-ONE-OUTCOME-PER-ENTRY
+- origin: spec+code
+  spec:
+  - DIS-BATCH-LOOKUP-EMPTY
+  code:
+  - DIS-BATCH-LOOKUP-EMPTY
+- origin: spec-only
+  spec:
+  - DIS-BATCH-LOOKUP-MISS-PER-ENTRY
+  code: []
+- origin: spec-only
+  spec:
+  - DIS-BATCH-LOOKUP-ERROR-ISOLATION
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-BATCH-LOOKUP-WARM-DELIVERS
+  code:
+  - DIS-BATCH-LOOKUP-WARM-DATA-DELIVERED
+- origin: spec+code
+  spec:
+  - DIS-BATCH-LOOKUP-COLD-PROMOTES
+  code:
+  - DIS-BATCH-LOOKUP-COLD-PROMOTE
+- origin: spec+code
+  spec:
+  - DIS-BATCH-LOOKUP-WARM-PINS-HELD-UNTIL-SYNC
+  code:
+  - DIS-BATCH-LOOKUP-WARM-PIN-UNTIL-SYNC
+  - DIS-BATCH-LOOKUP-PINS-BALANCED
+- origin: spec-only
+  spec:
+  - DIS-BATCH-LOOKUP-ONE-WARM-SYNC-AFTER-COLD
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-BATCH-LOOKUP-TOUCH-WARM
+  code:
+  - DIS-BATCH-LOOKUP-WARM-TOUCH
+- origin: spec+code
+  spec:
+  - DIS-BATCH-LOOKUP-TRANSIENT-RETRY
+  code:
+  - DIS-BATCH-LOOKUP-DM-RETRY
+  - DIS-BATCH-LOOKUP-DM-ERROR-NOT-MISS
+- origin: spec-only
+  spec:
+  - DIS-BATCH-LOOKUP-SINGLE-COLD-POOLED
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-BATCH-LOOKUP-COLD-STAGING-POSTPASS
+  code:
+  - DIS-BATCH-LOOKUP-COLD-STAGING-FALLBACK
+- origin: spec-only
+  spec:
+  - DIS-BATCH-LOOKUP-QUEUE-DEPTH-SPLIT
+  code: []
+- origin: spec-only
+  spec:
+  - DIS-BATCH-LOOKUP-COLD-NO-THREADS
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-BATCH-LOOKUP-REMOTE-FORWARD
+  - DIS-BATCH-LOOKUP-SIZE-MISMATCH-NOT-REMOTE
+  code:
+  - DIS-BATCH-LOOKUP-REMOTE-ONLY-MISSES
+- origin: spec-only
+  spec:
+  - DIS-BATCH-LOOKUP-NO-REMOTE-UNBOUND
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-BATCH-LOOKUP-REMOTE-NOTFOUND-IS-MISS
+  - DIS-BATCH-LOOKUP-REMOTE-TRANSPORT-IS-IO
+  code:
+  - DIS-BATCH-LOOKUP-REMOTE-NOT-FOUND-IS-MISS
+- origin: spec+code
+  spec:
+  - DIS-BATCH-LOOKUP-CONCURRENT-PROMOTE-HIT
+  code:
+  - DIS-BATCH-LOOKUP-CONCURRENT-PROMOTION
+- origin: spec-only
+  spec:
+  - DIS-BATCH-LOOKUP-CONCURRENT-PROMOTE-TIMEOUT
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-BATCH-LOOKUP-SYNC-FAILURE-ERROR
+  code:
+  - DIS-BATCH-LOOKUP-WARM-SYNC-FAILURE-NOT-HIT
+  - DIS-BATCH-LOOKUP-REMOTE-SYNC-FAILURE
+- origin: spec+code
+  spec:
+  - DIS-BATCH-LOOKUP-INIT-FAILURE-WHOLE-BATCH
+  code:
+  - DIS-BATCH-LOOKUP-NOT-INITIALIZED
+- origin: spec+code
+  spec:
+  - DIS-BATCH-LOOKUP-SERVEDBY-HIT-AGREEMENT
+  code:
+  - DIS-BATCH-LOOKUP-HIT-IFF-OK
+- origin: spec+code
+  spec:
+  - DIS-BATCH-LOOKUP-SERVEDBY-MISS-IFF-NOTFOUND
+  - DIS-BATCH-LOOKUP-SERVEDBY-SIZE-MISMATCH
+  - DIS-BATCH-LOOKUP-SERVEDBY-ERROR-MEANING
+  code:
+  - DIS-BATCH-LOOKUP-MISS-ATTRIBUTION
+- origin: spec+code
+  spec:
+  - DIS-BATCH-LOOKUP-SERVEDBY-DRAM
+  code:
+  - DIS-BATCH-LOOKUP-WARM-ROUTE
+- origin: spec+code
+  spec:
+  - DIS-BATCH-LOOKUP-SERVEDBY-SSD-ROUTE
+  code:
+  - DIS-BATCH-LOOKUP-COLD-ROUTE
+- origin: spec-only
+  spec:
+  - DIS-BATCH-LOOKUP-SERVEDBY-CONCURRENT-DRAM
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-BATCH-LOOKUP-SERVEDBY-REMOTE
+  code:
+  - DIS-BATCH-LOOKUP-REMOTE-ROUTE
+- origin: spec-only
+  spec:
+  - DIS-BATCH-LOOKUP-SERVEDBY-OVERWRITE
+  code: []
+- origin: spec-only
+  spec:
+  - DIS-BATCH-LOOKUP-SERVEDBY-NO-OUTCOME-CHANGE
+  code: []
+- origin: spec-only
+  spec:
+  - DIS-SERVEDBY-IS-HIT
+  code: []
+- origin: code-only
+  spec: []
+  code:
+  - DIS-BATCH-LOOKUP-SCATTER-BOUNDED
+- origin: code-only
+  spec: []
+  code:
+  - DIS-BATCH-LOOKUP-COLD-FAILURE-RELEASES-SLOT
+- origin: code-only
+  spec: []
+  code:
+  - DIS-BATCH-LOOKUP-REMOTE-NOT-RESIDENT
+- origin: code-only
+  spec: []
+  code:
+  - DIS-BATCH-LOOKUP-REMOTE-PIN-UNTIL-SYNC
+- origin: spec+code
+  spec:
+  - DIS-CHECK-PRESENT
+  code:
+  - DIS-CHECK-PRESENT-TRUE
+- origin: spec+code
+  spec:
+  - DIS-CHECK-ABSENT
+  code:
+  - DIS-CHECK-ABSENT-FALSE
+- origin: spec+code
+  spec:
+  - DIS-CHECK-NO-SIDE-EFFECTS
+  code:
+  - DIS-CHECK-NO-NET-PIN
+- origin: spec+code
+  spec:
+  - DIS-REMOVE-MISSING
+  code:
+  - DIS-REMOVE-KEY-NOT-FOUND
+- origin: spec+code
+  spec:
+  - DIS-REMOVE-MEMORY-TIER
+  code:
+  - DIS-REMOVE-ENTRY-GONE
+- origin: spec+code
+  spec:
+  - DIS-REMOVE-BLOCK-DEVICE
+  code:
+  - DIS-REMOVE-FREES-EXTENT
+- origin: divergent
+  spec:
+  - DIS-REMOVE-ORDER
+  code:
+  - DIS-REMOVE-DM-BEFORE-SLOT
+  note: The spec says remove frees the memory-tier slot first and then deletes the dispatch-map entry. The code
+    deletes the dispatch-map entry first and frees the slot only afterwards, skipping it if the map removal fails
+    (components/dispatcher/src/lib.rs:3117-3123).
+- origin: spec-only
+  spec:
+  - DIS-REMOVE-NO-WAIT
+  code: []
+- origin: spec-only
+  spec:
+  - DIS-REMOVE-RESOURCES-REUSABLE
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-REMOVE-FRAME-OTHER-KEYS
+  code:
+  - DIS-REMOVE-FRAME-OTHER-KEYS
+- origin: code-only
+  spec: []
+  code:
+  - DIS-REMOVE-NO-FOREIGN-PIN-RELEASE
+- origin: spec+code
+  spec:
+  - DIS-TOUCH-MISSING
+  code:
+  - DIS-TOUCH-KEY-NOT-FOUND
+- origin: spec+code
+  spec:
+  - DIS-TOUCH-REFRESHES
+  code:
+  - DIS-TOUCH-REFRESHES
+- origin: spec-only
+  spec:
+  - DIS-TOUCH-NO-DMA-NO-REFS
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-RESERVE-MEMORY-ALREADY-EXISTS
+  - DIS-RESERVE-MEMORY-ALREADY-RESIDENT-COUNTER
+  code:
+  - DIS-RESERVE-ALREADY-EXISTS
+- origin: spec+code
+  spec:
+  - DIS-RESERVE-MEMORY-SUCCESS
+  code:
+  - DIS-RESERVE-SUCCESS-SLOT
+- origin: spec+code
+  spec:
+  - DIS-RESERVE-MEMORY-NO-DISPATCH-ENTRY
+  code:
+  - DIS-RESERVE-NO-DISPATCH-MAP-ENTRY
+- origin: spec+code
+  spec:
+  - DIS-RESERVE-MEMORY-FULL-FAILS
+  code:
+  - DIS-RESERVE-ALLOCATION-FAILED
+- origin: spec-only
+  spec:
+  - DIS-RESERVE-MEMORY-BACKPRESSURE-RETRIES
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-RESERVE-MEMORY-BACKPRESSURE-COUNTER
+  code:
+  - DIS-RESERVE-BACKPRESSURE-COUNTER
+- origin: spec+code
+  spec:
+  - DIS-RESERVE-MEMORY-FAIL-FAST
+  code:
+  - DIS-RESERVE-ZERO-BUDGET-FAIL-FAST
+  - DIS-RESERVE-PAST-DEADLINE-SINGLE-ATTEMPT
+- origin: spec+code
+  spec:
+  - DIS-RESERVE-MEMORY-NO-EVICT-PINNED
+  - DIS-INV-EVICTION-PIN-SAFE
+  - DIS-INV-EVICTION-DEMOTE-ORDER
+  code:
+  - DIS-RESERVE-EVICTION-PIN-SAFE
+  - DIS-INV-MT-EVICTOR-SAFE-DEMOTION
+  statement: No memory-tier eviction path frees the slot of an entry that holds a read or write reference, and every
+    demotion switches the dispatch-map entry to block-device state before the slot is freed.
+- origin: spec+code
+  spec:
+  - DIS-INV-EVICTION-UNPERSISTED-SKIPPED
+  code:
+  - DIS-RESERVE-EVICTION-NO-UNPERSISTED-DROP
+- origin: spec+code
+  spec:
+  - DIS-INV-EVICTION-BOUNDED-FAILS
+  code:
+  - DIS-RESERVE-EVICTION-ATTEMPT-BOUND
+- origin: spec+code
+  spec:
+  - DIS-TIER-STATS-BLOCKED-CAUSES
+  - DIS-TIER-STATS-SCANS-EXHAUSTED
+  code:
+  - DIS-RESERVE-EVICTION-COUNTERS
+- origin: spec+code
+  spec:
+  - DIS-INV-EVICTION-EVENTS
+  code:
+  - DIS-INV-EVICTION-EVENT-DROP-COUNT
+- origin: code-only
+  spec: []
+  code:
+  - DIS-RESERVE-ZERO-SIZE
+- origin: spec+code
+  spec:
+  - DIS-COPY-ASYNC-NO-SLOT
+  code:
+  - DIS-COPY-ASYNC-NO-SLOT
+- origin: spec+code
+  spec:
+  - DIS-COPY-ASYNC-DMA-ERROR
+  code:
+  - DIS-COPY-ASYNC-FAILURE-RELEASES-SLOT
+- origin: spec+code
+  spec:
+  - DIS-COPY-ASYNC-GATHER-LAYOUT
+  code:
+  - DIS-COPY-ASYNC-GATHER-LAYOUT
+- origin: spec+code
+  spec:
+  - DIS-COPY-ASYNC-NULL-STREAM-SYNC
+  code:
+  - DIS-COPY-ASYNC-NULL-STREAM-SYNC
+- origin: code-only
+  spec: []
+  code:
+  - DIS-COPY-ASYNC-OVERFLOW
+- origin: code-only
+  spec: []
+  code:
+  - DIS-COPY-ASYNC-FRAME-DISPATCH-MAP
+- origin: spec+code
+  spec:
+  - DIS-COPY-COMPLETED-NOT-IN-TIER
+  code:
+  - DIS-COPY-COMPLETED-NO-SLOT
+- origin: spec+code
+  spec:
+  - DIS-COPY-COMPLETED-REGISTERS
+  code:
+  - DIS-COPY-COMPLETED-REGISTERS
+  - DIS-COPY-COMPLETED-ENQUEUES
+- origin: code-only
+  spec: []
+  code:
+  - DIS-COPY-COMPLETED-PRECONDITION-SIZE
+- origin: code-only
+  spec: []
+  code:
+  - DIS-COPY-COMPLETED-ALREADY-EXISTS
+- origin: code-only
+  spec: []
+  code:
+  - DIS-COPY-COMPLETED-EXISTING-ENTRY-PRESERVED
+- origin: code-only
+  spec: []
+  code:
+  - DIS-COPY-COMPLETED-REGISTER-FAILURE-RELEASES
+- origin: spec+code
+  spec:
+  - DIS-RELEASE-MEMORY-FREES
+  code:
+  - DIS-RELEASE-MEMORY-FREES
+- origin: spec+code
+  spec:
+  - DIS-RELEASE-MEMORY-IDEMPOTENT
+  code:
+  - DIS-RELEASE-MEMORY-IDEMPOTENT
+- origin: code-only
+  spec: []
+  code:
+  - DIS-RELEASE-MEMORY-PRECONDITION
+- origin: spec+code
+  spec:
+  - DIS-PIN-MISSING
+  code:
+  - DIS-PIN-KEY-NOT-FOUND
+- origin: spec+code
+  spec:
+  - DIS-PIN-WRITER-TIMEOUT
+  code:
+  - DIS-PIN-TIMEOUT
+- origin: spec+code
+  spec:
+  - DIS-PIN-INCREMENTS
+  - DIS-PIN-PREVENTS-EVICTION
+  code:
+  - DIS-PIN-INCREMENTS
+- origin: spec+code
+  spec:
+  - DIS-UNPIN-DECREMENTS
+  code:
+  - DIS-UNPIN-DECREMENTS
+- origin: spec+code
+  spec:
+  - DIS-UNPIN-UNDERFLOW
+  code:
+  - DIS-UNPIN-UNDERFLOW
+- origin: spec+code
+  spec:
+  - DIS-PROMOTE-BLOCK-TO-MEMORY
+  code:
+  - DIS-PROMOTE-COLD-KEYS
+- origin: spec+code
+  spec:
+  - DIS-PROMOTE-RESIDENT-REFRESH
+  code:
+  - DIS-PROMOTE-WARM-KEYS-TOUCHED
+- origin: spec+code
+  spec:
+  - DIS-PROMOTE-MISSING-SKIPPED
+  code:
+  - DIS-PROMOTE-MISSING-SKIPPED
+- origin: spec-only
+  spec:
+  - DIS-PROMOTE-ERRORS-NOT-PROPAGATED
+  code: []
+- origin: code-only
+  spec: []
+  code:
+  - DIS-PROMOTE-NOT-INITIALIZED-NOOP
+- origin: code-only
+  spec: []
+  code:
+  - DIS-PROMOTE-READ-FAILURE-RELEASES
+- origin: code-only
+  spec: []
+  code:
+  - DIS-PROMOTE-PINS-BALANCED
+- origin: spec+code
+  spec:
+  - DIS-CLEAR-MT-EMPTIES
+  - DIS-CLEAR-MT-COUNT
+  code:
+  - DIS-CLEAR-MT-EMPTY-AFTER
+- origin: spec+code
+  spec:
+  - DIS-CLEAR-MT-DEMOTES-PERSISTED
+  code:
+  - DIS-CLEAR-MT-PERSISTED-DEMOTED
+- origin: spec+code
+  spec:
+  - DIS-CLEAR-MT-REMOVES-UNPERSISTED
+  code:
+  - DIS-CLEAR-MT-UNPERSISTED-REMOVED
+- origin: code-only
+  spec: []
+  code:
+  - DIS-CLEAR-MT-PIN-SAFE
+- origin: spec+code
+  spec:
+  - DIS-FLUSH-PERSISTS-ALL
+  code:
+  - DIS-FLUSH-DRAINS
+- origin: spec-only
+  spec:
+  - DIS-FLUSH-THEN-CLEAR-DEMOTES
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-FLUSH-RETURNS-COUNT
+  code:
+  - DIS-FLUSH-RETURN-COUNT
+- origin: spec+code
+  spec:
+  - DIS-SCHEDULE-WT-QUEUES
+  code:
+  - DIS-SCHEDULE-WT-ENQUEUES
+- origin: spec+code
+  spec:
+  - DIS-SCHEDULE-WT-NONBLOCKING
+  code:
+  - DIS-SCHEDULE-WT-NONBLOCKING
+- origin: spec-only
+  spec:
+  - DIS-SCHEDULE-WT-FAILURE-KEEPS-ENTRY
+  code: []
+- origin: code-only
+  spec: []
+  code:
+  - DIS-SCHEDULE-WT-PIN-NEUTRAL
+- origin: spec-only
+  spec:
+  - DIS-READ-WRITE-STATS-MONOTONIC
+  code: []
+- origin: code-only
+  spec: []
+  code:
+  - DIS-READ-WRITE-STATS-SUM
+- origin: spec+code
+  spec:
+  - DIS-TIER-STATS-MONOTONIC
+  code:
+  - DIS-TIER-STATS-MONOTONIC
+- origin: spec+code
+  spec:
+  - DIS-TIER-STATS-ROUTE-PARTITION
+  code:
+  - DIS-BATCH-LOOKUP-ROUTE-PARTITION
+  - DIS-BATCH-LOOKUP-LOCAL-HIT-COUNTERS
+- origin: spec+code
+  spec:
+  - DIS-TIER-STATS-REMOTE-ACCOUNTING
+  - DIS-TIER-STATS-REMOTE-HIT-ON-FETCH
+  code:
+  - DIS-BATCH-LOOKUP-REMOTE-COUNTERS
+- origin: spec-only
+  spec:
+  - DIS-TIER-STATS-REMOTE-NOT-LOCAL
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-TIER-STATS-PROMOTIONS-TO-GPU
+  code:
+  - DIS-LOOKUP-COUNTS-GPU-PROMOTION
+  - DIS-BATCH-LOOKUP-GPU-COUNTER
+- origin: spec+code
+  spec:
+  - DIS-TIER-STATS-OLDEST-GAUGES
+  code:
+  - DIS-TIER-STATS-GAUGE-BOUNDS
+  - DIS-TIER-STATS-GAUGE-DEFINITION
+- origin: code-only
+  spec: []
+  code:
+  - DIS-TIER-STATS-READ-ONLY
+- origin: spec-only
+  spec:
+  - DIS-INV-EVICTION-DEMOTED-STILL-READABLE
+  code: []
+- origin: spec-only
+  spec:
+  - DIS-INV-EVICTION-NO-OP-WHEN-ROOM
+  code: []
+- origin: spec-only
+  spec:
+  - DIS-INV-EVICTION-STOPS-WHEN-FITS
+  code: []
+- origin: spec-only
+  spec:
+  - DIS-INV-MT-EVICTOR-SKIP-NOT-REMOVE
+  code: []
+- origin: spec-only
+  spec:
+  - DIS-INV-MT-EVICTOR-WATERMARK
+  code: []
+- origin: spec-only
+  spec:
+  - DIS-INV-MT-EVICTOR-BATCH-SCALE
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-INV-SSD-EVICTOR-WATERMARK
+  code:
+  - DIS-INV-SSD-EVICTOR-THRESHOLD
+- origin: spec+code
+  spec:
+  - DIS-INV-SSD-EVICTOR-SKIPS-MEMORY-TIER
+  - DIS-INV-SSD-EVICTOR-FREES-CORRECT-DRIVE
+  code:
+  - DIS-INV-SSD-EVICTOR-ONLY-BLOCK-ENTRIES
+- origin: spec-only
+  spec:
+  - DIS-INV-SSD-EVICTOR-SKIPS-REFERENCED
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-INV-CHANNEL-EXCLUSIVE
+  code:
+  - DIS-INV-CHANNEL-EXCLUSIVE
+- origin: spec-only
+  spec:
+  - DIS-INV-PIPELINE-DRAIN-ALL
+  code: []
+- origin: spec+code
+  spec:
+  - DIS-INV-PIPELINE-SEGMENT-MDTS
+  code:
+  - DIS-INV-SSD-SEGMENTATION
+- origin: spec-only
+  spec:
+  - DIS-INV-PIPELINE-COALESCED-H2D
+  code: []
+- origin: spec-only
+  spec:
+  - DIS-INV-STAGING-BOUNDED
+  code: []
+- origin: spec-only
+  spec:
+  - DIS-INV-DEVICE-STREAM-BINDING
+  code: []
+- origin: spec-only
+  spec:
+  - DIS-INV-STORE-STREAM-D2H
+  code: []
+- origin: not-verifiable
+  spec:
+  - NV-1
+  code: []
+- origin: not-verifiable
+  spec:
+  - NV-2
+  code: []
+- origin: not-verifiable
+  spec:
+  - NV-3
+  code: []
+- origin: not-verifiable
+  spec:
+  - NV-4
+  code: []
+- origin: not-verifiable
+  spec:
+  - NV-5
+  code: []
+- origin: not-verifiable
+  spec:
+  - NV-6
+  code: []
+- origin: not-verifiable
+  spec:
+  - NV-7
+  code: []
+- origin: not-verifiable
+  spec:
+  - NV-8
+  code: []
+- origin: not-verifiable
+  spec:
+  - NV-9
+  code: []
+- origin: not-verifiable
+  spec:
+  - NV-10
+  code: []
+- origin: not-verifiable
+  spec:
+  - NV-11
+  code: []
+- origin: not-verifiable
+  spec:
+  - NV-12
+  code: []
+- origin: not-verifiable
+  spec:
+  - NV-13
+  code: []
+- origin: not-verifiable
+  id: NV-C1
+  spec: []
+  code:
+  - NV-1
+- origin: not-verifiable
+  id: NV-C2
+  spec: []
+  code:
+  - NV-2
+- origin: not-verifiable
+  id: NV-C3
+  spec: []
+  code:
+  - NV-3
+- origin: not-verifiable
+  id: NV-C4
+  spec: []
+  code:
+  - NV-4
+- origin: not-verifiable
+  id: NV-C5
+  spec: []
+  code:
+  - NV-5
+- origin: not-verifiable
+  id: NV-C6
+  spec: []
+  code:
+  - NV-6
+- origin: not-verifiable
+  id: NV-C7
+  spec: []
+  code:
+  - NV-7
+- origin: not-verifiable
+  id: NV-C8
+  spec: []
+  code:
+  - NV-8
+- origin: not-verifiable
+  id: NV-C9
+  spec: []
+  code:
+  - NV-9
+- origin: not-verifiable
+  id: NV-C10
+  spec: []
+  code:
+  - NV-10
+- origin: not-verifiable
+  id: NV-C11
+  spec: []
+  code:
+  - NV-11
+- origin: not-verifiable
+  id: NV-C12
+  spec: []
+  code:
+  - NV-12
+- origin: not-verifiable
+  id: NV-C13
+  spec: []
+  code:
+  - NV-13
+driver_pin: 7d280cd3

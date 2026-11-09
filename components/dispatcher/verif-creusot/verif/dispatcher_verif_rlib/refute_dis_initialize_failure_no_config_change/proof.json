@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_initialize": { "prover": "alt-ergo", "time": 0.048 },
+      "vc_p_zero": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_refute_dis_initialize_failure_no_config_change": {
+        "prover": "alt-ergo",
+        "time": 0.137
+      }
+    }
+  }
+}

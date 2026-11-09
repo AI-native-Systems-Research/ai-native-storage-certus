@@ -1,0 +1,17 @@
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/init.rs" 18 9 18 29 *)
+
+(* <DFail as std::clone::Clone> *)
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_DFail = None | Parse UInt64.t | Create UInt64.t | Partition UInt64.t | Few UInt64.t UInt64.t | Format UInt64.t
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clone_DFail [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/init.rs" 18 9 18 29]
+  (self: t_DFail) (return (x: t_DFail)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- self ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_DFail = Any.any_l () | & self: t_DFail = self ]) [ return (result: t_DFail) -> (! return {result}) ]
