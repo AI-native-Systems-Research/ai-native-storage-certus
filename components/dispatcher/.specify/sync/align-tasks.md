@@ -394,7 +394,9 @@ numbers refer to HEAD `f4579a41f`, relative to `components/dispatcher/`.
 - [ ] A mock drive that reports `Timeout` and then writes the buffer late: the slot is not reused by a later insert.
 - [ ] The test is written first and fails at HEAD `f4579a41f`.
 
-## Task: Align 001-dispatcher-cache-interface/FR-056 `read_write_stats` (as amended by B-36): no double count while the drive list is handed over (A-16, OPEN, minor, HIGH confidence)
+## Task: Align 001-dispatcher-cache-interface/FR-056 `read_write_stats` (as amended by B-36): no double count while the drive list is handed over (A-16, ✅ RESOLVED by `d45ab524d`, minor, HIGH confidence)
+
+> **Resolved 2026-11-08 (apply of the 2026-11-08 analysis, B-52).** `d45ab524d` folds and swaps/clears the drive list under one `data_drives` write guard (`src/lib.rs:2172-2176`, `:2445-2449`; `absorb_drive_rw_stats` at `:1833-1838`), and `read_write_stats` holds the read guard across the baseline and the live drives (`:4610-4615`); lock order `data_drives` → baseline at every site. The spec side is B-52 (FR-056). The first acceptance criterion below is **not** met by a test: a mock cannot hold `shutdown` in that window. It becomes a follow-up: a Loom model of the fold/swap against a concurrent reader. The second criterion still holds.
 
 **Spec Requirement**: the counters MUST NOT decrease between two calls (FR-056 as amended by B-36); the interface says "Monotonic" (`components/interfaces/src/idispatcher.rs:940`).
 **Current Code**: `absorb_drive_rw_stats` takes the `data_drives` read lock and the baseline write lock and releases both (`src/lib.rs:1831-1837`); the drive list is swapped later under a separate write lock (`:2171`, `:2441-2444`). A `read_write_stats` call in between (`:4602-4606`) adds the baseline, which already includes the outgoing drives, to those same drives, and returns double their counters; the next call reads lower.
@@ -429,3 +431,56 @@ None. Every proposal of this run is `approved: true`, so there is no unapproved 
 ## Still open (carried over)
 
 A-1, A-2, A-3, A-4, A-5, A-02, A-05, A-06, A-08, A-10, A-12, N-01, RH-03, DISP-RESERVE-REASON (as listed in `proposals.json` `carried_over_open`), plus the new A-15, A-16, A-17. A-2 and A-06 are listed as closed in the 2026-10-24 section above; they are carried here only because `proposals.json` lists them.
+
+---
+
+# Apply 2026-11-08 — branch `fix/dispatcher-j33-repairs` (approved by Cornel, 2026-11-08)
+
+Source: `.specify/sync/proposals.json` / `proposals.md` (analysis run 2026-11-08, HEAD
+`d45ab524d`). The one ALIGN proposal of this run, A-18, carries the approval note *"Approved by
+Cornel 2026-11-08 (all proposals of the 2026-11-08 analysis except gpu-services P-5)."* As an
+ALIGN item it is recorded here as a task. **No code was changed.** Line numbers refer to HEAD
+`d45ab524d`, relative to `components/dispatcher/`.
+
+## Closed by this branch
+
+- **A-16** — ✅ RESOLVED in code by `d45ab524d` (see the task above; the spec side is B-52). Its
+  concurrent-reader criterion becomes a Loom-test follow-up.
+
+## Re-anchored
+
+- **A-15** (OPEN, carried) — fix 8 was taken out (`709153326`), so the timeout now fails every job
+  of its drive, and every failed job's slot is released at once. New anchors: `src/pipeline.rs:1398-1411`,
+  `src/lib.rs:3074-3076` (`batch_lookup`), `:1014-1022` (`promote_and_serve`). Its required change
+  is unchanged. A-18 below subsumes it; close both together.
+
+## Task: Align 001-dispatcher-cache-interface/US-11 AS4 + FR-061: per-job timeout isolation, done safely (A-18, OPEN, moderate, MEDIUM confidence)
+
+**Spec Requirement**: User Story 11 acceptance scenario 4, "the error is reported for that entry only" (`spec.md:221`), whose timeout exception (B-51) and FR-061's known gap (B-50, `spec.md:473`) name this task.
+**Current Code**: one `Completion::Timeout` fails every still-`Ok` job of its drive, including jobs whose reads had landed, sets `obj_failed[d]` and stops submitting to that drive (`src/pipeline.rs:1398-1411`); `batch_lookup` then releases every failed job's slot at once (`src/lib.rs:3074-3076`), and `promote_and_serve` does the same for its one job (`:1014-1022`). The reverted `408a568d0` isolated the timeout but kept submitting to the drive, so a hung drive held `batch_lookup` for about 155 s, and a late write into a freed slot became more likely (review of PR #591, `709153326`).
+**Required Change**: redo `408a568d0`'s per-job isolation with the two review properties as acceptance criteria:
+1. **No late write into a reused slot.** The timed-out job's slot is not released: leak it and log it, as FR-062 does for a bounce buffer, or fence the drive first (controller reset or abort) before freeing its slots. This subsumes **A-15**.
+2. **A hung drive is bounded.** After a timeout, stop submitting new reads to that drive and fail its unsubmitted jobs; drain only what is already in flight, so `batch_lookup` waits about one `READ_TIMEOUT_MS` (5 s, `src/pipeline.rs:61`) per drive, not about 155 s. Only the job whose segment timed out can be named, and only if the actor reports the tag; otherwise infer it as a job with outstanding segments after the drain. Jobs whose reads all landed before the timeout keep their `Ok` and their delivery.
+
+On apply: remove B-50's and B-51's exception text from FR-061 and US-11 AS4, and close A-15.
+**Files to Modify**: `src/pipeline.rs` (`scatter_gather_multi_drive_zero_copy`), `src/lib.rs` (`batch_lookup` cold-result loop, `promote_and_serve`), a new `repair_test_*` module; `specs/001-dispatcher-cache-interface/spec.md` (FR-061, US-11 AS4, FR-028) on apply
+**Estimated Effort**: medium (the design choice, leak vs. fence, belongs to whoever does the repair)
+
+### Acceptance Criteria
+- [ ] A mock drive that times out one read: the other jobs on that drive whose reads landed are `Ok` and delivered.
+- [ ] Every job with unsubmitted segments is `Err`.
+- [ ] A mock drive that writes into the buffer after `Timeout`: the slot is not reused by a later `insert`.
+- [ ] A mock drive that never completes after one timeout: `batch_lookup` returns within about 2 × `READ_TIMEOUT_MS`.
+- [ ] Tests written first; the first and the third fail at HEAD `d45ab524d` (the fourth passes today and guards against regressing).
+
+## Open items from this run (not approved)
+
+None. All four proposals of this run (B-50, B-51, B-52, A-18) are `approved: true`, so there is no unapproved proposal with an `approval_note` to carry here. The approval note's exception, gpu-services P-5, belongs to the gpu-services sync, not to this component.
+
+### NOTE N-14 — `lookup_async` reports every `dm.lookup` error as `KeyNotFound` (decision deferred)
+
+- `lookup_async` maps every `dm.lookup` error to `KeyNotFound`, with no retry (`src/lib.rs:3500`). `contracts/errors.md:37` documents this, so it is not drift. But a writer-held live key is reported as a miss on the single-key path: fix 5 removed that hazard from `batch_lookup`, not from `lookup`. Needs a decision, best taken with the `lookup_async` issue (with N-13). Not a task in this apply.
+
+## Still open (carried over)
+
+A-1, A-3, A-4, A-5, A-02, A-05, A-08, A-10, A-12, A-15, A-17, N-01, RH-03, DISP-RESERVE-REASON (as listed in `proposals.json` `carried_over_open`), plus the new A-18 and the notes N-13, N-14. A-16 is closed above.

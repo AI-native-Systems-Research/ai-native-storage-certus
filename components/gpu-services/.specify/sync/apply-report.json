@@ -1,62 +1,36 @@
 {
-  "applied_at": "2026-11-08T00:17:01Z",
-  "proposals_generated": "2026-11-07T12:00:00Z",
-  "based_on": "proposals.json (generated 2026-11-07T12:00:00Z)",
+  "applied_at": "2026-11-09T07:09:01Z",
+  "proposals_generated": "2026-11-08T12:00:00Z",
+  "based_on": "proposals.json (generated 2026-11-08T12:00:00Z)",
   "branch": "fix/dispatcher-j33-repairs",
-  "head": "f4579a41f",
+  "head": "d45ab524d",
   "mode": "batch",
-  "approved_by": "Cornel 2026-11-07",
-  "backup": "backups/20261108T001701Z",
+  "approved_by": "Cornel 2026-11-08",
+  "backup": "backups/20261109T070901Z",
   "changes": [
     {
-      "id": "P-1",
-      "direction": "BACKFILL",
-      "spec": "001-gpu-cuda-services",
-      "file": "specs/001-gpu-cuda-services/spec.md",
-      "requirement": "FR-015",
-      "change": "Modified",
-      "old_text_occurrences": 1,
-      "summary": "spdk_mem_register only when an SPDK environment is active; without one returns Ok(()) after CUDA pinning alone"
-    },
-    {
-      "id": "P-2",
+      "id": "P-6",
       "direction": "BACKFILL",
       "spec": "001-gpu-cuda-services",
       "file": "specs/001-gpu-cuda-services/spec.md",
       "requirement": "FR-016",
       "change": "Modified",
       "old_text_occurrences": 1,
-      "summary": "spdk_mem_unregister only when active; SPDK failure returns Err without cudaHostUnregister; SHOULD register/unregister under same SPDK state"
+      "before": "If `spdk_mem_unregister`\n  fails, the method returns the error without calling `cudaHostUnregister`.",
+      "after": "If `spdk_mem_unregister`\n  fails, the method MUST still call `cudaHostUnregister` (so the CUDA pin\n  is not leaked, e.g. when SPDK became active only after the region was\n  registered) and then return the SPDK error; if `cudaHostUnregister`\n  fails, the method returns the CUDA error. After either error the region\n  is no longer CUDA-pinned whenever `cudaHostUnregister` succeeded.",
+      "summary": "CUDA unregister runs even when SPDK unregister fails; SPDK error then returned; CUDA failure returns CUDA error",
+      "applied_at": "2026-11-09T07:09:01Z"
     },
     {
-      "id": "P-3",
-      "direction": "BACKFILL",
-      "spec": "002-gpu-ssd-dma-prepare",
-      "file": "specs/002-gpu-ssd-dma-prepare/spec.md",
-      "requirement": "FR-019",
-      "change": "Modified",
-      "old_text_occurrences": 1,
-      "summary": "consistent with 001 FR-015"
-    },
-    {
-      "id": "P-4",
-      "direction": "BACKFILL",
-      "spec": "002-gpu-ssd-dma-prepare",
-      "file": "specs/002-gpu-ssd-dma-prepare/spec.md",
-      "requirement": "FR-020",
-      "change": "Modified",
-      "old_text_occurrences": 1,
-      "summary": "consistent with 001 FR-016"
-    },
-    {
-      "id": "P-1,P-2",
+      "id": "P-6",
       "spec": "001-gpu-cuda-services",
-      "requirement": "Last-Synced header",
-      "change": "Added"
+      "requirement": "FR-016 provenance",
+      "change": "Added",
+      "after": "*(Backfilled 2026-11-08 from commit `d45ab524d`, review of PR #591: the CUDA step runs even when the SPDK step fails; `src/lib.rs:1218-1242`.)*"
     },
     {
-      "id": "P-3,P-4",
-      "spec": "002-gpu-ssd-dma-prepare",
+      "id": "P-6",
+      "spec": "001-gpu-cuda-services",
       "requirement": "Last-Synced header",
       "change": "Added"
     }
@@ -68,7 +42,7 @@
       "id": "P-5",
       "file": "align-tasks.md",
       "target": "components/interfaces/src/igpu_services.rs (doc comments)",
-      "approval_note": "Cornel 2026-11-07: not in this PR (edits components/interfaces, re-stamps every component); bundle with the next interfaces change."
+      "approval_note": "Cornel 2026-11-08: not in this PR (edits components/interfaces, re-stamps every component); bundle with the next interfaces change."
     }
   ],
   "not_applied": [
@@ -79,6 +53,7 @@
   ],
   "source_files_changed": [],
   "frontmatter_touched": false,
-  "result": "4 proposals applied (P-1..P-4), 0 align tasks, 1 open (P-5)",
-  "previous": "backups/20261108T001701Z/apply-report.json.prev"
+  "tests_run": false,
+  "result": "1 proposal applied (P-6), 0 align tasks, 1 open (P-5)",
+  "previous": "backups/20261109T070901Z/apply-report.json.prev"
 }

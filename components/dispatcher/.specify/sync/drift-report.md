@@ -6,6 +6,28 @@ spec_sync_git_commit: b153ea11e
 spec_sync_inputs_sha256: beba51e020232e890025f048b084a4379e35ba4805c7411c18e5ae4fca4656bc
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Apply 2026-11-08 (branch fix/dispatcher-j33-repairs, approved by Cornel).** Approval note on every proposal: *"Approved by Cornel 2026-11-08 (all proposals of the 2026-11-08 analysis except gpu-services P-5)."* All four proposals of the 2026-11-08 analysis are `approved: true`, so all were taken. Applied at HEAD `d45ab524d` in BATCH mode. The edited spec is backed up in `.specify/sync/backups/20261109T071309Z/` (byte-identical, checked with `diff`), along with the previous apply reports. Every old text was checked to occur exactly once before it was replaced; none failed.
+>
+> - **Applied** with the exact proposal text (3 BACKFILL, all in `specs/001-dispatcher-cache-interface/spec.md`): **B-50** reverses the applied B-44. FR-061: a read timeout fails every not-yet-failed job of its drive, stops submissions to it, and still drains; the 2026-11-07 "MUST NOT fail the drive's other jobs" is withdrawn. B-50 also adds a new `Last Synced 2026-11-08` header line after the 2026-11-07 one, which is kept. **B-51**: US-11 AS4 gets the exception for a timeout or a broken channel, tracked as A-18. **B-52**: FR-056 `read_write_stats` drops the A-16 gap sentence and states the one-lock-hold rule of `d45ab524d`. No SUPERSEDE or NEW_SPEC proposal was in this run.
+> - **Became a task** in `align-tasks.md` (ALIGN, no code change): **A-18**, which redoes per-job timeout isolation with the PR #591 review properties: no late write into a reused slot, and a hung drive bounded to about one `READ_TIMEOUT_MS`. It subsumes A-15. **A-16** is marked ✅ RESOLVED by `d45ab524d` there, with its concurrent-reader criterion turned into a Loom-test follow-up. A-15 is re-anchored to `src/pipeline.rs:1398-1411` and `src/lib.rs:3074-3076`, `:1014-1022`.
+> - **Not applied:** none. **Unapproved proposals with an `approval_note`:** none. The note's exception, gpu-services P-5, belongs to the gpu-services sync.
+> - **Stays open:** the new A-18; carried A-1, A-3, A-4, A-5, A-02, A-05, A-08 (now also lacks a `ServedBy::Ssd` test), A-10, A-12, A-15 (close together with A-18), A-17, N-01, RH-03, DISP-RESERVE-REASON; notes **N-13** and **N-14** (deferred to the `lookup_async` issue, with FR-036's "instead of blocking"). B-43 / A-13 do not apply (fix 7 out). The "Status I would stamp: `drifted`" in the note below was written before this apply. With B-50…B-52 applied and A-18 recorded, the spec describes today's code; re-stamping is left to the script.
+
+> **Sync 2026-11-08 (branch fix/dispatcher-j33-repairs) — re-analysis after fix 8 was taken out and the PR #591 review fixes; drift OPEN (4 proposals, all `approved: false`, nothing applied).** HEAD `d45ab524d`, merge-base with `origin/unstable` `7c12e427a`. The specs already contain the 2026-11-07 apply (note below). Since that analysis (`f4579a41f`) three things changed. `709153326` takes fix 8 (`408a568d0`) out, after Nara's review on PR #591. `d45ab524d` makes the review fixes: the `repair_test_*` modules are test-only, `absorb_drive_rw_stats` folds under the `data_drives` write lock, and gpu-services `unregister_host_memory` always calls `cudaHostUnregister`. The 2026-11-07 apply edited the three spec files. Every item of the 2026-11-07 analysis and apply was checked again against today's code; section "Sweep 2026-11-08" below. 119 FR/SC: 92 aligned, 2 drifted new, 10 drifted carried, 0 not implemented, 15 not verifiable here. Read-only: no build or test was run.
+>
+> - **Fix 1** (failed `initialize` keeps both tunables): `src/lib.rs:2143-2148`, `:2376-2382`. FR-012 says this since the apply (B-35) → **aligned**.
+> - **Fix 2** (registration in every mode; a failure is a warning): `src/lib.rs:2251-2275`, `log_warn` `:2268-2271`. FR-034 → **aligned**. The gpu-services change in `d45ab524d` (`components/gpu-services/src/lib.rs:1218-1242`) needs no dispatcher text. The dispatcher ignores the result anyway (`src/lib.rs:2424`), and FR-035 still holds.
+> - **Fix 3** (read/write stats never decrease): `src/lib.rs:1833-1838`, `:2172-2176`, `:2445-2449`, `:4610-4615`. `d45ab524d` **closes A-16 in code**: the fold and the swap or clear happen under one hold of the write lock; the reader holds the read lock across both reads; the lock order is `data_drives` → baseline everywhere. FR-056 still declares A-16 as a known gap → **B-52** (removes that sentence and closes A-16). There is no regression test for this window; a Loom model is suggested.
+> - **Fix 4** (eviction errors counted by cause): `src/lib.rs:1213-1242`. 002 FR-033 / FR-035 → **aligned**. **A-17** is still open: `components/dispatch-map/src/lib.rs:576-578` still answers `InvalidState` for an entry that is not MemoryTier.
+> - **Fix 5** (exhausted retries are an error): `src/lib.rs:2674-2683`, `:2748-2760`; the remote pass takes only `KeyNotFound` (`:3135-3142`). FR-039 step 1 and `contracts/errors.md:36-37` → **aligned**. New note **N-14**: the single-key `lookup`/`lookup_async` still turns any dispatch-map error into `KeyNotFound`, with no retry (`:3500`). `errors.md:37` documents this, so it is not drift, but it is the same class of hazard. Recorded for a decision.
+> - **Fix 6** (no-drives promotion): `src/lib.rs:878-923`, `:2794-2852`. FR-028 / US-9 AS3 → **aligned**.
+> - **Fix 7 — out** (`209b01de5`). `lookup_async` copies synchronously and returns the null stream (`src/lib.rs:3428-3449`, `:3496`), so FR-036's "instead of blocking" stays carried drift (deferred). **B-43 and A-13 do not apply.** A-13's finding is kept as **note N-13**: an async lookup must hold the read pin until the copy is done.
+> - **Fix 8 — out** (`709153326`). A `Completion::Timeout` again fails every job of its drive that has not already failed, and stops submissions to that drive (`src/pipeline.rs:1398-1411`). The incomplete-object pass is gone. **The applied B-44 is wrong now**: FR-061 (`spec.md:471`) says a timeout fails only its own job → **B-50** reverses it. US-11 AS4 (`spec.md:219`, "reported for that entry only") is drifted again → **B-51** (known-gap exception) and **A-18** (redo the repair with the review's two properties as acceptance criteria). **A-15** stays open, re-anchored to `src/pipeline.rs:1398-1411` and `src/lib.rs:3074-3076`, `:1014-1022`. The revert also deleted the only `ServedBy::Ssd` value test, so carried A-08 now lacks `Ssd`, `Remote` and `SizeMismatch` tests.
+> - **Fix 9** (route counters add up): single-key `src/lib.rs:3439-3448`, `:3483-3495`; batch `:3365-3371`; remote counted when the peer answers, `:3217-3220`, `:3297`. FR-058 / SC-017 / 002 FR-025 → **aligned**.
+> - **Review fixes:** all 25 `repair_test_*` modules are now `#[cfg(test)]` (`src/lib.rs:72-86`, `:4740-4754`, `:8754-8816`), so the 2026-11-07 "Unspecced code" item is **closed**.
+>
+> **Status I would stamp: `drifted`** until B-50…B-52 are applied (and A-18 recorded). Proposals: 3 BACKFILL, 1 ALIGN. **None edits `components/interfaces`.** The new ids continue the series: B-50… and A-18…, because B-35…B-49 and A-13…A-17 are taken by the applied 2026-11-07 proposals. The frontmatter above is the previous stamp, left for the re-stamp script. Previous versions of the four reports are in git at `d45ab524d`.
+
 > **Apply 2026-11-07 (branch fix/dispatcher-j33-repairs, approved by Cornel).** Approval note on every proposal: *"Approved by Cornel 2026-11-07 (all proposals except gpu-services P-5; B-38 and B-45 with the options as proposed)."* All 17 proposals of the 2026-11-07 analysis are `approved: true`, so all were taken. Applied at HEAD `f4579a41f` in BATCH mode; backup of the three edited specs in `.specify/sync/backups/20261108T002307Z/`. Every old text was checked to occur exactly once before it was replaced; none failed.
 >
 > - **Applied** with the exact proposal text (14 BACKFILL): **B-35** (001 FR-012: a failed `initialize` leaves the tunables unchanged), **B-36** (001 FR-056 `read_write_stats`: monotonic baseline), **B-37** (002 FR-033: variant mapping; a third cause increments neither counter), **B-38** (002 FR-035: `dispatcher`'s background-evictor gap declared — the BACKFILL option, as proposed), **B-39** (001 FR-039 step 1: exhausted retries are `Timeout`/`IoError`, attributed `ERROR`, not forwarded), **B-40** (`contracts/errors.md`: `Timeout` row adds `check`, `batch_lookup`; `IoError` row adds `check` and the persistent-map-error condition), **B-41** (001 FR-028: no-drives promotion; closes A-04), **B-42** (001 US-9 AS3), **B-44** (001 FR-061: a read timeout fails only its own job), **B-45** (001 FR-058 + SC-017, 002 FR-025: single-key route counters and the remote-on-fetch exception — the BACKFILL option, as proposed), **B-46** (001 FR-062 + US-13 AS1: the drive comes from the SSD location), **B-47** (001 FR-001: `clear_memory_tier`, `clear_all`, `tier_event_stats`), **B-48** (001 FR-034: registration in every mode, never fails `initialize`), **B-49** (001 FR-037 + FR-052: `warm_stream` has no reader; unknown-device fallbacks stated). Both specs got a `Last Synced 2026-11-07` header line. No SUPERSEDE or NEW_SPEC proposal was in this run.
@@ -225,6 +247,226 @@ spec_sync_hash_tool: scripts/spec-sync-hash.sh
 > components/dispatcher` over `src/**` + `specs/**` (with `components/interfaces/`
 > folded in) and matches `spec_sync_inputs_sha256`; the digest here was recomputed
 > over a clean tree (no untracked files under `src/`/`specs/`) after the last edit.
+
+# Spec Drift Report — dispatcher (Sweep 2026-11-08, branch `fix/dispatcher-j33-repairs`)
+
+Generated: 2026-11-09T06:53:49Z (analysis date 2026-11-08)
+Project: dispatcher (`components/dispatcher`)
+HEAD `d45ab524d` · merge-base with `origin/unstable` `7c12e427a`. Line numbers refer to HEAD and are relative to `components/dispatcher/` unless a crate is named.
+
+## Scope and method
+
+- **Inputs:**
+  - `specs/001-dispatcher-cache-interface/{spec.md, contracts/errors.md}` and `specs/002-served-by-tier-attribution/spec.md`, as they are after the 2026-11-07 apply (`b153ea11e`);
+  - `src/**` at HEAD;
+  - `components/interfaces/src/idispatcher.rs` (unchanged against the base);
+  - `components/dispatch-map/src/lib.rs` `try_evict_to_block`;
+  - gpu-services `register_host_memory` / `unregister_host_memory`.
+- **Delta since the 2026-11-07 analysis** (`f4579a41f`), from `git diff f4579a41f HEAD`:
+  - `src/pipeline.rs` — fix 8 reverted;
+  - `src/lib.rs` — A-16 locking, `#[cfg(test)]`;
+  - `src/repair_test_nvme_timeout_fails_whole_drive.rs` — deleted;
+  - gpu-services `src/lib.rs` — unregister order;
+  - the three spec files — the apply.
+- **Prior material re-read:**
+  - the 2026-11-06 analysis: stash `j33 spec-sync analysis 2026-11-06 (before repair 7 out)` and `~/pr-fixes/sync/full_out_j33_dispatcher.txt`;
+  - the 2026-11-07 analysis and apply: the notes above, `proposals.json`, `apply-report.md`, `align-tasks.md` section "Apply 2026-11-07".
+- **Re-checked against today's code:** every applied proposal (B-35…B-49) and every open task (A-15…A-17, N-13).
+- **Not run:** no build or test (BATCH mode, read-only). Test evidence is cited from the test sources.
+
+## Summary
+
+| Category | Count |
+|----------|-------|
+| Specs Analyzed | 2 |
+| Requirements Checked | 119 FR/SC (same population as 2026-11-07) |
+| ✓ Aligned | 92 (77%) |
+| ⚠️ Drifted — new this run | 2 (2%): 001 FR-061, 001 FR-056 (`read_write_stats`) |
+| ⚠️ Drifted — carried (open align task, or FR-036 deferred) | 10 (8%) |
+| ✗ Not Implemented | 0 (0%) |
+| ⧗ Not verifiable here (hardware / benchmark / cluster / other component / process) | 15 (13%) |
+| 🆕 Unspecced Code | 0 (the 2026-11-07 item is closed) |
+
+Non-FR items that drift with them, not counted:
+- 001 US-11 acceptance scenario 4 (fix 8 out);
+- the 001 `Last Synced 2026-11-07` header line, which still lists `408a568d0` and "FR-061 (a read timeout fails only its own job)".
+
+**What moved since 2026-11-07:**
+- 13 of the 15 new drift items of 2026-11-07 are now aligned: the apply's backfills match today's code.
+- Two applied texts are now wrong:
+  - **B-44**: fix 8 is out;
+  - **B-36's known-gap sentence**: A-16 is now fixed in code.
+- The carried list is unchanged: A-05, A-1, A-5, A-4, FR-036 (deferred), A-3, A-02, A-12, A-08 ×2.
+
+## The nine fixes — where the spec covers each (today's code)
+
+| # | Commit | Code at HEAD | Spec text that covers it | Spec right today? | This run |
+|---|---|---|---|---|---|
+| 1 | `11748983d` | tunables committed only after every check (`src/lib.rs:2143-2148`, `:2376-2382`); tests `src/repair_test_failed_initialize_changes_config.rs:208`, `:242` | 001 FR-012 (`spec.md:344`, B-35) | **Yes** | none |
+| 2 | `7ac879dd4` | registration whenever GPU + tier are bound; failure is `log_warn` and `initialize` returns `Ok` (`src/lib.rs:2251-2275`); tests `src/repair_test_register_host_memory.rs:408`, `:432` | 001 FR-034 (`spec.md:366`, B-48) | **Yes** | none (gpu-services `d45ab524d` needs no dispatcher text, see below) |
+| 3 | `d65de1fef` + `d45ab524d` | baseline folded under the `data_drives` write lock (`src/lib.rs:1833-1838`, `:2172-2176`, `:2445-2449`); reader holds the read lock across both reads (`:4610-4615`); test `src/repair_test_rw_stats_after_shutdown.rs:620` | 001 FR-056 `read_write_stats` (`spec.md:398`, B-36) | Rule yes; **the "Known gap, tracked as A-16" sentence is now false** | **B-52**; A-16 closed |
+| 4 | `03b05d505` | `ActiveReferences` → by pin, `InvalidState` → unpersisted, otherwise neither (`src/lib.rs:1213-1242`); test `src/repair_test_eviction_errors_counted_unpersisted.rs:273` | 002 FR-033, FR-035 (B-37, B-38) | **Yes** (A-17 declared as a known gap, still true) | none; A-17 stays open |
+| 5 | `b0720fe6c` | after 5 retries: `Timeout` → `Timeout`, other → `IoError` (`src/lib.rs:2674-2683`, `:2748-2760`); remote pass takes `KeyNotFound` only (`:3135-3142`); `ERROR` attribution (`:3354`); test `src/repair_test_transient_map_error.rs:683` | 001 FR-039 step 1 (`spec.md:371`, B-39); `contracts/errors.md:36-37` (B-40) | **Yes** | none; note **N-14** (single-key path) |
+| 6 | `60838384e` | no drives: deliver, then `promote_block_to_memory_tier`, release on failure (`src/lib.rs:878-923`, `:2794-2852`); tests `src/repair_test_no_drives_promote_without_read.rs:582`, `:613`, `:645`, `:680`, `:724` | 001 FR-028 (`spec.md:360`, B-41), US-9 AS3 (B-42) | **Yes** | none |
+| 7 | `9ff85fa51` → reverted `209b01de5` | synchronous copy, null stream (`src/lib.rs:3428-3449`, `:3496`) | 001 FR-036 (`spec.md:368`) | as on unstable (carried, deferred) | B-43 / A-13 **do not apply**; note **N-13** kept |
+| 8 | `408a568d0` → reverted `709153326` | a `Completion::Timeout` fails every not-yet-failed job of its drive and stops that drive's submissions (`src/pipeline.rs:1398-1411`); the incomplete-object pass is gone | 001 FR-061 drain bullet (`spec.md:471`, B-44); US-11 AS4 (`spec.md:219`) | **No**: both describe the reverted fix | **B-50** (reverse B-44), **B-51** (AS4 exception), **A-18** (re-repair) |
+| 9 | `ec1b890ca` | single-key route counters (`src/lib.rs:3439-3448`, `:3483-3495`); batch counters from `ServedBy` (`:3365-3371`); remote hit counted when the peer answers (`:3217-3220`, `:3297`); tests `src/repair_test_route_partition_does_not_add_up.rs:544`, `:591`, `:633`, `:684`, `:717` | 001 FR-058, SC-017; 002 FR-025 (B-45) | **Yes** | none |
+
+**The brief against the code:**
+- (2) a failed registration is a warning, not a failure: `src/lib.rs:2268-2271`.
+- (7) `lookup_async` is synchronous with the null stream: `:3435` (`true`), `:3449`, `:3496`.
+- (8) the code is unstable's again: `git diff origin/unstable...HEAD -- src/pipeline.rs` is empty.
+- (9) remote hits are counted when the peer answers: `:3217-3220`.
+- A-16: closed in code, as the brief says. `data_drives.write()` is taken only at `src/lib.rs:2173` and `:2446` (outside tests), each holding the guard across `absorb_drive_rw_stats(&g)` and the swap or `take`. `rw_stats_baseline` is written only inside `absorb_drive_rw_stats` (`:1834`) and read only under the `data_drives` read guard (`:4610-4611`). So a reader sees either the old drives without their fold, or the new list with it; never both. The lock order is `data_drives` → baseline in both places, so there is no inversion.
+
+## Detailed Findings
+
+### Spec: 001-dispatcher-cache-interface — Dispatcher Cache Interface (Memory-Tier Architecture)
+
+#### Aligned ✓ (changes against 2026-11-07 only; the rest as listed in the 2026-11-07 sweep, re-anchored)
+
+- **FR-012** → `src/lib.rs:2143-2148`, `:2376-2382` (B-35 matches).
+- **FR-028 + US-9 AS3** → `src/lib.rs:878-923`, `:2794-2852`. Also checked: the no-drive path never holds a staging lease, because the staging fallback needs drives (`:849`, `:853`); so `!staged` at `:903`, `:914` is always true there.
+- **FR-034** → `src/lib.rs:2251-2275`; gpu-services `:1176-1181`. **FR-035** → `src/lib.rs:2421-2426`. `d45ab524d` changes only the order inside gpu-services `unregister_host_memory` (`components/gpu-services/src/lib.rs:1218-1242`: the SPDK error is kept, CUDA is unregistered, then the SPDK error is returned). FR-035 says only "MUST call … to release CUDA page-locking and SPDK registration", which still holds, and the dispatcher ignores the result (`src/lib.rs:2424`).
+- **FR-039 step 1** + `contracts/errors.md` `Timeout`/`IoError` rows → `src/lib.rs:2748-2760`.
+- **FR-001** (B-47) → `components/interfaces/src/idispatcher.rs` unchanged.
+- **FR-037, FR-052** (B-49) → `warm_stream` is still written only at `src/lib.rs:2210`, swapped at `:2430`, with no reader.
+- **FR-058, SC-017** (B-45) → see the fix table.
+- **FR-062 + US-13 AS1** (B-46) → `select_drive` `src/lib.rs:4667`.
+- **FR-054** → the single-object readers fail all objects on a timeout (`src/pipeline.rs:523-531`, `:809-820`), but their callers pass one job, so the failure is per entry.
+
+#### Drifted ⚠️ (new)
+
+- **FR-061 drain-all-on-error bullet** (fix 8 out; `spec.md:471`).
+  - The spec says: *"A read timeout (`Completion::Timeout`) … MUST NOT fail the drive's other jobs. Submission and draining continue, and after the loop each job whose segments did not all complete is reported `Err` with the timeout message — that job only"*.
+  - The code (`src/pipeline.rs:1398-1411`):
+    - sets every job of drive `d` that is still `Ok` to `Err("NVMe read timeout drive={d} …")`;
+    - sets `obj_failed[d].fill(true)` and `stop_submitting[d] = true`;
+    - leaves already-landed objects un-delivered: their H2D is gated on `!obj_failed` (`:1361`);
+    - fails the un-submitted work (`:1462-1472`).
+  - The draining itself still holds (loop `:1275`).
+  - The cited test `src/repair_test_nvme_timeout_fails_whole_drive.rs` no longer exists.
+  - **Major** (the spec promises per-job isolation that the code does not give) → **B-50**.
+  - The header line of `spec.md:43` names `408a568d0` and this clause → fixed in B-50.
+- **User Story 11 AS4** (`spec.md:219`; not counted).
+  - "the error is reported for that entry only; other entries in the batch continue to be processed independently" holds for a per-segment read error (`src/pipeline.rs:1317-1322`) and for a GPU copy error (`:1385-1389`).
+  - It does not hold for a read timeout, an invalid tag, an unexpected completion, a disconnect or a failed send (`:1253-1256`, `:1310-1316`, `:1398-1454`): each of these fails every job of that drive (other drives are unaffected).
+  - That was also true at the base. Fix 8 had made the timeout case true, and the 2026-11-07 analysis rated AS4 aligned on that basis.
+  - → **B-51** (state the exception; keep AS4 as the target) + **A-18**.
+- **FR-056 `read_write_stats`** (`spec.md:398`).
+  - The rule ("MUST NOT decrease between two calls") holds.
+  - The trailing sentence *"Known gap, tracked as A-16: a call made while the drive list is being handed over can count the outgoing drives twice, so the next call can read lower."* is false since `d45ab524d` (evidence in the fix table).
+  - Minor → **B-52** (closes A-16).
+
+#### Drifted ⚠️ (carried)
+
+Unchanged from 2026-11-07:
+
+| Requirement | Task | Note |
+|---|---|---|
+| 001 FR-003 | A-05 | |
+| 001 FR-013 | A-1 | `schedule_write_through` `src/lib.rs:4576` |
+| 001 FR-017 | A-5 | |
+| 001 FR-018 | A-4 | |
+| 001 FR-036 | deferred | N-13 |
+| 001 FR-038 | A-3 | |
+| 001 FR-051 | A-02 | cold pin released at classification, `src/lib.rs:2732` |
+| 001 SC-003 | A-12 | |
+| 002 FR-027, SC-009 | A-08 | see below |
+
+- **N-13** (kept from the withdrawn A-13). An asynchronous `lookup_async`, one that returns the stream its copy is queued on, MUST hold the entry's read pin until the copy has **completed**, and record its hit counters only then. FR-039 step (2) states this rule for `batch_lookup` (pins released only after the warm sync). The synchronous `lookup` (`src/lib.rs:2482-2493`), which syncs only after `lookup_async` returns, inherits the same need.
+  - Today's code is safe: the pin is released after a synchronous copy (`:3429-3437`), and the counters are recorded only on `Ok` (`:3439-3448`).
+  - This needs an interface decision: a pin guard returned with the stream, or a caller-held pin. It is deferred to the separate `lookup_async` issue. No text is proposed.
+- **A-08** (002 FR-027 / SC-009) has worsened.
+  - The 2026-11-07 report cited `src/repair_test_nvme_timeout_fails_whole_drive.rs:769` as the `Ssd` value test. That file was deleted with fix 8 (`709153326`).
+  - Today the value-specific `served_by` assertions are:
+    - `Dram`: `src/repair_test_served_by.rs:511`, `src/repair_test_route_partition_does_not_add_up.rs:756`;
+    - `Miss`: `src/repair_test_transient_map_error.rs:789`;
+    - `Error`: `src/repair_test_transient_map_error.rs:780`, `src/repair_test_sync_failure_error.rs:532`.
+  - **No test for `Ssd`, `Remote` or `SizeMismatch`.** (`repair_test_route_partition_does_not_add_up.rs:787` only counts `Ssd` attributions, expecting zero.)
+  - The Creusot mirror proves the `Ssd` mapping (`verif-creusot/src/batch.rs:1285`), but FR-027 asks for a test. A-08's task text already lists `Ssd`, so no new proposal is made; only the evidence is updated here.
+
+#### Not Implemented ✗
+
+None.
+
+#### Not verifiable here ⧗
+
+- SC-012 and SC-014 (NVMe hardware).
+- Not counted:
+  - gpu-services `tests/host_memory_without_spdk.rs` (needs a GPU; since `d45ab524d` it skips without one, so a pass on a GPU-less CI proves nothing);
+  - FR-011 NUMA auto-placement.
+
+### Spec: 002-served-by-tier-attribution — Serving-Tier Attribution (`served_by`)
+
+#### Aligned ✓
+
+- **FR-025** (B-45): remote counted at fetch (`src/lib.rs:3217-3220`); a failed delivery is `Err` → `ERROR` (`:3354`).
+- **FR-033** (B-37) → `src/lib.rs:1213-1242`; the A-17 known-gap sentence is still true (`components/dispatch-map/src/lib.rs:576-578`).
+- **FR-035** (B-38) → `src/background.rs:736-738`: neither cause is counted.
+- **FR-001…FR-013, FR-017** → attribution sites `src/lib.rs:2722`, `:2738`, `:3252`, `:3325`; mapping `:3333-3358`.
+- **FR-019…FR-024, FR-026, FR-034, FR-036, SC-001, SC-004** as on 2026-11-07.
+
+#### Drifted ⚠️
+
+Only carried A-08 (FR-027, SC-009), see above.
+
+#### Not verifiable here ⧗
+
+As on 2026-11-07:
+- SC-002, SC-003, SC-005…SC-008 (cluster / benchmark / client);
+- FR-014, FR-015 (`dispatcher-p2p`);
+- FR-018 (remote-lookup wire protocol);
+- FR-029 (`integrity-check` configuration, not run);
+- FR-030…FR-032 (documentation-process rules).
+
+### Align tasks re-checked against today's code
+
+| Id | State at HEAD | Evidence |
+|---|---|---|
+| **A-15** (001 FR-028 vs FR-062: a timed-out read's slot is freed) | **OPEN.** The trigger is now the whole-drive failure. Every job of the drive whose read timed out is `Err`, and `batch_lookup` releases each job's slot at once. Only the timed-out job's slot can receive a late write. It is freed with the others, so the hazard is the same as at the base. | `src/pipeline.rs:1398-1411`; `src/lib.rs:3074-3076` (batch), `:1014-1022` (`promote_and_serve`); the pipeline keeps `chunk_bufs` alive only for the call |
+| **A-16** (FR-056 hand-over double count) | **CLOSED in code by `d45ab524d`.** Propose recording it as resolved (B-52). There is no regression test; a Loom model would cover the window. | `src/lib.rs:1833-1838`, `:2172-2176`, `:2445-2449`, `:4610-4615` |
+| **A-17** (002 FR-033: `InvalidState` also means "not MemoryTier") | **OPEN** | `components/dispatch-map/src/lib.rs:571-578`; `src/lib.rs:1223-1232` |
+| **A-04** | closed (`60838384e`) | — |
+| **A-14** | closed (`9a79224a1`); `d45ab524d` adds the CUDA-pin release on an SPDK unregister failure | `components/gpu-services/src/lib.rs:1179-1181`, `:1223-1242` |
+| A-1, A-2, A-3, A-4, A-5, A-02, A-05, A-06, A-08, A-10, A-12, N-01, RH-03, DISP-RESERVE-REASON | carried, not changed by this delta | the delta touches none of their code |
+
+**New since 2026-11-07:**
+- **A-18** (fix 8 to be redone). Nara's review on PR #591, recorded in `709153326`, gives the acceptance properties:
+  - (a) after a timeout, no slot that the drive may still write into is reused (this subsumes A-15);
+  - (b) a hung drive must not hold `batch_lookup` far beyond one read timeout. Today it costs about 5 s: one `READ_TIMEOUT_MS` (`src/pipeline.rs:61`), then the drive is abandoned. The reverted fix kept submitting and cost about 155 s.
+- **N-14** (note, no proposal). `lookup_async` maps every `dm.lookup` error to `KeyNotFound`, without fix 5's retries (`src/lib.rs:3500`). `contracts/errors.md:37` says so explicitly ("`lookup` and `remove` never return `Timeout`; they report a dispatch-map timeout as `KeyNotFound`"), so there is no drift. But a live, writer-held key is then reported as a miss by the single-key path, the hazard fix 5 removed from `batch_lookup`. The single-key path has no remote forwarding, so it does not reach remote lookup. Recorded for a decision; not a fix-5 defect.
+
+### Applied proposals of 2026-11-07, re-checked
+
+| Id | Today |
+|---|---|
+| B-35, B-37, B-38, B-39, B-40, B-41, B-42, B-45, B-46, B-47, B-48, B-49 | match the code (evidence above) |
+| B-36 | rule matches; its known-gap sentence is stale → B-52 |
+| **B-44** | **wrong**: describes the reverted fix 8 → B-50 |
+| B-43, A-13 | never applied; do not apply (fix 7 out) |
+
+### Unspecced Code 🆕
+
+None.
+- The 2026-11-07 item ("five `repair_test_*` modules compiled into the non-test library") is **closed** by `d45ab524d`. All 25 `repair_test_*` declarations carry `#[cfg(test)]` (`src/lib.rs:72-86`, `:4740-4754`, `:8754-8816`).
+- The deleted `repair_test_nvme_timeout_fails_whole_drive.rs` left no dangling `mod` line (`709153326` removed it).
+
+## Inter-Spec Conflicts
+
+- **001 US-11 AS4 vs FR-061 (after B-50).** AS4 promises per-entry isolation for "a cold entry's NVMe read … fails". The code gives it for a read error, not for a timeout. B-51 adds the exception to AS4, so the two documents agree, and A-18 tracks the code.
+- **001 FR-028 (free the slot on a failed read) vs FR-062's rationale (never free a buffer a drive may still write).** Still open as A-15. B-50 keeps it declared in FR-061.
+
+## Recommendations
+
+1. Approve **B-50**: it reverses the applied B-44 and the header-line mention.
+2. Approve **B-51**: the AS4 exception.
+3. Approve **B-52**: it closes A-16 in the spec.
+4. Record **A-18** as the task for the re-repair, with the review's two properties as its acceptance criteria. A-15 should land with it or before it.
+5. Keep N-13 and FR-036 deferred.
+6. Decide N-14 (single-key `lookup` and a writer-held key) together with the `lookup_async` issue.
+7. Restore an `Ssd` value test under A-08: the fix-8 test file that held it is gone.
+8. Run gpu-services `tests/host_memory_without_spdk.rs` on a GPU host. Since `d45ab524d` it passes trivially without a GPU.
 
 # Spec Drift Report — dispatcher (Sweep 2026-11-07, branch `fix/dispatcher-j33-repairs`)
 

@@ -213,3 +213,28 @@ approval note and is recorded below as an open item.
 - [ ] Doc comments at `igpu_services.rs:788-790` and `:808-809` state that the SPDK step is conditional on an active SPDK environment.
 - [ ] `cargo doc -p interfaces --no-deps --features spdk` is warning-free (the intra-doc link `[`crate::is_spdk_env_active`]` resolves only under `spdk`; if it does not, use plain backticks).
 - [ ] Done in the same change as another `components/interfaces` edit, and every component re-stamped once.
+
+---
+
+# 2026-11-08 Apply — branch `fix/dispatcher-j33-repairs` (approved by Cornel)
+
+Based on: `.specify/sync/proposals.{json,md}` (generated 2026-11-08T12:00:00Z,
+HEAD `d45ab524d`, review of PR #591). P-6 (BACKFILL, 001 FR-016) was applied to
+`specs/` (see `apply-report.md`). There were **no ALIGN proposals**, so no
+code-change task was generated this run. One unapproved proposal carries an
+approval note and stays open below.
+
+## OPEN: P-5 (carried over, refreshed) — `IGpuServices::register_host_memory` / `unregister_host_memory` doc comments (interfaces)
+
+**Status**: ⏳ OPEN (not approved, deferred again; supersedes the wording of the 2026-11-07 entry above)
+**Approval note (verbatim)**: "Cornel 2026-11-08: not in this PR (edits components/interfaces, re-stamps every component); bundle with the next interfaces change."
+**Spec Requirement**: Interface doc for spec 001 FR-015 / FR-016 (FR-016 as backfilled 2026-11-08 by P-6) and spec 002 FR-019 / FR-020.
+**Current Doc**: `components/interfaces/src/igpu_services.rs:788-790` and `:808-809` describe the SPDK step as unconditional. The code (`components/gpu-services/src/lib.rs:1179-1181`, `:1223`) skips it when `interfaces::is_spdk_env_active()` is false, and since `d45ab524d` `unregister_host_memory` calls `cudaHostUnregister` even when `spdk_mem_unregister` fails (`:1231`, `:1239-1242`).
+**Required Change**: Use the refreshed P-5 "New text" blocks in `proposals.md` (2026-11-08), which also say that the CUDA step runs even if the SPDK step fails and that the SPDK error is then returned. Optionally reword `:786`. Leave `:802` and `:813` unchanged.
+**Files to Modify**: `components/interfaces/src/igpu_services.rs` (doc comments only). Outside this pass's scope; not edited.
+**Estimated Effort**: small (doc only); cost is a re-stamp of every component.
+
+### Acceptance Criteria
+- [ ] Doc comments at `igpu_services.rs:788-790` and `:808-809` match the refreshed P-5 text (conditional SPDK step; CUDA unregister runs regardless of the SPDK result).
+- [ ] `cargo doc -p interfaces --no-deps --features spdk` is warning-free (use plain backticks if the intra-doc link to `crate::is_spdk_env_active` does not resolve).
+- [ ] Bundled with another `components/interfaces` edit, every component re-stamped once.

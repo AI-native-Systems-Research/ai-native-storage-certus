@@ -1,110 +1,58 @@
 # Drift Resolution Proposals — gpu-services
 
-Generated: 2026-11-07T12:00:00Z · Branch: `fix/dispatcher-j33-repairs` (HEAD `f4579a41f`) · Based on: `drift-report.json` of the same run (delta `32ffa627f..HEAD`, commit `9a79224a1`, A-14).
+Generated: 2026-11-08T12:00:00Z · Branch: `fix/dispatcher-j33-repairs` (HEAD `d45ab524d`) · Based on: `drift-report.json` of the same run (delta `0eb3d3955..HEAD`, one commit `d45ab524d`, review of PR #591).
 
-Mode: batch. **No proposal is approved** (`approved: false` on all). Apply was not run, and no spec, source or interface file was edited.
+Mode: batch. **No proposal is approved** (`approved: false` on all). Apply was not run. No spec, source or interface file was edited.
 
 ## Summary
 
 | Resolution Type | Count |
 |---|---|
-| Backfill (Code → Spec) | 5 (P-1…P-4 component specs; P-5 interface doc, **touches `components/interfaces`**) |
+| Backfill (Code → Spec) | 2: P-6 (component spec); P-5 (interface doc, carried over from 2026-11-07, **touches `components/interfaces`**) |
 | Align (Spec → Code) | 0 |
-| Human Decision | 0 (2 observations listed below, no proposal) |
+| Human Decision | 0 (observations below, no proposal) |
 | New Specs | 0 |
 | Remove from Spec | 0 |
 
 | Id | Requirement | Type | Approved | Edits |
 |---|---|---|---|---|
-| P-1 | 001 FR-015 | BACKFILL | false | `specs/001-gpu-cuda-services/spec.md` |
-| P-2 | 001 FR-016 | BACKFILL | false | `specs/001-gpu-cuda-services/spec.md` |
-| P-3 | 002 FR-019 | BACKFILL | false | `specs/002-gpu-ssd-dma-prepare/spec.md` |
-| P-4 | 002 FR-020 | BACKFILL | false | `specs/002-gpu-ssd-dma-prepare/spec.md` |
-| P-5 | `IGpuServices` doc comments | BACKFILL (**interfaces**) | false | `components/interfaces/src/igpu_services.rs` — re-stamps every component; optional, recommend deferring |
+| P-6 | 001 FR-016 | BACKFILL | false | `components/gpu-services/specs/001-gpu-cuda-services/spec.md` only |
+| P-5 | `IGpuServices::register_host_memory` / `unregister_host_memory` doc comments | BACKFILL (**interfaces**) | false | `components/interfaces/src/igpu_services.rs`. **Re-stamps every component.** Optional; recommend deferring (Cornel, 2026-11-07: "bundle with the next interfaces change") |
 
-P-1…P-4 are enough to make this component `clean`: they edit only `components/gpu-services/specs/`. P-5 is a doc-comment fix only. Bundle it with the next change that touches interfaces anyway.
+**Is a BACKFILL needed? Yes, one: P-6.**
+- With P-6 applied, the component is `clean`, and P-6 edits only `components/gpu-services/specs/`.
+- `d45ab524d` adds **no new interface drift**:
+  - `register_host_memory` `# Errors` ("Returns an error if CUDA host registration or SPDK registration fails", `igpu_services.rs:802`) is still true.
+  - `unregister_host_memory` ("Calls `spdk_mem_unregister` then `cudaHostUnregister`", `:808-809`) has the right order. It now holds even on SPDK failure, which it did not before `d45ab524d`.
+- The only interface gap left is the conditional SPDK step from `9a79224a1`, which P-5 already covers.
+- 002 FR-019 / FR-020 and 001 FR-015 need nothing (see the drift report).
 
-**Why BACKFILL (code is authoritative), for all five:** with no SPDK environment, the SPDK memory map does not exist, so `spdk_mem_register` / `spdk_mem_unregister` dereference it and the process gets SIGSEGV. No code can meet the old unconditional wording in that mode. The change:
-- fixes a crash seen in production (node7, A30, J40);
-- comes with a regression test, `tests/host_memory_without_spdk.rs:26-58`;
-- uses the guard pattern the tree already uses (`components/memory-tier/src/lib.rs:152`, `:314`; `DmaBuffer::drop` at `components/interfaces/src/spdk_types.rs:381`);
-- leaves the SPDK-active path byte-for-byte unchanged.
-
-The stricter spec contract (SPDK registration happens whenever the call succeeds) has no implementation that would not crash, so ALIGN is not an option.
+Previous proposals (2026-11-07, P-1…P-5) are in git: `git show 0eb3d3955:components/gpu-services/.specify/sync/proposals.md`. P-1…P-4 were applied on 2026-11-07. P-5 is still open (see `align-tasks.md:202`).
 
 ---
 
-### P-1: 001-gpu-cuda-services / FR-015
+### P-6: 001-gpu-cuda-services / FR-016
 
-**Type**: BACKFILL · **Confidence**: HIGH · **approved: false**
+**Type**: BACKFILL · **Confidence**: HIGH · **approved: false** · touches interfaces: no
 
-**Spec says** (`specs/001-gpu-cuda-services/spec.md:309-316`):
-> "Component MUST provide a `register_host_memory(ptr, size)` method (gated behind `spdk` feature) that page-locks the specified host memory region via `cudaHostRegister` (enabling async GPU DMA) and registers it with SPDK via `spdk_mem_register` (enabling NVMe DMA). If `cudaHostRegister` succeeds but `spdk_mem_register` fails, the method MUST roll back by calling `cudaHostUnregister` before returning the error."
+**Requirement**: FR-016, `unregister_host_memory`.
 
-**Code does**:
-- init guard: `src/lib.rs:1146-1150`
-- `cudaHostRegister(ptr, size, CUDA_HOST_REGISTER_PORTABLE)`: `:1155-1157`
-- `we_registered_cuda`: `:1158`
-- **`if !interfaces::is_spdk_env_active() { return Ok(()); }`**: `:1179-1181`, before `spdk_mem_register` at `:1183`
-- EBUSY handling and rollback: `:1184-1191`, unchanged
+**Spec says** (`specs/001-gpu-cuda-services/spec.md:342-343`, inside FR-016 at `:336-348`):
+> "If `spdk_mem_unregister` fails, the method returns the error without calling `cudaHostUnregister`."
 
-So without an SPDK environment, a successful call means "CUDA-pinned only".
+The provenance note at `:347-348` also cites `src/lib.rs:1220-1225`, which has moved.
 
-**Old text** (exact, `spec.md:309-316`):
-```
-- **FR-015**: Component MUST provide a `register_host_memory(ptr, size)`
-  method (gated behind `spdk` feature) that page-locks the specified
-  host memory region via `cudaHostRegister` (enabling async GPU DMA)
-  and registers it with SPDK via `spdk_mem_register` (enabling NVMe
-  DMA). If `cudaHostRegister` succeeds but `spdk_mem_register` fails,
-  the method MUST roll back by calling `cudaHostUnregister` before
-  returning the error. *(Backfilled 2026-09-09 from `src/lib.rs:960-1010`.)*
-```
-**New text**:
-```
-- **FR-015**: Component MUST provide a `register_host_memory(ptr, size)`
-  method (gated behind `spdk` feature) that page-locks the specified
-  host memory region via `cudaHostRegister` (enabling async GPU DMA)
-  and, when an SPDK environment is active, registers it with SPDK via
-  `spdk_mem_register` (enabling NVMe DMA). If `cudaHostRegister` succeeds
-  but `spdk_mem_register` fails, the method MUST roll back by calling
-  `cudaHostUnregister` before returning the error. *(Backfilled 2026-09-09
-  from `src/lib.rs:960-1010`.)* When no SPDK environment is active
-  (`interfaces::is_spdk_env_active()` is false at call time), the method
-  MUST NOT call `spdk_mem_register` (there is no SPDK memory map, and the
-  call would crash the process); it returns `Ok(())` after the CUDA
-  pinning alone, and the region is then usable for async GPU transfers but
-  not as an NVMe DMA target. *(Backfilled 2026-11-07 from commit
-  `9a79224a1`, A-14; `src/lib.rs:1179-1181`; test
-  `tests/host_memory_without_spdk.rs`.)*
-```
-The rest of FR-015 (PORTABLE flag, idempotence, `we_registered_cuda`, `spec.md:317-326`) stays as written. It is still accurate.
+**Code does** (`src/lib.rs:1198-1244`, after `d45ab524d`):
+1. When `interfaces::is_spdk_env_active()` is true, it calls `spdk_mem_unregister(ptr, size)`. A non-zero rc becomes `spdk_err = Some("spdk_mem_unregister failed (rc=…)")` and is **not** returned yet (`:1223-1228`).
+2. It **always** calls `cudaHostUnregister(ptr)` (`:1231`).
+3. If the CUDA call fails, it returns `Err("cudaHostUnregister failed: …")`, and the SPDK error, if any, is dropped (`:1232-1237`).
+4. Otherwise it returns the SPDK error if there was one, else `Ok(())` (`:1239-1242`).
 
-**Rationale**: see "Why BACKFILL" above. The flag is read at call time, and the wording says so.
+The reason is in the comment at `:1218-1222`: if SPDK became active only after the region was registered, the SPDK step fails, and an early return would leak the CUDA pin.
 
----
+The spec sentence now says the opposite of the code.
 
-### P-2: 001-gpu-cuda-services / FR-016
-
-**Type**: BACKFILL · **Confidence**: HIGH · **approved: false**
-
-**Spec says** (`specs/001-gpu-cuda-services/spec.md:327-331`):
-> "Component MUST provide an `unregister_host_memory(ptr, size)` method (gated behind `spdk` feature) that unregisters memory from SPDK via `spdk_mem_unregister` then removes page-locking via `cudaHostUnregister`. MUST be called before freeing the underlying allocation."
-
-**Code does**:
-- `spdk_mem_unregister` only `if interfaces::is_spdk_env_active()`: `src/lib.rs:1220-1225`
-- a non-zero rc returns `Err` before the CUDA step: `:1222-1224`
-- `cudaHostUnregister` always: `:1228-1234`
-
-**Old text** (exact, `spec.md:327-331`):
-```
-- **FR-016**: Component MUST provide an `unregister_host_memory(ptr,
-  size)` method (gated behind `spdk` feature) that unregisters memory
-  from SPDK via `spdk_mem_unregister` then removes page-locking via
-  `cudaHostUnregister`. MUST be called before freeing the underlying
-  allocation.
-```
-**New text**:
+**Old text** (exact, `spec.md:336-348`):
 ```
 - **FR-016**: Component MUST provide an `unregister_host_memory(ptr,
   size)` method (gated behind `spdk` feature) that, when an SPDK
@@ -120,62 +68,62 @@ The rest of FR-015 (PORTABLE flag, idempotence, `we_registered_cuda`, `spec.md:3
   *(Backfilled 2026-11-07 from commit `9a79224a1`, A-14;
   `src/lib.rs:1220-1225`.)*
 ```
-**Rationale**: matches the code, including the existing early `Err` on SPDK failure, which the old text did not state. The SHOULD makes the call-time edge case visible (see the drift report observation). No caller in the tree violates it: dispatcher `components/dispatcher/src/lib.rs:2256` / `:2419`, dispatcher-p2p `components/dispatcher-p2p/src/lib.rs:1451` / `:1735`.
-
----
-
-### P-3: 002-gpu-ssd-dma-prepare / FR-019
-
-**Type**: BACKFILL · **Confidence**: HIGH · **approved: false**
-
-**Spec says** (`specs/002-gpu-ssd-dma-prepare/spec.md:95`):
-> "… page-locks an existing host allocation via `cudaHostRegister` (enabling async GPU H2D/D2H DMA from the GPU's DMA engine) and registers it with SPDK via `spdk_mem_register` (enabling NVMe controllers to DMA directly to/from it). On partial failure (CUDA succeeds, SPDK fails), MUST roll back `cudaHostRegister` before returning error. *(Backfilled 2026-09-09; consistent with spec-001 FR-015.)*"
-
-**Code does**: same as P-1 (`src/lib.rs:1179-1181`).
-
-**Old text** (exact substring of `spec.md:95`):
-```
-and registers it with SPDK via `spdk_mem_register` (enabling NVMe controllers to DMA directly to/from it). On partial failure (CUDA succeeds, SPDK fails), MUST roll back `cudaHostRegister` before returning error. *(Backfilled 2026-09-09; consistent with spec-001 FR-015.)*
-```
 **New text**:
 ```
-and, when an SPDK environment is active, registers it with SPDK via `spdk_mem_register` (enabling NVMe controllers to DMA directly to/from it). On partial failure (CUDA succeeds, SPDK fails), MUST roll back `cudaHostRegister` before returning error. *(Backfilled 2026-09-09; consistent with spec-001 FR-015.)* When no SPDK environment is active (`interfaces::is_spdk_env_active()` false at call time) the method MUST NOT call `spdk_mem_register` and returns `Ok(())` after CUDA pinning alone. *(Backfilled 2026-11-07, A-14, `9a79224a1`; consistent with spec-001 FR-015.)*
+- **FR-016**: Component MUST provide an `unregister_host_memory(ptr,
+  size)` method (gated behind `spdk` feature) that, when an SPDK
+  environment is active, unregisters memory from SPDK via
+  `spdk_mem_unregister`, then removes page-locking via
+  `cudaHostUnregister`. When no SPDK environment is active
+  (`interfaces::is_spdk_env_active()` is false at call time) the SPDK step
+  is skipped and only `cudaHostUnregister` runs. If `spdk_mem_unregister`
+  fails, the method MUST still call `cudaHostUnregister` (so the CUDA pin
+  is not leaked, e.g. when SPDK became active only after the region was
+  registered) and then return the SPDK error; if `cudaHostUnregister`
+  fails, the method returns the CUDA error. After either error the region
+  is no longer CUDA-pinned whenever `cudaHostUnregister` succeeded.
+  MUST be called before freeing the underlying allocation. Callers SHOULD
+  register and unregister under the same SPDK-environment state (e.g. in
+  `initialize` / `shutdown`); the flag is read independently by each call.
+  *(Backfilled 2026-11-07 from commit `9a79224a1`, A-14;
+  `src/lib.rs:1220-1225`.)* *(Backfilled 2026-11-08 from commit
+  `d45ab524d`, review of PR #591: the CUDA step runs even when the SPDK
+  step fails; `src/lib.rs:1218-1242`.)*
 ```
-The rest of the line (PORTABLE, idempotence, `we_registered_cuda`) is unchanged.
+Also add a header line under the existing ones at `spec.md:6-8`:
+```
+**Last-Synced**: 2026-11-08 (spec-sync, branch `fix/dispatcher-j33-repairs`: BACKFILL FR-016 — `unregister_host_memory` calls `cudaHostUnregister` even when `spdk_mem_unregister` fails, then returns the SPDK error, commit `d45ab524d`. No source changes.)
+```
+
+**Rationale (why BACKFILL, not ALIGN)**:
+- The new behaviour comes from a code review (Nara, PR #591) and fixes a real leak. With the old early return, the order "register while SPDK was inactive, unregister after SPDK became active" returned `Err` and left the region page-locked for good, because no other API unpins it (FR-007, `spec.md:244-251`). The 2026-11-07 drift report recorded that order as an observation.
+- The caller still sees the SPDK failure as an `Err`, so nothing is hidden.
+- The spec sentence was written only a day earlier (P-2, 2026-11-07) by copying the old code. It was not an independent design decision, so it is not authoritative over the review fix.
+- Changing the code back would bring the leak back.
+- The FR-016 SHOULD stays: the mismatched-state order still yields an `Err`.
+
+**Not covered by a test** (see observations): the SPDK-fails path needs real SPDK and a real GPU. The new text describes the code as read; it has not been executed.
 
 ---
 
-### P-4: 002-gpu-ssd-dma-prepare / FR-020
+### P-5 (carried over, refreshed): `IGpuServices` doc comments — **EDITS `components/interfaces` (re-stamps every component)**
 
-**Type**: BACKFILL · **Confidence**: HIGH · **approved: false**
+**Type**: BACKFILL (interface doc) · **Confidence**: HIGH on content, LOW priority · **approved: false** · touches interfaces: **yes**
 
-**Spec says** (`specs/002-gpu-ssd-dma-prepare/spec.md:96`):
-> "… that reverses FR-019: calls `spdk_mem_unregister` then `cudaHostUnregister`. MUST be called before the underlying allocation is freed."
+Status: the 2026-11-07 P-5 was not approved ("Cornel 2026-11-07: not in this PR (edits components/interfaces, re-stamps every component); bundle with the next interfaces change."). It is recorded as OPEN in `align-tasks.md:202-208`. It is repeated here only so the bundled interfaces change uses wording that matches `d45ab524d`. **This component is `clean` without P-5.**
 
-**Code does**: same as P-2 (`src/lib.rs:1220-1225`, `:1228-1234`).
-
-**Old text** (exact, `spec.md:96`):
-```
-- **FR-020**: The interface MUST provide an `unregister_host_memory(ptr, size)` method (gated behind `spdk` feature) that reverses FR-019: calls `spdk_mem_unregister` then `cudaHostUnregister`. MUST be called before the underlying allocation is freed.
-```
-**New text**:
-```
-- **FR-020**: The interface MUST provide an `unregister_host_memory(ptr, size)` method (gated behind `spdk` feature) that reverses FR-019: calls `spdk_mem_unregister` (only when an SPDK environment is active at call time) then `cudaHostUnregister`. MUST be called before the underlying allocation is freed. *(Backfilled 2026-11-07, A-14, `9a79224a1`; consistent with spec-001 FR-016.)*
-```
-
----
-
-### P-5: `IGpuServices::register_host_memory` / `unregister_host_memory` doc comments — **EDITS `components/interfaces` (re-stamps every component)**
-
-**Type**: BACKFILL (interface doc) · **Confidence**: HIGH on the content, LOW priority · **approved: false**
+**Requirement**: interface contract of `register_host_memory` / `unregister_host_memory`.
 
 **Doc says** (`components/interfaces/src/igpu_services.rs`):
 - `:786`: "Register existing host memory as CUDA-pinned and SPDK DMA-capable."
 - `:788-790`: "Calls `cudaHostRegister` to page-lock the memory (enabling async GPU DMA) then `spdk_mem_register` so NVMe controllers can DMA directly to/from it."
-- `:802`: "Returns an error if CUDA host registration or SPDK registration fails."
+- `:802`: "Returns an error if CUDA host registration or SPDK registration fails." This is **aligned**: SPDK registration can only fail when it is attempted. No change.
 - `:808-809`: "Calls `spdk_mem_unregister` then `cudaHostUnregister`. Must be called before freeing the underlying allocation."
+- `:813`: "Returns an error if unregistration fails." This is **aligned**. No change.
 
-**Code does**: `components/gpu-services/src/lib.rs:1179-1181` and `:1220-1225` (SPDK step conditional). The `# Errors` line at `:802` is still literally true, because SPDK registration can only fail when it is attempted. Only the description lines are incomplete.
+**Code does**:
+- In both methods the SPDK step runs only if `is_spdk_env_active()` (`components/gpu-services/src/lib.rs:1179-1181`, `:1223`).
+- Unregister calls `cudaHostUnregister` regardless of the SPDK result (`:1231`, `:1239-1242`).
 
 **Old text** (exact, `igpu_services.rs:788-790`):
 ```
@@ -196,31 +144,28 @@ The rest of the line (PORTABLE, idempotence, `we_registered_cuda`) is unchanged.
         /// Calls `spdk_mem_unregister` then `cudaHostUnregister`. Must be
         /// called before freeing the underlying allocation.
 ```
-**New text**:
+**New text** (refreshed for `d45ab524d`):
 ```
         /// Calls `spdk_mem_unregister` (only if an SPDK environment is
-        /// active) then `cudaHostUnregister`. Must be called before freeing
-        /// the underlying allocation.
+        /// active) then `cudaHostUnregister`; the CUDA step runs even if the
+        /// SPDK step fails, and the SPDK error is then returned. Must be
+        /// called before freeing the underlying allocation.
 ```
-Leave `:786` and `:802` unchanged, or change `:786` to "Register existing host memory as CUDA-pinned and, with an SPDK environment, SPDK DMA-capable."
+Optionally change `:786` to "Register existing host memory as CUDA-pinned and, with an SPDK environment, SPDK DMA-capable." Leave `:802` and `:813` unchanged.
 
-Two caveats before applying:
-- `is_spdk_env_active` is re-exported only under `cfg(feature = "spdk")` (`components/interfaces/src/lib.rs:112-113`). Both methods are `spdk`-gated too, so the intra-doc link resolves. Even so, run `cargo doc -p interfaces --no-deps --features spdk` to confirm it is warning-free, or drop the link and use plain backticks.
-- **This edits `components/interfaces`, which changes every component's spec-sync digest.** Recommendation: defer and bundle with the next interfaces change. The component is `clean` without it, because the interfaces spec (`components/interfaces/specs/001-interfaces/spec.md:274-275`) is generic and still aligned.
+Caveats:
+- `is_spdk_env_active` is re-exported only under `cfg(feature = "spdk")` (`components/interfaces/src/lib.rs:113`). Both methods are `spdk`-gated too. Check with `cargo doc -p interfaces --no-deps --features spdk`, or use plain backticks instead of the intra-doc link.
+- **Editing `components/interfaces` changes every component's spec-sync digest.** Defer and bundle with the next interfaces change. The interfaces spec (`components/interfaces/specs/001-interfaces/spec.md:274-275`) is generic and needs nothing.
 
 ---
 
 ## Observations (no proposal; for a human)
 
-1. **Call-time flag, independent per call.** If a region is registered while SPDK is inactive and unregistered after SPDK became active, `spdk_mem_unregister` runs on a region SPDK never saw. A non-zero rc returns `Err` before `cudaHostUnregister` (`src/lib.rs:1222-1224`), so the CUDA pin is left in place. No caller does this today. P-2's SHOULD documents the constraint. A code ALIGN (tracking per-region SPDK registration, like `dma::registered_regions`) is possible but not proposed, because no requirement asks for it.
-2. **`allocate_pinned_dma_buffer` has the same crash class.**
-   - It goes `src/lib.rs:1097-1130` → `dma::create_spdk_dma_buffer_from_cuda_host_alloc`, which calls `spdk_mem_register` unguarded (`src/dma.rs:259`).
-   - This matches 001 FR-020 (`spec.md:350-356`), so it is not drift.
-   - However, the dispatcher's `StagingPool::new` calls it (`components/dispatcher/src/pipeline.rs:219`). If that is reachable in memory-tier-only mode, it would SIGSEGV like A-14 did.
-   - Worth a dispatcher-side check. Out of scope for this component's sync.
+1. **The GPU test passes vacuously without a GPU.** `tests/host_memory_without_spdk.rs:35-39` returns early with a `SKIP:` line when `initialize()` fails. The parent captures stderr (`:70-79`) and shows it only on failure (`:80-86`), so on CI or a GPU-less host the test is green without checking A-14. That is what `d45ab524d` intends. Only a run on a GPU host (node7) counts as evidence. The FR-015 citation of this test (`spec.md:323-324`) is still fair.
+2. **No test covers the new error path** (SPDK unregister fails → CUDA unregister → SPDK `Err`). Covering it needs SPDK active plus a region SPDK never registered, on a GPU host. Worth adding next to `tests/gpu_nvme_p2p.rs` (also `p2p`).
+3. **Retry after the SPDK `Err`.** Once the SPDK-failure `Err` is returned, the region is already CUDA-unpinned, so a retry fails in `cudaHostUnregister`. In-tree callers discard the result (`components/dispatcher/src/lib.rs:2424`, `components/dispatcher-p2p/src/lib.rs:1735`). P-6's text states the post-condition.
+4. **Carried over:** `allocate_pinned_dma_buffer` → `src/dma.rs:259` calls `spdk_mem_register` without the guard. That matches 001 FR-020, but it has the A-14 crash class without SPDK. A dispatcher-side check is recommended.
 
 ## Verification status
 
-Static only. I could not run `cargo test` / `cargo check` in this session (the commands were not approved). The new test needs a real GPU and `--features p2p`. The node7 pass reported in commit `9a79224a1` was not reproduced here.
-
-Previous proposals: `backups/20261107T120000Z/proposals.md.prev` (2026-10-31, B-1/B-2, applied).
+Static only: every citation was read at HEAD `d45ab524d`. `cargo test -p gpu-services` was not approved in this session, so it was not run. The GPU test (`--features p2p`, real GPU) was not run either. `d45ab524d` reports dispatcher lib tests only.

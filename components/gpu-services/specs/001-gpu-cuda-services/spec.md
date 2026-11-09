@@ -6,6 +6,7 @@
 **Last-Synced**: 2026-09-03 (spec-sync: FR-017 ALIGN — `destroy_stream` and `stream_synchronize` now enforce the "require prior initialization" guard the FR promises, matching their sibling stream/device methods; FR-008 exception extended to document `pub mod cuda_ffi` and the `dma`-module cleanup free-functions as deliberate public surface.)
 **Last-Synced**: 2026-10-31 (spec-sync, branch `specsync-b`: BACKFILL new FR-026 `memcpy_batch_async` (`cudaMemcpyBatchAsync`, CUDA 13.x signature, `srcAccessOrder` STREAM; per-copy fallback below a 13.0 runtime, commit `8b800832`), which the optimizer branch added with no requirement; Assumptions feature-flag line extended. The `not_unsafe_ptr_arg_deref` attribute change and `build.rs` `expect`s are behaviour-identical and touch no requirement. No source changes.)
 **Last-Synced**: 2026-11-07 (spec-sync, branch `fix/dispatcher-j33-repairs`, approved by Cornel: BACKFILL FR-015 / FR-016 — `register_host_memory` / `unregister_host_memory` skip the SPDK step when no SPDK environment is active (`interfaces::is_spdk_env_active()`), commit `9a79224a1`, A-14. No source changes.)
+**Last-Synced**: 2026-11-08 (spec-sync, branch `fix/dispatcher-j33-repairs`: BACKFILL FR-016 — `unregister_host_memory` calls `cudaHostUnregister` even when `spdk_mem_unregister` fails, then returns the SPDK error, commit `d45ab524d`. No source changes.)
 **Input**: User description: "GPU Services component providing CUDA library initialization, GPU hardware scanning, IPC handle deserialization, memory pinning, and DMA buffer creation for SSD-to-GPU data transfer"
 
 ## Clarifications
@@ -340,12 +341,18 @@ by a verification read-back.
   `cudaHostUnregister`. When no SPDK environment is active
   (`interfaces::is_spdk_env_active()` is false at call time) the SPDK step
   is skipped and only `cudaHostUnregister` runs. If `spdk_mem_unregister`
-  fails, the method returns the error without calling `cudaHostUnregister`.
+  fails, the method MUST still call `cudaHostUnregister` (so the CUDA pin
+  is not leaked, e.g. when SPDK became active only after the region was
+  registered) and then return the SPDK error; if `cudaHostUnregister`
+  fails, the method returns the CUDA error. After either error the region
+  is no longer CUDA-pinned whenever `cudaHostUnregister` succeeded.
   MUST be called before freeing the underlying allocation. Callers SHOULD
   register and unregister under the same SPDK-environment state (e.g. in
   `initialize` / `shutdown`); the flag is read independently by each call.
   *(Backfilled 2026-11-07 from commit `9a79224a1`, A-14;
-  `src/lib.rs:1220-1225`.)*
+  `src/lib.rs:1220-1225`.)* *(Backfilled 2026-11-08 from commit
+  `d45ab524d`, review of PR #591: the CUDA step runs even when the SPDK
+  step fails; `src/lib.rs:1218-1242`.)*
 - **FR-017**: Component MUST provide CUDA stream lifecycle management
   via `create_stream`, `destroy_stream`, and `stream_synchronize`
   methods. `create_stream` returns an opaque `GpuStream` handle
