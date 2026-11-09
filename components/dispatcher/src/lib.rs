@@ -81,6 +81,7 @@ mod repair_test_failed_promotion_releases_slot;
 #[path = "repair_test_eviction_errors_counted_unpersisted.rs"]
 mod repair_test_eviction_errors_counted_unpersisted;
 
+#[cfg(test)]
 #[path = "repair_test_route_partition_does_not_add_up.rs"]
 mod repair_test_route_partition_does_not_add_up;
 
@@ -1825,8 +1826,11 @@ impl DispatcherComponent {
     /// (`initialize`): the baseline is what `read_write_stats` aggregates
     /// from, so the counters of drives that are about to be dropped stay
     /// part of the cumulative total and the aggregate never decreases.
-    fn absorb_drive_rw_stats(&self) {
-        let drives = self.data_drives.read();
+    /// Fold the counters of the drives in `drives` into the baseline. The caller holds the
+    /// `data_drives` write lock across this fold and the swap or clear of the drive list, so that
+    /// `read_write_stats` (which holds the read lock across both of its reads) never sees the same
+    /// drives in the baseline and in the live list (A-16).
+    fn absorb_drive_rw_stats(&self, drives: &[DataDrive]) {
         let mut baseline = self.rw_stats_baseline.write();
         for drive in drives.iter() {
             baseline.merge_from(&drive.block_dev_iface.read_write_stats());
@@ -2163,9 +2167,13 @@ impl IDispatcher for DispatcherComponent {
         if self.spdk_env.is_connected() || has_bd_factory {
             let drives = self.create_data_drives(&config)?;
             // Replacing the drive list must not lower the cumulative counters:
-            // fold the outgoing drives' totals into the baseline first.
-            self.absorb_drive_rw_stats();
-            *self.data_drives.write() = drives;
+            // fold the outgoing drives' totals into the baseline, under the same
+            // write lock as the swap.
+            {
+                let mut g = self.data_drives.write();
+                self.absorb_drive_rw_stats(&g);
+                *g = drives;
+            }
 
             // Rebuild dispatch-map from recovered extents when not formatting.
             if !config.format_on_init {
@@ -2434,9 +2442,9 @@ impl IDispatcher for DispatcherComponent {
         // invalidating memory that other actors are still actively polling.
         // The drives are about to be dropped; keep their read/write counters
         // in the baseline so read_write_stats stays monotonic after shutdown.
-        self.absorb_drive_rw_stats();
         let drives = {
             let mut g = self.data_drives.write();
+            self.absorb_drive_rw_stats(&g);
             std::mem::take(&mut *g)
         };
         // Phase 1: Signal all actors to stop (closes channels, actors exit poll loops)
@@ -4596,8 +4604,12 @@ impl IDispatcher for DispatcherComponent {
         // The baseline carries the counters of drives already torn down, so the
         // cumulative total keeps holding (and never drops below) what the
         // removed drives had accumulated.
+        // Hold the drive list's read lock across both reads: a swap or clear of the
+        // list folds the outgoing drives into the baseline under the write lock, so
+        // the baseline and the live drives are always read as one state (A-16).
+        let drives = self.data_drives.read();
         let mut agg = self.rw_stats_baseline.read().clone();
-        for drive in self.data_drives.read().iter() {
+        for drive in drives.iter() {
             // merge_from sums every counter and both size histograms.
             agg.merge_from(&drive.block_dev_iface.read_write_stats());
         }
@@ -8790,11 +8802,15 @@ mod repair_test_check_present_map_timeout;
 #[cfg(test)]
 #[path = "repair_test_failed_initialize_changes_config.rs"]
 mod repair_test_failed_initialize_changes_config;
+#[cfg(test)]
 #[path = "repair_test_register_host_memory.rs"]
 mod repair_test_register_host_memory;
+#[cfg(test)]
 #[path = "repair_test_rw_stats_after_shutdown.rs"]
 mod repair_test_rw_stats_after_shutdown;
+#[cfg(test)]
 #[path = "repair_test_transient_map_error.rs"]
 mod repair_test_transient_map_error;
+#[cfg(test)]
 #[path = "repair_test_no_drives_promote_without_read.rs"]
 mod repair_test_no_drives_promote_without_read;

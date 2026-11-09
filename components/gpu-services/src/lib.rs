@@ -1217,12 +1217,15 @@ impl IGpuServices for GpuServicesComponent {
 
             // Registered with SPDK only when an SPDK environment was active (see
             // register_host_memory); without one there is nothing to unregister.
-            if interfaces::is_spdk_env_active() {
+            // A failure here must not skip the CUDA unregister below: if SPDK became
+            // active only after the region was registered, the SPDK step fails on a
+            // range it never registered, and returning early would leak the CUDA pin.
+            let spdk_err = if interfaces::is_spdk_env_active() {
                 let rc = unsafe { spdk_mem_unregister(ptr, size) };
-                if rc != 0 {
-                    return Err(format!("spdk_mem_unregister failed (rc={})", rc));
-                }
-            }
+                (rc != 0).then(|| format!("spdk_mem_unregister failed (rc={})", rc))
+            } else {
+                None
+            };
 
             // SAFETY: ptr was previously registered with cudaHostRegister.
             let err = unsafe { cuda_ffi::cudaHostUnregister(ptr) };
@@ -1233,7 +1236,10 @@ impl IGpuServices for GpuServicesComponent {
                 ));
             }
 
-            Ok(())
+            match spdk_err {
+                Some(e) => Err(e),
+                None => Ok(()),
+            }
         }
     }
 }
