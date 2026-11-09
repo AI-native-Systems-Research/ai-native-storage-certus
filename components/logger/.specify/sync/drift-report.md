@@ -1,0 +1,154 @@
+---
+spec_sync_component: logger
+spec_sync_drift_status: clean
+spec_sync_synced_at: 2026-11-05T10:19:50Z
+spec_sync_git_commit: 32ffa627f
+spec_sync_inputs_sha256: 31a075702a19da3d2d9747272813293bf7cc62de8bf52d72acb47888e1bab4ba
+spec_sync_hash_tool: scripts/spec-sync-hash.sh
+---
+> **Re-stamp 2026-11-05 (branch `certus-host-setup`, on unstable `bb0c9b9c`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them (its previous stamp was re-verified against `git archive origin/unstable`); its digest moves because `components/interfaces` changed (`ISPDKEnv::init_with_allowed`, added for the two-process drive race; see the spdk-env and interfaces syncs of the same date). This component does not implement `ISPDKEnv`. No analysis below changes.
+
+> **Re-stamp 2026-10-29 (branch `fix/dispatcher-remove-ssd-extent`, merged with unstable `e35618b2`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (the `IDispatcher::check` doc gains an `# Errors` section, B-17 of the dispatcher sync). No analysis below changes.
+> **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IDispatcher::clear_all`) and the rebase brought unstable's changes. No analysis below changes.
+
+> **Re-stamp 2026-10-23 (branch `unstable`, commit `d7a24d58` "Fix workspace build warnings" plus the spec-sync follow-up).** That commit only fixed warnings under the workspace lint posture: it added `Debug` impls, narrowed unreachable `pub` items to `pub(crate)`, wrapped `unsafe fn` bodies in explicit `unsafe {}` blocks, and the follow-up ran `rustfmt`. It also touched `components/interfaces` (a `Debug` impl for `Command`), which changes every component's digest. This component's own `src/` was in that commit. Every changed item was checked: none is part of a provided interface, none is named as public by the spec, and no behaviour changed. No spec citation into this component's source moved. All citations were re-verified by diff-mapping each base line to its new position. Status stays `clean`.
+
+> **Re-stamp 2026-10-21 (transitive, `components/interfaces` changed on branch `fix/dispatcher-remove-clear-mt`).** Only `components/interfaces` changed for this component: `IDispatcher` doc comments (`flush_to_ssd` errors, `clear_memory_tier`, `batch_lookup`) and the interfaces spec (FR-008, FR-009, FR-017, FR-018, FR-018a, FR-021, FR-023, Overview, NFR-002, Implementation Notes; text only, no type or signature changed). This component uses none of the changed items (grep over its src/ and specs/: 0 hits). This component's last full sync below stands; no re-analysis was needed.
+
+> **Re-stamp 2026-10-14 (transitive: `components/interfaces` changed, branch `fix/cold-staging-buf-16mib`).** The spec-sync digest folds `components/interfaces/{src,specs}` into every component's hash, so the single interface change on this branch — `DispatcherConfig::cold_staging_buf_bytes` default 4 MiB → 16 MiB (commit `8e12e49f`) and the matching correction to interfaces FR-027 — invalidates every component's stamp at once; this is the design, not a defect. **No code re-analysis was performed for this component, and none was needed:** its own `src/**` and `specs/**` are unchanged on this branch, and it does not reference `cold_staging_buf_bytes` (consumed only by the dispatcher's host-DRAM cold-staging pool). Digest refreshed to the recomputed value.
+
+> **Re-stamp 2026-10-09 (transitive: `components/interfaces` changed, branch `fix/evict-blocked-by-pin`).** The only change to this component's hashed inputs is a doc-comment correction on `IDispatchMap::try_evict_to_block` in `components/interfaces/src/idispatch_map.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and its previous stamp was re-verified to match `origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
+
+> **Re-stamp 2026-10-05 (transitive: `components/interfaces` changed, branch `fix/poller-cpu-placement-logging`).** The only change to this component's hashed inputs is a doc-comment correction on `DispatcherConfig::poller_base_cpu` in `components/interfaces/src/idispatcher.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and it does not reference `poller_base_cpu` (verified by grep over its src/ and specs/). Its previous stamp was re-verified to match `git archive origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
+
+> **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
+> folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
+> change invalidates all of them at once -- which is the design, not a defect. The interface
+> change is the `served_by` attribution work: new `ServedBy` and `LookupOutcome` types, and
+> `IDispatcher::batch_lookup` widened to return `Vec<LookupOutcome>`.
+>
+> **No re-analysis was performed for this component, and the digest bump asserts only what was
+> actually checked**: the interface change is additive except for `batch_lookup`'s return type,
+> which the compiler enforces across all implementors, and this component's own `src/**` and
+> `specs/**` are unchanged. Components that implement `IDispatcher` (`dispatcher`,
+> `dispatcher-p2p`) had their specs updated substantively; this one did not need it. If a later
+> sweep finds drift here, this stamp is not evidence against it.
+
+> **Re-stamp 2026-09-15 (interfaces-fold; no drift).** Branch `fix-reserve-batch-deadline` (`bec6c6ec`) added a `deadline: Option<std::time::Instant>` parameter to `IDispatcher::reserve_memory` in `components/interfaces/src/idispatcher.rs` (shared batch backpressure deadline for the shm-queue OP_RESERVE handler). `scripts/spec-sync-hash.sh` folds the whole `components/interfaces` tree into every component's hash, so this component's digest moved even though its own spec/implementation did not change. This component does not describe or call `reserve_memory`; the interface delta cannot affect its spec↔implementation alignment. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.
+
+> **Re-stamp 2026-09-09 (merged-branch interfaces-fold; no drift).** Branch
+> `fix-dispatcher-store-backpressure` was merged into `unstable` at `3411518a`; that
+> branch adds `DispatcherConfig::store_backpressure_ms` plus two `TierEventStats`
+> counters (`store_backpressure_events`, `store_drops_on_full`) to
+> `components/interfaces/src/idispatcher.rs`. `scripts/spec-sync-hash.sh` folds
+> the whole `components/interfaces/` tree into every component's hash, so this
+> component's digest moved even though its own `src/`+`specs/` are byte-for-byte
+> unchanged and it references none of those new dispatcher symbols (verified by
+> grep across `components/` and `lib/`). The merge's conflict resolution had
+> reverted this stamp to unstable's `b220a1c8` value; the digest is recomputed
+> here at merged HEAD. Drift status remains `clean`; the report body stands
+> verbatim.
+
+# Drift Report: logger
+
+**Generated**: 2026-09-03 (Spec-Sync re-sweep)
+**Project**: logger
+**Spec analyzed**: `specs/001-logger-component/spec.md` (Status: Draft, Last-Synced 2026-08-20)
+**Mode**: Read-only drift analysis + freshness stamp. No code or spec change
+required this sweep — the component is fully aligned.
+
+This sweep supersedes the earlier stale artifact (which read "Generated: pending",
+listed **1 Drifted** — FR-006 "yellow for warn" vs code orange — and 20 aligned).
+That artifact **predated the 2026-08-20 Phase B spec update**, which BACKFILLED
+FR-006 to name the exact escapes the implementation emits (proposals.md /
+apply-report.md). The current spec text (FR-006, US1 AC-5) already specifies the
+256-color orange warn escape `\x1b[38;5;208m`, so the reported drift no longer
+exists: spec, code, and the passing unit test all agree on orange.
+
+## Summary
+
+| Metric | Count |
+|--------|-------|
+| Specs Analyzed | 1 (`001-logger-component`) |
+| Requirements Checked | 14 FR (FR-001…014) + 7 SC (SC-001…007) = 21 |
+| Aligned | 21 |
+| Drifted | 0 |
+| Not Implemented | 0 |
+| Unspecced Features | 0 |
+
+**Verification runs this sweep** (all green):
+- `cargo build -p logger` — clean
+- `cargo clippy -p logger --all-targets -- -D warnings` — clean
+- `cargo test -p logger -- --test-threads 1` — 15 unit + 7 integration + 5 doc
+  = 27 passed; 0 failed.
+
+## Detailed Findings
+
+### Spec 001-logger-component — Logger Component
+
+**Aligned ✓** (verified this sweep against the implementation)
+- FR-001 `LoggerComponent` via `define_component!` — `src/lib.rs:123-131`
+- FR-002 `ILogger` defined in interfaces crate via `define_interface!`
+  (error/warn/info/debug) — `../interfaces/src/ilogger.rs:3-10`; consumed via
+  `impl ILogger for LoggerComponent` `src/lib.rs:222-238`
+- FR-003 `IUnknown` discovery for `ILogger` — via `define_component!`
+  (`src/lib.rs:123`); exercised by `test_query_interface_ilogger`,
+  `test_query_interface_returns_some`, `test_provided_interfaces`
+  (`tests/integration.rs:21-51`)
+- FR-004 `RUST_LOG` filtering, env_logger semantics — `from_env_str`/`from_env`
+  `src/lib.rs:57-73`; `log()` threshold check `src/lib.rs:200`
+- FR-005 console/stderr default — `LoggerState::default` `src/lib.rs:110-121`
+  (writer = `io::stderr()`)
+- FR-006 ANSI colors per level — `ansi_color()` `src/lib.rs:84-91`: error red
+  `\x1b[31m`, **warn orange `\x1b[38;5;208m`**, info green `\x1b[32m`, debug cyan
+  `\x1b[36m` — matches the (2026-08-20 backfilled) spec exactly; asserted by
+  `test_all_levels_colored` `src/lib.rs:378-389`
+- FR-007 file output mode — `new_with_file` (append+create) `src/lib.rs:155-165`
+- FR-008 file output no ANSI — `use_color: false` `src/lib.rs:163`
+- FR-009 timestamp + level + message — `log()` `src/lib.rs:203-215` (RFC3339
+  millis, 5-char padded level, message)
+- FR-010 thread-safe (`Mutex` writer, no interleaving) — `src/lib.rs:105,216`;
+  asserted by `test_concurrent_logging_no_interleave` (`tests/integration.rs:91`)
+- FR-011 default level info when RUST_LOG unset — `from_env` `src/lib.rs:68-73`
+  (`Err(_) => LogLevel::Info`)
+- FR-012 `new_with_writer(Box<dyn Write+Send>, LogLevel, use_color)` —
+  `src/lib.rs:187-197`
+- FR-013 TTY auto-detect via `libc::isatty(STDERR_FILENO)` — `src/lib.rs:114`;
+  file loggers force color off
+- FR-014 public `LogLevel` (`from_env_str`, `Display`), public `LoggerState`
+  wrapping writer/level/color — `src/lib.rs:36,57,94,104`
+- SC-001 all four methods produce timestamp+level+message — unit format tests
+  (`src/lib.rs`) + doc examples
+- SC-002 level filtering suppresses below threshold — level-ordering + filtering
+  unit tests
+- SC-003 console distinct colors per level on a terminal — `test_all_levels_colored`
+  (`src/lib.rs:378-389`)
+- SC-004 file output zero ANSI — `test_file_output_no_ansi`
+- SC-005 4+ concurrent threads, no interleaving — `test_concurrent_logging_no_interleave`
+  (400 lines, `tests/integration.rs:91-125`)
+- SC-006 `IUnknown` query for `ILogger` + binds to receptacles —
+  `test_query_interface_*`, `test_receptacle_binding`, `test_receptacle_info`
+  (`tests/integration.rs`)
+- SC-007 doc tests + Criterion benchmarks — 5 doc-tests in `src/lib.rs`;
+  `benches/log_throughput.rs` wired via `[[bench]]` in `Cargo.toml`
+
+**Drifted ⚠️**
+- None. (The earlier report's FR-006 "yellow vs orange" finding was resolved by
+  the 2026-08-20 BACKFILL that reworded the spec to the implemented orange escape.)
+
+**Not Implemented ✗**
+- None.
+
+## Unspecced Features
+
+| Feature | Location | Lines | Suggested Spec |
+|---------|----------|-------|----------------|
+| (none) | | | |
+
+## Recommendations
+1. **No action required for the gate.** Spec, code, and tests are aligned across
+   all 14 FR + 7 SC.
+2. **Doc staleness (minor, non-blocking, outside hash scope):** the component
+   `CLAUDE.md` line "This crate must be added to the workspace … before building"
+   is stale — `logger` is already a workspace member. Doc-only; not a spec/impl
+   drift and outside the gate's `src/` + `specs/` hash scope.

@@ -1,0 +1,59 @@
+@startuml
+skinparam defaultTextAlignment center
+skinparam padding 3
+skinparam nodesep 25
+skinparam ranksep 25
+hide stereotype
+
+title Certus Server — full-optimized Profile
+
+node "Client Host" as client_host {
+    component "vLLM + certus-shmq-connector" as pyclient
+    database "GPU Memory\n(client)" as client_gpu #LightGreen
+}
+
+node "Server Host" as server_host {
+    node "certus-server-yaml (CERTUS_PROFILE=full-optimized)" as server_proc {
+
+        component "shmq-dispatcher\nPopulate | Lookup | Check | TouchCheck\nReserve | CopyToStore | CommitStore | AbortStore\nPin | Unpin | TakeEvents | Remove | Flush\npoller + workers | shmq-reaper" as shmq #F0F0F0
+
+        component "DispatcherComponent <<IDispatcher>>" as dispatcher #DBEAFE {
+            component "DataDrive 0..N\nBlockDeviceSpdkNvme <<IBlockDevice>>\nDiskPartitionManager (GPT)\nExtentManager <<IExtentManager>>\nChannelPool" as data_drive #FEF3C7
+            component "ParallelBackgroundWriter | BackgroundEvictor\nMemoryTierEvictor (threshold > 0)\nScatter-gather cold loop\nPipelineRing (StagingPool) | DeviceStreams\nEvictionSender | TierEventCounters" as disp_bg #FEF9C3
+        }
+
+        component "DispatchMapComponent\n<<IDispatchMap>>" as dispatch_map #DBEAFE
+        component "MemoryTierComponent\n<<IMemoryTier>>" as memory_tier #DBEAFE
+        component "EvictionPolicyOptimizedComponent\n<<IEvictionPolicy>>\nO(1) index-linked LRU\n+ TinyLFU admission (Count-Min Sketch)" as eviction #FDE68A
+        component "GpuServicesComponent\n<<IGpuServices>>" as gpu_svc #BBF7D0
+        component "SPDKEnvComponent\n<<ISPDKEnv>>" as spdk_env #E5E7EB
+        component "RemoteLookupComponent\n<<IRemoteLookup>>\n(not initialized: NotFound)" as remote_lookup #LightCoral
+        component "LoggerComponent\n<<ILogger>>" as logger #E5E7EB
+    }
+
+    database "GPU Memory\n(server)" as server_gpu #LightGreen
+    database "NVMe SSD 0..N\n[metadata | ext-meta | data]" as nvme_data
+}
+
+pyclient -down-> shmq : shmq (/dev/shm)
+client_gpu .down.> server_gpu : CUDA IPC
+
+shmq -down-> dispatcher
+
+dispatcher -down-> dispatch_map
+dispatcher -down-> memory_tier
+dispatcher -down-> gpu_svc
+dispatcher -down-> spdk_env
+dispatcher -right-> remote_lookup : local misses
+
+dispatch_map -down-> eviction
+memory_tier -down-> eviction
+
+disp_bg --> data_drive
+data_drive -down-> spdk_env
+
+gpu_svc -down-> server_gpu : DMA
+data_drive .down.> nvme_data : NVMe I/O (VFIO)
+
+logger -[hidden]- eviction
+@enduml

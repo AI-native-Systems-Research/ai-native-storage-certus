@@ -1,0 +1,38 @@
+{
+  "generated": "pending",
+  "project": "Certus — components/example-helloworld-dylib",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 7,
+    "aligned": 6,
+    "drifted": 1,
+    "not_implemented": 0,
+    "unspecced_features": 0
+  },
+  "specs": [
+    {
+      "id": "001-example-helloworld-dylib",
+      "title": "example-helloworld-dylib",
+      "aligned": [
+        "FR-1: #[no_mangle] create_component (src/lib.rs:20-21)",
+        "FR-2: returns ComponentRef wrapping HelloWorldComponent (src/lib.rs:21-24)",
+        "FR-3: IGreeter via query_interface, exercised by apps/dynamic-loading-example/src/main.rs:75-76",
+        "NFR-1: crate-type = [dylib] (Cargo.toml:8-9)",
+        "NFR-2: same-rustc requirement documented (src/lib.rs:9-10)",
+        "NFR-3: no C-ABI shim, Rust-ABI factory only (src/lib.rs:20-24)"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-4",
+          "spec_text": "each side statically embeds its own copy; no shared .so linkage is involved (TypeId consistency from compile-time type identity)",
+          "actual": "module doc claims dylib and host 'dynamically link the same component-core and example-helloworld shared libraries'",
+          "location": "src/lib.rs:4-7",
+          "severity": "moderate"
+        }
+      ],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [],
+  "conflicts": []
+}

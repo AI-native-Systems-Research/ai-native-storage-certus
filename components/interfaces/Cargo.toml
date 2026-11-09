@@ -1,0 +1,22 @@
+[package]
+name = "interfaces"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+component-core.workspace = true
+component-macros.workspace = true
+spdk-sys = { workspace = true, optional = true }
+
+[features]
+default = []
+# Adds per-block CRC-32 integrity accessors to IDispatchMap (set/get_checksum).
+# Opt-in; the methods vanish entirely when off, so no impl pays for them.
+integrity-check = []
+spdk = ["dep:spdk-sys"]
+gpu = []
+
+[lints]
+workspace = true

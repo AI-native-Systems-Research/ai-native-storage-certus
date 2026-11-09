@@ -1,0 +1,37 @@
+{
+  "generated": "2026-10-05",
+  "project": "spdk-env",
+  "spec": "002-spdk-env-vfio-init",
+  "branch": "fix/poller-cpu-placement-logging",
+  "baseline": "origin/unstable (stamped 2c86a131; stamp re-verified against `git archive origin/unstable`)",
+  "method": "Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.",
+  "summary": {
+    "specs_analyzed": 1,
+    "findings": 1,
+    "resolved": 1,
+    "open": 0
+  },
+  "aligned": [
+    "FR-011 / SC-004 (no threads spawned) still hold",
+    "FR-003 (init in init(), not construction) unchanged",
+    "FR-014 singleton unchanged"
+  ],
+  "drifted": [
+    {
+      "requirement": "FR-022 (new)",
+      "direction": "BACKFILL",
+      "severity": "moderate",
+      "spec_text": "(unspecced)",
+      "actual": "init_spdk_env saves the caller's affinity (sched_getaffinity) before spdk_env_init and restores it (sched_setaffinity) after, undoing DPDK EAL's main-lcore pin so later-spawned threads do not inherit CPU 0. Best-effort.",
+      "location": "components/spdk-env/src/env.rs:91-102, 115-139",
+      "note": "New behaviour on this branch.",
+      "resolution": "FR-022 added; Last Synced header added."
+    }
+  ],
+  "unspecced": [],
+  "conflicts": [],
+  "drift_status": "clean",
+  "inputs_sha256": "434551d211795bfc98ca9376af37cbc7f71849d4e1e4e3906ff2f8fee3fe5bb2",
+  "git_commit": "d102a00b",
+  "synced_at": "2026-10-06T00:17:04Z"
+}

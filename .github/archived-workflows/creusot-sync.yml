@@ -1,0 +1,97 @@
+# Triggered on every push to `unstable`.
+#
+# Merges the new unstable commit into `unstable-creusot` and pushes it back.
+# No Creusot checks are run — this is a pure sync, advisory only.
+# Opens a GitHub issue if the merge produces a conflict.
+#
+# unstable ──push──► this workflow
+#                       │
+#                 merge into unstable-creusot
+#                       │
+#              ┌────────┴────────┐
+#            OK              CONFLICT
+#              │                 │
+#   push unstable-creusot   open issue
+#   back to origin          (manual resolution required)
+#   job: SUCCESS            job: SUCCESS (advisory)
+
+name: Creusot — sync unstable
+
+on:
+  push:
+    branches: [unstable]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: creusot-sync-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    name: Merge unstable → unstable-creusot
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout unstable-creusot
+        uses: actions/checkout@v4.2.2
+        with:
+          ref: unstable-creusot
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge origin/unstable into unstable-creusot
+        id: merge
+        continue-on-error: true
+        run: |
+          git fetch origin unstable
+          if git merge origin/unstable --no-edit \
+               -m "chore: sync unstable → unstable-creusot [automated]"; then
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Merge conflict between unstable and unstable-creusot — manual resolution required."
+          fi
+
+      - name: Push updated unstable-creusot
+        if: steps.merge.outputs.merged == 'true'
+        continue-on-error: true
+        run: git push origin unstable-creusot
+
+      - name: Open issue on merge conflict
+        if: steps.merge.outputs.merged == 'false'
+        continue-on-error: true
+        uses: actions/github-script@v7.0.1
+        with:
+          script: |
+            const sha    = context.payload.after ?? context.sha;
+            const short  = sha.slice(0, 7);
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              title: `Merge conflict: unstable → unstable-creusot (${short})`,
+              body: [
+                `Automatic merge of \`unstable\` into \`unstable-creusot\` failed at commit \`${sha}\`.`,
+                ``,
+                `**Action required:** resolve the conflict manually:`,
+                `\`\`\`bash`,
+                `git fetch origin`,
+                `git checkout unstable-creusot`,
+                `git merge origin/unstable`,
+                `# resolve conflicts, preserving Creusot verification files`,
+                `git push origin unstable-creusot`,
+                `\`\`\``,
+                `See [workflow run](${runUrl}) for details.`,
+              ].join('\n'),
+              labels: ['creusot', 'merge-conflict'],
+            });

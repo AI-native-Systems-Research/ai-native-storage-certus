@@ -1,0 +1,51 @@
+{
+  "generated": "2026-09-01T22:59:04Z",
+  "based_on": "drift-report 2026-09-01T22:59:04Z",
+  "commit": "33bddaba",
+  "summary": {
+    "backfill": 2,
+    "align": 0,
+    "human_decision": 1,
+    "new_specs": 0,
+    "remove_from_spec": 0,
+    "plan_doc_fixes": 2
+  },
+  "proposals": [
+    {
+      "id": "P1",
+      "spec": "001-extent-manager-v2",
+      "requirement": "FR-030",
+      "direction": "BACKFILL",
+      "recommended": "correct-spec-prose",
+      "spec_text": "issues a flush to the metadata device after checkpoint writes (and in the format path)",
+      "actual": "flush() called only in checkpoint path (lib.rs:308-310); format() has no flush (lib.rs:496-498); README.md:66 and Cargo.toml:24-27 say checkpoint-only",
+      "proposed_edit": "Remove the '(and in the format path)' parenthetical from FR-030 prose.",
+      "alternative": "Add a feature-gated flush() after lib.rs:498 (behavior change, not applied automatically).",
+      "confidence": "HIGH",
+      "human_decision": true
+    },
+    {
+      "id": "P2",
+      "spec": "001-extent-manager-v2",
+      "requirement": "FR-016",
+      "direction": "BACKFILL",
+      "spec_text": "interface doc + README incorrectly state 'five minutes' ... should be corrected to 30-second default",
+      "actual": "iextent_manager.rs:205 and README.md:13 already say 30 seconds",
+      "proposed_edit": "Rewrite the FR-016 note to state the 30 s default plainly and drop the obsolete remediation language.",
+      "confidence": "HIGH",
+      "human_decision": false
+    },
+    {
+      "id": "P3",
+      "spec": "001-extent-manager-v2",
+      "target": "plan.md",
+      "direction": "BACKFILL",
+      "edits": [
+        {"location": "plan.md:59", "from": "checkpoint_interval_ms: AtomicU64 (default 5000)", "to": "checkpoint_timer_state: Arc<CheckpointTimerState> (Mutex<Option<Duration>> + Condvar + shutdown), default 30s"},
+        {"location": "plan.md:229", "from": "superblock.rs ... (v5)", "to": "superblock.rs ... (v6)"}
+      ],
+      "confidence": "HIGH",
+      "human_decision": false
+    }
+  ]
+}

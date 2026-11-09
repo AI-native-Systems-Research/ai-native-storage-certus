@@ -1,0 +1,3 @@
+.store-dir.root
+__pycache__/
+diag-*.txt

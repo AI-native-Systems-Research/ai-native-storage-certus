@@ -1,0 +1,84 @@
+{
+  "generated": "2026-04-15T12:00:00Z",
+  "project": "component-framework",
+  "summary": {
+    "same_feature_different_behavior": 0,
+    "obsolete_constraints": 2,
+    "scope_overlap": 0,
+    "implicit_conflicts": 3,
+    "total": 5
+  },
+  "conflicts": [
+    {
+      "id": 1,
+      "title": "define_actor! macro planned but not implemented",
+      "type": "obsolete_constraint",
+      "severity": "low",
+      "sources": [
+        "specs/003-actor-channels/plan.md",
+        "specs/003-actor-channels/contracts/public-api.md"
+      ],
+      "description": "Plan and contract reference a define_actor! macro that was never implemented. Actor<M, H> implements IUnknown directly instead.",
+      "suggested_resolution": "SUPERSEDE",
+      "status": "pending"
+    },
+    {
+      "id": 2,
+      "title": "send_any/recv_any type-erased methods planned but not implemented",
+      "type": "obsolete_constraint",
+      "severity": "low",
+      "sources": [
+        "specs/003-actor-channels/contracts/public-api.md"
+      ],
+      "description": "Contract references send_any/recv_any using Box<dyn Any + Send> that do not exist. Channels use generic ISender<T>/IReceiver<T> instead.",
+      "suggested_resolution": "SUPERSEDE",
+      "status": "pending"
+    },
+    {
+      "id": 3,
+      "title": "Benchmark naming example uses capacity_4096 not in parameter set",
+      "type": "implicit_conflict",
+      "severity": "minimal",
+      "sources": [
+        "specs/004-channel-benchmarks/contracts/benchmark-suite.md"
+      ],
+      "description": "Naming example shows capacity_4096 but parameter set is {64, 1024, 16384}.",
+      "suggested_resolution": "MERGE",
+      "status": "pending"
+    },
+    {
+      "id": 4,
+      "title": "No From<ReceptacleError> for RegistryError conversion",
+      "type": "implicit_conflict",
+      "severity": "low",
+      "sources": [
+        "specs/001-com-component-framework/spec.md",
+        "specs/002-registry-refcount-binding/spec.md"
+      ],
+      "description": "Receptacle::connect returns ReceptacleError; connect_receptacle_raw returns RegistryError. No From conversion exists, requiring manual .map_err() in every implementation.",
+      "suggested_resolution": "HUMAN_REQUIRED",
+      "status": "pending"
+    },
+    {
+      "id": 5,
+      "title": "IUnknown trait extended across specs without cross-reference",
+      "type": "implicit_conflict",
+      "severity": "low",
+      "sources": [
+        "specs/001-com-component-framework/spec.md",
+        "specs/002-registry-refcount-binding/spec.md"
+      ],
+      "description": "Spec 001 defines IUnknown with 4 methods. Spec 002 adds connect_receptacle_raw as a 5th method. Neither spec cross-references the other regarding this extension.",
+      "suggested_resolution": "MERGE",
+      "status": "pending"
+    }
+  ],
+  "dependency_graph": {
+    "001": [],
+    "002": ["001"],
+    "003": ["001", "002"],
+    "004": ["001", "002", "003"],
+    "005": ["001", "002", "003"],
+    "006": ["001", "002", "003"]
+  }
+}

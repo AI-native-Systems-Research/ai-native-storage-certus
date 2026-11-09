@@ -1,0 +1,719 @@
+"""run_multiturn_common.py — shared setup for the multi-turn ShareGPT replay.
+
+This module owns the pieces both execution models need, so the five backend
+drivers
+(``run_multiturn_nooffload.py``, ``run_multiturn_offloading.py``,
+``run_fs_bench_450.py``, ``run_fs_bench_450_iostat.py`` and
+``certus-shmq-connector/run_multiturn_shmq_certus.py``) stop copy-pasting them:
+dataset loading + turn extraction (``load_convs``), engine construction
+(``build_engine``), the tokenizer-length closure (``make_n_tokens``), the MFU
+probe (``mfu_kwargs``), the Prometheus exporter (``start_prom_exporter``), and
+the telemetry helpers (``prom_counters``, ``prom_histograms``, ``hist_pct``,
+``disk_rw_bytes``, ``gib``).
+
+The two *execution models* live in their own siblings and both build on this
+module: the default synchronous batched-round loop in
+:mod:`run_multiturn_sync_batched` (``run_batched``) and the async
+per-conversation model in :mod:`run_multiturn_async` (``run_async`` /
+``run_async_driver``).
+
+The *backend* — how vLLM is constructed (``kv_transfer_config``, engine kwargs)
+and what telemetry each run captures — stays in the driver, which assembles
+``engine_kwargs`` and passes them here.
+
+Nothing here imports vllm at module load, so the driver stays in control of when
+the (heavy) engine import happens.
+"""
+
+import glob
+import gzip
+import json
+import os
+import random
+import sys
+import tempfile
+
+
+# ── Named workloads ─────────────────────────────────────────────────────────
+# A "workload" names a dataset (+ a sensible default conversation count) so a
+# driver can select it with WORKLOAD_NAME=<name> instead of spelling out
+# DATASET_PATH. (Selector env is WORKLOAD_NAME, not WORKLOAD — see resolve_workload.)
+# The repo-root data dir, resolved relative to this module
+# (benchmarks/kv-offload-replay/ -> ../../data).
+_DATA_DIR = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data")
+)
+
+# Total conversations in the full ShareGPT corpus (all data/sharegpt/*.json
+# chunks). Used as the default conversation cap for the corpus (min-turns-1)
+# case — i.e. "draw from the whole corpus" — since load_convs' cap is what
+# bounds how much of the corpus is read.
+_SHAREGPT_CORPUS_CONVS = 94145
+
+
+def _sharegpt_turns():
+    """(min_turns, max_turns) for the ``sharegpt`` workload from the environment.
+
+    ``SHAREGPT_MIN_TURNS`` defaults to 12; ``SHAREGPT_MAX_TURNS`` defaults to
+    ``min`` when unset, so a bare ``--min-turns N`` selects the ``N/N`` config."""
+    min_env = os.environ.get("SHAREGPT_MIN_TURNS")
+    max_env = os.environ.get("SHAREGPT_MAX_TURNS")
+    min_turns = int(min_env) if min_env else 12
+    max_turns = int(max_env) if max_env else min_turns
+    return min_turns, max_turns
+
+
+def _sharegpt_dataset(has_explicit_path=False):
+    """Dataset for the ``sharegpt`` workload, selected by human-turn count via
+    ``SHAREGPT_MIN_TURNS`` / ``SHAREGPT_MAX_TURNS``.
+
+    Exactly TWO configurations are prepared, and only these two are accepted:
+
+    * ``min==12`` and ``max==12`` -> ``data/sharegpt_12turn_450.json``: 450
+      conversations, each with exactly 12 human turns (the set every bench image
+      bakes as its ``DATASET_PATH``).
+    * ``min==2`` and ``max==2`` -> the ``data/sharegpt/`` directory: the FULL
+      ShareGPT corpus (all chunks, 94,145 conversations). ``load_convs`` reads
+      every ``*.json`` chunk in order and caps at ``num_convs`` — so
+      ``min-turns 2`` means "draw from the whole corpus".
+
+    ``2`` is the honest floor for the corpus: ``load_convs`` keeps only
+    conversations with ``>= 2`` human turns (a single-turn conversation has no
+    prior context for a multi-turn KV-reuse workload to reuse), so ``min-turns 1``
+    loads the identical set. ``1`` is therefore accepted as a back-compat alias
+    for ``2`` but ``2`` is the canonical value.
+
+    ``max-turns`` defaults to ``min-turns`` when unset, so ``--min-turns 2`` and
+    ``--min-turns 12`` alone each select a prepared config. Any other pair — in
+    particular any ``max-turns`` value that does not mirror ``min`` (2 with min
+    2, 12 with min 12) — is rejected: set ``DATASET_PATH`` to a custom
+    turn-filtered ShareGPT file instead. When ``DATASET_PATH`` is set this returns
+    ``None`` so that path takes over rather than erroring; otherwise it exits with
+    the hint.
+
+    Note the corpus directory is resolved ``__file__``-relative, which is only
+    correct where the module keeps its repo layout (host runs, and the shmq
+    image). The other bench images flatten the layout, so the orchestrator
+    overrides ``DATASET_PATH`` with the in-container mount point for the corpus
+    case rather than relying on this path."""
+    min_turns, max_turns = _sharegpt_turns()
+    if min_turns == 12 and max_turns == 12:
+        return os.path.join(_DATA_DIR, "sharegpt_12turn_450.json")
+    # min-turns 2 = the whole corpus (load_convs' own >=2 floor); 1 accepted as a
+    # legacy alias for 2 since it loads the identical set.
+    if min_turns in (1, 2) and max_turns == min_turns:
+        return os.path.join(_DATA_DIR, "sharegpt")  # directory of corpus chunks
+    if has_explicit_path:
+        return None
+    raise SystemExit(
+        "[run] WORKLOAD_NAME=sharegpt: only min-turns==max-turns==2 (the full "
+        "94,145-conv corpus; 1 also accepted) or min-turns==max-turns==12 (the "
+        f"450-conv subset) are prepared, got min={min_turns} max={max_turns}. "
+        "Set DATASET_PATH to a custom turn-filtered ShareGPT dataset for other "
+        "turn counts."
+    )
+
+
+def _sharegpt_num_convs(has_explicit_path=False):
+    """Default conversation cap for the ``sharegpt`` workload, by turn config.
+
+    The 450-conv cap is the default *only* for the 12/12 subset; every other
+    prepared config (i.e. min-turns 2) defaults to the whole corpus, so lowering
+    the turn threshold draws from all conversations rather than silently keeping
+    the 450-conv cap. ``NUM_CONVS`` still overrides either way."""
+    min_turns, max_turns = _sharegpt_turns()
+    if min_turns == 12 and max_turns == 12:
+        return 450
+    return _SHAREGPT_CORPUS_CONVS
+
+
+# ── long-doc-QA synthetic workload ──────────────────────────────────────────
+# A KV-cache-stress variant of the multi-turn replay. Each "conversation" is one
+# long synthetic document followed by short follow-up questions: turn 0's prompt
+# is (document + first question) — a large, per-document-UNIQUE prefix that the
+# accumulating-context loop caches once on turn 0 and every later turn reuses. So
+# the distinct working set is ~num_docs × doc_tokens of KV, sized to overflow the
+# GPU cache and drive the offload tier. (Contrast upstream benchmarks/long-doc-qa,
+# whose docs are an identical "hi hi …" string differing only by a leading index —
+# those prefixes dedup at the KV-block layer and store almost nothing across docs;
+# here each document's filler is drawn independently so the blocks are distinct.)
+#
+# The three shape parameters are env-tunable; defaults are chosen so a document
+# plus ALL of its accumulated turns fits the DEFAULT 8192 window (budget
+# MAX_MODEL_LEN - OUTPUT_TOKENS, as low as ~7992 at OUTPUT_TOKENS=200) with real
+# headroom. This matters because the loop's `nt > prompt_budget` guard RETIRES the
+# whole conversation on overflow (it does not truncate) — a too-large default
+# would silently drop every conversation and produce a near-empty run. By turn 7
+# the prompt is doc + 7 responses + the accumulated follow-ups; at a conservative
+# ~1.3 tokens/word a 4000-word doc lands near ~6.7k tokens, comfortably inside the
+# window even at OUTPUT_TOKENS=200. It is still large in aggregate: ~4000 tokens ×
+# 1000 docs of DISTINCT prefix KV, well past any GPU cache. Raise LONGDOC_DOC_TOKENS
+# together with --max-model-len for a bigger reused prefix.
+#   LONGDOC_DOC_TOKENS  approx document length, tokens ≈ words  (default 4000)
+#   LONGDOC_QUESTIONS   human turns per document (doc+Q1, then follow-ups) (default 8)
+#   LONGDOC_NUM_DOCS    documents in the generated corpus        (default 1000)
+#   LONGDOC_SEED        RNG seed for a reproducible corpus        (default 1234)
+
+# Short, common, mostly-single-token words: joined with spaces, the token count of
+# the filler tracks the word count closely, so LONGDOC_DOC_TOKENS reads as tokens.
+_LONGDOC_WORDS = (
+    "the of and to in a is that for it as with on was by at from or an be this "
+    "which we can has more not but their they will one all would there her when "
+    "who them been its into time some these may then two other than up out only "
+    "over most also after first well way even new want because any day most us "
+    "system data model memory cache block layer token value store read write page "
+    "buffer stream index record region offset pointer thread queue signal frame"
+).split()
+
+# Generic follow-up questions, cycled after the first. Content is immaterial (the
+# document is random filler); they only need to be short and distinct enough to
+# advance the turn. Question 1 rides on turn 0 with the document.
+_LONGDOC_QUESTIONS = [
+    "Summarize the key points of the document above.",
+    "What is the main topic being discussed?",
+    "List any entities mentioned in the text.",
+    "What conclusion does the document reach?",
+    "Are there any contradictions in the passage?",
+    "Explain the most important detail in your own words.",
+    "What would a reader remember from this document?",
+    "Identify the section that carries the most information.",
+]
+
+
+def _int_env(name, default):
+    """int() of an env var, treating unset OR empty (``NAME=``) as the default.
+
+    Orchestrators forward tuning knobs as ``-e NAME=${NAME:-}``, so an unset knob
+    arrives as an empty string; ``int("")`` would raise. This collapses both to
+    the default."""
+    v = os.environ.get(name, "")
+    return int(v) if v.strip() else default
+
+
+def _longdoc_params():
+    """(doc_tokens, questions, num_docs, seed) for the long-doc-qa workload."""
+    return (
+        _int_env("LONGDOC_DOC_TOKENS", 4000),
+        max(2, _int_env("LONGDOC_QUESTIONS", 8)),  # loader needs >= 2 human turns
+        _int_env("LONGDOC_NUM_DOCS", 1000),
+        _int_env("LONGDOC_SEED", 1234),
+    )
+
+
+def _longdoc_generate(has_explicit_path=False):
+    """Generate (once) a ShareGPT-format json of synthetic long-doc-QA convs and
+    return its path.
+
+    Deterministic for a given (doc_tokens, questions, num_docs, seed): the
+    filename encodes the params, so an unchanged config reuses the file and a
+    changed one writes a fresh sibling — no stale reuse across differently-shaped
+    runs. The file goes under the system temp dir, so generation needs no writable
+    spot in the repo tree and leaves no git artifact (consistent with not
+    committing bench data); it is regenerated per container, which is cheap.
+
+    ``has_explicit_path`` is accepted for the WORKLOADS callable protocol but
+    ignored — an explicit ``DATASET_PATH`` still wins in ``resolve_workload``
+    (it is applied after the workload's dataset), so we always produce the file."""
+    doc_tokens, questions, num_docs, seed = _longdoc_params()
+    fname = f"longdoc_qa_d{doc_tokens}_q{questions}_n{num_docs}_s{seed}.json"
+    path = os.path.join(tempfile.gettempdir(), fname)
+    if os.path.exists(path):
+        return path
+
+    rng = random.Random(seed)
+    pool = _LONGDOC_WORDS
+    data = []
+    for i in range(num_docs):
+        # Lead each document with its own id so even same-length docs differ from
+        # the very first token; the rest is independently sampled filler.
+        words = [f"doc{i:06d}"]
+        words += [pool[rng.randrange(len(pool))] for _ in range(doc_tokens)]
+        document = " ".join(words)
+        # Human-only turns; load_convs reads only from=="human" turns, so gpt
+        # placeholders are unnecessary. Turn 0 carries the document + Q1.
+        turns = [{"from": "human",
+                  "value": f"{document}\n\n{_LONGDOC_QUESTIONS[0]}"}]
+        for q in range(1, questions):
+            turns.append({"from": "human",
+                          "value": _LONGDOC_QUESTIONS[q % len(_LONGDOC_QUESTIONS)]})
+        data.append({"id": f"longdoc-{i:06d}", "conversations": turns})
+
+    # Write via a temp sibling + rename so a concurrent reader never sees a
+    # partial file (and two racing generators converge on the same bytes).
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)
+    return path
+
+
+def _longdoc_num_convs(has_explicit_path=False):
+    """Default conversation cap for long-doc-qa: the whole generated corpus
+    (LONGDOC_NUM_DOCS). ``NUM_CONVS`` still overrides via ``resolve_workload``."""
+    return _longdoc_params()[2]
+
+
+# name -> {dataset: path|callable, num_convs: int, desc: str}. A callable dataset
+# is resolved at selection time (so per-run env like SHAREGPT_MIN_TURNS is
+# honored) and may return None to defer to an explicit DATASET_PATH. Add entries
+# here to register new workloads for all five drivers.
+WORKLOADS = {
+    "sharegpt": {
+        # ShareGPT multi-turn workload, selected by human-turn count (see
+        # _sharegpt_dataset): 12/12 = the baked 450-conv 12-turn subset; 1/1 =
+        # the full 94,145-conv corpus dir. Both dataset and num_convs are
+        # callables resolved from the turn config at selection time: the 450-conv
+        # cap is the default only for 12/12, otherwise the default is the whole
+        # corpus (see _sharegpt_num_convs). NUM_CONVS overrides either way.
+        "dataset": _sharegpt_dataset,
+        "num_convs": _sharegpt_num_convs,
+        "desc": "ShareGPT multi-turn workload by human-turn count "
+                "(SHAREGPT_MIN_TURNS/MAX_TURNS: 12/12 = 450-conv subset, "
+                "1/1 = full 94,145-conv corpus)",
+    },
+    "long-doc-qa": {
+        # Synthetic long-document QA (see _longdoc_generate): a large per-document
+        # unique prefix + short follow-ups, generated to a temp file at selection
+        # time. Both dataset and num_convs are callables resolved per run so the
+        # LONGDOC_* knobs take effect. Sized to build sizeable KV while fitting the
+        # default 8192 window; raise LONGDOC_DOC_TOKENS with --max-model-len to go
+        # bigger.
+        "dataset": _longdoc_generate,
+        "num_convs": _longdoc_num_convs,
+        "desc": "Synthetic long-document QA: per-doc-unique ~LONGDOC_DOC_TOKENS-"
+                "token prefix + LONGDOC_QUESTIONS follow-ups × LONGDOC_NUM_DOCS "
+                "docs (KV-cache stress; all env-tunable)",
+    },
+    "synth-multiturn": {
+        # Synthetic multi-turn ShareGPT set authored via the Claude API by
+        # tools/gen_synthetic_sharegpt.py (1000 convs, Poisson mean-50 human
+        # turns). Unlike long-doc-qa it is LLM-authored, so it can't be
+        # regenerated offline/deterministically — the file IS the artifact and
+        # is baked into the image gzip-compressed (load_convs decompresses it).
+        # A heavy multi-turn working set for GPU-KV + offload-tier stress.
+        "dataset": os.path.join(_DATA_DIR, "synth_multiturn.json.gz"),
+        "num_convs": 1000,
+        "desc": "Synthetic multi-turn ShareGPT (Claude-authored via "
+                "tools/gen_synthetic_sharegpt.py; ~1000 convs, mean-50 human "
+                "turns) — heavy multi-turn KV working set for offload stress",
+    },
+}
+
+
+def resolve_workload(default_dataset, default_num_convs):
+    """Resolve ``(dataset_path, num_convs)`` for this run from the environment.
+
+    Dataset-path precedence:
+      1. ``DATASET_PATH`` — explicit ShareGPT-format json; always wins.
+      2. ``WORKLOAD_NAME=<name>`` — a registered workload (see :data:`WORKLOADS`).
+      3. the caller's ``default_dataset`` (each driver's historical default).
+
+    ``NUM_CONVS``, when set, always overrides the count; otherwise a selected
+    workload's ``num_convs`` applies, else ``default_num_convs``. This keeps every
+    driver's prior default behavior intact when neither WORKLOAD_NAME nor the env
+    overrides are set. Unknown ``WORKLOAD_NAME`` values exit with the known list.
+
+    Note: the selector env is ``WORKLOAD_NAME``, not ``WORKLOAD`` — the bench
+    container images already use ``WORKLOAD`` for the driver-script path their
+    entrypoint execs, so the two must not collide."""
+    dataset = default_dataset
+    num_convs = default_num_convs
+    # An empty/whitespace DATASET_PATH counts as unset: the bench images bake
+    # DATASET_PATH=<450x12 sharegpt>, so an orchestrator selecting a self-generating
+    # workload (e.g. long-doc-qa) blanks it with `-e DATASET_PATH=` to stop the
+    # baked path winning here. Treat that as "no explicit path" so WORKLOAD_NAME wins.
+    explicit_path = (os.environ.get("DATASET_PATH") or "").strip() or None
+
+    workload = os.environ.get("WORKLOAD_NAME", "").strip().lower()
+    # Turn bounds only mean anything for the sharegpt workload, so setting either
+    # without WORKLOAD_NAME implies it — otherwise SHAREGPT_MIN_TURNS is silently
+    # ignored and the driver keeps its baked 450x12 default (the "asked for the
+    # corpus, still got 450" trap the shell orchestrators already guard against).
+    # This also keeps the 450-conv default tied to the 12/12 config: any other
+    # turn setting now routes through _sharegpt_num_convs (whole corpus) instead
+    # of falling back to default_num_convs.
+    if not workload and (
+        os.environ.get("SHAREGPT_MIN_TURNS") or os.environ.get("SHAREGPT_MAX_TURNS")
+    ):
+        workload = "sharegpt"
+    if workload:
+        spec = WORKLOADS.get(workload)
+        if spec is None:
+            raise SystemExit(
+                f"[run] unknown WORKLOAD_NAME={workload!r}; "
+                f"known: {', '.join(sorted(WORKLOADS)) or '(none)'}"
+            )
+        # Both dataset and num_convs may be callables, resolved now so per-run
+        # env like SHAREGPT_MIN_TURNS is honored (e.g. the default conv count
+        # tracks the turn config: 450 for 12/12, whole corpus otherwise). The
+        # dataset callable may return None to defer to an explicit DATASET_PATH
+        # rather than erroring on an unprepared range.
+        nc = spec.get("num_convs", default_num_convs)
+        num_convs = nc(bool(explicit_path)) if callable(nc) else nc
+        ds = spec["dataset"]
+        resolved = ds(bool(explicit_path)) if callable(ds) else ds
+        if resolved is not None:
+            dataset = resolved
+
+    if explicit_path:
+        dataset = explicit_path
+
+    num_convs_env = os.environ.get("NUM_CONVS")
+    if num_convs_env is not None:
+        num_convs = int(num_convs_env)
+
+    return dataset, num_convs
+
+
+# ── Workload input ────────────────────────────────────────────────────────
+def _read_dataset_json(path):
+    """Parse a ShareGPT-format dataset file, transparently decompressing it.
+
+    Supports plain ``.json``, gzip ``.json.gz`` (stdlib, always available), and
+    zstd ``.json.zst`` (only if the ``zstandard`` package is installed — it is
+    not a hard dependency, so a ``.zst`` dataset on an image without it fails
+    with a clear message rather than an opaque ImportError). Committing datasets
+    compressed keeps large sets (e.g. the synth-multiturn workload) small in-repo
+    and in the baked image."""
+    if path.endswith(".gz"):
+        with gzip.open(path, "rt", encoding="utf-8") as f:
+            return json.load(f)
+    if path.endswith(".zst"):
+        try:
+            import zstandard
+        except ImportError as e:
+            raise SystemExit(
+                f"[run] {path} is zstd-compressed but the `zstandard` package "
+                "is not installed in this image; provide a .json or .json.gz "
+                "dataset, or add zstandard to the image"
+            ) from e
+        with open(path, "rb") as fh:
+            data = zstandard.ZstdDecompressor().stream_reader(fh).read()
+        return json.loads(data.decode("utf-8"))
+    with open(path) as f:
+        return json.load(f)
+
+
+def load_convs(dataset_path, num_convs, conv_multiplier=1):
+    """Load ShareGPT-format json and return a list of human-turn streams.
+
+    ``dataset_path`` may be a single json file or a *directory* of json chunks
+    (the full-corpus ``sharegpt`` min-turns-1 case): a directory is read as its
+    ``*.json`` files in sorted (numeric-chunk) order, concatenated, so a chunked
+    corpus replays as one continuous conversation stream.
+
+    Each returned element is the list of ``human`` turn strings for one
+    conversation (only conversations with >= 2 human turns are kept), capped at
+    ``num_convs`` conversations — the cap short-circuits chunk reads, so a small
+    ``num_convs`` never loads the whole corpus.
+
+    ``conv_multiplier`` > 1 replicates the whole set N times for a larger
+    concurrent working set; each replica's first turn is tagged ``[r{n}] `` so
+    the accumulated context hashes distinctly per replica (otherwise
+    byte-identical copies would dedup at the prefix-cache / KV-block layer and
+    store no extra data). Replica order is (r0: all convs), (r1: all convs), …
+    """
+    if os.path.isdir(dataset_path):
+        paths = sorted(glob.glob(os.path.join(dataset_path, "*.json")))
+    else:
+        paths = [dataset_path]
+
+    convs = []
+    for path in paths:
+        if len(convs) >= num_convs:
+            break
+        all_data = _read_dataset_json(path)
+        for entry in all_data:
+            if len(convs) >= num_convs:
+                break
+            turns = entry.get("conversations", [])
+            human_turns = [t["value"] for t in turns if t.get("from") == "human"]
+            if len(human_turns) >= 2:
+                convs.append(human_turns)
+
+    if conv_multiplier > 1:
+        base = convs
+        convs = []
+        for r in range(conv_multiplier):
+            for conv in base:
+                tagged = list(conv)
+                tagged[0] = f"[r{r}] {tagged[0]}"
+                convs.append(tagged)
+    return convs
+
+
+# ── Shared telemetry helpers (lifted verbatim from the drivers) ─────────────
+def gib(n):
+    """Format a byte count as GiB, or 'n/a' for None."""
+    return "n/a" if n is None else f"{n / (1024 ** 3):.2f} GiB"
+
+
+def disk_rw_bytes(disk_stat_path):
+    """Return (bytes_read, bytes_written) cumulative for a /sys/block/<dev>/stat
+    path, or (None, None) if unreadable. Fields 3 and 7 are sectors read/written
+    in 512-byte units."""
+    if not disk_stat_path:
+        return None, None
+    try:
+        with open(disk_stat_path) as f:
+            fields = f.read().split()
+        return int(fields[2]) * 512, int(fields[6]) * 512
+    except (OSError, IndexError, ValueError):
+        return None, None
+
+
+def prom_counters(llm, capture=True):
+    """Snapshot vLLM's cumulative ``vllm:`` Counter metrics into a name->value
+    dict. Prefers the V1 offline ``llm.get_metrics()`` snapshot (engine counters
+    live there, not on the global REGISTRY in offline mode), then supplements
+    with the global prometheus REGISTRY (V0 engines, and connector-registered
+    ``vllm:kv_offload_*`` which only ever live on the registry). Names differ by
+    source — get_metrics() uses bare names, REGISTRY samples carry ``_total`` —
+    so both keys are kept."""
+    vals = {}
+    if not capture:
+        return vals
+    try:
+        for m in llm.get_metrics():
+            if type(m).__name__ != "Counter":
+                continue
+            name = getattr(m, "name", "")
+            val = getattr(m, "value", None)
+            if name.startswith("vllm:") and isinstance(val, (int, float)):
+                # Sum across label sets: get_metrics() emits one Counter per
+                # sample, so labeled metrics share a name.
+                vals[name] = vals.get(name, 0.0) + float(val)
+    except Exception:  # noqa: BLE001 - get_metrics() is V1-only; skip on V0
+        pass
+    try:
+        from prometheus_client import REGISTRY
+        for metric in REGISTRY.collect():
+            if not metric.name.startswith("vllm:"):
+                continue
+            for s in metric.samples:
+                if s.name.endswith("_total"):
+                    vals[s.name] = vals.get(s.name, 0.0) + float(s.value)
+    except Exception as e:  # noqa: BLE001
+        print(f"[prom] collect failed: {e}", file=sys.stderr, flush=True)
+    return vals
+
+
+# Canonical set of vLLM request-latency histograms every workload captures. This
+# is the ONE place the names live: the in-process drivers pass it to
+# prom_histograms(), and the serve-mode HTTP scraper (synthetic-agentic/
+# scrape_prom.py) mirrors it (it cannot import this module — it runs host-side
+# against a container's /metrics). Keep the two in sync.
+#
+# Names are the UNION across the vLLM versions this bench runs (verified against
+# 0.26 and 0.30); a name absent on a given server simply yields no data for that
+# metric (match-by-name, no error), so the union is the safe superset:
+#   - time_to_first_token_seconds           : prefill responsiveness (TTFT)
+#   - inter_token_latency_seconds           : inter-token latency (ITL; 0.26 + 0.30)
+#   - request_time_per_output_token_seconds : decode cadence (TPOT; 0.30 name)
+#   - e2e_request_latency_seconds           : whole-request wall latency
+#   - request_queue_time_seconds            : WAITING-phase queueing delay
+#   - request_decode_time_seconds           : DECODE-phase service time
+LATENCY_HISTOGRAMS = {
+    "vllm:time_to_first_token_seconds",
+    "vllm:inter_token_latency_seconds",
+    "vllm:request_time_per_output_token_seconds",
+    "vllm:e2e_request_latency_seconds",
+    "vllm:request_queue_time_seconds",
+    "vllm:request_decode_time_seconds",
+}
+
+
+def prom_histograms(llm, names, capture=True):
+    """Sample the named vLLM latency histograms once (cumulative over the run) as
+    {name: {count, sum, buckets{le: cumcount}}}, summed across label sets.
+
+    Two sources, mirroring prom_counters: the V1 offline ``llm.get_metrics()``
+    snapshot (Histogram objects), AND the global prometheus REGISTRY (the
+    ``_bucket{le=}``/``_sum``/``_count`` samples). The REGISTRY pass is essential
+    under AsyncLLM (WORKLOAD_MODE=async), which has NO get_metrics() — without it
+    async runs captured no histograms at all. A name already seen via get_metrics
+    is not re-read from the REGISTRY, so the two sources never double-count."""
+    out = {}
+    if not capture:
+        return out
+    try:
+        for m in llm.get_metrics():
+            if type(m).__name__ != "Histogram":
+                continue
+            name = getattr(m, "name", "")
+            if name not in names:
+                continue
+            agg = out.setdefault(name, {"count": 0, "sum": 0.0, "buckets": {}})
+            agg["count"] += int(getattr(m, "count", 0))
+            agg["sum"] += float(getattr(m, "sum", 0.0))
+            for le, c in (getattr(m, "buckets", {}) or {}).items():
+                agg["buckets"][le] = agg["buckets"].get(le, 0) + int(c)
+    except Exception:  # noqa: BLE001 - get_metrics() is V1-offline-only; async lacks it
+        pass
+    # REGISTRY pass: histogram samples are name_bucket{le=…} / name_sum / name_count.
+    # Only fill names not already captured above, so offline + registry never stack.
+    try:
+        from prometheus_client import REGISTRY
+        for metric in REGISTRY.collect():
+            base = "vllm:" + metric.name if not metric.name.startswith("vllm:") else metric.name
+            if base not in names or base in out:
+                continue
+            agg = {"count": 0.0, "sum": 0.0, "buckets": {}}
+            for s in metric.samples:
+                if s.name.endswith("_bucket"):
+                    le = s.labels.get("le")
+                    if le is not None:
+                        agg["buckets"][le] = agg["buckets"].get(le, 0.0) + float(s.value)
+                elif s.name.endswith("_sum"):
+                    agg["sum"] += float(s.value)
+                elif s.name.endswith("_count"):
+                    agg["count"] += float(s.value)
+            if agg["count"] or agg["buckets"]:
+                out[base] = {"count": int(agg["count"]), "sum": agg["sum"],
+                             "buckets": {le: int(c) for le, c in agg["buckets"].items()}}
+    except Exception as e:  # noqa: BLE001
+        print(f"[prom] histogram REGISTRY sample failed: {e}", file=sys.stderr)
+    return out
+
+
+def hist_pct(buckets, count, p):
+    """Percentile from cumulative buckets: the smallest upper bound ``le`` whose
+    cumulative count first reaches ``p*count``. Bucket-granular; returns inf when
+    the crossing lands in the +Inf bucket, None for an empty histogram."""
+    if not count:
+        return None
+    target = p * count
+
+    def _le(k):
+        return float("inf") if k in ("+Inf", "inf", "Inf") else float(k)
+
+    for le in sorted(buckets, key=_le):
+        if buckets[le] >= target:
+            return _le(le)
+    return float("inf")
+
+
+# ── Shared engine construction / setup (lifted from the drivers) ─────────────
+# These own the boilerplate every driver repeated around the backend-specific
+# kv_transfer_config: the common LLM kwargs, the MFU-metrics probe, the optional
+# Prometheus exporter, and the tokenizer-length closure. Both execution models
+# use them — run_batched in run_multiturn_sync_batched and the async model in
+# run_multiturn_async (build_engine(..., async_mode=True) + run_async) — so
+# setup is not forked.
+def yarn_hf_overrides(model, max_model_len, native=32768):
+    """Return ``hf_overrides`` enabling YaRN rope-scaling when ``max_model_len``
+    exceeds the model's native context, else ``{}``.
+
+    Qwen2.x ships a 32768-token window (``max_position_embeddings=32768``, no
+    ``rope_scaling``), so vLLM rejects a larger ``max_model_len`` with a
+    ``ModelConfig`` validation error rather than infer long-context support. The
+    OTel corpus needs the full 131072-token window, and Qwen's official recipe is
+    static YaRN with ``factor = target / native`` (4.0 for 131072). This applies
+    it only when the requested window is larger AND the model is a Qwen2.x — other
+    models fall through untouched. ``VLLM_ALLOW_LONG_MAX_MODEL_LEN`` is the wrong
+    tool here (it merely bypasses the check; RoPE positions past the trained range
+    produce NaNs). Set ``ROPE_YARN=0`` to opt out (e.g. to cap at ``native``).
+
+    Note: static YaRN slightly degrades quality on short sequences, which is the
+    accepted trade for a long-context KV-offload benchmark."""
+    import os
+    if os.environ.get("ROPE_YARN", "1") == "0":
+        return {}
+    if max_model_len <= native or "qwen2" not in model.lower():
+        return {}
+    factor = float(max_model_len) / float(native)
+    print(f"[engine] enabling YaRN rope-scaling factor={factor:g} "
+          f"(native {native} -> max_model_len {max_model_len})", file=sys.stderr)
+    return {"rope_scaling": {"rope_type": "yarn", "factor": factor,
+                             "original_max_position_embeddings": native}}
+
+
+def build_engine(engine_kwargs, *, async_mode=False):
+    """Construct the vLLM engine from a fully-assembled kwargs dict.
+
+    ``async_mode=False`` (default) returns a synchronous ``LLM(**engine_kwargs)``
+    — byte-identical to the drivers' former inline construction. ``async_mode=True``
+    returns a V1 ``AsyncLLM`` built from ``AsyncEngineArgs(**engine_kwargs)`` for
+    the per-conversation :func:`run_async` path; a ``kv_transfer_config`` given as
+    a dict is converted to ``KVTransferConfig`` (AsyncEngineArgs wants the typed
+    object, whereas ``LLM`` accepts the dict directly).
+
+    The same ``engine_kwargs`` feed both modes, so a driver flips between batched
+    and async by toggling this one flag — the backend config is not duplicated.
+    """
+    if not async_mode:
+        from vllm import LLM
+        return LLM(**engine_kwargs)
+
+    from vllm import AsyncEngineArgs
+    from vllm.v1.engine.async_llm import AsyncLLM
+
+    kwargs = dict(engine_kwargs)
+    kv = kwargs.get("kv_transfer_config")
+    if isinstance(kv, dict):
+        from vllm.config import KVTransferConfig
+        kwargs["kv_transfer_config"] = KVTransferConfig(**kv)
+    return AsyncLLM.from_engine_args(AsyncEngineArgs(**kwargs))
+
+
+def make_n_tokens(tokenizer, flavor="input_ids"):
+    """Return a ``text -> token count`` callable.
+
+    ``flavor="input_ids"`` uses ``len(tokenizer(text).input_ids)`` (nooffload,
+    offloading, shmq); ``flavor="encode"`` uses ``len(tokenizer.encode(text))``
+    (the fs_bench drivers). Both count the same for these tokenizers; the flavor
+    only preserves each driver's exact prior call."""
+    if flavor == "encode":
+        return lambda text: len(tokenizer.encode(text))
+    return lambda text: len(tokenizer(text).input_ids)
+
+
+def mfu_kwargs(capture=True, *, verbose=True):
+    """Return ``{"enable_mfu_metrics": True}`` iff the running vLLM's EngineArgs
+    accepts it, else ``{}``. Emits the same two ``[prom]`` lines the drivers
+    printed. ``capture=False`` short-circuits to ``{}`` with no probe/print."""
+    kwargs = {}
+    if not capture:
+        return kwargs
+    try:
+        import dataclasses as _dc
+        from vllm.engine.arg_utils import EngineArgs as _EA
+        if any(f.name == "enable_mfu_metrics" for f in _dc.fields(_EA)):
+            kwargs["enable_mfu_metrics"] = True
+    except Exception as e:  # noqa: BLE001
+        if verbose:
+            print(f"[prom] enable_mfu_metrics unavailable: {e}", file=sys.stderr)
+    if verbose:
+        print(f"[prom] enable_mfu_metrics={bool(kwargs)} "
+              f"(estimated_flops_per_gpu_total "
+              f"{'captured per round' if kwargs else 'ABSENT'})",
+              file=sys.stderr)
+    return kwargs
+
+
+def start_prom_exporter():
+    """Start the optional Prometheus HTTP exporter iff ``PROM_PORT`` is set.
+
+    Reads ``PROM_PORT``/``LOG_STATS`` from the environment and reproduces the
+    drivers' former inline block (start the server, warn when LOG_STATS is off so
+    the endpoint would serve an empty registry). No-op when ``PROM_PORT`` is
+    unset."""
+    import os
+    port = os.environ.get("PROM_PORT")
+    if not port:
+        return
+    from prometheus_client import start_http_server
+    start_http_server(int(port))
+    print(f"[prom] metrics exporter listening on :{port}/metrics", file=sys.stderr)
+    if os.environ.get("LOG_STATS", "0") == "0":
+        print(
+            "[prom] warning: LOG_STATS is off — vLLM metrics are not "
+            "registered, so /metrics will be empty. Set LOG_STATS=1.",
+            file=sys.stderr,
+        )
+
+
+# The two execution models live in their own siblings and carry no shared setup:
+# the default synchronous batched-round loop (run_batched) in
+# run_multiturn_sync_batched, and the opt-in async per-conversation model
+# (run_async, run_async_driver) in run_multiturn_async.

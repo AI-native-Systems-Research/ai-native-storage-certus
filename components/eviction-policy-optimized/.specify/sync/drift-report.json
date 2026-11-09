@@ -1,0 +1,158 @@
+{
+  "generated": "2026-10-31T04:54:40Z",
+  "project": "eviction-policy-optimized",
+  "branch": "specsync-c",
+  "base": "a0292be6",
+  "head": "0a71990e",
+  "scope": "55a4ddd4 (clippy) only; components/interfaces analysed by its own sync",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 24,
+    "aligned": 24,
+    "drifted": 0,
+    "stale_citations_backfilled": 1,
+    "not_implemented": 0,
+    "unspecced_features": 0
+  },
+  "specs": [
+    {
+      "id": "specs/001-optimized-eviction-policy/spec.md",
+      "items": [
+        {
+          "id": "US1 AS1-3",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "US3 AS1",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "US4 AS1",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-001",
+          "status": "aligned",
+          "location": "src/lib.rs:126-144"
+        },
+        {
+          "id": "FR-002",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-003",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-004",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-005",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-006",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-007",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-008",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-009",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-010",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-011",
+          "status": "aligned",
+          "location": "src/lib.rs:171-179"
+        },
+        {
+          "id": "FR-012",
+          "status": "aligned",
+          "location": "src/lru_list.rs:123-128,178-183"
+        },
+        {
+          "id": "FR-013",
+          "status": "aligned",
+          "location": "src/lib.rs:163-169"
+        },
+        {
+          "id": "NFR-001",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "NFR-002",
+          "status": "aligned",
+          "location": "src/lib.rs:71-73,75-110,120"
+        },
+        {
+          "id": "NFR-003",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "NFR-004",
+          "status": "aligned",
+          "location": "src/lib.rs:27-29 (unchanged)"
+        },
+        {
+          "id": "NFR-005",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "Key Entities CountMinSketch/Pool/PoolId/EvictionHandle",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "SC-002",
+          "status": "aligned",
+          "location": "src/lib.rs:424-451"
+        },
+        {
+          "id": "SC-003",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        }
+      ],
+      "citation_drift": [
+        {
+          "where": "all line citations",
+          "before": "`src/lib.rs` citations past line 74 (US1 AS1-3, US3, US4, FR-001 to FR-011, FR-013, NFR-002, NFR-005, SC-002) and `src/lru_list.rs` citations in FR-009 and FR-012",
+          "after": "each mapped by the diff to its HEAD line (+37 before `create_pool`, +42 after it, +10 in `lru_list.rs`); citations at or before line 73 (`CMS_*`, `CountMinSketch`, `Pool`, `EvictionState`) did not move"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Lock poisoning panics (unchanged by 55a4ddd4); not stated in the spec; recorded, not proposed."
+  ],
+  "unspecced": [],
+  "conflicts": [],
+  "drift_status": "clean",
+  "previous_report": null
+}

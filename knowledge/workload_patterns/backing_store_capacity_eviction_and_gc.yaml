@@ -1,0 +1,58 @@
+id: backing-store-capacity-eviction-and-gc
+kind: atomic
+name: Persistent-Tier Capacity LRU Eviction
+status: candidate
+parameters:
+  eviction_batch_blocks:
+    type: integer
+    range:
+    - 1
+    - 1024
+    default: 64
+  block_size:
+    type: integer
+    range:
+    - 1
+    - 64
+    default: 16
+  num_layers:
+    type: integer
+    range:
+    - 24
+    - 128
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range:
+    - 256
+    - 16384
+    default: 4096
+keyspaces:
+  gc_victims:
+    cardinality: eviction_batch_blocks
+    object_bytes: block_size * num_layers * kv_bytes_per_token_per_layer
+    sharing: global
+    disjoint_between_actors: false
+preconditions:
+- subject: gc_victims
+  state: present_in_store
+  value: true
+phases:
+- id: persistent-eviction
+  actors:
+    count: 1
+    arrival: burst
+    concurrency: 1
+  operations:
+  - op: delete
+    keys: gc_victims
+    order: random
+    repeat: eviction_batch_blocks
+measure:
+- phase: persistent-eviction
+  operation: store
+  metrics:
+  - latency_p99_ms
+expected_io:
+  stores: '0'
+  loads: '0'

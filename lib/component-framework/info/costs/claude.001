@@ -1,0 +1,18 @@
+/cost                                                                                                                                                           
+  ⎿  Total cost:            $14.72                                                                                                                                
+     Total duration (API):  32m 3s                                                                                                                                
+     Total duration (wall): 56m 50s                                                                                                                               
+     Total code changes:    3535 lines added, 352 lines removed                                                                                                   
+     Usage by model:                                                                                                                                              
+          claude-opus-4-6:  23.7k input, 76.0k output, 17.3m cache read, 651.8k cache write ($14.72)
+
++ examples
+
+/cost                                                                                                                                                           
+  ?  Total cost:            $15.63
+     Total duration (API):  34m 42s                                                                                                                               
+     Total duration (wall): 1h 2m 24s                                                                                            
+     Total code changes:    3792 lines added, 353 lines removed                                                                                                   
+     Usage by model:                                                                                                                                              
+          claude-opus-4-6:  24.0k input, 80.3k output, 18.2m cache read, 701.7k cache write ($15.63)  
+          

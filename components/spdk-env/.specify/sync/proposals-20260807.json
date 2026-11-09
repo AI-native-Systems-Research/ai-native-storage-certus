@@ -1,0 +1,60 @@
+{
+  "generated": "2026-08-07",
+  "branch": "sync/spec-drift-sweep-20260807",
+  "component": "spdk-env",
+  "based_on": "drift-report.{json,md} (2026-08-07 sweep re-analysis)",
+  "mode": "interactive",
+  "summary": { "backfill": 1, "human_decision": 0, "align_open": 2, "no_action": 2 },
+  "proposals": [
+    {
+      "id": "spdk-002-SC-002",
+      "spec": "002-spdk-env-vfio-init",
+      "requirement": "SC-002",
+      "direction": "BACKFILL",
+      "confidence": "HIGH",
+      "spec_says": "On a misconfigured system (no VFIO, wrong permissions, no hugepages, missing logger) the component reports the specific issue.",
+      "code_does": "No logger receptacle exists (FR-007); component uses eprintln!. The 'missing logger' misconfiguration case is stale (same correction already applied to SC-005 on 2026-07-22).",
+      "resolution": "Drop the stale 'missing logger' case from SC-002.",
+      "resolves_align_task": "2026-07-22 Task 2 (SC-002 stale logger clause)",
+      "approved": true,
+      "applied": true
+    },
+    {
+      "id": "spdk-001-superseded",
+      "spec": "001-spdk-vfio-env",
+      "direction": "NO_ACTION",
+      "note": "Already SUPERSEDED by 002 (2026-07-22 banner). No re-edit.",
+      "approved": true,
+      "applied": false
+    },
+    {
+      "id": "spdk-002-FR-015",
+      "spec": "002-spdk-env-vfio-init",
+      "requirement": "FR-015",
+      "direction": "NO_ACTION",
+      "note": "Spec already self-flags skip-and-warn as 'Future: not yet implemented'. US1 scenario 4 / edge case still read present-tense — open align-task (Task 4), not resolved this sweep.",
+      "approved": true,
+      "applied": false
+    },
+    {
+      "id": "spdk-002-task1-nvme-only",
+      "spec": "002-spdk-env-vfio-init",
+      "requirement": "SC-001 / US1 (all VFIO device types)",
+      "direction": "ALIGN",
+      "confidence": "MEDIUM",
+      "note": "enumerate_devices() is NVMe-only vs. 'all VFIO device types' claim. Open align-task; not a HIGH bug, not drafted.",
+      "approved": false,
+      "applied": false
+    },
+    {
+      "id": "spdk-002-task3-init-unwind",
+      "spec": "002-spdk-env-vfio-init",
+      "requirement": "(defect) do_init error path",
+      "direction": "ALIGN",
+      "confidence": "MEDIUM",
+      "note": "do_init() error path never calls spdk_env_fini() to unwind a successful init_spdk_env(); latent (enumerate_devices never returns Err). Open align-task; not drafted.",
+      "approved": false,
+      "applied": false
+    }
+  ]
+}

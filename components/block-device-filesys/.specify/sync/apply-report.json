@@ -1,0 +1,42 @@
+{
+  "generated": "2026-08-20",
+  "phase": "Phase B spec-sync",
+  "component": "block-device-filesys",
+  "spec_edited": "specs/001-block-device-filesys/spec.md",
+  "backup": ".specify/sync/backups/specs/001-block-device-filesys/spec.md.bak",
+  "source_changed": false,
+  "cargo_run": false,
+  "counts": {
+    "backfill_applied": 1,
+    "backfill_unspecced": 1,
+    "align_tasks": 0,
+    "resolved": 0,
+    "human_decision": 0
+  },
+  "specs_updated": [
+    {
+      "requirement": "FR-015",
+      "change_type": "BACKFILL",
+      "description": "Softened claim: create()'s doc example is intentionally ```ignore (illustrative-only); only DeviceConfig::new is runnable/compiled. Added 2026-08-20 correction note."
+    },
+    {
+      "requirement": "FR-023",
+      "change_type": "BACKFILL-UNSPECCED",
+      "description": "New FR documenting reserved pub(crate) config mutators set_file_path/set_block_size/set_num_blocks as intentional, non-public, outside the functional contract."
+    },
+    {
+      "requirement": "metadata:Last Synced",
+      "change_type": "METADATA",
+      "description": "Updated to 2026-08-20 Phase B; prior 2026-08-07 note retained."
+    }
+  ],
+  "align_tasks_generated": [],
+  "unspecced_backfilled": [
+    {
+      "feature": "set_file_path / set_block_size / set_num_blocks internal setters (pub(crate), #[allow(dead_code)])",
+      "location": "src/lib.rs:95-109",
+      "disposition": "Backfilled as FR-023 (reserved internal mutators; not public API; no acceptance scenario)."
+    }
+  ],
+  "resolved": []
+}

@@ -1,0 +1,43 @@
+research_question: >
+  Using a bounce buffer SSD→CPU→GPU with sequential transfers (dispatcher v0)
+  is faster than direct SSD→GPU P2P DMA for transfer of 4 MiB broken into a
+  stream of 128 KiB transfers, even with pre-pinned GPU memory.
+
+run_id: h8-v0-pinned
+
+max_iterations: 2
+
+target_system:
+  name: "Certus Storage Engine — Dispatcher v0 (sequential bounce) vs P2P with persistent staging"
+  description: >
+    AI-native KV-cache storage system. Dispatcher v0 at components/dispatcher/v0/
+    handles lookup by reading all 128KiB chunks sequentially to host DRAM via
+    ReadSync, then a single dma_copy_to_device to GPU at the end. No pipelining,
+    no P2P path. The IGpuServices receptacle provides prepare_memory_for_spdk()
+    which returns a DMA buffer backed by GPU BAR1 (via GDRCopy) for P2P.
+    Implement a P2P path in dispatcher v0 and compare against the existing
+    bounce-buffer path. Test through certus-server with --dispatcher-version v0.
+    CONSTRAINTS:
+    - Do NOT use or modify gpu-p2p-server.
+    - Do NOT create standalone benchmark binaries.
+    - All benchmarks MUST run through certus-server (apps/certus-server/) with --dispatcher-version v0.
+    - P2P implementation goes in components/dispatcher/v0/.
+    - P2P requires pre-pinned GPU staging via IGpuServices::prepare_memory_for_spdk().
+    - The P2P path must still promote data to memory-tier after reading to GPU,
+      so that subsequent lookups for the same key hit DRAM (same as bounce path).
+  observable_metrics:
+    - "end-to-end lookup latency (ms) for a single 4 MiB key"
+    - "sustained lookup throughput (MB/s) over N sequential lookups"
+  controllable_knobs:
+    - "transfer path: bounce (existing) | P2P direct with persistent staging (to implement)"
+    - "value size (4 MiB)"
+    - "chunk size (128 KiB, NVMe MDTS limited)"
+  repo_path: /home/nara/certus/ai-native-storage-certus
+
+models:
+  design: "claude-opus-4-6"
+  execute_analyze: "claude-sonnet-4-6"
+
+prompts:
+  methodology_layer: "prompts/methodology"
+  domain_adapter_layer: null

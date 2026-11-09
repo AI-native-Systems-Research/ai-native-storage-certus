@@ -1,0 +1,100 @@
+{
+  "generated": "2026-07-22T21:32:51Z",
+  "project": "rdma-test",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 19,
+    "aligned": 16,
+    "drifted": 3,
+    "not_implemented": 0,
+    "unspecced_features": 3
+  },
+  "specs": [
+    {
+      "id": "001-rdma-network-test",
+      "title": "RDMA Network Test Tool",
+      "aligned": [
+        "FR-001",
+        "FR-002",
+        "FR-003",
+        "FR-004",
+        "FR-006",
+        "FR-008",
+        "FR-009",
+        "FR-010",
+        "FR-011",
+        "FR-013",
+        "SC-001",
+        "SC-002",
+        "SC-003",
+        "SC-004",
+        "SC-005",
+        "SC-006"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-005",
+          "spec_text": "System MUST allow configuration of ... test type ... via command-line parameters. (contracts/cli-interface.md: '--test' Enum, values: throughput, latency, all; spec.md/quickstart.md examples use '--test throughput' and '-t throughput')",
+          "actual": "The '--test'/'-t' flag is backed by the TestType enum {Write, Read, Send, Recv, Latency, All} (clap ValueEnum, default lowercase rendering). There is no 'throughput' value; every documented example ('rdma-test client -a 10.0.0.1 -t throughput ...', './scripts/launch.sh node1 node2 --test throughput') would fail with a clap 'invalid value' error at startup.",
+          "location": "tools/rdma-test/src/main.rs:19-27 (TestType enum) vs tools/rdma-test/specs/001-rdma-network-test/contracts/cli-interface.md:17 and quickstart.md:51,54",
+          "severity": "major"
+        },
+        {
+          "requirement": "FR-007",
+          "spec_text": "spec.md Implementation Details for FR-007 states env var 'RDMA_TEST_PORT: Server listen port (default: 50000)'",
+          "actual": "scripts/launch.sh defaults PORT to 7471 ('PORT=\"${RDMA_TEST_PORT:-7471}\"'), matching the CLI global default in main.rs (default_value_t = 7471) and cli-interface.md's launch-script table (default 7471). Only spec.md's prose disagrees with the script, the CLI contract, and the code.",
+          "location": "tools/rdma-test/specs/001-rdma-network-test/spec.md:134 vs tools/rdma-test/scripts/launch.sh:21",
+          "severity": "minor"
+        },
+        {
+          "requirement": "FR-012",
+          "spec_text": "System MUST retry failed RDMA connections up to 3 times before aborting, and report partial results if any measurements were collected before failure. (Edge Cases: 'When the RDMA connection is interrupted mid-test, the tool retries up to 3 times. If all retries fail, it aborts and reports partial results collected before failure.')",
+          "actual": "The only retry loop (MAX_RETRIES=3) wraps a single CQ completion poll (poll_completion_with_retry), not connection establishment -- client_connect()/server_connect() call rdma_resolve_addr/rdma_resolve_route/rdma_connect/rdma_accept exactly once each with no retry/backoff if the RDMA-CM handshake itself fails. Additionally the 'partial' field on TestOutput is hard-coded to 'false' and is never set to true anywhere in the codebase; when a test errors out mid-run, main() simply prints the anyhow error to stderr and calls process::exit(1) without ever constructing/printing a TestOutput, so no partial JSON or human-readable partial results are ever emitted, contradicting the documented behavior.",
+          "location": "tools/rdma-test/src/rdma.rs:226-237 (poll_completion_with_retry) and src/rdma.rs:331,433 (server_connect/client_connect, no retry) and src/client.rs:129 (partial: false hard-coded) and src/main.rs:262-265 (error path drops all results)",
+          "severity": "major"
+        }
+      ],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "RDMA Read throughput test (TestType::Read / --test read)",
+      "location": "tools/rdma-test/src/throughput.rs:46-81 (run_read_client), src/client.rs:42-49, src/server.rs:26-29, src/main.rs:20-27",
+      "lines": 36,
+      "suggested_spec": "001-rdma-network-test (extend FR-002 to cover one-sided RDMA Read, or split into new FR)"
+    },
+    {
+      "feature": "Send-side bandwidth throughput test (TestType::Send / --test send), two-sided ibv_post_send with pre-posted recv window",
+      "location": "tools/rdma-test/src/send_bw.rs:1-74, src/client.rs:50-57, src/server.rs:30-33",
+      "lines": 74,
+      "suggested_spec": "001-rdma-network-test (new FR for two-sided Send/Recv bandwidth, distinct from the FR-003 latency ping-pong)"
+    },
+    {
+      "feature": "Recv-side bandwidth throughput test (TestType::Recv / --test recv), two-sided ibv_post_recv with pre-posted recv window",
+      "location": "tools/rdma-test/src/recv_bw.rs:1-76, src/client.rs:58-65, src/server.rs:34-37",
+      "lines": 76,
+      "suggested_spec": "001-rdma-network-test (new FR for two-sided Send/Recv bandwidth, distinct from the FR-003 latency ping-pong)"
+    }
+  ],
+  "conflicts": [
+    {
+      "description": "RDMA_TEST_PORT default disagreement: spec.md's FR-007 Implementation Details section documents a default of 50000, while contracts/cli-interface.md, scripts/launch.sh, and src/main.rs all agree on 7471.",
+      "locations": [
+        "tools/rdma-test/specs/001-rdma-network-test/spec.md:134",
+        "tools/rdma-test/specs/001-rdma-network-test/contracts/cli-interface.md:123",
+        "tools/rdma-test/scripts/launch.sh:21",
+        "tools/rdma-test/src/main.rs:55"
+      ]
+    },
+    {
+      "description": "'--test' value set disagreement: spec.md acceptance scenarios and contracts/cli-interface.md and quickstart.md all document/use 'throughput' as a --test value, but the implemented TestType enum has no 'throughput' variant (it has write/read/send/recv/latency/all).",
+      "locations": [
+        "tools/rdma-test/specs/001-rdma-network-test/spec.md:31",
+        "tools/rdma-test/specs/001-rdma-network-test/contracts/cli-interface.md:17",
+        "tools/rdma-test/specs/001-rdma-network-test/quickstart.md:51",
+        "tools/rdma-test/src/main.rs:19-27"
+      ]
+    }
+  ]
+}

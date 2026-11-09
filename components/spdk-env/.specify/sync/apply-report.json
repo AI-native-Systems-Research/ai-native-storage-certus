@@ -1,0 +1,17 @@
+{
+  "applied": "2026-10-05",
+  "project": "spdk-env",
+  "spec": "002-spdk-env-vfio-init",
+  "branch": "fix/poller-cpu-placement-logging",
+  "backup": ".specify/sync/backups/20261005T185807Z/spec.md",
+  "edits": [
+    {
+      "requirement": "FR-022 (new)",
+      "direction": "BACKFILL",
+      "result": "FR-022 added; Last Synced header added."
+    }
+  ],
+  "source_files_modified": [],
+  "align_tasks_generated": 0,
+  "drift_status": "clean"
+}

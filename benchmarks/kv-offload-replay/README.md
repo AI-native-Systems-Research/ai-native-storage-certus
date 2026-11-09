@@ -1,0 +1,530 @@
+# Offloading-connector tracing and replay
+
+Capture vLLM `OffloadingConnector` / `OffloadingManager` traffic as JSONL, then
+replay it against a fresh cache policy to compare hit ratios, admission, and
+evictions without re-running the model.
+
+- **Generation** requires vLLM (the tracing connectors wrap live vLLM classes).
+- **Replay** is pure Python by default — no vLLM or GPU needed.
+
+> **Running the live 450×12 comparison workload?** See
+> [`RUNBOOK-cpu-and-sharedstorage.md`](RUNBOOK-cpu-and-sharedstorage.md) for the
+> CPU-offload and SharedStorage backends, and `../../certus-shmq-connector/README.md`
+> for the Certus shmq path.
+
+> **All four backends' container files live here.** The NoOffload / CPU-offload /
+> SharedStorage images are built from `Dockerfile.{nooffload,cpu-offload,sharedstorage}`
+> in this directory. The Certus (shmq) backend's container files are **symlinks** into
+> `../../certus-shmq-connector/` (`Dockerfile.certus-shmq`, `run-bench-certus-shmq.sh`,
+> `docker-entrypoint-certus-shmq.sh`) — the real files stay there because that image's
+> build needs the connector Python package in its context, but building via the symlink
+> works (build context is still the repo root: `podman build -f
+> benchmarks/kv-offload-replay/Dockerfile.certus-shmq -t certus-shmq-connector .`). All four
+> Dockerfiles take `--build-arg VLLM_VERSION=<x.y.z>` (default `0.23.0`).
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `tracing_connector.py` | Connector-agnostic `KVConnectorBase_V1` that wraps a **config-selected** inner connector (`traced_kv_connector` in `kv_connector_extra_config`, default `OffloadingConnector`) and traces every call to `offloading_trace_<pid>.jsonl`. Since the CPU-offload and shmq/certus paths both run `OffloadingConnector`, the default traces either. Set `TRACE_DIR` to redirect output (e.g. a container mount). |
+| `tracing_offloading_manager.py` | Drop-in `CPUOffloadingSpec` that wraps the underlying `OffloadingManager` + `OffloadingHandler`. Writes `offloading_mgr_<pid>.jsonl` (lookup/touch/prepare_store/…) and `offloading_handler_<pid>.jsonl` (GPU↔CPU transfer jobs). |
+| `run_sharegpt_offloading.py` | Driver: runs `vllm bench throughput` on ShareGPT with the tracing connectors attached. |
+| `run_multiturn_offloading.py` | Driver: the multi-turn 450×12 offload workload for head-to-head vs Certus, and the single driver behind the unified `Dockerfile.offload` image. Selects the backend from env: `OFFLOAD_MODE=none` → GPU-only baseline (no `kv_transfer_config`); default → built-in `OffloadingConnector` CPU-only offload; `SECONDARY_TIER=fs` / `DISK_DIR` → native CPU+FS tiering; `TRACE_OFFLOAD=1` → the tracing wrappers above. See [`RUNBOOK-cpu-and-sharedstorage.md`](RUNBOOK-cpu-and-sharedstorage.md). |
+| `run_multiturn_nooffload.py` | Driver: the multi-turn 450×12 **no-offload** (GPU-only) baseline — same workload with no `kv_transfer_config`, so evicted KV is recomputed rather than fetched. The reference point for the offload backends. Used for the bare-metal path; the containerized baseline now runs through `run_multiturn_offloading.py` with `OFFLOAD_MODE=none` in the unified `Dockerfile.offload`. See [`RUNBOOK-cpu-and-sharedstorage.md`](RUNBOOK-cpu-and-sharedstorage.md). |
+| `run_otel_replay.py` | Driver (**kv-offload-otel-replay**): the timestamp-scheduled sibling of `run_multiturn_offloading.py`. Replays the `otel_trace_replay` corpus built by `benchmarks/kv-offload-otel-replay/trace-gen/trace_to_otel.py` (default `/mnt/certus1/inference-perf-syn-data/otel_1k`) instead of ShareGPT, and **reproduces the recorded turn timing** — one async coroutine per conversation, sleeping each recorded inter-turn gap (`start_time[k] − end_time[k−1]`) before the next turn, so wall-clock turn spacing matches the workload. Per-turn `max_tokens` come from the spans; context is rebuilt from vLLM's own generations under a 120k sliding window. Same backend/env selectors as `run_multiturn_offloading.py` (`OFFLOAD_MODE` / `DISK_DIR` / `SECONDARY_TIER` / `TRACE_OFFLOAD`). Options: `--dir` (`OTEL_DIR`), `--num` (`NUM_CONVS`, default = all files), `--time-scale` (`TIME_SCALE`, 1.0=real, 0=saturating). Async execution lives in `run_otel_async.py`. |
+| `run_otel_async.py` | Timestamp-scheduled async execution model behind `run_otel_replay.py` — the OTel analogue of `run_multiturn_async.py`. `run_otel` (one coroutine per conversation, sleeps the recorded inter-turn gaps, per-turn `max_tokens`, sliding-window context) and `run_otel_driver` (engine build, 1 Hz disk+prom sampler, latency percentiles, summary + `[prom]` markers matching the ShareGPT async path). **Containerized:** see [`../kv-offload-otel-replay/`](../kv-offload-otel-replay/) for the offload + shmq images and `run-docker-otel-*.sh` wrappers (the corpus is bind-mounted, not baked in). |
+| `otel_corpus.py` | Shared corpus loader for the OTel replay drivers — `load_otel_convs(trace_dir, num_convs)` parses the `otel_trace_replay` files (one conversation per file, spans = turns) into per-conversation `(human_text, max_tokens, delay_before_sec)` streams, keeping only each span's new user turn (linear ~0.8 GB for the 1000-file corpus, not the ~18 GB quadratic on-disk footprint). Connector-agnostic analogue of `run_multiturn_common.load_convs`; imported by both `run_otel_replay.py` and the shmq OTel driver. |
+| `../../certus-shmq-connector/run_otel_shmq_certus.py` | Driver: **kv-offload-otel-replay on certus-shmq**. The shmq counterpart of `run_otel_replay.py` — same OTel corpus, same timestamp scheduling and `run_otel_async` execution model, but the `CertusShmqOffloadingSpec` connector/compat/session-id/`GetIoStats` setup of `run_multiturn_shmq_certus.py` (imports the `certus_shmq_connector` package, so it lives in the connector dir, not here). Same `--dir`/`OTEL_DIR`, `--num`/`NUM_CONVS`, `--time-scale`/`TIME_SCALE` options plus the shmq env (`SHM_PATH`, `SLAB_SIZE_BYTES`, `ACTIVE_SESSIONS`, `DP_SIZE`/`DP_RANK`). Requires a running `certus-server` on `SHM_PATH`. |
+| `replay_offloading_traces.py` | Replays manager and/or handler traces against a pluggable target. Built-in manager targets: pure-Python LRU (default), vLLM `CPUOffloadingManager`, and `llmd_fs_backend`. Built-in handler targets: `fs-backend`. Additional targets can be supplied as `module.path:ClassName`. |
+
+## Prerequisites
+
+- Python 3.9+
+- For trace generation: vLLM installed, a GPU, and `sharegpt_v3.json` in this directory (from the `anon8231489123/ShareGPT_Vicuna_unfiltered` release).
+- For replay (default): nothing beyond the Python standard library.
+- For replay against optional backends, install what the backend needs (each is lazy-imported):
+  - `cpu-manager` → vLLM
+  - `fs-backend` → vLLM + `torch` + CUDA + `llmd_fs_backend` + `storage_offload`
+
+## Generating traces
+
+```bash
+PYTHONPATH=. python run_sharegpt_offloading.py \
+    --num-conversations 200 \
+    --num-prompts 200
+```
+
+- `--num-conversations N` filters `sharegpt_v3.json` to the first N valid (≥1 human→gpt pair) conversations and writes `sharegpt_subset_<N>.json`, which is then fed to vLLM.
+- `--num-prompts M` is vLLM's own flag: how many prompts it samples from that pool. Other `vllm bench throughput` flags pass through unchanged (for example, `--model`, `--max-model-len`, `--gpu-memory-utilization`).
+
+Every process writes its own trace files. After a run you should see:
+
+```
+offloading_trace_<pid>.jsonl     # connector-level (verbose; references vLLM objects)
+offloading_mgr_<pid>.jsonl       # manager-level  (clean JSON — use this for replay)
+offloading_handler_<pid>.jsonl   # handler-level  (GPU↔CPU transfer jobs)
+```
+
+The manager trace is the canonical input for `replay_offloading_traces.py`.
+
+## Reference traces
+
+Pre-generated traces live under `traces/` so you can replay without a GPU.
+
+| Path | Workload | Model | GPU | Wall | Transfers | Notes |
+|---|---|---|---|---|---|---|
+| `traces/sharegpt/199-prompts.{mgr,handler}.jsonl` | ShareGPT v3, 199 prompts | Meta-Llama-3-8B | A30 24 GB | 86 s | 199 GPU→CPU, 0 CPU→GPU | vLLM 0.19.1, `max-model-len 4096`, `gpu-mem-util 0.90`, block size 16. Write-path only — no cache hits landed, so load latency / bandwidth is not exercised. Replay results: [`traces/sharegpt/199-prompts.results.md`](traces/sharegpt/199-prompts.results.md). |
+
+Substitute the paths above for the `offloading_mgr_*.jsonl` / `offloading_handler_*.jsonl` globs in any example below.
+
+## Replaying traces
+
+### Default (pure Python, no vLLM)
+
+```bash
+python replay_offloading_traces.py \
+    --manager-trace offloading_mgr_*.jsonl \
+    --num-blocks 256
+```
+
+Example output:
+
+```
+=== manager replay ===
+  target: simple-lru {'num_blocks': 256, 'block_size': 16, 'policy': 'lru'}
+  lookup:       calls=17  req=260 blocks  hit=0 (0.00%)
+  prepare_store: calls=199  rejected=0 (0.00%)
+                 admitted=442/442  evicted=186 (186 unique)
+  complete_store: calls=20  blocks=442
+  wall: 0.012s  ops/s=36864  admitted_blocks/s=35811
+  latency_ms (per method):
+    method               n     mean      p50      p95      p99      max
+    lookup              17    0.021    0.017    0.055    0.055    0.055
+    touch              219    0.018    0.015    0.048    0.053    0.058
+    prepare_store      199    0.014    0.008    0.036    0.126    0.604
+    complete_store      20    0.028    0.023    0.062    0.062    0.062
+```
+
+The manager replay captures wall time, per-method latency percentiles, and aggregate ops/s — enough to benchmark one policy against another. Shrink `--num-blocks` to force eviction pressure; grow it to see the hit-rate ceiling.
+
+### Against vLLM's `CPUOffloadingManager`
+
+```bash
+python replay_offloading_traces.py \
+    --manager-trace offloading_mgr_*.jsonl \
+    --target cpu-manager \
+    --num-blocks 1024 --policy lru
+```
+
+vLLM is imported lazily — only this target pulls it in.
+
+### Against the llmd_fs_backend (real files on disk)
+
+```bash
+python replay_offloading_traces.py \
+    --manager-trace offloading_mgr_*.jsonl \
+    --target fs-backend \
+    --target-args '{"root_dir": "/tmp/kv-fs-replay",
+                     "num_gpu_blocks": 1024,
+                     "per_block_bytes": 4096}'
+```
+
+Stands up a `SharedStorageOffloadingManager` plus `StorageOffloadingHandlers` wired to the `storage_offload` C++ engine, backed by a fabricated zero-filled GPU KV tensor. `prepare_store` issues a real `transfer_async` (GPU → disk); `complete_store` polls `get_finished()` until all in-flight writes have landed, so subsequent `lookup`s see the files and report accurate hit rates.
+
+Requires `torch` + CUDA, `vllm`, `llmd_fs_backend`, `storage_offload`. Writes real files under `root_dir` — clean up afterwards with `rm -rf`. The `storage_offload` engine pads each file to its staging-buffer size, so disk usage can exceed payload bytes by a large factor.
+
+### Against your own policy
+
+Point `--target` at `module.path:ClassName`. Constructor kwargs come from `--target-args`:
+
+```bash
+python replay_offloading_traces.py \
+    --manager-trace offloading_mgr_*.jsonl \
+    --target mypkg.mypolicy:TwoQCache \
+    --target-args '{"protected_blocks": 512, "probation_blocks": 512}'
+```
+
+### Target protocol
+
+A replay target is any object with these methods. Keys are hex-string block hashes, passed through as-is from the trace.
+
+```python
+class MyTarget:
+    def __init__(self, num_blocks: int, block_size: int = 16, **kwargs): ...
+
+    def lookup(self, keys: list[str]) -> int:
+        """Return the number of leading keys present (prefix hit)."""
+
+    def touch(self, keys: list[str]) -> None:
+        """Mark keys as recently used. May be called with empty list."""
+
+    def prepare_load(self, keys: list[str]) -> None:
+        """Reserve keys for a read. May raise if missing."""
+
+    def complete_load(self, keys: list[str]) -> None: ...
+
+    def prepare_store(self, keys: list[str]):
+        """Admit new keys, evicting as needed. Return an object with
+        .block_hashes_to_store and .block_hashes_evicted, or None if
+        the request cannot fit."""
+
+    def complete_store(self, keys: list[str], success: bool = True) -> None: ...
+```
+
+The shape matches vLLM's `OffloadingManager` so existing implementations can be wrapped in a few lines — see `_make_cpu_manager_target` in `replay_offloading_traces.py`.
+
+## What the replay measures (and what it doesn't)
+
+The manager trace captures **every scheduler↔manager call with its full key list** — `lookup`, `touch`, `prepare_load`, `complete_load`, `prepare_store`, `complete_store`. That's enough to replay any alternative manager *faithfully at the per-call level*: each call gets the exact same key sequence the original vLLM run presented, so each manager's own admission / eviction / retention decisions are real.
+
+The handler trace captures **the shape of data movement** — transfer direction, block count, timing — but **not** the KV tensor bytes. Replay either moves zero-filled / uninitialised buffers of the right size (real-worker mode) or applies a per-block cost model (simulated mode).
+
+### Faithfully measured
+
+| Metric | Comes from |
+|---|---|
+| Cache hit rate | Each alternative manager's `lookup` return values on the original key sequences. |
+| Admission count / rejection rate | `prepare_store` decisions. |
+| Eviction count and identity | `prepare_store` output: `evicted_keys`. |
+| Manager-layer wall time and per-method p50 / p99 latency | Measured live during replay. |
+| Handler throughput (MB/s) and submit→done latency | Measured live; real IO in real-worker mode. |
+
+### Not closed-loop
+
+Trace replay is **open-loop**. The manager trace is a recording of what happened in one specific vLLM run — it's not a script that adapts to a new manager's responses. Concretely:
+
+Original run:
+```
+scheduler:  manager.lookup([A, B, C, D, E])
+manager:    → 3            (A, B, C are hits)
+scheduler:  prepare_load([A, B, C]); prefill [D, E]; later prepare_store([new blocks])
+```
+
+Replay against a different manager:
+```
+replay:     manager_new.lookup([A, B, C, D, E])
+manager_new: → 1           (only A is hit in its state)
+replay:     (still marches to the next captured record — a prepare_load for whatever
+             the original manager reported, NOT what manager_new just said)
+```
+
+So the `lookup` count is real, but the subsequent calls are fixed from the original execution. In production, a different manager's different hit rates would have caused different prefills, different block hashes, different eviction pressure later — we don't re-derive any of that.
+
+### What that means for interpretation
+
+The replay answers:
+
+> "Presented with the same key requests, how does manager X compare to manager Y on per-call decisions and on storage cost?"
+
+It does **not** answer:
+
+> "What would the end-to-end serving throughput have been if we'd run vLLM with manager X from the start?"
+
+To answer the second question, run vLLM with manager X as the active connector and capture a fresh trace — i.e., re-do the *generation* step with the new manager, not replay. The tracing connector is backend-agnostic, so any `OffloadingManager`-shaped backend plugs in cleanly.
+
+In practice, per-call decisions strongly predict end-to-end behaviour: a manager with a higher hit rate on the same key stream will almost certainly be better end-to-end too. The open-loop caveat matters most when you're chasing fine-grained tail-latency differences or want to report production-accurate tokens/sec.
+
+## Trace formats
+
+`offloading_mgr_<pid>.jsonl` (one JSON object per line):
+
+```json
+{"ts": 2.46, "method": "touch", "keys": ["41176c…", "594304…"]}
+{"ts": 2.46, "method": "lookup", "keys": [...]}
+{"ts": 2.46, "method": "prepare_store", "keys": [...]}
+{"ts": 2.47, "method": "complete_store", "keys": [...], "success": true}
+```
+
+`offloading_handler_<pid>.jsonl` (read by the simulated-handler replay):
+
+```json
+{"ts": 5.22, "method": "transfer_async", "transfer_type": "GPU->CPU",
+ "job_id": 0,
+ "src": {"medium": "GPU", "block_ids": [3, 4, 5, ...], "group_sizes": [12]},
+ "dst": {"medium": "CPU", "block_ids": [0, 1, 2, ...]}}
+```
+
+`offloading_trace_<pid>.jsonl` is the connector-level trace — useful for timing and call sequence, but arguments contain `repr()` of live vLLM objects so it is not self-contained. The manager and handler traces are the portable ones.
+
+## Handler replay
+
+Two modes — simulated (default) or real worker.
+
+### Simulated cost model
+
+```bash
+python replay_offloading_traces.py \
+    --handler-trace offloading_handler_*.jsonl \
+    --per-block-ms 0.05
+```
+
+Applies a per-block service time to each `transfer_async` event and reports p50/p95/p99 latency and aggregate throughput. No external deps.
+
+### Real worker (FS backend)
+
+```bash
+# Drive the real llmd_fs_backend worker
+python replay_offloading_traces.py \
+    --handler-trace offloading_handler_*.jsonl \
+    --handler-target fs-backend \
+    --handler-target-args '{"root_dir": "/tmp/kv-fs-handler",
+                             "num_gpu_blocks": 1024,
+                             "per_block_bytes": 16384}'
+```
+
+The replay driver replays every `transfer_async` event against the real worker: it synthesizes a destination (block hashes) matching the trace's block count and direction, calls the worker's `transfer_async`, then drains completions at each `wait` / `get_finished` event in the trace. For `in`-direction transfers (storage → GPU) it reuses hashes written by earlier `out`-direction transfers so the worker can actually find them.
+
+The reported latency is real wall time (submit → completion drain) and the throughput reflects real disk or NVMe bandwidth. Synthetic destinations mean the content on disk isn't meaningful — only the shape, timing, and direction of transfers are preserved.
+
+Custom handler targets: pass `--handler-target module.path:ClassName`. The class must expose `transfer_async(job_id, n_blocks, direction)`, `wait(job_ids)`, and `get_finished()` — see `_make_fs_handler_target` for a reference implementation.
+
+## Benchmarking example
+
+Generate a sizeable trace with some reuse and eviction pressure, then replay it through a real backend (both manager and handler):
+
+```bash
+# 1. Generate: 500 ShareGPT conversations through vLLM + TracingConnector
+PYTHONPATH=. python run_sharegpt_offloading.py --num-conversations 500 --num-prompts 500
+
+# 2. Real backend run: manager + handler against llmd_fs_backend
+python replay_offloading_traces.py \
+    --manager-trace offloading_mgr_*.jsonl \
+    --handler-trace offloading_handler_*.jsonl \
+    --target fs-backend \
+    --handler-target fs-backend \
+    --handler-target-args '{"root_dir": "/mnt/fs-backend-bench/replay",
+                             "num_gpu_blocks": 1024,
+                             "per_block_bytes": 16384}' \
+    --output-json bench_fs.json
+```
+
+For a lower-bound replay-driver cost, run with `--target simple-lru --num-blocks <big>` — no eviction, no backend, just the replay loop. Diff that against the `fs-backend` run to separate real storage cost from the replay driver's own overhead.
+
+## Comparing all backends: `profile_all.sh`
+
+`profile_all.sh` runs the same 12-turn ShareGPT replay workload through up to four
+KV-offload backends — `nooffload` (GPU-only baseline), `certus-spdk` (shmq client +
+`certus-server` over DRAM + raw NVMe), `cpuoffload` (vLLM's host-RAM
+`OffloadingConnector`), and `sharedstorage` (`llmd_fs_backend` RAID0/XFS) — and emits
+a side-by-side throughput table. Each backend is preflighted independently: ready ones
+run, the rest are marked `SKIPPED` with a reason, and per-backend failures never fail
+the whole run.
+
+**The host reconfiguration is automatic.** The shared NVMe group you pass with
+`--device-pci` is flipped between phases *by the script itself* via
+`tools/configure-bench.sh` — bound to `vfio-pci` + 1G hugepages for the `certus-spdk`
+phase (SPDK), and to the kernel `nvme` driver + RAID0/XFS for the `sharedstorage`
+phase. You do **not** run `configure-bench.sh` yourself; `profile_all.sh` invokes it
+(runtime-only, no reboot) and requests a reboot only if the boot-reserved 1G-hugepage
+pool falls short. `sudo` is cached once, up front.
+
+### Running only the Certus-SPDK backend
+
+To profile just the Certus stack (`--only certus-spdk`) — building the client image
+first, pinning the vLLM base image, and capping the replay at 12 turns:
+
+```bash
+time benchmarks/kv-offload-replay/profile_all.sh \
+    --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 \
+    --device-pci 0000:63:00.0 --device-pci 0000:64:00.0 \
+    --max-rounds 12 \
+    --model-fs /mnt/fs-backend-bench \
+    --vllm-version 0.23.0 \
+    --only certus-spdk \
+    --evict-threshold 1 \
+    --build
+```
+
+### Parameters used above
+
+| Flag | Meaning |
+|------|---------|
+| `--device-pci <DDDD:BB:DD.F>` | NVMe PCIe address of the shared drive group; **repeatable** (one per drive). The `certus-spdk` phase binds these to `vfio-pci`; needed for that backend to run at all. |
+| `--max-rounds <n>` | Cap every backend at N replay rounds/turns (`0` = replay all turns). `12` matches the 12-turn dataset. |
+| `--model-fs <dir>` | Filesystem for the HF model cache and the shmq podman image store. Default `/mnt/certus1`. Also the default location of the run's `--logdir`. |
+| `--vllm-version <x.y.z>` | Pin the vLLM base-image version for the built images (passed as the `VLLM_VERSION` build arg; images are tagged `:vllm<x.y.z>` so versions coexist). Implies the images must be built at that version — pass `--build` too. |
+| `--only certus-spdk` | Run only the Certus-SPDK backend. Other valid names: `nooffload`, `cpuoffload`, `sharedstorage` (comma-separated). |
+| `--evict-threshold <f>` | Certus-SPDK DRAM→SSD demotion threshold. Default `0.6`; `1` effectively defers demotion until the DRAM tier is full. |
+| `--build` | Build any missing bench image before its run. Required the first time (or after `--vllm-version` changes), since the image tag won't exist yet. |
+
+Other useful flags: `--memory-tier-size <sz>` (Certus-SPDK server DRAM pool, e.g.
+`32G`), `--num-convs <n>` (conversations to replay, default 450), `--gpu <sel>` (CDI
+GPU selector: `all` | `0` | `0,1` | `<uuid>`), and `--logdir <dir>` (output dir;
+defaults to `<model-fs>/kvprofile-<runid>`). Run `profile_all.sh --help` for the full
+list.
+
+### Selecting the workload and execution model
+
+Two orthogonal knobs, both forwarded as env to every backend driver so all
+variants run the same thing:
+
+| Flag | Env forwarded | Meaning |
+|------|---------------|---------|
+| `--workload-mode <batched\|async>` (or `--async`) | `WORKLOAD_MODE` | Execution model. `batched` (default) runs the synchronous per-round `generate()` loop; `async` runs one vLLM coroutine per conversation on a V1 `AsyncLLM` (`max_num_seqs` bounds the running batch, the rest queue). Same engine config either way; in async mode `--max-rounds` becomes a per-conversation turn cap. |
+| `--workload <name>` | `WORKLOAD_NAME` | Named dataset. Empty (default) = each driver's baked 450×12 dataset. `sharegpt` selects the ShareGPT multi-turn workload by human-turn count (see below). `long-doc-qa` selects the synthetic long-document QA workload (see below). |
+| `--min-turns <n>` / `--max-turns <n>` | `SHAREGPT_MIN_TURNS` / `SHAREGPT_MAX_TURNS` | Human-turn window for the `sharegpt` workload — **passing either implies `--workload sharegpt`**. Only two configs are prepared: `12`/`12` (default) = the baked 450×12 subset (the container variants are then a no-op), and `1`/`1` = the **full 94,145-conversation corpus** (`data/sharegpt/*.json`, mounted read-only and capped by `--num-convs`). Any other pair errors — use an explicit `DATASET_PATH` for other turn counts. `--max-turns` mirrors `--min-turns` when unset. |
+
+The corpus itself is documented in [`../../data/sharegpt/README.md`](../../data/sharegpt/README.md).
+
+### `long-doc-qa` — synthetic long-document QA (KV-cache stress)
+
+`--workload long-doc-qa` swaps the ShareGPT content for a synthetic long-document
+workload while keeping **everything else the same** — same drivers, same
+`profile_all.sh`, same execution models (`--workload-mode batched|async`), same
+render tools. Each conversation is one long, **per-document-unique** document
+followed by short follow-up questions: turn 0's prompt is `document + Q1`, a large
+reused prefix the accumulating-context loop caches once and every later turn
+reuses. The distinct working set is therefore ≈ `num_docs × doc_tokens` of KV,
+sized to overflow the GPU cache and drive the offload tier. (Unlike upstream
+[`../long-doc-qa`](../long-doc-qa), whose documents are an identical `"hi hi …"`
+string — those dedup at the KV-block layer — each document here draws its filler
+independently, so the blocks are distinct and actually occupy the tier.)
+
+The dataset is generated deterministically to a temp file at selection time (no
+committed artifact, regenerated per container), so no driver changes are needed.
+Shape knobs (all env, forwarded to every backend):
+
+| Env | Default | Meaning |
+|-----|---------|---------|
+| `LONGDOC_DOC_TOKENS` | `4000` | Approx document length (tokens ≈ words). The default fits the default 8192 window with all 8 turns and headroom; **raise it together with `--max-model-len`** or later turns overflow the budget and the conversation is retired (the loop drops on overflow, it does not truncate). |
+| `LONGDOC_QUESTIONS` | `8` | Human turns per document (turn 0 = doc + Q1, then follow-ups). |
+| `LONGDOC_NUM_DOCS` | `1000` | Documents in the generated corpus. `--num-convs` caps this at run time and defaults to it for this workload. |
+| `LONGDOC_SEED` | `1234` | RNG seed for a reproducible corpus. |
+
+Example: `LONGDOC_DOC_TOKENS=12000 ./profile_all.sh --workload long-doc-qa --max-model-len 16384 …`
+The same selection works outside `profile_all.sh`: any driver honours
+`WORKLOAD_NAME` / `WORKLOAD_MODE` / `DATASET_PATH` / `NUM_CONVS` directly (see
+`run_multiturn_common.resolve_workload`).
+
+**Against a running stack (llm-d).** `longdoc_router.py` sends the same
+long-doc-qa conversations (same `LONGDOC_*` knobs, so the same documents) to an
+OpenAI-compatible router over HTTP, and starts nothing: no certus server, no
+vLLM engine, no container. Model, context window and KV sizing are whatever the
+served stack has. Each turn is one streamed `/v1/completions` request whose
+prompt is the previous prompt, the answer and the next question, as in the
+async driver; a turn too long for the served window is refused by the server
+and retires its conversation.
+
+```bash
+LONGDOC_DOC_TOKENS=8000 LONGDOC_QUESTIONS=8 \
+    ./longdoc_router.py --url http://node2:30080 --num-convs 8 --output-tokens 1 \
+    --out longdoc.jsonl
+```
+
+`--concurrency` (default: every conversation at once), `--turns`, `--model`
+(default: the first served) and `--temperature` / `--top-p` (default 0.7 / 0.95,
+as the drivers) are the rest. `--ignore-eos` makes every turn generate exactly
+`--output-tokens`; use it when comparing runs, or answers end at different
+lengths and the runs carry different KV. Output is one JSON line per turn plus a summary
+(TTFT for turn 0 and for later turns, per-turn prompt length).
+
+> **Note:** the container IPC mode is not a CLI flag — `profile_all.sh` launches
+> the shmq client with `--ipc=host` already, which does double duty: the host
+> `certus-server` can open the container's CUDA IPC handles, and the container sees
+> the host `/dev/shm` mailbox. There is no `--client-network` option; passing an
+> unknown flag exits with an error.
+
+### Outputs
+
+Per run: `<logdir>/<variant>.log` (per-backend stdout/stderr),
+`<logdir>/result-<variant>.json` flushed as each backend finishes (survives a crash or
+a `--only` subset), `<logdir>/results.json` (aggregate), and the comparison table on
+stdout. Wrapping the invocation in `time` (as above) captures total wall-clock across
+all selected phases including the host reconfiguration.
+
+## Closed-loop head-to-head by hand (cputier-fixed vs certus-shmq)
+
+`profile_all.sh` above is the automated all-backends sweep. The two stability
+scripts below are the manual path for the **closed-loop** live comparison used
+for the fixed-concurrency head-to-head: **cputier-fixed** (vLLM 0.26.0 native
+CPU+fs tiering with the baked tiering fix — image `certus-offload-fix026`)
+vs **certus-shmq** (host `certus-server` over SPDK NVMe + shmq client container).
+
+### Open-loop vs closed-loop
+
+The workload driver has two modes, selected by `ACTIVE_SESSIONS`:
+
+- `ACTIVE_SESSIONS=0` (default) — **open-loop**: every conversation is launched
+  up front and the driver waits for all to finish (historical `gather`-all).
+- `ACTIVE_SESSIONS=N` — **closed-loop**: a fixed pool of `N` worker coroutines
+  keeps exactly `N` conversations in flight; each finishing conversation admits
+  the next from a shared counter (admit-on-finish). This holds a steady
+  concurrency level regardless of how many total conversations (`NUM_CONVS`) are
+  queued, which is what makes the two arms comparable. Requires
+  `WORKLOAD_MODE=async`.
+
+For a fair steady-state comparison, `MAX_NUM_SEQS` must be `>= ACTIVE_SESSIONS`
+(otherwise vLLM's own WAITING queue, not the driver's session pool, becomes the
+concurrency gate).
+
+### Step 1 — (shmq only) rebuild the client image first
+
+The shmq image bakes the driver **and** its three helper modules
+(`run_multiturn_common.py`, `run_multiturn_sync_batched.py`,
+`run_multiturn_async.py`) via `COPY` lines in `certus-shmq-connector/Dockerfile`.
+An older image can predate those lines and be missing
+`/workspace/benchmarks/kv-offload-replay/` entirely, which surfaces at runtime as
+`ModuleNotFoundError: No module named 'run_multiturn_common'`. Rebuild so the
+image is self-consistent (build context is the repo root):
+
+```bash
+podman --root /mnt/certus1/podman/storage --runroot /mnt/certus1/podman/run \
+    build --build-arg VLLM_VERSION=0.26.0 \
+    -f certus-shmq-connector/Dockerfile -t certus-shmq-connector .
+```
+
+> **After rebuilding, do NOT pass `WORKLOAD_SRC` or `ASYNC_SRC`.** Those single-file
+> bind-mounts exist only as an emergency override. Mounting one file into the
+> `/workspace/benchmarks/kv-offload-replay/` dir when that dir does *not* already
+> exist in the image makes podman create a fresh dir containing **only** that file,
+> shadowing the baked siblings and re-triggering the `ModuleNotFoundError`. With a
+> current image all the helpers are baked, so leave both variables unset.
+
+The shmq arm also needs (not done by these scripts — they require `sudo`; see
+`certus-shmq-connector/setup-host.sh` or `tools/configure-bench.sh`): the
+`certus-server` binary built (`cargo build --release -p certus-server`), NVMe
+devices `0000:{61,62,63,64}:00.0` bound to `vfio-pci`, and 1G hugepages reserved
+on NUMA node 0.
+
+### Step 2 — run each arm
+
+Both scripts take an output-dir name as `$1` and write `<out>/progress.log` with a
+`RUN_DONE … gens=… elapsed=… gen_per_s=…` line per run. Use `RUNS=1` for a single
+timed run (raise it for stability/CoV sampling). Matched-tier fairness: the
+cputier `CPU_BYTES` must equal the shmq `MEM_TIER_SIZE` (both `13G` for the
+head-to-head).
+
+```bash
+cd benchmarks/kv-offload-replay
+
+# Arm 1 — cputier-fixed (native CPU+fs tiering, patched image)
+RUNS=1 NUM_CONVS=1000 MAX_ROUNDS=0 WORKLOAD_MODE=async ACTIVE_SESSIONS=60 \
+    DATASET_HOST=/home/dwaddington/certus/data/sharegpt_v3.json \
+    bash ./run_cputier_patched_stability.sh cl60-cputier-$(date +%Y%m%d_%H%M%S)
+
+# Arm 2 — certus-shmq (SPDK NVMe + shmq client)   [image rebuilt in Step 1]
+RUNS=1 NUM_CONVS=1000 MAX_ROUNDS=0 WORKLOAD_MODE=async ACTIVE_SESSIONS=60 \
+    DATASET_HOST=/home/dwaddington/certus/data/sharegpt_v3.json \
+    bash ./run_certus_stability.sh cl60-shmq-$(date +%Y%m%d_%H%M%S)
+```
+
+`MAX_ROUNDS=0` replays every human turn in each conversation; set a positive value
+to cap turns per conversation.
+
+### Step 3 (optional) — both arms back-to-back
+
+`run_cl60_headtohead.sh` runs cputier then shmq sequentially (they share the GPU,
+so they must not overlap), stamping both output dirs with one timestamp:
+
+```bash
+NUM_CONVS=1000 ACTIVE_SESSIONS=60 bash ./run_cl60_headtohead.sh
+```
+
+Overridable env: `NUM_CONVS`, `ACTIVE_SESSIONS`, `MAX_ROUNDS`, `DS` (dataset path),
+`STAMP`. It does **not** rebuild the shmq image — do Step 1 first if the image is
+stale. Compare the two `RUN_DONE … gen_per_s=…` lines in
+`cl60-cputier-<stamp>/progress.log` and `cl60-shmq-<stamp>/progress.log`.
+
+## Other datasets
+
+`--num-conversations` is ShareGPT-specific (the filter expects the ShareGPT V3 schema with `id` and `conversations[{from,value}]`). For other datasets, skip the flag and use `vllm bench throughput`'s native dataset options (`--dataset-name random`, `--dataset-name sonnet`, a custom `--dataset-path`, etc.) — the tracing connectors do not care where the prompts come from.

@@ -1,0 +1,18 @@
+channel,throughput_melems_s,mean_latency_us
+builtin_u64,1.4071,0.7106
+crossbeam_bounded_u64,2.0454,0.4890
+crossbeam_unbounded_u64,20.708,0.0483
+kanal_u64,0.59157,1.6897
+tokio_u64,2.2198,0.4503
+builtin_vec1024,1.4391,0.6947
+crossbeam_bounded_vec1024,0.51422,1.9449
+crossbeam_unbounded_vec1024,1.6786,0.5959
+kanal_vec1024,0.28083,3.5596
+tokio_vec1024,0.52852,1.8920
+
+# SPSC results (capacity 1024)
+spsc_builtin,3.0981,0.3228
+spsc_crossbeam_bounded,10.494,0.09529
+spsc_crossbeam_unbounded,15.578,0.06419
+spsc_kanal,0.80938,1.2355
+spsc_rtrb,0.95271,1.0496

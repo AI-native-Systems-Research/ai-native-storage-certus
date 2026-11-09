@@ -1,0 +1,246 @@
+diff --git a/pkg/epp/framework/plugins/requestcontrol/dataproducer/p2psource/producer.go b/pkg/epp/framework/plugins/requestcontrol/dataproducer/p2psource/producer.go
+index 0b259854..7f4c1d2a 100644
+--- a/pkg/epp/framework/plugins/requestcontrol/dataproducer/p2psource/producer.go
++++ b/pkg/epp/framework/plugins/requestcontrol/dataproducer/p2psource/producer.go
+@@ -27,6 +27,7 @@ import (
+ 	"hash/fnv"
+ 	"math"
+ 	"net"
++	"strings"
+ 
+ 	"sigs.k8s.io/controller-runtime/pkg/log"
+ 
+@@ -69,6 +70,12 @@ type Config struct {
+ 	// pull saves against the transfer and the waits a pull pays on busy pods,
+ 	// after the MinCachedTokenDelta floor. Nil keeps the fixed-delta decision.
+ 	CostModel *CostModelConfig `json:"costModel,omitempty"`
++	// PullableTiers are the device tiers a pull can be served from: a source's
++	// pullable prefix is its longest contiguous chain in any of them. Empty
++	// defaults to ["cpu"], vLLM's P2P tier. "gpu" and "speculative" are
++	// rejected: a peer cannot pull from another pod's GPU, and speculative
++	// entries are not cached blocks.
++	PullableTiers []string `json:"pullableTiers,omitempty"`
+ }
+ 
+ // CostModelConfig holds the calibrated constants of the pull cost model. The
+@@ -188,6 +195,7 @@ type Producer struct {
+ 	prefillProfile              string
+ 	attrKeyValue                plugin.DataKey
+ 	costModel                   *CostModelConfig
++	pullableTiers               []string
+ }
+ 
+ // PluginFactory parses the raw plugin configuration and returns a configured
+@@ -207,6 +215,12 @@ func PluginFactory(name string, rawParameters *json.Decoder, _ plugin.Handle) (p
+ 			return nil, fmt.Errorf("%s: %w", PluginType, err)
+ 		}
+ 	}
++	for _, tier := range cfg.PullableTiers {
++		switch strings.ToLower(tier) {
++		case "", gpuDeviceTier, attrprefix.SpeculativeTierKey:
++			return nil, fmt.Errorf("%s: pullableTiers cannot include %q", PluginType, tier)
++		}
++	}
+ 	return New(name, cfg), nil
+ }
+ 
+@@ -227,6 +241,13 @@ func New(name string, cfg Config) *Producer {
+ 		defaulted.BusyQueueThreshold = defaultBusyQueueThreshold
+ 		costModel = &defaulted
+ 	}
++	pullable := make([]string, 0, len(cfg.PullableTiers))
++	for _, tier := range cfg.PullableTiers {
++		pullable = append(pullable, strings.ToLower(tier))
++	}
++	if len(pullable) == 0 {
++		pullable = []string{defaultPullableTier}
++	}
+ 	return &Producer{
+ 		typedName:                   plugin.TypedName{Type: PluginType, Name: name},
+ 		prefixMatchDataKey:          attrprefix.PrefixCacheMatchInfoDataKey.WithNonEmptyProducerName(cfg.PrefixMatchInfoProducerName),
+@@ -235,6 +256,7 @@ func New(name string, cfg Config) *Producer {
+ 		prefillProfile:              prefillProfile,
+ 		attrKeyValue:                plugin.NewDataKey("best-match", PluginType).WithNonEmptyProducerName(name),
+ 		costModel:                   costModel,
++		pullableTiers:               pullable,
+ 	}
+ }
+ 
+@@ -504,9 +526,12 @@ func (p *Producer) PreRequest(ctx context.Context, request *scheduling.Inference
+ 	return nil
+ }
+ 
+-// cpuDeviceTier is the CachedBlocksByTier key for the CPU tier (device tiers
+-// are lowercased by the KV-event pipeline).
+-const cpuDeviceTier = "cpu"
++// defaultPullableTier is the CachedBlocksByTier key for the CPU tier, vLLM's
++// P2P tier (device tiers are lowercased by the KV-event pipeline).
++const defaultPullableTier = "cpu"
++
++// gpuDeviceTier is never pullable: a peer cannot read another pod's GPU.
++const gpuDeviceTier = "gpu"
+ 
+ // sourceCachedTokens returns the prompt tokens the endpoint can serve a P2P
+ // pull from, and its block size. Pulls are served from the source's CPU tier,
+@@ -519,7 +544,13 @@ func (p *Producer) sourceCachedTokens(ep scheduling.Endpoint) (tokens, blockSize
+ 		return 0, 0, false
+ 	}
+ 	if byTier := info.CachedBlocksByTier(); byTier != nil {
+-		return byTier[cpuDeviceTier] * info.BlockSizeTokens(), info.BlockSizeTokens(), true
++		// Each tier's count is a contiguous chain from the first block, so the
++		// longest one is the pullable prefix; a sum would count a gap.
++		longest := 0
++		for _, tier := range p.pullableTiers {
++			longest = max(longest, byTier[tier])
++		}
++		return longest * info.BlockSizeTokens(), info.BlockSizeTokens(), true
+ 	}
+ 	return info.CachedBlockCount() * info.BlockSizeTokens(), info.BlockSizeTokens(), false
+ }
+diff --git a/pkg/epp/framework/plugins/requestcontrol/dataproducer/p2psource/producer_test.go b/pkg/epp/framework/plugins/requestcontrol/dataproducer/p2psource/producer_test.go
+index 535be6d6..44ddaa54 100644
+--- a/pkg/epp/framework/plugins/requestcontrol/dataproducer/p2psource/producer_test.go
++++ b/pkg/epp/framework/plugins/requestcontrol/dataproducer/p2psource/producer_test.go
+@@ -101,7 +101,7 @@ func TestNew_DefaultsMinCachedTokenDelta(t *testing.T) {
+ 	req := &scheduling.InferenceRequest{RequestID: "req-new-default"}
+ 
+ 	require.NoError(t, p.Produce(ctx, req, []scheduling.Endpoint{
+-		tierEndpoint(p, "pod-a", "10.0.0.1", 4, map[string]int{cpuDeviceTier: 4}),
++		tierEndpoint(p, "pod-a", "10.0.0.1", 4, map[string]int{defaultPullableTier: 4}),
+ 	}))
+ 
+ 	assert.Equal(t, defaultMinCachedTokenDelta, p.minCachedTokenDelta)
+@@ -148,7 +148,7 @@ func TestProduce_PublishesReusablePrefixTokens(t *testing.T) {
+ 			req := &scheduling.InferenceRequest{RequestID: "req-floor-" + tt.name}
+ 
+ 			require.NoError(t, p.Produce(ctx, req, []scheduling.Endpoint{
+-				tierEndpoint(p, "pod-a", "10.0.0.1", tt.cached, map[string]int{cpuDeviceTier: tt.cached}),
++				tierEndpoint(p, "pod-a", "10.0.0.1", tt.cached, map[string]int{defaultPullableTier: tt.cached}),
+ 			}))
+ 
+ 			got, ok := readReusablePrefixTokens(req, "test")
+@@ -182,7 +182,7 @@ func TestProduce_CancelledContextDoesNotStoreAttributes(t *testing.T) {
+ 	req := &scheduling.InferenceRequest{RequestID: "req-cancelled"}
+ 
+ 	err := p.Produce(ctx, req, []scheduling.Endpoint{
+-		tierEndpoint(p, "pod-a", "10.0.0.1", 4, map[string]int{cpuDeviceTier: 4}),
++		tierEndpoint(p, "pod-a", "10.0.0.1", 4, map[string]int{defaultPullableTier: 4}),
+ 	})
+ 
+ 	require.ErrorIs(t, err, context.Canceled)
+@@ -225,7 +225,7 @@ func TestProduce_ReusablePrefixTokensKeyUsesInstanceName(t *testing.T) {
+ 	req := &scheduling.InferenceRequest{RequestID: "req-custom-key"}
+ 
+ 	require.NoError(t, p.Produce(ctx, req, []scheduling.Endpoint{
+-		tierEndpoint(p, "pod-a", "10.0.0.1", 2, map[string]int{cpuDeviceTier: 2}),
++		tierEndpoint(p, "pod-a", "10.0.0.1", 2, map[string]int{defaultPullableTier: 2}),
+ 	}))
+ 
+ 	got, ok := readReusablePrefixTokens(req, "custom")
+@@ -494,7 +494,7 @@ func tierEndpointWithLoad(p *Producer, name, address string, cachedBlocks, waiti
+ 		attrprefix.NewPrefixCacheMatchInfo(cachedBlocks, 4, testBlockSize).
+ 			WithCachedBlockCount(cachedBlocks).
+ 			WithConfirmedCachedBlockCount(cachedBlocks).
+-			WithCachedBlocksByTier(map[string]int{cpuDeviceTier: cachedBlocks}))
++			WithCachedBlocksByTier(map[string]int{defaultPullableTier: cachedBlocks}))
+ 	return e
+ }
+ 
+@@ -676,7 +676,7 @@ func TestProduce_GPUOnlySource_NotChosen(t *testing.T) {
+ 	req := &scheduling.InferenceRequest{RequestID: "req-gpu-only"}
+ 	eps := []scheduling.Endpoint{
+ 		tierEndpoint(p, "pod-gpu", "10.0.0.1", 10, map[string]int{"gpu": 10}),
+-		tierEndpoint(p, "pod-cpu", "10.0.0.2", 3, map[string]int{"gpu": 3, cpuDeviceTier: 3}),
++		tierEndpoint(p, "pod-cpu", "10.0.0.2", 3, map[string]int{"gpu": 3, defaultPullableTier: 3}),
+ 	}
+ 	require.NoError(t, p.Produce(ctx, req, eps))
+ 
+@@ -686,6 +686,61 @@ func TestProduce_GPUOnlySource_NotChosen(t *testing.T) {
+ 	assert.Equal(t, 3*testBlockSize, best.cachedTokens)
+ }
+ 
++// A storage-tier holder is a pull source only when storage is pullable.
++func TestProduce_PullableTiers_Storage(t *testing.T) {
++	ctx := utils.NewTestContext(t)
++	for _, tc := range []struct {
++		name  string
++		tiers []string
++		want  string
++	}{
++		{"default: cpu only", nil, ""},
++		{"storage pullable", []string{"storage"}, "10.0.0.2:8080"},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			p := New("test", Config{MinCachedTokenDelta: 1, PullableTiers: tc.tiers})
++			req := &scheduling.InferenceRequest{RequestID: "req-" + tc.name}
++			eps := []scheduling.Endpoint{
++				tierEndpoint(p, "pod-gpu", "10.0.0.1", 10, map[string]int{"gpu": 10}),
++				tierEndpoint(p, "pod-ext", "10.0.0.2", 6, map[string]int{"gpu": 2, "storage": 6}),
++			}
++			require.NoError(t, p.Produce(ctx, req, eps))
++			best, ok := scheduling.ReadRequestAttribute[*bestMatchPeer](req, p.attrKey())
++			if tc.want == "" {
++				assert.False(t, ok, "no pullable source by default")
++				return
++			}
++			require.True(t, ok)
++			assert.Equal(t, tc.want, best.hostPort)
++			assert.Equal(t, 6*testBlockSize, best.cachedTokens)
++		})
++	}
++}
++
++// Two pullable tiers: the longer chain counts; they are not summed.
++func TestProduce_PullableTiers_LongestChainNotSum(t *testing.T) {
++	ctx := utils.NewTestContext(t)
++	p := New("test", Config{MinCachedTokenDelta: 1, PullableTiers: []string{"CPU", "storage"}})
++	req := &scheduling.InferenceRequest{RequestID: "req-two-tiers"}
++	require.NoError(t, p.Produce(ctx, req, []scheduling.Endpoint{
++		tierEndpoint(p, "pod-mixed", "10.0.0.3", 7, map[string]int{"cpu": 3, "storage": 4}),
++	}))
++	best, ok := scheduling.ReadRequestAttribute[*bestMatchPeer](req, p.attrKey())
++	require.True(t, ok)
++	assert.Equal(t, 4*testBlockSize, best.cachedTokens)
++}
++
++func TestPluginFactory_PullableTiers_RejectsUnpullable(t *testing.T) {
++	for _, tier := range []string{"gpu", "GPU", "speculative", ""} {
++		dec := json.NewDecoder(strings.NewReader(`{"pullableTiers": ["` + tier + `"]}`))
++		_, err := PluginFactory("test", dec, nil)
++		assert.Error(t, err, "tier %q", tier)
++	}
++	dec := json.NewDecoder(strings.NewReader(`{"pullableTiers": ["storage"]}`))
++	_, err := PluginFactory("test", dec, nil)
++	assert.NoError(t, err)
++}
++
+ func TestProduce_GPUOnlySource_NoReusablePrefixTokens(t *testing.T) {
+ 	ctx := utils.NewTestContext(t)
+ 	p := New("test", Config{MinCachedTokenDelta: 1})
+@@ -738,7 +793,7 @@ func TestPreRequest_ComputingSideCountsAllTiers(t *testing.T) {
+ 	ctx := utils.NewTestContext(t)
+ 	p := New("test", Config{MinCachedTokenDelta: 2 * testBlockSize})
+ 
+-	src := tierEndpoint(p, "pod-src", "10.0.0.1", 6, map[string]int{cpuDeviceTier: 6})
++	src := tierEndpoint(p, "pod-src", "10.0.0.1", 6, map[string]int{defaultPullableTier: 6})
+ 	computing := tierEndpoint(p, "pod-comp", "10.0.0.2", 5, map[string]int{"gpu": 5})
+ 
+ 	req := &scheduling.InferenceRequest{RequestID: "req-comp-tiers"}
+@@ -753,7 +808,7 @@ func TestPreRequest_TierDataWithoutConfirmedCountUsesCachedCount(t *testing.T) {
+ 	ctx := utils.NewTestContext(t)
+ 	p := New("test", Config{MinCachedTokenDelta: 2 * testBlockSize})
+ 
+-	src := tierEndpoint(p, "pod-src", "10.0.0.1", 6, map[string]int{cpuDeviceTier: 6})
++	src := tierEndpoint(p, "pod-src", "10.0.0.1", 6, map[string]int{defaultPullableTier: 6})
+ 	computing := scheduling.NewEndpoint(&fwkdl.EndpointMetadata{
+ 		ID:      k8stypes.NamespacedName{Name: "pod-comp"},
+ 		Address: "10.0.0.2",
+@@ -778,7 +833,7 @@ func TestPreRequest_SpeculativeComputingCacheDoesNotSuppressHeader(t *testing.T)
+ 	ctx := utils.NewTestContext(t)
+ 	p := New("test", Config{MinCachedTokenDelta: 1})
+ 
+-	src := tierEndpoint(p, "pod-src", "10.0.0.1", 6, map[string]int{cpuDeviceTier: 6})
++	src := tierEndpoint(p, "pod-src", "10.0.0.1", 6, map[string]int{defaultPullableTier: 6})
+ 	computing := tierEndpointWithConfirmed(p, "pod-comp", "10.0.0.2", 6, 0,
+ 		map[string]int{attrprefix.SpeculativeTierKey: 6})
+ 	req := &scheduling.InferenceRequest{RequestID: "req-speculative-computing", Headers: map[string]string{}}

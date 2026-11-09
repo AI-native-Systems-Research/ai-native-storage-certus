@@ -1,0 +1,37 @@
+{
+ "wall_s": 527.2,
+ "turns": 60,
+ "sessions": 12,
+ "per_turn": {
+  "0": {
+   "n": 12,
+   "prompt_tokens_mean": 83,
+   "ttft_p50_s": 1.961,
+   "latency_p50_s": 26.596
+  },
+  "1": {
+   "n": 12,
+   "prompt_tokens_mean": 1226,
+   "ttft_p50_s": 0.193,
+   "latency_p50_s": 25.173
+  },
+  "2": {
+   "n": 12,
+   "prompt_tokens_mean": 2368,
+   "ttft_p50_s": 0.2,
+   "latency_p50_s": 25.756
+  },
+  "3": {
+   "n": 12,
+   "prompt_tokens_mean": 3525,
+   "ttft_p50_s": 0.194,
+   "latency_p50_s": 26.203
+  },
+  "4": {
+   "n": 12,
+   "prompt_tokens_mean": 4661,
+   "ttft_p50_s": 0.197,
+   "latency_p50_s": 26.576
+  }
+ }
+}

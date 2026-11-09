@@ -1,0 +1,1884 @@
+//! Pipelined SSD→DRAM→GPU transfer engine for the cold lookup path.
+//!
+//! # Overview
+//!
+//! When a cache miss occurs (key is on SSD, not in memory-tier), data must be
+//! read from NVMe and delivered to the client's GPU. This module implements
+//! three progressively optimized pipeline strategies:
+//!
+//! 1. **`pipelined_ssd_to_gpu_zero_copy`** — Zero-copy single-object pipeline.
+//!    NVMe reads directly into the CUDA-pinned memory-tier slot (no intermediate
+//!    ring buffer, no CPU memcpy). Each completed segment is immediately DMA'd
+//!    to GPU while the next NVMe read is in flight. Used by single-key `lookup()`.
+//!
+//! 2. **`pipelined_multi_object_zero_copy`** — Multi-object zero-copy pipeline.
+//!    Processes N objects concurrently on the same NVMe queue, interleaving
+//!    segments from different objects to hide per-object NVMe latency. Used by
+//!    `batch_lookup` for parallel cold promotion of multiple keys.
+//!
+//! # Data flow (cold path)
+//!
+//! ```text
+//! ┌─────────┐  ReadAsync   ┌───────────────────┐  cudaMemcpyAsync  ┌──────────┐
+//! │ NVMe SSD│─────DMA──────▶ Memory-Tier Pool   │───────H2D─────────▶ GPU VRAM │
+//! │         │              │ (CUDA+SPDK pinned) │                   │          │
+//! └─────────┘              └───────────────────┘                   └──────────┘
+//!       ▲                         │
+//!       │ submit next read        │ on each completion
+//!       └─────────────────────────┘
+//! ```
+//!
+//! # Key design decisions
+//!
+//! - **NVMe queue depth saturation**: keeps `max_queue_depth` reads in flight at
+//!   all times via a sliding-window submit/complete loop.
+//! - **Dual CUDA streams**: alternates GPU DMA copies between two streams so
+//!   the GPU copy engine can overlap transfers.
+//! - **Periodic stream sync**: every 8 completions, both streams are synchronized
+//!   to bound GPU-side queue depth and prevent unbounded memory pressure.
+//! - **Tag-based completion routing**: each NVMe read carries a tag encoding
+//!   `(object_index, segment_index)` so out-of-order completions are routed to
+//!   the correct memory-tier offset and GPU destination.
+//! - **Zero-copy via SPDK+CUDA co-registration**: the memory-tier pool is both
+//!   `spdk_mem_register`'d (NVMe can DMA into it) and `cudaHostRegister`'d (GPU
+//!   can DMA from it), eliminating all CPU-side data copies.
+
+use std::sync::{Arc, Mutex};
+
+use interfaces::{
+    ClientChannels, Command, Completion, DispatcherError, DmaBuffer, GpuStream, IBlockDevice,
+    IGpuServices, IpcHandle,
+};
+
+use crate::io_segmenter;
+
+/// Number of GPU DMA copies before a periodic stream synchronization.
+/// Larger values reduce sync overhead at the cost of higher GPU-side memory
+/// pressure. 32 amortizes the ~50µs sync cost across more pipeline stages.
+pub const PIPELINE_RING_SIZE: usize = 32;
+
+/// Timeout for async NVMe read operations (ms).
+const READ_TIMEOUT_MS: u64 = 5000;
+
+/// Queue the H2D copies that scatter one contiguous memory-tier slot to its
+/// GPU regions on `stream` (no sync): region L reads from
+/// `slot + sum(sizes[0..L])`, each copy clamped to `slot_size`. A zero-size
+/// region receives zero bytes but does not end the scatter (the regions after it
+/// still get theirs); only an exhausted slot stops it, since no later region can
+/// have bytes left. Shared by the warm serve and the in-loop multi-region
+/// delivery of [`scatter_gather_multi_drive_zero_copy`].
+pub(crate) fn queue_slot_to_regions(
+    gpu: &dyn IGpuServices,
+    stream: GpuStream,
+    slot: *const u8,
+    slot_size: usize,
+    regions: &[IpcHandle],
+) -> Result<(), String> {
+    let mut off: usize = 0;
+    for region in regions {
+        let rest = slot_size.saturating_sub(off);
+        if rest == 0 {
+            break;
+        }
+        let copy_size = (region.size as usize).min(rest);
+        if copy_size > 0 {
+            gpu.memcpy_h2d_async(
+                (slot as usize + off) as *const std::ffi::c_void,
+                region.address as *mut std::ffi::c_void,
+                copy_size,
+                stream,
+            )?;
+        }
+        off += region.size as usize;
+    }
+    Ok(())
+}
+
+/// Fixed pool of pre-registered DMA buffers for staging cold loads when the
+/// memory tier is saturated (all slots pinned by in-flight loads).
+///
+/// A cold load normally promotes into a memory-tier slot, but under pressure no
+/// slot can be freed (see `evict_for_space`). Rather than fail the load — which
+/// crashes vLLM (`assert transfer_result.success`) — we stage it through one of
+/// these buffers: `SSD → staging → GPU`, then return the buffer to the pool
+/// without caching. Loads therefore never fail on tier pressure.
+///
+/// Each buffer is CUDA-pinned + SPDK-registered (via `allocate_pinned_dma_buffer`)
+/// so NVMe can DMA into it and the GPU can DMA from it, exactly like a tier slot.
+/// `checkout` blocks until a buffer is free; this is deadlock-free because a
+/// buffer is held only for the duration of one cold read and released
+/// independently of any memory-tier pin.
+pub struct StagingPool {
+    // Buffers are owned here for their lifetime (freed + unregistered on drop);
+    // callers only ever touch the raw pointers via a StagingLease.
+    _buffers: Vec<DmaBuffer>,
+    ptrs: Vec<*mut u8>,
+    buf_bytes: usize,
+    free: Mutex<Vec<usize>>,
+    cv: std::sync::Condvar,
+}
+
+impl std::fmt::Debug for StagingPool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StagingPool")
+            .field("buffer_count", &self.ptrs.len())
+            .field("buf_bytes", &self.buf_bytes)
+            .finish_non_exhaustive()
+    }
+}
+
+// SAFETY: the raw pointers refer to CUDA-pinned + SPDK-registered host memory
+// that is valid for cross-thread DMA use for the pool's lifetime; the owning
+// DmaBuffers are never mutated or moved after construction, and free-list access
+// is serialized by the Mutex.
+unsafe impl Send for StagingPool {}
+unsafe impl Sync for StagingPool {}
+
+impl StagingPool {
+    /// Allocate `slots` registered buffers of `buf_bytes` each.
+    pub fn new(
+        gpu: &dyn IGpuServices,
+        slots: usize,
+        buf_bytes: usize,
+    ) -> Result<Self, DispatcherError> {
+        let mut buffers = Vec::with_capacity(slots);
+        let mut ptrs = Vec::with_capacity(slots);
+        for i in 0..slots {
+            let buf = gpu.allocate_pinned_dma_buffer(buf_bytes).map_err(|e| {
+                DispatcherError::AllocationFailed(format!("staging buffer {i} alloc: {e}"))
+            })?;
+            ptrs.push(buf.as_ptr() as *mut u8);
+            buffers.push(buf);
+        }
+        Ok(Self {
+            _buffers: buffers,
+            ptrs,
+            buf_bytes,
+            free: Mutex::new((0..slots).collect()),
+            cv: std::sync::Condvar::new(),
+        })
+    }
+
+    /// Per-buffer capacity in bytes. A cold load larger than this can't be
+    /// staged (the caller must fall back).
+    pub fn buf_bytes(&self) -> usize {
+        self.buf_bytes
+    }
+
+    /// Check out a free buffer, blocking until one is available. The returned
+    /// lease owns a clone of the pool `Arc` (so it has no borrow lifetime and
+    /// can be stored freely) and returns the buffer to the pool when dropped.
+    pub fn checkout(self: &Arc<Self>) -> StagingLease {
+        let mut free = self.free.lock().unwrap();
+        while free.is_empty() {
+            free = self.cv.wait(free).unwrap();
+        }
+        let idx = free.pop().unwrap();
+        StagingLease {
+            pool: Arc::clone(self),
+            idx,
+            ptr: self.ptrs[idx],
+        }
+    }
+}
+
+/// RAII lease of one staging buffer; returns it to the pool on drop.
+pub struct StagingLease {
+    pool: Arc<StagingPool>,
+    idx: usize,
+    ptr: *mut u8,
+}
+
+impl std::fmt::Debug for StagingLease {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StagingLease")
+            .field("index", &self.idx)
+            .finish_non_exhaustive()
+    }
+}
+
+impl StagingLease {
+    /// Raw pointer to the leased buffer (registered host memory).
+    pub fn ptr(&self) -> *mut u8 {
+        self.ptr
+    }
+}
+
+impl Drop for StagingLease {
+    fn drop(&mut self) {
+        self.pool.free.lock().unwrap().push(self.idx);
+        self.pool.cv.notify_one();
+    }
+}
+
+/// Pre-allocated dual CUDA streams and chunk size for pipelined SSD→GPU transfers.
+///
+/// Constructed once at dispatcher init and reused across all cold-path reads.
+pub struct PipelineRing {
+    pub streams: [GpuStream; 2],
+    pub chunk_size: usize,
+    /// Staging pool for cold loads that can't get a memory-tier slot.
+    pub staging: Option<Arc<StagingPool>>,
+}
+
+impl std::fmt::Debug for PipelineRing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PipelineRing")
+            .field("chunk_size", &self.chunk_size)
+            .field("has_staging_pool", &self.staging.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl PipelineRing {
+    /// Allocate CUDA streams and the cold-load staging pool for pipeline use.
+    pub fn new(
+        gpu: &dyn IGpuServices,
+        chunk_size: usize,
+        staging_slots: usize,
+        staging_buf_bytes: usize,
+    ) -> Result<Self, DispatcherError> {
+        let stream_a = gpu
+            .create_stream()
+            .map_err(|e| DispatcherError::IoError(format!("create_stream failed: {e}")))?;
+        let stream_b = gpu.create_stream().map_err(|e| {
+            let _ = gpu.destroy_stream(stream_a);
+            DispatcherError::IoError(format!("create_stream failed: {e}"))
+        })?;
+
+        let staging = if staging_slots > 0 {
+            match StagingPool::new(gpu, staging_slots, staging_buf_bytes) {
+                Ok(p) => Some(Arc::new(p)),
+                Err(e) => {
+                    let _ = gpu.destroy_stream(stream_a);
+                    let _ = gpu.destroy_stream(stream_b);
+                    return Err(e);
+                }
+            }
+        } else {
+            None
+        };
+
+        Ok(Self {
+            streams: [stream_a, stream_b],
+            chunk_size,
+            staging,
+        })
+    }
+
+    /// Destroy CUDA streams.
+    pub fn destroy(self, gpu: &dyn IGpuServices) {
+        let _ = gpu.destroy_stream(self.streams[0]);
+        let _ = gpu.destroy_stream(self.streams[1]);
+    }
+}
+
+/// No-op free function for DmaBuffer wrappers over memory-tier regions.
+unsafe extern "C" fn noop_free(_ptr: *mut std::ffi::c_void) {}
+
+/// Zero-copy pipeline: read from SSD directly into a memory-tier slot, stream to GPU.
+///
+/// Unlike [`pipelined_ssd_to_gpu`] which uses intermediate ring buffers and a CPU
+/// memcpy per chunk, this reads NVMe directly into the memory-tier slot (which must
+/// be CUDA-pinned + SPDK-registered), then issues async H2D from the same memory.
+///
+/// # Requirements
+///
+/// The memory-tier pool must have been registered via
+/// `IGpuServices::register_host_memory` (i.e., `cudaHostRegister` + `spdk_mem_register`).
+///
+/// # Safety
+///
+/// - `mem_tier_ptr` must be a valid, SPDK-registered, CUDA-pinned pointer for `total_bytes`.
+/// - `gpu_dst` must be a valid GPU destination pointer for `total_bytes`.
+#[allow(clippy::too_many_arguments)]
+pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+    drive: &dyn IBlockDevice,
+    gpu: &dyn IGpuServices,
+    streams: &[GpuStream; 2],
+    channels: &ClientChannels,
+    mem_tier_ptr: *mut u8,
+    gpu_dst: *mut std::ffi::c_void,
+    start_lba: u64,
+    total_bytes: usize,
+    chunk_size: usize,
+    max_queue_depth: usize,
+) -> Result<(), DispatcherError> {
+    let block_size = drive.block_size() as usize;
+    let aligned_bytes = total_bytes.next_multiple_of(block_size);
+
+    let segments = io_segmenter::segment_io(
+        start_lba,
+        aligned_bytes,
+        chunk_size as u32,
+        block_size as u32,
+    );
+
+    if segments.is_empty() {
+        return Ok(());
+    }
+
+    let num_chunks = segments.len();
+
+    // Create DmaBuffer wrappers for each chunk of the memory-tier slot.
+    // These are noop-free since the memory-tier owns the allocation.
+    let chunk_bufs: Vec<Arc<Mutex<DmaBuffer>>> = segments
+        .iter()
+        .map(|seg| {
+            let ptr = unsafe { mem_tier_ptr.add(seg.buffer_offset) as *mut std::ffi::c_void };
+            let buf_size = seg.length.next_multiple_of(block_size);
+            let buf =
+                unsafe { DmaBuffer::from_raw(ptr, buf_size, noop_free, -1) }.map_err(|e| {
+                    DispatcherError::AllocationFailed(format!("DmaBuffer wrap chunk: {e}"))
+                })?;
+            Ok(Arc::new(Mutex::new(buf)))
+        })
+        .collect::<Result<Vec<_>, DispatcherError>>()?;
+
+    // Submit ALL reads upfront with tag = segment index. The tag is echoed
+    // back in the completion, allowing us to identify which segment completed
+    // and issue its GPU DMA copy immediately — overlapping NVMe I/O with GPU
+    // DMA transfers instead of waiting for an entire batch.
+    let submit_limit = max_queue_depth.min(num_chunks).max(1);
+    let mut submitted = 0usize;
+    let mut completed = 0usize;
+
+    // Prime the pipeline: submit up to submit_limit reads.
+    while submitted < num_chunks && submitted < submit_limit {
+        channels
+            .command_tx
+            .send(Command::ReadAsync {
+                ns_id: 1,
+                lba: segments[submitted].lba,
+                buf: Arc::clone(&chunk_bufs[submitted]),
+                timeout_ms: READ_TIMEOUT_MS,
+                tag: submitted as u64,
+            })
+            .map_err(|e| DispatcherError::IoError(format!("ReadAsync send #{submitted}: {e}")))?;
+        submitted += 1;
+    }
+
+    // Process completions: on each ReadDone, issue the GPU DMA for that segment,
+    // then submit the next read if any remain.
+    //
+    // Drain until every *submitted* read is accounted for (`completed <
+    // submitted`) — never returning early while reads are outstanding, or those
+    // reads' completions would be orphaned in the client ring and block the
+    // single-threaded block-device actor for the whole drive. On error we record
+    // it, stop submitting new reads, and keep draining; the first error wins.
+    let mut outcome: Result<(), DispatcherError> = Ok(());
+    let mut stop_submitting = false;
+    while completed < submitted {
+        match channels.completion_rx.recv() {
+            Ok(Completion::ReadDone {
+                handle,
+                tag,
+                result,
+            }) => {
+                completed += 1;
+                match result {
+                    Err(e) => {
+                        if outcome.is_ok() {
+                            outcome = Err(DispatcherError::IoError(format!(
+                                "SSD read (handle {handle:?}): {e}"
+                            )));
+                        }
+                        stop_submitting = true;
+                    }
+                    Ok(()) => {
+                        let seg_idx = tag as usize;
+                        let seg = &segments[seg_idx];
+                        // The SSD read already landed in the DRAM slot (chunk_bufs
+                        // wrap mem_tier_ptr). A null gpu_dst means "fill the DRAM
+                        // slot only" — the multi-region cold path scatters the slot
+                        // to its N GPU allocations afterwards, so skip the fused
+                        // copy here but keep draining/refilling the read pipeline.
+                        if !gpu_dst.is_null() {
+                            let copy_len = seg
+                                .length
+                                .min(total_bytes.saturating_sub(seg.buffer_offset));
+                            let current_stream = streams[(completed - 1) % 2];
+
+                            let guard = chunk_bufs[seg_idx].lock().unwrap();
+                            let dma = gpu.dma_copy_to_device_async(
+                                &guard,
+                                unsafe {
+                                    (gpu_dst as *mut u8).add(seg.buffer_offset)
+                                        as *mut std::ffi::c_void
+                                },
+                                copy_len,
+                                current_stream,
+                            );
+                            drop(guard);
+                            if let Err(e) = dma {
+                                if outcome.is_ok() {
+                                    outcome = Err(DispatcherError::IoError(format!(
+                                        "GPU async DMA copy (seg {seg_idx}) failed: {e}"
+                                    )));
+                                }
+                                stop_submitting = true;
+                            } else if completed % PIPELINE_RING_SIZE == 0 {
+                                // Periodically bound GPU queue depth (best-effort).
+                                let _ = gpu.stream_synchronize(streams[0]);
+                                let _ = gpu.stream_synchronize(streams[1]);
+                            }
+                        }
+                    }
+                }
+
+                // Keep the pipeline full unless we've hit an error.
+                if !stop_submitting && submitted < num_chunks {
+                    if channels
+                        .command_tx
+                        .send(Command::ReadAsync {
+                            ns_id: 1,
+                            lba: segments[submitted].lba,
+                            buf: Arc::clone(&chunk_bufs[submitted]),
+                            timeout_ms: READ_TIMEOUT_MS,
+                            tag: submitted as u64,
+                        })
+                        .is_ok()
+                    {
+                        submitted += 1;
+                    } else {
+                        if outcome.is_ok() {
+                            outcome = Err(DispatcherError::IoError("ReadAsync send failed".into()));
+                        }
+                        stop_submitting = true;
+                    }
+                }
+            }
+            Ok(Completion::Timeout { handle }) => {
+                if outcome.is_ok() {
+                    outcome = Err(DispatcherError::IoError(format!(
+                        "NVMe read timeout (handle {handle:?})"
+                    )));
+                }
+                stop_submitting = true;
+                completed += 1;
+            }
+            Ok(other) => {
+                if outcome.is_ok() {
+                    outcome = Err(DispatcherError::IoError(format!(
+                        "unexpected completion: {other:?}"
+                    )));
+                }
+                stop_submitting = true;
+                completed += 1;
+            }
+            Err(_) => {
+                // Actor gone — no further completions will arrive; safe to stop.
+                if outcome.is_ok() {
+                    outcome = Err(DispatcherError::IoError(
+                        "completion channel disconnected".into(),
+                    ));
+                }
+                break;
+            }
+        }
+    }
+
+    // Sync both streams to ensure all in-flight GPU copies are complete
+    // (best-effort; the read outcome above is authoritative).
+    for s in streams {
+        let _ = gpu.stream_synchronize(*s);
+    }
+    outcome?;
+
+    // Forget all DmaBuffer wrappers (noop_free, but avoid double-free logic).
+    for buf in chunk_bufs {
+        std::mem::forget(Arc::try_unwrap(buf).ok());
+    }
+
+    Ok(())
+}
+
+/// Describes a single object to be read from SSD into memory-tier and GPU.
+pub struct ColdReadJob<'a> {
+    pub mem_ptr: *mut u8,
+    pub gpu_dst: *mut std::ffi::c_void,
+    pub start_lba: u64,
+    pub total_bytes: usize,
+    /// The block's GPU piece destinations in region order. With more than one
+    /// region, [`scatter_gather_multi_drive_zero_copy`] scatters the slot to
+    /// them in its poll loop; empty (or one region) means no multi-region
+    /// delivery. [`pipelined_multi_object_zero_copy`] ignores it.
+    pub regions: &'a [IpcHandle],
+}
+
+impl std::fmt::Debug for ColdReadJob<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ColdReadJob")
+            .field("start_lba", &self.start_lba)
+            .field("total_bytes", &self.total_bytes)
+            .field("regions", &self.regions.len())
+            .finish_non_exhaustive()
+    }
+}
+
+// SAFETY: pointers (including the region addresses) are valid for the duration
+// of the pipeline call; region addresses are only passed to CUDA copy APIs.
+unsafe impl Send for ColdReadJob<'_> {}
+
+/// Multi-object pipelined SSD→GPU zero-copy transfer.
+///
+/// Processes multiple objects concurrently on the same NVMe channels,
+/// interleaving reads across objects to hide per-object NVMe latency.
+/// Each completion is identified by tag = `obj_idx * max_segments + seg_idx`.
+///
+/// # Safety
+/// All `mem_ptr` and `gpu_dst` pointers in `jobs` must be valid for their
+/// respective `total_bytes`.
+#[allow(clippy::too_many_arguments)]
+pub unsafe fn pipelined_multi_object_zero_copy(
+    drive: &dyn IBlockDevice,
+    gpu: &dyn IGpuServices,
+    streams: &[GpuStream; 2],
+    channels: &ClientChannels,
+    jobs: &[ColdReadJob<'_>],
+    chunk_size: usize,
+    max_queue_depth: usize,
+    metrics: Option<&dyn crate::metrics::PipelineMetrics>,
+) -> Vec<Result<(), DispatcherError>> {
+    let block_size = drive.block_size() as usize;
+    let num_jobs = jobs.len();
+    let mut results: Vec<Result<(), DispatcherError>> = vec![Ok(()); num_jobs];
+
+    if num_jobs == 0 {
+        return results;
+    }
+
+    // Segment all objects upfront.
+    struct ObjSegments {
+        segments: Vec<crate::io_segmenter::IoSegment>,
+        chunk_bufs: Vec<Arc<Mutex<DmaBuffer>>>,
+    }
+
+    let mut all_objs: Vec<ObjSegments> = Vec::with_capacity(num_jobs);
+    let mut total_segments = 0usize;
+
+    for job in jobs {
+        let aligned_bytes = job.total_bytes.next_multiple_of(block_size);
+        let segments = io_segmenter::segment_io(
+            job.start_lba,
+            aligned_bytes,
+            chunk_size as u32,
+            block_size as u32,
+        );
+
+        let chunk_bufs: Vec<Arc<Mutex<DmaBuffer>>> = segments
+            .iter()
+            .map(|seg| {
+                let ptr = unsafe { job.mem_ptr.add(seg.buffer_offset) as *mut std::ffi::c_void };
+                let buf_size = seg.length.next_multiple_of(block_size);
+                let buf = unsafe { DmaBuffer::from_raw(ptr, buf_size, noop_free, -1) }.unwrap();
+                Arc::new(Mutex::new(buf))
+            })
+            .collect();
+
+        total_segments += segments.len();
+        all_objs.push(ObjSegments {
+            segments,
+            chunk_bufs,
+        });
+    }
+
+    if total_segments == 0 {
+        return results;
+    }
+
+    // Flatten all segments into a single work queue ordered by object then segment.
+    // The tag encoding `obj_idx * max_segments_per_obj + seg_idx` lets us decode
+    // which object and segment completed from each NVMe ReadDone event.
+    let mut work: Vec<(usize, usize)> = Vec::with_capacity(total_segments);
+    for (obj_idx, obj) in all_objs.iter().enumerate() {
+        for seg_idx in 0..obj.segments.len() {
+            work.push((obj_idx, seg_idx));
+        }
+    }
+
+    let max_segments_per_obj = all_objs.iter().map(|o| o.segments.len()).max().unwrap_or(0);
+
+    // Submit initial batch up to max_queue_depth.
+    let submit_limit = max_queue_depth.min(work.len());
+    let mut submitted = 0usize;
+    let mut completed = 0usize;
+    let mut stream_idx = 0usize;
+
+    let t_submit_start = std::time::Instant::now();
+    while submitted < submit_limit {
+        let (obj_idx, seg_idx) = work[submitted];
+        let obj = &all_objs[obj_idx];
+        let tag = (obj_idx * max_segments_per_obj + seg_idx) as u64;
+
+        if channels
+            .command_tx
+            .send(Command::ReadAsync {
+                ns_id: 1,
+                lba: obj.segments[seg_idx].lba,
+                buf: Arc::clone(&obj.chunk_bufs[seg_idx]),
+                timeout_ms: READ_TIMEOUT_MS,
+                tag,
+            })
+            .is_err()
+        {
+            for result in results.iter_mut().take(num_jobs) {
+                *result = Err(DispatcherError::IoError("channel send failed".into()));
+            }
+            return results;
+        }
+        submitted += 1;
+    }
+    let _t_initial_submit = t_submit_start.elapsed();
+    let mut t_recv_ns: u64 = 0;
+    let mut t_gpu_ns: u64 = 0;
+    let mut t_sync_ns: u64 = 0;
+    let mut _t_resub_ns: u64 = 0;
+
+    // Coalesced per-object H2D: track remaining segments per object.
+    // When an object's last segment completes, issue ONE H2D for the whole
+    // contiguous DRAM slot. NVMe resubmission happens BEFORE H2D launch to
+    // preserve NVMe/GPU overlap.
+    let mut obj_remaining: Vec<usize> = all_objs.iter().map(|o| o.segments.len()).collect();
+    let mut obj_failed: Vec<bool> = vec![false; num_jobs];
+
+    let mut stop_submitting = false;
+    while completed < submitted {
+        let t0 = std::time::Instant::now();
+        match channels.completion_rx.recv() {
+            Ok(Completion::ReadDone { tag, result, .. }) => {
+                t_recv_ns += t0.elapsed().as_nanos() as u64;
+                completed += 1;
+
+                let obj_idx = (tag as usize) / max_segments_per_obj;
+                let seg_idx = (tag as usize) % max_segments_per_obj;
+
+                // Validate tag bounds.
+                if obj_idx >= num_jobs
+                    || seg_idx >= all_objs.get(obj_idx).map_or(0, |o| o.segments.len())
+                {
+                    for r in results.iter_mut() {
+                        if r.is_ok() {
+                            *r = Err(DispatcherError::IoError("invalid completion tag".into()));
+                        }
+                    }
+                    obj_failed.fill(true);
+                    stop_submitting = true;
+                } else if let Err(e) = result {
+                    results[obj_idx] = Err(DispatcherError::IoError(format!(
+                        "SSD read obj={obj_idx} seg={seg_idx}: {e}"
+                    )));
+                    obj_failed[obj_idx] = true;
+                    obj_remaining[obj_idx] = obj_remaining[obj_idx].saturating_sub(1);
+                } else {
+                    obj_remaining[obj_idx] -= 1;
+                }
+
+                // Resubmit next NVMe read BEFORE H2D launch (preserve overlap).
+                if !stop_submitting && submitted < work.len() {
+                    let tr = std::time::Instant::now();
+                    let (next_obj, next_seg) = work[submitted];
+                    let next_obj_data = &all_objs[next_obj];
+                    let next_tag = (next_obj * max_segments_per_obj + next_seg) as u64;
+
+                    if channels
+                        .command_tx
+                        .send(Command::ReadAsync {
+                            ns_id: 1,
+                            lba: next_obj_data.segments[next_seg].lba,
+                            buf: Arc::clone(&next_obj_data.chunk_bufs[next_seg]),
+                            timeout_ms: READ_TIMEOUT_MS,
+                            tag: next_tag,
+                        })
+                        .is_ok()
+                    {
+                        submitted += 1;
+                    } else {
+                        stop_submitting = true;
+                    }
+                    _t_resub_ns += tr.elapsed().as_nanos() as u64;
+                }
+
+                // Object fully read: issue ONE coalesced H2D for the entire slot.
+                if obj_idx < num_jobs
+                    && obj_remaining[obj_idx] == 0
+                    && !obj_failed[obj_idx]
+                    && !jobs[obj_idx].gpu_dst.is_null()
+                {
+                    let tg = std::time::Instant::now();
+                    let job = &jobs[obj_idx];
+                    let current_stream = streams[stream_idx % 2];
+
+                    let dma_result = gpu.memcpy_h2d_async(
+                        job.mem_ptr as *const std::ffi::c_void,
+                        job.gpu_dst,
+                        job.total_bytes,
+                        current_stream,
+                    );
+                    if let Err(e) = dma_result {
+                        results[obj_idx] = Err(DispatcherError::IoError(format!(
+                            "GPU H2D obj={obj_idx}: {e}"
+                        )));
+                    }
+                    t_gpu_ns += tg.elapsed().as_nanos() as u64;
+
+                    stream_idx += 1;
+
+                    // Periodic sync to bound GPU queue depth. Threshold is per
+                    // completed-object H2D, not per segment.
+                    if stream_idx % PIPELINE_RING_SIZE == 0 {
+                        let ts = std::time::Instant::now();
+                        let _ = gpu.stream_synchronize(streams[0]);
+                        let _ = gpu.stream_synchronize(streams[1]);
+                        t_sync_ns += ts.elapsed().as_nanos() as u64;
+                    }
+                }
+            }
+            Ok(Completion::Timeout { handle }) => {
+                for r in results.iter_mut() {
+                    if r.is_ok() {
+                        *r = Err(DispatcherError::IoError(format!(
+                            "NVMe read timeout (handle {handle:?})"
+                        )));
+                    }
+                }
+                obj_failed.fill(true);
+                stop_submitting = true;
+                completed += 1;
+            }
+            Ok(_) => {
+                for r in results.iter_mut() {
+                    if r.is_ok() {
+                        *r = Err(DispatcherError::IoError(
+                            "unexpected completion on cold-read channel".into(),
+                        ));
+                    }
+                }
+                obj_failed.fill(true);
+                stop_submitting = true;
+                completed += 1;
+            }
+            Err(_) => {
+                for r in results.iter_mut() {
+                    if r.is_ok() {
+                        *r = Err(DispatcherError::IoError(
+                            "block-device channel disconnected".into(),
+                        ));
+                    }
+                }
+                obj_failed.fill(true);
+                break;
+            }
+        }
+    }
+
+    // Any work never submitted (we stopped early on error) has no data on the
+    // GPU — mark those objects failed so they aren't reported as loaded.
+    for &(obj_idx, _seg_idx) in work.iter().skip(submitted) {
+        if results[obj_idx].is_ok() {
+            results[obj_idx] = Err(DispatcherError::IoError(
+                "cold read aborted before segment was submitted".into(),
+            ));
+        }
+    }
+
+    // Final stream sync.
+    let ts_final = std::time::Instant::now();
+    let _ = gpu.stream_synchronize(streams[0]);
+    let _ = gpu.stream_synchronize(streams[1]);
+    let t_final_sync_ns = ts_final.elapsed().as_nanos() as u64;
+    t_sync_ns += t_final_sync_ns;
+
+    #[cfg(feature = "pipeline-telemetry")]
+    eprintln!(
+        "[pipeline-perf] jobs={} segs={} submit={:.2}ms recv_wait={:.2}ms gpu_dma={:.2}ms sync={:.2}ms resub={:.2}ms final_sync={:.2}ms",
+        num_jobs,
+        total_segments,
+        _t_initial_submit.as_secs_f64() * 1000.0,
+        t_recv_ns as f64 / 1_000_000.0,
+        t_gpu_ns as f64 / 1_000_000.0,
+        (t_sync_ns - t_final_sync_ns) as f64 / 1_000_000.0,
+        _t_resub_ns as f64 / 1_000_000.0,
+        t_final_sync_ns as f64 / 1_000_000.0,
+    );
+
+    if let Some(m) = metrics {
+        m.record_cold_ssd_read(0, t_recv_ns as f64 / 1000.0);
+        m.record_cold_gpu_dma(t_gpu_ns as f64 / 1000.0);
+        m.record_cold_stream_sync(t_sync_ns as f64 / 1000.0);
+    }
+
+    // Forget DmaBuffer wrappers (memory-tier owns the allocation).
+    for obj in all_objs {
+        for buf in obj.chunk_bufs {
+            std::mem::forget(Arc::try_unwrap(buf).ok());
+        }
+    }
+
+    results
+}
+
+/// Per-drive work descriptor for the scatter-gather pipeline.
+pub struct DriveWork<'a> {
+    pub channels: &'a ClientChannels,
+    pub drive: &'a dyn IBlockDevice,
+    pub jobs: &'a [ColdReadJob<'a>],
+}
+
+impl std::fmt::Debug for DriveWork<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DriveWork")
+            .field("job_count", &self.jobs.len())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Per-call span telemetry for [`scatter_gather_multi_drive_zero_copy`].
+///
+/// On only when `OPTIMIZER_ARTIFACTS_DIR` is set (read once): each call then
+/// appends one JSON line to `$OPTIMIZER_ARTIFACTS_DIR/cold_sg_spans.<pid>.jsonl`
+/// through a process-wide buffered writer flushed every 32 lines. When unset,
+/// [`sg_spans::start`] returns `None` and the poll loop only checks the `Option`.
+mod sg_spans {
+    use std::fs::File;
+    use std::io::{BufWriter, Write};
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Instant;
+
+    const FLUSH_EVERY: u32 = 32;
+
+    struct Sink {
+        out: BufWriter<File>,
+        pending: u32,
+    }
+
+    fn sink() -> Option<&'static Mutex<Sink>> {
+        static SINK: OnceLock<Option<Mutex<Sink>>> = OnceLock::new();
+        SINK.get_or_init(|| {
+            let dir = std::env::var_os("OPTIMIZER_ARTIFACTS_DIR")?;
+            let path = std::path::Path::new(&dir)
+                .join(format!("cold_sg_spans.{}.jsonl", std::process::id()));
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .ok()?;
+            Some(Mutex::new(Sink {
+                out: BufWriter::new(file),
+                pending: 0,
+            }))
+        })
+        .as_ref()
+    }
+
+    #[derive(Default)]
+    struct Drive {
+        objects: usize,
+        bytes: usize,
+        cmds: usize,
+        window_cmds: usize,
+        first_completion_us: Option<u64>,
+        last_completion_us: Option<u64>,
+        first_obj_done_us: Option<u64>,
+    }
+
+    pub(super) struct Spans {
+        t0: Instant,
+        drives: Vec<Drive>,
+        h2d_issue_us: Vec<u64>,
+        loop_end_us: u64,
+    }
+
+    /// Start a span record, or `None` when telemetry is off.
+    pub(super) fn start(num_drives: usize, num_jobs: usize) -> Option<Spans> {
+        sink()?;
+        Some(Spans {
+            t0: Instant::now(),
+            drives: (0..num_drives).map(|_| Drive::default()).collect(),
+            h2d_issue_us: Vec::with_capacity(num_jobs),
+            loop_end_us: 0,
+        })
+    }
+
+    impl Spans {
+        fn now_us(&self) -> u64 {
+            u64::try_from(self.t0.elapsed().as_micros()).unwrap_or(u64::MAX)
+        }
+
+        pub(super) fn set_drive(
+            &mut self,
+            d: usize,
+            objects: usize,
+            bytes: usize,
+            cmds: usize,
+            window_cmds: usize,
+        ) {
+            let dr = &mut self.drives[d];
+            dr.objects = objects;
+            dr.bytes = bytes;
+            dr.cmds = cmds;
+            dr.window_cmds = window_cmds;
+        }
+
+        pub(super) fn completion(&mut self, d: usize, obj_done: bool) {
+            let t = self.now_us();
+            let dr = &mut self.drives[d];
+            dr.first_completion_us.get_or_insert(t);
+            dr.last_completion_us = Some(t);
+            if obj_done {
+                dr.first_obj_done_us.get_or_insert(t);
+            }
+        }
+
+        pub(super) fn h2d_issue(&mut self) {
+            let t = self.now_us();
+            self.h2d_issue_us.push(t);
+        }
+
+        pub(super) fn loop_end(&mut self) {
+            self.loop_end_us = self.now_us();
+        }
+
+        /// Write the line (after the final stream sync).
+        pub(super) fn finish(self) {
+            let Some(sink) = sink() else { return };
+            let final_sync_end_us = self.now_us();
+            let opt = |v: Option<u64>| v.map_or_else(|| "null".to_string(), |x| x.to_string());
+            let cutoff = self.loop_end_us.saturating_sub(400);
+            let h2d_last400_count = self.h2d_issue_us.iter().filter(|&&t| t >= cutoff).count();
+            let drives: Vec<String> = self
+                .drives
+                .iter()
+                .map(|d| {
+                    format!(
+                        "{{\"objects\":{},\"bytes\":{},\"cmds\":{},\"window_cmds\":{},\
+                         \"first_completion_us\":{},\"last_completion_us\":{},\
+                         \"first_obj_done_us\":{}}}",
+                        d.objects,
+                        d.bytes,
+                        d.cmds,
+                        d.window_cmds,
+                        opt(d.first_completion_us),
+                        opt(d.last_completion_us),
+                        opt(d.first_obj_done_us),
+                    )
+                })
+                .collect();
+            let line = format!(
+                "{{\"num_drives\":{},\"loop_end_us\":{},\"final_sync_end_us\":{},\
+                 \"h2d_issues\":{},\"first_h2d_issue_us\":{},\"last_h2d_issue_us\":{},\
+                 \"h2d_last400_count\":{},\"drives\":[{}]}}\n",
+                self.drives.len(),
+                self.loop_end_us,
+                final_sync_end_us,
+                self.h2d_issue_us.len(),
+                opt(self.h2d_issue_us.first().copied()),
+                opt(self.h2d_issue_us.last().copied()),
+                h2d_last400_count,
+                drives.join(","),
+            );
+            let Ok(mut s) = sink.lock() else { return };
+            let _ = s.out.write_all(line.as_bytes());
+            s.pending += 1;
+            if s.pending >= FLUSH_EVERY {
+                s.pending = 0;
+                let _ = s.out.flush();
+            }
+        }
+    }
+}
+
+/// Multi-drive scatter-gather SSD→GPU zero-copy transfer.
+///
+/// Fans out NVMe reads to all drives simultaneously and fans in completions
+/// via a multiplexed poll loop on the caller thread. When an object's last
+/// NVMe segment completes, the fused H2D DMA is issued immediately —
+/// preserving the NVMe/H2D overlap that is load-bearing. A multi-region job
+/// (more than one entry in `regions`) instead gets one batch of piece copies
+/// (region L from `slot + sum(sizes[0..L])`) at that point.
+///
+/// Completions are reaped continuously: H2Ds queue on the pipe streams
+/// without any intermediate host sync, and one final dual sync covers the
+/// whole batch before returning. This is safe because each object's H2D
+/// source is its own memory-tier slot, so there is no buffer reuse to guard.
+/// The final sync is checked: if it fails, every object that issued an H2D
+/// is reported `Err`.
+///
+/// Returns `Vec<Vec<Result<(), DispatcherError>>>` indexed by drive, then
+/// by job index within that drive.
+///
+/// # Safety
+/// All `mem_ptr` and `gpu_dst` pointers in the jobs must be valid for their
+/// respective `total_bytes`.
+#[allow(clippy::too_many_arguments)]
+pub unsafe fn scatter_gather_multi_drive_zero_copy(
+    gpu: &dyn IGpuServices,
+    streams: &[GpuStream; 2],
+    drive_works: &[DriveWork<'_>],
+    chunk_size: usize,
+    max_queue_depth: usize,
+    metrics: Option<&dyn crate::metrics::PipelineMetrics>,
+) -> Vec<Vec<Result<(), DispatcherError>>> {
+    let num_drives = drive_works.len();
+    let mut all_results: Vec<Vec<Result<(), DispatcherError>>> = drive_works
+        .iter()
+        .map(|dw| vec![Ok(()); dw.jobs.len()])
+        .collect();
+
+    if num_drives == 0 {
+        return all_results;
+    }
+
+    let mut spans = sg_spans::start(num_drives, drive_works.iter().map(|dw| dw.jobs.len()).sum());
+
+    struct DriveSegments {
+        objs: Vec<ObjSegs>,
+        total_segments: usize,
+        work: Vec<(usize, usize)>,
+        max_segments_per_obj: usize,
+    }
+
+    struct ObjSegs {
+        segments: Vec<crate::io_segmenter::IoSegment>,
+        chunk_bufs: Vec<Arc<Mutex<DmaBuffer>>>,
+    }
+
+    let mut per_drive: Vec<DriveSegments> = Vec::with_capacity(num_drives);
+    let mut grand_total_segments: usize = 0;
+
+    for dw in drive_works {
+        let block_size = dw.drive.block_size() as usize;
+        let mut objs: Vec<ObjSegs> = Vec::with_capacity(dw.jobs.len());
+        let mut total_segments = 0usize;
+        let mut work: Vec<(usize, usize)> = Vec::new();
+
+        for (obj_idx, job) in dw.jobs.iter().enumerate() {
+            let aligned_bytes = job.total_bytes.next_multiple_of(block_size);
+            let segments = io_segmenter::segment_io(
+                job.start_lba,
+                aligned_bytes,
+                chunk_size as u32,
+                block_size as u32,
+            );
+            let chunk_bufs: Vec<Arc<Mutex<DmaBuffer>>> = segments
+                .iter()
+                .map(|seg| {
+                    let ptr =
+                        unsafe { job.mem_ptr.add(seg.buffer_offset) as *mut std::ffi::c_void };
+                    let buf_size = seg.length.next_multiple_of(block_size);
+                    let buf = unsafe { DmaBuffer::from_raw(ptr, buf_size, noop_free, -1) }.unwrap();
+                    Arc::new(Mutex::new(buf))
+                })
+                .collect();
+            for seg_idx in 0..segments.len() {
+                work.push((obj_idx, seg_idx));
+            }
+            total_segments += segments.len();
+            objs.push(ObjSegs {
+                segments,
+                chunk_bufs,
+            });
+        }
+
+        let max_segments_per_obj = objs.iter().map(|o| o.segments.len()).max().unwrap_or(0);
+        grand_total_segments += total_segments;
+        per_drive.push(DriveSegments {
+            objs,
+            total_segments,
+            work,
+            max_segments_per_obj,
+        });
+    }
+
+    if grand_total_segments == 0 {
+        return all_results;
+    }
+
+    // Distribute queue depth proportionally to each drive's segment count.
+    let mut per_drive_qd: Vec<usize> = per_drive
+        .iter()
+        .map(|ds| {
+            let share = (max_queue_depth as u64 * ds.total_segments as u64
+                / grand_total_segments as u64) as usize;
+            share.max(1).min(ds.work.len())
+        })
+        .collect();
+    // Ensure we don't exceed total budget.
+    let total_budget: usize = per_drive_qd.iter().sum();
+    if total_budget > max_queue_depth {
+        let excess = total_budget - max_queue_depth;
+        let mut remaining = excess;
+        for qd in per_drive_qd.iter_mut().rev() {
+            if remaining == 0 {
+                break;
+            }
+            let reduce = remaining.min(*qd - 1);
+            *qd -= reduce;
+            remaining -= reduce;
+        }
+    }
+
+    if let Some(sp) = spans.as_mut() {
+        for (d, (ds, dw)) in per_drive.iter().zip(drive_works).enumerate() {
+            let bytes = dw.jobs.iter().map(|j| j.total_bytes).sum();
+            sp.set_drive(d, dw.jobs.len(), bytes, ds.total_segments, per_drive_qd[d]);
+        }
+    }
+
+    // Per-drive submission/completion state.
+    let mut submitted: Vec<usize> = vec![0; num_drives];
+    let mut completed: Vec<usize> = vec![0; num_drives];
+    let mut total_submitted: usize = 0;
+    let mut total_completed: usize = 0;
+    let mut stop_submitting: Vec<bool> = vec![false; num_drives];
+
+    // Per-drive, per-object remaining segment count and failure state.
+    let mut obj_remaining: Vec<Vec<usize>> = per_drive
+        .iter()
+        .map(|ds| ds.objs.iter().map(|o| o.segments.len()).collect())
+        .collect();
+    let mut obj_failed: Vec<Vec<bool>> = drive_works
+        .iter()
+        .map(|dw| vec![false; dw.jobs.len()])
+        .collect();
+
+    // Objects whose H2D was issued in the loop; the final sync gates them.
+    let mut h2d_issued: Vec<Vec<bool>> = drive_works
+        .iter()
+        .map(|dw| vec![false; dw.jobs.len()])
+        .collect();
+
+    let mut stream_idx: usize = 0;
+
+    // Tag encoding: (drive_idx << 32) | (obj_idx * max_segs + seg_idx)
+    // Since we use per-drive channels, we only need the intra-drive part of
+    // the tag (the drive is implicit from which channel completed). But we
+    // use the same per-drive tag encoding as pipelined_multi_object_zero_copy.
+
+    // Fan-out: submit initial segments for each drive.
+    for d in 0..num_drives {
+        let ds = &per_drive[d];
+        let dw = &drive_works[d];
+        let limit = per_drive_qd[d].min(ds.work.len());
+
+        while submitted[d] < limit {
+            let (obj_idx, seg_idx) = ds.work[submitted[d]];
+            let obj = &ds.objs[obj_idx];
+            let tag = (obj_idx * ds.max_segments_per_obj + seg_idx) as u64;
+
+            if dw
+                .channels
+                .command_tx
+                .send(Command::ReadAsync {
+                    ns_id: 1,
+                    lba: obj.segments[seg_idx].lba,
+                    buf: Arc::clone(&obj.chunk_bufs[seg_idx]),
+                    timeout_ms: READ_TIMEOUT_MS,
+                    tag,
+                })
+                .is_err()
+            {
+                for r in all_results[d].iter_mut() {
+                    *r = Err(DispatcherError::IoError("channel send failed".into()));
+                }
+                stop_submitting[d] = true;
+                break;
+            }
+            submitted[d] += 1;
+            total_submitted += 1;
+        }
+    }
+
+    let mut t_recv_ns: u64 = 0;
+    let mut t_gpu_ns: u64 = 0;
+    // Covers only the final dual sync; the poll loop never blocks on the GPU.
+    let mut t_sync_ns: u64 = 0;
+
+    // Multiplexed completion loop: poll all drives' completion_rx channels.
+    let mut poll_idx: usize = 0;
+    let mut idle_spins: u32 = 0;
+    const SPIN_LIMIT: u32 = 64;
+    const YIELD_LIMIT: u32 = 256;
+
+    while total_completed < total_submitted {
+        let d = poll_idx % num_drives;
+        poll_idx += 1;
+
+        if completed[d] >= submitted[d] {
+            if poll_idx % num_drives == 0 {
+                idle_spins += 1;
+                if idle_spins < SPIN_LIMIT {
+                    std::hint::spin_loop();
+                } else if idle_spins < YIELD_LIMIT {
+                    std::thread::yield_now();
+                } else {
+                    std::thread::park_timeout(std::time::Duration::from_micros(1));
+                }
+            }
+            continue;
+        }
+
+        let ds = &per_drive[d];
+        let dw = &drive_works[d];
+        let t0 = std::time::Instant::now();
+
+        match dw.channels.completion_rx.try_recv() {
+            Ok(Completion::ReadDone { tag, result, .. }) => {
+                t_recv_ns += t0.elapsed().as_nanos() as u64;
+                idle_spins = 0;
+                completed[d] += 1;
+                total_completed += 1;
+
+                let obj_idx = (tag as usize) / ds.max_segments_per_obj;
+                let seg_idx = (tag as usize) % ds.max_segments_per_obj;
+
+                if obj_idx >= dw.jobs.len()
+                    || seg_idx >= ds.objs.get(obj_idx).map_or(0, |o| o.segments.len())
+                {
+                    for r in all_results[d].iter_mut() {
+                        if r.is_ok() {
+                            *r = Err(DispatcherError::IoError("invalid completion tag".into()));
+                        }
+                    }
+                    obj_failed[d].fill(true);
+                    stop_submitting[d] = true;
+                } else if let Err(e) = result {
+                    all_results[d][obj_idx] = Err(DispatcherError::IoError(format!(
+                        "SSD read drive={d} obj={obj_idx} seg={seg_idx}: {e}"
+                    )));
+                    obj_failed[d][obj_idx] = true;
+                    obj_remaining[d][obj_idx] = obj_remaining[d][obj_idx].saturating_sub(1);
+                } else {
+                    obj_remaining[d][obj_idx] -= 1;
+                }
+
+                if let Some(sp) = spans.as_mut() {
+                    let obj_done = obj_remaining[d].get(obj_idx) == Some(&0);
+                    sp.completion(d, obj_done);
+                }
+
+                // Resubmit next segment for this drive BEFORE H2D (preserve overlap).
+                if !stop_submitting[d] && submitted[d] < ds.work.len() {
+                    let (next_obj, next_seg) = ds.work[submitted[d]];
+                    let next_obj_data = &ds.objs[next_obj];
+                    let next_tag = (next_obj * ds.max_segments_per_obj + next_seg) as u64;
+
+                    if dw
+                        .channels
+                        .command_tx
+                        .send(Command::ReadAsync {
+                            ns_id: 1,
+                            lba: next_obj_data.segments[next_seg].lba,
+                            buf: Arc::clone(&next_obj_data.chunk_bufs[next_seg]),
+                            timeout_ms: READ_TIMEOUT_MS,
+                            tag: next_tag,
+                        })
+                        .is_ok()
+                    {
+                        submitted[d] += 1;
+                        total_submitted += 1;
+                    } else {
+                        stop_submitting[d] = true;
+                    }
+                }
+
+                // Object fully read: issue ONE coalesced H2D for the entire slot,
+                // or, for a multi-region object, ONE batch of its piece copies.
+                if obj_idx < dw.jobs.len()
+                    && obj_remaining[d][obj_idx] == 0
+                    && !obj_failed[d][obj_idx]
+                    && (dw.jobs[obj_idx].regions.len() > 1 || !dw.jobs[obj_idx].gpu_dst.is_null())
+                {
+                    let tg = std::time::Instant::now();
+                    let job = &dw.jobs[obj_idx];
+                    let current_stream = streams[stream_idx % 2];
+
+                    let dma_result = if job.regions.len() > 1 {
+                        queue_slot_to_regions(
+                            gpu,
+                            current_stream,
+                            job.mem_ptr,
+                            job.total_bytes,
+                            job.regions,
+                        )
+                    } else {
+                        gpu.memcpy_h2d_async(
+                            job.mem_ptr as *const std::ffi::c_void,
+                            job.gpu_dst,
+                            job.total_bytes,
+                            current_stream,
+                        )
+                    };
+                    h2d_issued[d][obj_idx] = true;
+                    if let Err(e) = dma_result {
+                        all_results[d][obj_idx] = Err(DispatcherError::IoError(format!(
+                            "GPU H2D drive={d} obj={obj_idx}: {e}"
+                        )));
+                    }
+                    t_gpu_ns += tg.elapsed().as_nanos() as u64;
+                    if let Some(sp) = spans.as_mut() {
+                        sp.h2d_issue();
+                    }
+
+                    stream_idx += 1;
+                }
+            }
+            Ok(Completion::Timeout { handle }) => {
+                idle_spins = 0;
+                completed[d] += 1;
+                total_completed += 1;
+                for r in all_results[d].iter_mut() {
+                    if r.is_ok() {
+                        *r = Err(DispatcherError::IoError(format!(
+                            "NVMe read timeout drive={d} (handle {handle:?})"
+                        )));
+                    }
+                }
+                obj_failed[d].fill(true);
+                stop_submitting[d] = true;
+            }
+            Ok(_) => {
+                idle_spins = 0;
+                completed[d] += 1;
+                total_completed += 1;
+                for r in all_results[d].iter_mut() {
+                    if r.is_ok() {
+                        *r = Err(DispatcherError::IoError(
+                            "unexpected completion on cold-read channel".into(),
+                        ));
+                    }
+                }
+                obj_failed[d].fill(true);
+                stop_submitting[d] = true;
+            }
+            Err(component_core::channel::ChannelError::Empty) => {
+                // Nothing ready on this drive; continue polling others.
+                if poll_idx % num_drives == 0 {
+                    idle_spins += 1;
+                    if idle_spins < SPIN_LIMIT {
+                        std::hint::spin_loop();
+                    } else if idle_spins < YIELD_LIMIT {
+                        std::thread::yield_now();
+                    } else {
+                        std::thread::park_timeout(std::time::Duration::from_micros(1));
+                    }
+                }
+            }
+            Err(_) => {
+                // Channel closed — drive actor gone.
+                for r in all_results[d].iter_mut() {
+                    if r.is_ok() {
+                        *r = Err(DispatcherError::IoError(
+                            "block-device channel disconnected".into(),
+                        ));
+                    }
+                }
+                obj_failed[d].fill(true);
+                stop_submitting[d] = true;
+                // Mark all remaining as completed so we don't spin.
+                let delta = submitted[d] - completed[d];
+                completed[d] = submitted[d];
+                total_completed += delta;
+            }
+        }
+    }
+
+    if let Some(sp) = spans.as_mut() {
+        sp.loop_end();
+    }
+
+    // Mark unsubmitted work as failed.
+    for d in 0..num_drives {
+        let ds = &per_drive[d];
+        for &(obj_idx, _) in ds.work.iter().skip(submitted[d]) {
+            if all_results[d][obj_idx].is_ok() {
+                all_results[d][obj_idx] = Err(DispatcherError::IoError(
+                    "cold read aborted before segment was submitted".into(),
+                ));
+            }
+        }
+    }
+
+    // Final stream sync: the delivery barrier for every H2D issued above. Both
+    // syncs always run; if either fails, no issued object is reported Ok.
+    let ts_final = std::time::Instant::now();
+    let sync0 = gpu.stream_synchronize(streams[0]);
+    let sync1 = gpu.stream_synchronize(streams[1]);
+    let t_final_sync_ns = ts_final.elapsed().as_nanos() as u64;
+    t_sync_ns += t_final_sync_ns;
+    if let Some(e) = sync0.err().or(sync1.err()) {
+        for (results, issued) in all_results.iter_mut().zip(&h2d_issued) {
+            for (r, &was_issued) in results.iter_mut().zip(issued) {
+                if was_issued && r.is_ok() {
+                    *r = Err(DispatcherError::IoError(format!(
+                        "final pipe stream_synchronize failed: {e}"
+                    )));
+                }
+            }
+        }
+    }
+    if let Some(sp) = spans {
+        sp.finish();
+    }
+
+    if let Some(m) = metrics {
+        m.record_cold_ssd_read(0, t_recv_ns as f64 / 1000.0);
+        m.record_cold_gpu_dma(t_gpu_ns as f64 / 1000.0);
+        m.record_cold_stream_sync(t_sync_ns as f64 / 1000.0);
+    }
+
+    // Forget DmaBuffer wrappers (memory-tier owns the allocation).
+    for ds in per_drive {
+        for obj in ds.objs {
+            for buf in obj.chunk_bufs {
+                std::mem::forget(Arc::try_unwrap(buf).ok());
+            }
+        }
+    }
+
+    all_results
+}
+
+/// Describes a single object to be promoted from SSD into the memory-tier (no GPU).
+pub struct DramPromoteJob {
+    pub mem_ptr: *mut u8,
+    pub start_lba: u64,
+    pub total_bytes: usize,
+}
+
+impl std::fmt::Debug for DramPromoteJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DramPromoteJob")
+            .field("start_lba", &self.start_lba)
+            .field("total_bytes", &self.total_bytes)
+            .finish_non_exhaustive()
+    }
+}
+
+// SAFETY: pointers are valid for the duration of the pipeline call.
+unsafe impl Send for DramPromoteJob {}
+
+/// Read from SSD directly into a memory-tier slot without any GPU DMA.
+///
+/// This is the promote-only variant of [`pipelined_ssd_to_gpu_zero_copy`].
+/// It keeps `max_queue_depth` NVMe reads in flight but performs no GPU
+/// transfers — used by `promote_to_memory_tier` for pre-warming entries.
+///
+/// # Safety
+/// - `mem_tier_ptr` must be a valid, SPDK-registered pointer for `total_bytes`.
+#[allow(clippy::too_many_arguments)]
+pub unsafe fn pipelined_ssd_to_dram_only(
+    drive: &dyn IBlockDevice,
+    channels: &ClientChannels,
+    mem_tier_ptr: *mut u8,
+    start_lba: u64,
+    total_bytes: usize,
+    chunk_size: usize,
+    max_queue_depth: usize,
+) -> Result<(), DispatcherError> {
+    let block_size = drive.block_size() as usize;
+    let aligned_bytes = total_bytes.next_multiple_of(block_size);
+
+    let segments = io_segmenter::segment_io(
+        start_lba,
+        aligned_bytes,
+        chunk_size as u32,
+        block_size as u32,
+    );
+
+    if segments.is_empty() {
+        return Ok(());
+    }
+
+    let num_chunks = segments.len();
+
+    let chunk_bufs: Vec<Arc<Mutex<DmaBuffer>>> = segments
+        .iter()
+        .map(|seg| {
+            let ptr = unsafe { mem_tier_ptr.add(seg.buffer_offset) as *mut std::ffi::c_void };
+            let buf_size = seg.length.next_multiple_of(block_size);
+            let buf =
+                unsafe { DmaBuffer::from_raw(ptr, buf_size, noop_free, -1) }.map_err(|e| {
+                    DispatcherError::AllocationFailed(format!("DmaBuffer wrap chunk: {e}"))
+                })?;
+            Ok(Arc::new(Mutex::new(buf)))
+        })
+        .collect::<Result<Vec<_>, DispatcherError>>()?;
+
+    let submit_limit = max_queue_depth.min(num_chunks).max(1);
+    let mut submitted = 0usize;
+    let mut completed = 0usize;
+
+    while submitted < num_chunks && submitted < submit_limit {
+        channels
+            .command_tx
+            .send(Command::ReadAsync {
+                ns_id: 1,
+                lba: segments[submitted].lba,
+                buf: Arc::clone(&chunk_bufs[submitted]),
+                timeout_ms: READ_TIMEOUT_MS,
+                tag: submitted as u64,
+            })
+            .map_err(|e| DispatcherError::IoError(format!("ReadAsync send #{submitted}: {e}")))?;
+        submitted += 1;
+    }
+
+    while completed < num_chunks {
+        match channels.completion_rx.recv() {
+            Ok(Completion::ReadDone { tag: _, result, .. }) => {
+                result.map_err(|e| DispatcherError::IoError(format!("SSD read failed: {e}")))?;
+
+                completed += 1;
+
+                if submitted < num_chunks {
+                    channels
+                        .command_tx
+                        .send(Command::ReadAsync {
+                            ns_id: 1,
+                            lba: segments[submitted].lba,
+                            buf: Arc::clone(&chunk_bufs[submitted]),
+                            timeout_ms: READ_TIMEOUT_MS,
+                            tag: submitted as u64,
+                        })
+                        .map_err(|e| {
+                            DispatcherError::IoError(format!("ReadAsync send #{submitted}: {e}"))
+                        })?;
+                    submitted += 1;
+                }
+            }
+            Ok(Completion::Timeout { handle }) => {
+                return Err(DispatcherError::IoError(format!(
+                    "NVMe read timeout (handle {:?})",
+                    handle
+                )));
+            }
+            Ok(other) => {
+                return Err(DispatcherError::IoError(format!(
+                    "unexpected completion: {other:?}"
+                )));
+            }
+            Err(_) => {
+                return Err(DispatcherError::IoError(
+                    "completion channel disconnected".into(),
+                ));
+            }
+        }
+    }
+
+    for buf in chunk_bufs {
+        std::mem::forget(Arc::try_unwrap(buf).ok());
+    }
+
+    Ok(())
+}
+
+/// Read timeout for [`read_into_bounce`], in milliseconds: one that never fires.
+///
+/// The block-device actor's timeout forgets an operation while the drive may
+/// still write its buffer. For a bounce buffer that is unsafe: the buffer would be
+/// freed and handed to another entry under a read still in flight. So this path
+/// waits for every read to complete, however long the device takes, and a hung
+/// device surfaces as the requesting peer's own reply deadline. `u32::MAX` ms
+/// (~49 days) rather than `u64::MAX`, which overflows the actor's deadline
+/// arithmetic.
+pub const BOUNCE_READ_TIMEOUT_MS: u64 = u32::MAX as u64;
+
+/// How [`read_into_bounce`] failed: whether its buffer may be freed.
+#[derive(Debug)]
+pub enum BounceReadError {
+    /// Every read submitted has completed; `dst` is free.
+    Settled(String),
+    /// A read may still be writing `dst`.
+    Unsettled(String),
+}
+
+/// Read `total_bytes` from `start_lba` into `dst`, which must lie in a bounce
+/// buffer, keeping up to `max_queue_depth` segments in flight.
+///
+/// Unlike [`pipelined_ssd_to_dram_only`], an error does not return while reads
+/// are outstanding: every submitted segment is waited for. On success, and on
+/// a [`BounceReadError::Settled`] failure, the device holds no reference to
+/// `dst` and the buffer may be freed. On [`BounceReadError::Unsettled`] a read
+/// ended without proof the drive stopped writing — a timeout, or an error the
+/// actor reports *before* the controller reset that stops the DMA — and the
+/// buffer must never be reused.
+///
+/// # Errors
+///
+/// [`BounceReadError::Settled`] if a segment failed and every submitted read
+/// has completed; [`BounceReadError::Unsettled`] if a read may still be
+/// writing `dst`.
+///
+/// # Safety
+/// - `dst` must be valid, DMA-capable memory for `total_bytes` rounded up to the
+///   block size, untouched by anyone else until this returns.
+pub unsafe fn read_into_bounce(
+    drive: &dyn IBlockDevice,
+    channels: &ClientChannels,
+    dst: *mut u8,
+    start_lba: u64,
+    total_bytes: usize,
+    chunk_size: usize,
+    max_queue_depth: usize,
+) -> Result<(), BounceReadError> {
+    let block_size = drive.block_size() as usize;
+    let aligned_bytes = total_bytes.next_multiple_of(block_size);
+    let segments = io_segmenter::segment_io(
+        start_lba,
+        aligned_bytes,
+        chunk_size as u32,
+        block_size as u32,
+    );
+    let num_chunks = segments.len();
+    let mut bufs = Vec::with_capacity(num_chunks);
+    for seg in &segments {
+        // SAFETY: inside `dst`, whose extent the caller guarantees.
+        let ptr = unsafe { dst.add(seg.buffer_offset).cast::<std::ffi::c_void>() };
+        // SAFETY: `noop_free` — the memory belongs to the buffer, not the wrapper.
+        let buf = unsafe {
+            DmaBuffer::from_raw(ptr, seg.length.next_multiple_of(block_size), noop_free, -1)
+        }
+        .map_err(|e| BounceReadError::Settled(format!("wrapping segment: {e}")))?;
+        bufs.push(Arc::new(Mutex::new(buf)));
+    }
+
+    let limit = max_queue_depth.min(num_chunks).max(1);
+    let (mut submitted, mut outstanding) = (0usize, 0usize);
+    let mut failure: Option<String> = None;
+    let mut unsettled = false;
+    loop {
+        // Submit while there is room, unless something already failed.
+        while failure.is_none() && submitted < num_chunks && outstanding < limit {
+            let sent = channels.command_tx.send(Command::ReadAsync {
+                ns_id: 1,
+                lba: segments[submitted].lba,
+                buf: Arc::clone(&bufs[submitted]),
+                timeout_ms: BOUNCE_READ_TIMEOUT_MS,
+                tag: submitted as u64,
+            });
+            match sent {
+                Ok(()) => {
+                    submitted += 1;
+                    outstanding += 1;
+                }
+                Err(e) => failure = Some(format!("submitting segment {submitted}: {e}")),
+            }
+        }
+        if outstanding == 0 {
+            break;
+        }
+        match channels.completion_rx.recv() {
+            Ok(Completion::ReadDone { result, tag, .. }) => {
+                outstanding -= 1;
+                if let Err(e) = result {
+                    failure.get_or_insert(format!("segment {tag}: {e}"));
+                }
+            }
+            Ok(
+                c @ (Completion::Error {
+                    handle: Some(_), ..
+                }
+                | Completion::Timeout { .. }),
+            ) => {
+                // The actor forgot one of our reads without its completion: a
+                // timeout (`BOUNCE_READ_TIMEOUT_MS` makes that unreachable in
+                // practice) or an error sent before a controller reset. The
+                // drive may still be writing, so `dst` is not ours to reuse.
+                outstanding -= 1;
+                unsettled = true;
+                failure.get_or_insert(format!("read ended without data: {c:?}"));
+            }
+            Ok(other) => {
+                // Ends none of our reads; they may all still be out.
+                failure.get_or_insert(format!("unexpected completion: {other:?}"));
+            }
+            Err(_) => {
+                // The device actor is gone, and with it every pending read:
+                // nothing can still write into `dst`.
+                failure.get_or_insert("completion channel disconnected".into());
+                break;
+            }
+        }
+    }
+    for buf in bufs {
+        std::mem::forget(Arc::try_unwrap(buf).ok());
+    }
+    match failure {
+        None => Ok(()),
+        Some(m) if unsettled => Err(BounceReadError::Unsettled(m)),
+        Some(m) => Err(BounceReadError::Settled(m)),
+    }
+}
+
+/// Multi-object pipelined SSD→DRAM transfer without GPU DMA.
+///
+/// Processes multiple objects concurrently on the same NVMe channels.
+/// This is the promote-only variant of [`pipelined_multi_object_zero_copy`].
+///
+/// # Safety
+/// All `mem_ptr` pointers in `jobs` must be valid for their respective `total_bytes`.
+#[allow(clippy::too_many_arguments)]
+pub unsafe fn pipelined_multi_ssd_to_dram_only(
+    drive: &dyn IBlockDevice,
+    channels: &ClientChannels,
+    jobs: &[DramPromoteJob],
+    chunk_size: usize,
+    max_queue_depth: usize,
+) -> Vec<Result<(), DispatcherError>> {
+    let block_size = drive.block_size() as usize;
+    let num_jobs = jobs.len();
+    let mut results: Vec<Result<(), DispatcherError>> = vec![Ok(()); num_jobs];
+
+    if num_jobs == 0 {
+        return results;
+    }
+
+    struct ObjSegments {
+        segments: Vec<crate::io_segmenter::IoSegment>,
+        chunk_bufs: Vec<Arc<Mutex<DmaBuffer>>>,
+    }
+
+    let mut all_objs: Vec<ObjSegments> = Vec::with_capacity(num_jobs);
+    let mut total_segments = 0usize;
+
+    for job in jobs {
+        let aligned_bytes = job.total_bytes.next_multiple_of(block_size);
+        let segments = io_segmenter::segment_io(
+            job.start_lba,
+            aligned_bytes,
+            chunk_size as u32,
+            block_size as u32,
+        );
+
+        let chunk_bufs: Vec<Arc<Mutex<DmaBuffer>>> = segments
+            .iter()
+            .map(|seg| {
+                let ptr = unsafe { job.mem_ptr.add(seg.buffer_offset) as *mut std::ffi::c_void };
+                let buf_size = seg.length.next_multiple_of(block_size);
+                let buf = unsafe { DmaBuffer::from_raw(ptr, buf_size, noop_free, -1) }.unwrap();
+                Arc::new(Mutex::new(buf))
+            })
+            .collect();
+
+        total_segments += segments.len();
+        all_objs.push(ObjSegments {
+            segments,
+            chunk_bufs,
+        });
+    }
+
+    if total_segments == 0 {
+        return results;
+    }
+
+    let mut work: Vec<(usize, usize)> = Vec::with_capacity(total_segments);
+    for (obj_idx, obj) in all_objs.iter().enumerate() {
+        for seg_idx in 0..obj.segments.len() {
+            work.push((obj_idx, seg_idx));
+        }
+    }
+
+    let max_segments_per_obj = all_objs.iter().map(|o| o.segments.len()).max().unwrap_or(0);
+
+    let submit_limit = max_queue_depth.min(work.len());
+    let mut submitted = 0usize;
+    let mut completed = 0usize;
+
+    while submitted < submit_limit {
+        let (obj_idx, seg_idx) = work[submitted];
+        let obj = &all_objs[obj_idx];
+        let tag = (obj_idx * max_segments_per_obj + seg_idx) as u64;
+
+        if channels
+            .command_tx
+            .send(Command::ReadAsync {
+                ns_id: 1,
+                lba: obj.segments[seg_idx].lba,
+                buf: Arc::clone(&obj.chunk_bufs[seg_idx]),
+                timeout_ms: READ_TIMEOUT_MS,
+                tag,
+            })
+            .is_err()
+        {
+            for r in results.iter_mut() {
+                *r = Err(DispatcherError::IoError("channel send failed".into()));
+            }
+            return results;
+        }
+        submitted += 1;
+    }
+
+    while completed < work.len() {
+        match channels.completion_rx.recv() {
+            Ok(Completion::ReadDone { tag, result, .. }) => {
+                let obj_idx = (tag as usize) / max_segments_per_obj;
+                let seg_idx = (tag as usize) % max_segments_per_obj;
+                let _ = seg_idx;
+
+                if let Err(e) = result {
+                    results[obj_idx] = Err(DispatcherError::IoError(format!(
+                        "SSD read obj={obj_idx}: {e}"
+                    )));
+                }
+
+                completed += 1;
+
+                if submitted < work.len() {
+                    let (next_obj, next_seg) = work[submitted];
+                    let next_obj_data = &all_objs[next_obj];
+                    let next_tag = (next_obj * max_segments_per_obj + next_seg) as u64;
+
+                    let _ = channels.command_tx.send(Command::ReadAsync {
+                        ns_id: 1,
+                        lba: next_obj_data.segments[next_seg].lba,
+                        buf: Arc::clone(&next_obj_data.chunk_bufs[next_seg]),
+                        timeout_ms: READ_TIMEOUT_MS,
+                        tag: next_tag,
+                    });
+                    submitted += 1;
+                }
+            }
+            Ok(Completion::Timeout { handle }) => {
+                for r in results.iter_mut() {
+                    if r.is_ok() {
+                        *r = Err(DispatcherError::IoError(format!(
+                            "NVMe read timeout (handle {:?})",
+                            handle
+                        )));
+                    }
+                }
+                break;
+            }
+            Ok(_) | Err(_) => {
+                for r in results.iter_mut() {
+                    if r.is_ok() {
+                        *r = Err(DispatcherError::IoError(
+                            "unexpected completion or channel disconnect".into(),
+                        ));
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    for obj in all_objs {
+        for buf in obj.chunk_bufs {
+            std::mem::forget(Arc::try_unwrap(buf).ok());
+        }
+    }
+
+    results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pipeline_ring_size_is_reasonable() {
+        let size = PIPELINE_RING_SIZE;
+        assert!(size >= 2);
+        assert!(size <= 64);
+    }
+}

@@ -1,0 +1,683 @@
+//! Channel components — first-class SPSC and MPSC message-passing primitives.
+//!
+//! Channels are components that provide [`Sender`] and [`Receiver`] endpoints
+//! for typed, lock-free message passing between actors or threads. Two channel
+//! types are provided:
+//!
+//! - [`SpscChannel`] — single-producer, single-consumer
+//! - [`mpsc::MpscChannel`] — multi-producer, single-consumer
+//!
+//! Both enforce topology constraints at bind time: SPSC rejects a second
+//! sender or receiver, while MPSC allows multiple senders but only one
+//! receiver.
+
+pub mod crossbeam_bounded;
+pub mod crossbeam_unbounded;
+pub mod kanal_bounded;
+pub mod mpsc;
+pub mod queue;
+pub mod rtrb_spsc;
+pub mod spsc;
+pub mod tokio_mpsc;
+
+use std::fmt;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, PoisonError};
+use std::thread::{self, Thread};
+
+use crate::interface::Interface;
+use queue::RingBuffer;
+
+pub use spsc::SpscChannel;
+
+/// Iterations of `spin_loop` hinting before escalating to yielding.
+///
+/// Covers the common case where the peer is about to make progress on another
+/// core, so the wait costs no syscall at all.
+const SPIN_LIMIT: u32 = 64;
+
+/// Iterations before escalating from yielding to parking.
+///
+/// Yielding hands the core to a peer that may be runnable but not scheduled.
+/// It is a syscall, so it is a *transition* strategy, never a resting state.
+const YIELD_LIMIT: u32 = 256;
+
+/// How long a blocked sender/receiver parks before re-checking.
+///
+/// A bound on the wake-up race, not the wake-up mechanism: the peer calls
+/// `unpark` as soon as it makes the queue non-empty (or non-full), so this only
+/// caps the window where the peer acted between our last check and our park.
+const PARK_INTERVAL: std::time::Duration = std::time::Duration::from_micros(50);
+
+/// Advance the wait counter, saturating once parking is reached.
+///
+/// Saturating is the point. An earlier version reset the counter to
+/// [`SPIN_LIMIT`] after parking, intending "stop spinning, keep yielding and
+/// parking" — but [`SPIN_LIMIT`] is the *bottom* of the yield band, so a waiter
+/// that had already parked went back to roughly 191 `sched_yield` calls per 50 µs
+/// park, forever. An idle waiter never settled into blocking and burned most of a
+/// core. Saturating here keeps a waiter that has parked once parking from then on.
+///
+/// It also stops the counter growing without bound, which would overflow in a
+/// debug build for a waiter blocked long enough.
+#[inline]
+fn escalate(spins: u32) -> u32 {
+    if spins >= YIELD_LIMIT {
+        YIELD_LIMIT
+    } else {
+        spins + 1
+    }
+}
+
+/// Interface trait for sending typed messages through a channel.
+///
+/// This is the component-model interface for message producers. Components
+/// can declare receptacles of type `dyn ISender<T> + Send + Sync` and bind
+/// them to channel components via [`bind()`](crate::binding::bind).
+///
+/// # Examples
+///
+/// ```
+/// use component_core::channel::{ISender, SpscChannel};
+/// use component_core::iunknown::query;
+/// use std::sync::Arc;
+///
+/// let ch = SpscChannel::<u32>::new(16);
+/// let sender: Arc<dyn ISender<u32> + Send + Sync> =
+///     query::<dyn ISender<u32> + Send + Sync>(&ch).unwrap();
+///
+/// let rx = ch.receiver().unwrap();
+/// sender.send(42).unwrap();
+/// assert_eq!(rx.recv().unwrap(), 42);
+/// ```
+pub trait ISender<T: Send + 'static>: Send + Sync + 'static {
+    /// Send a message. Blocks if the queue is full.
+    ///
+    /// # Errors
+    ///
+    /// [`ChannelError::Closed`] if the channel is closed (its receiving side
+    /// has gone, or it was force-closed), depending on the implementation.
+    fn send(&self, value: T) -> Result<(), ChannelError>;
+    /// Try to send without blocking.
+    ///
+    /// # Errors
+    ///
+    /// [`ChannelError::Full`] if the queue has no room, or
+    /// [`ChannelError::Closed`] if the channel is closed, depending on the
+    /// implementation.
+    fn try_send(&self, value: T) -> Result<(), ChannelError>;
+}
+
+/// Interface trait for receiving typed messages from a channel.
+///
+/// This is the component-model interface for message consumers. Components
+/// can declare receptacles of type `dyn IReceiver<T> + Send + Sync` and bind
+/// them to channel components via [`bind()`](crate::binding::bind).
+///
+/// # Examples
+///
+/// ```
+/// use component_core::channel::{IReceiver, SpscChannel};
+/// use component_core::iunknown::query;
+/// use std::sync::Arc;
+///
+/// let ch = SpscChannel::<u32>::new(16);
+/// let tx = ch.sender().unwrap();
+/// let receiver: Arc<dyn IReceiver<u32> + Send + Sync> =
+///     query::<dyn IReceiver<u32> + Send + Sync>(&ch).unwrap();
+///
+/// tx.send(99).unwrap();
+/// assert_eq!(receiver.recv().unwrap(), 99);
+/// ```
+pub trait IReceiver<T: Send + 'static>: Send + Sync + 'static {
+    /// Receive a message. Blocks if the queue is empty.
+    ///
+    /// # Errors
+    ///
+    /// [`ChannelError::Closed`] once the channel is closed and drained,
+    /// depending on the implementation.
+    fn recv(&self) -> Result<T, ChannelError>;
+    /// Try to receive without blocking.
+    ///
+    /// # Errors
+    ///
+    /// [`ChannelError::Empty`] if no message is queued, or
+    /// [`ChannelError::Closed`] once the channel is closed and drained,
+    /// depending on the implementation.
+    fn try_recv(&self) -> Result<T, ChannelError>;
+}
+
+impl<T: Send + 'static> Interface for dyn ISender<T> + Send + Sync {}
+impl<T: Send + 'static> Interface for dyn IReceiver<T> + Send + Sync {}
+
+/// Error type for channel operations.
+///
+/// # Examples
+///
+/// ```
+/// use component_core::channel::ChannelError;
+///
+/// let err = ChannelError::Full;
+/// assert_eq!(format!("{err}"), "channel is full");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChannelError {
+    /// Queue is full (for `try_send`).
+    Full,
+    /// Queue is empty (for `try_recv`).
+    Empty,
+    /// All senders disconnected; no more messages will arrive.
+    Closed,
+    /// Topology constraint violated at bind time.
+    BindingRejected {
+        /// Description of the violated constraint.
+        reason: String,
+    },
+}
+
+impl fmt::Display for ChannelError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Full => write!(f, "channel is full"),
+            Self::Empty => write!(f, "channel is empty"),
+            Self::Closed => write!(f, "channel is closed"),
+            Self::BindingRejected { reason } => {
+                write!(f, "binding rejected: {reason}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ChannelError {}
+
+/// Shared state between sender(s) and receiver for signaling.
+pub(crate) struct ChannelState<T> {
+    pub(crate) queue: RingBuffer<T>,
+    pub(crate) sender_count: AtomicUsize,
+    pub(crate) receiver_thread: std::sync::Mutex<Option<Thread>>,
+    pub(crate) sender_thread: std::sync::Mutex<Option<Thread>>,
+    /// Fast-path flags: checked with a Relaxed load before acquiring the
+    /// corresponding Mutex. Set before parking, cleared after waking.
+    pub(crate) receiver_parked: AtomicBool,
+    pub(crate) sender_parked: AtomicBool,
+    /// Force-close flag set by actor deactivation to ensure the receiver
+    /// exits even when other senders (from `IUnknown` queries) are still alive.
+    pub(crate) force_closed: AtomicBool,
+    /// Set when a receiver is dropped and cleared when one is created, so a
+    /// blocked `send` can return `Closed` instead of waiting forever. Before any
+    /// receiver exists it stays clear: sends may fill the queue for a receiver
+    /// bound later.
+    pub(crate) receiver_closed: AtomicBool,
+}
+
+/// Sender endpoint for typed message passing.
+///
+/// For SPSC channels, `Sender` is not `Clone`. For MPSC channels, `Sender`
+/// can be cloned to create additional producers.
+///
+/// When all senders are dropped, the channel is closed and the receiver
+/// will receive [`ChannelError::Closed`] after draining remaining messages.
+///
+/// # Examples
+///
+/// ```
+/// use component_core::channel::SpscChannel;
+///
+/// let ch = SpscChannel::<u32>::new(4);
+/// let tx = ch.sender().unwrap();
+/// let rx = ch.receiver().unwrap();
+///
+/// tx.send(42).unwrap();
+/// assert_eq!(rx.recv().unwrap(), 42);
+/// ```
+pub struct Sender<T: Send + 'static> {
+    state: Arc<ChannelState<T>>,
+    // Track whether this sender tracks the bound count for the channel component
+    bound_flag: Option<Arc<AtomicBool>>,
+}
+
+impl<T: Send + 'static> fmt::Debug for Sender<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Sender").finish()
+    }
+}
+
+impl<T: Send + 'static> Sender<T> {
+    pub(crate) fn new(state: Arc<ChannelState<T>>, bound_flag: Option<Arc<AtomicBool>>) -> Self {
+        state.sender_count.fetch_add(1, Ordering::Release);
+        Self { state, bound_flag }
+    }
+
+    /// Send a message. Blocks if the queue is full.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ChannelError::Closed`] if the receiver has been dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use component_core::channel::SpscChannel;
+    ///
+    /// let ch = SpscChannel::<u32>::new(4);
+    /// let tx = ch.sender().unwrap();
+    /// let rx = ch.receiver().unwrap();
+    ///
+    /// tx.send(1).unwrap();
+    /// tx.send(2).unwrap();
+    /// assert_eq!(rx.recv().unwrap(), 1);
+    /// assert_eq!(rx.recv().unwrap(), 2);
+    /// ```
+    pub fn send(&self, value: T) -> Result<(), ChannelError> {
+        let mut val = value;
+        let mut spins = 0u32;
+        loop {
+            match self.state.queue.push(val) {
+                Ok(()) => {
+                    if self.state.receiver_parked.load(Ordering::Relaxed) {
+                        if let Ok(guard) = self.state.receiver_thread.lock() {
+                            if let Some(ref t) = *guard {
+                                t.unpark();
+                            }
+                        }
+                    }
+                    return Ok(());
+                }
+                Err(returned) => {
+                    // Full, and nobody will ever drain it.
+                    if self.state.receiver_closed.load(Ordering::Acquire) {
+                        return Err(ChannelError::Closed);
+                    }
+                    val = returned;
+                    spins = escalate(spins);
+                    if spins < SPIN_LIMIT {
+                        std::hint::spin_loop();
+                    } else if spins < YIELD_LIMIT {
+                        thread::yield_now();
+                    } else {
+                        {
+                            // `thread::current()` runs before the lock is taken, so the guard
+                            // only covers a store into an `Option<Thread>`, which cannot panic:
+                            // this lock is never poisoned.
+                            let me = thread::current();
+                            let mut guard = self
+                                .state
+                                .sender_thread
+                                .lock()
+                                .unwrap_or_else(PoisonError::into_inner);
+                            *guard = Some(me);
+                        }
+                        self.state.sender_parked.store(true, Ordering::Release);
+                        thread::park_timeout(PARK_INTERVAL);
+                        self.state.sender_parked.store(false, Ordering::Relaxed);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Try to send without blocking.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ChannelError::Full`] if the queue is full.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use component_core::channel::{SpscChannel, ChannelError};
+    ///
+    /// let ch = SpscChannel::<u32>::new(2);
+    /// let tx = ch.sender().unwrap();
+    ///
+    /// assert!(tx.try_send(1).is_ok());
+    /// assert!(tx.try_send(2).is_ok());
+    /// assert_eq!(tx.try_send(3).unwrap_err(), ChannelError::Full);
+    /// ```
+    pub fn try_send(&self, value: T) -> Result<(), ChannelError> {
+        match self.state.queue.push(value) {
+            Ok(()) => {
+                if self.state.receiver_parked.load(Ordering::Relaxed) {
+                    if let Ok(guard) = self.state.receiver_thread.lock() {
+                        if let Some(ref t) = *guard {
+                            t.unpark();
+                        }
+                    }
+                }
+                Ok(())
+            }
+            Err(_returned) => Err(ChannelError::Full),
+        }
+    }
+}
+
+impl<T: Send + 'static> ISender<T> for Sender<T> {
+    fn send(&self, value: T) -> Result<(), ChannelError> {
+        Sender::send(self, value)
+    }
+
+    fn try_send(&self, value: T) -> Result<(), ChannelError> {
+        Sender::try_send(self, value)
+    }
+}
+
+impl<T: Send + 'static> Drop for Sender<T> {
+    fn drop(&mut self) {
+        let prev = self.state.sender_count.fetch_sub(1, Ordering::AcqRel);
+        if prev == 1 {
+            // Last sender dropped — signal closure
+            self.state
+                .queue
+                .sender_alive
+                .store(false, Ordering::Release);
+            // Wake the receiver so it can see the closed signal
+            if let Ok(guard) = self.state.receiver_thread.lock() {
+                if let Some(ref t) = *guard {
+                    t.unpark();
+                }
+            }
+        }
+
+        // Release the binding slot if applicable
+        if let Some(ref flag) = self.bound_flag {
+            flag.store(false, Ordering::Release);
+        }
+    }
+}
+
+/// Receiver endpoint for typed message passing.
+///
+/// Only one receiver exists per channel. When all senders are dropped and
+/// the queue is drained, [`recv`](Receiver::recv) returns
+/// [`ChannelError::Closed`].
+///
+/// # Examples
+///
+/// ```
+/// use component_core::channel::SpscChannel;
+///
+/// let ch = SpscChannel::<u32>::new(4);
+/// let tx = ch.sender().unwrap();
+/// let rx = ch.receiver().unwrap();
+///
+/// tx.send(10).unwrap();
+/// assert_eq!(rx.recv().unwrap(), 10);
+/// ```
+pub struct Receiver<T: Send + 'static> {
+    state: Arc<ChannelState<T>>,
+    bound_flag: Option<Arc<AtomicBool>>,
+}
+
+impl<T: Send + 'static> fmt::Debug for Receiver<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Receiver").finish()
+    }
+}
+
+impl<T: Send + 'static> Receiver<T> {
+    pub(crate) fn new(state: Arc<ChannelState<T>>, bound_flag: Option<Arc<AtomicBool>>) -> Self {
+        state.receiver_closed.store(false, Ordering::Release);
+        Self { state, bound_flag }
+    }
+
+    /// Receive a message. Blocks if the queue is empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ChannelError::Closed`] when all senders are dropped and
+    /// the queue is fully drained.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use component_core::channel::{SpscChannel, ChannelError};
+    ///
+    /// let ch = SpscChannel::<u32>::new(4);
+    /// let tx = ch.sender().unwrap();
+    /// let rx = ch.receiver().unwrap();
+    ///
+    /// tx.send(42).unwrap();
+    /// drop(tx);
+    ///
+    /// assert_eq!(rx.recv().unwrap(), 42);
+    /// assert_eq!(rx.recv().unwrap_err(), ChannelError::Closed);
+    /// ```
+    pub fn recv(&self) -> Result<T, ChannelError> {
+        let mut spins = 0u32;
+        loop {
+            if let Some(value) = self.state.queue.pop() {
+                if self.state.sender_parked.load(Ordering::Relaxed) {
+                    if let Ok(guard) = self.state.sender_thread.lock() {
+                        if let Some(ref t) = *guard {
+                            t.unpark();
+                        }
+                    }
+                }
+                return Ok(value);
+            }
+
+            let naturally_closed = !self.state.queue.sender_alive.load(Ordering::Acquire)
+                && self.state.sender_count.load(Ordering::Acquire) == 0;
+            let force_closed = self.state.force_closed.load(Ordering::Acquire);
+
+            if naturally_closed || force_closed {
+                if let Some(value) = self.state.queue.pop() {
+                    return Ok(value);
+                }
+                return Err(ChannelError::Closed);
+            }
+
+            spins = escalate(spins);
+            if spins < SPIN_LIMIT {
+                std::hint::spin_loop();
+            } else if spins < YIELD_LIMIT {
+                thread::yield_now();
+            } else {
+                {
+                    // `thread::current()` runs before the lock is taken, so the guard
+                    // only covers a store into an `Option<Thread>`, which cannot panic:
+                    // this lock is never poisoned.
+                    let me = thread::current();
+                    let mut guard = self
+                        .state
+                        .receiver_thread
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner);
+                    *guard = Some(me);
+                }
+                self.state.receiver_parked.store(true, Ordering::Release);
+                thread::park_timeout(PARK_INTERVAL);
+                self.state.receiver_parked.store(false, Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// Try to receive without blocking.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ChannelError::Empty`] if no messages are available.
+    /// Returns [`ChannelError::Closed`] if all senders are dropped and
+    /// the queue is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use component_core::channel::{SpscChannel, ChannelError};
+    ///
+    /// let ch = SpscChannel::<u32>::new(4);
+    /// let tx = ch.sender().unwrap();
+    /// let rx = ch.receiver().unwrap();
+    ///
+    /// assert_eq!(rx.try_recv().unwrap_err(), ChannelError::Empty);
+    /// tx.send(1).unwrap();
+    /// assert_eq!(rx.try_recv().unwrap(), 1);
+    /// ```
+    pub fn try_recv(&self) -> Result<T, ChannelError> {
+        if let Some(value) = self.state.queue.pop() {
+            if self.state.sender_parked.load(Ordering::Relaxed) {
+                if let Ok(guard) = self.state.sender_thread.lock() {
+                    if let Some(ref t) = *guard {
+                        t.unpark();
+                    }
+                }
+            }
+            Ok(value)
+        } else {
+            let naturally_closed = !self.state.queue.sender_alive.load(Ordering::Acquire)
+                && self.state.sender_count.load(Ordering::Acquire) == 0;
+            let force_closed = self.state.force_closed.load(Ordering::Acquire);
+
+            if naturally_closed || force_closed {
+                Err(ChannelError::Closed)
+            } else {
+                Err(ChannelError::Empty)
+            }
+        }
+    }
+}
+
+impl<T: Send + 'static> IReceiver<T> for Receiver<T> {
+    fn recv(&self) -> Result<T, ChannelError> {
+        Receiver::recv(self)
+    }
+
+    fn try_recv(&self) -> Result<T, ChannelError> {
+        Receiver::try_recv(self)
+    }
+}
+
+impl<T: Send + 'static> Drop for Receiver<T> {
+    fn drop(&mut self) {
+        self.state.receiver_closed.store(true, Ordering::Release);
+        if let Some(ref flag) = self.bound_flag {
+            flag.store(false, Ordering::Release);
+        }
+    }
+}
+
+// SAFETY: a `Sender` is an `Arc<ChannelState<T>>` plus an
+// `Option<Arc<AtomicBool>>`. The state is atomics, `Mutex<Option<Thread>>`s
+// and a `RingBuffer<T>`, which is `Send + Sync` for `T: Send`; values of `T`
+// only move through it. `SpscChannel` hands out at most one `Sender` at a time
+// (its `sender_bound` flag), so it is the ring's only pusher.
+unsafe impl<T: Send + 'static> Send for Sender<T> {}
+// SAFETY: `RingBuffer::push` must not run on two threads at once. Sharing
+// `&Sender` lets several threads call `send`/`try_send`, so soundness rests on
+// callers using the one sender from one thread at a time, as the SPSC
+// contract says; nothing in the type enforces it.
+unsafe impl<T: Send + 'static> Sync for Sender<T> {}
+// SAFETY: as for `Sender`: thread-safe shared state, and `SpscChannel` hands
+// out at most one `Receiver` at a time, so it is the ring's only popper.
+unsafe impl<T: Send + 'static> Send for Receiver<T> {}
+// SAFETY: `RingBuffer::pop` must not run on two threads at once. Sharing
+// `&Receiver` lets several threads call `recv`/`try_recv`, so soundness rests
+// on callers using the one receiver from one thread at a time, as the SPSC
+// contract says; nothing in the type enforces it.
+unsafe impl<T: Send + 'static> Sync for Receiver<T> {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The wait counter must saturate rather than fall back into the yield band,
+    /// which is what made an idle waiter spin on `sched_yield` indefinitely.
+    #[test]
+    fn escalate_saturates_at_the_park_threshold() {
+        assert_eq!(escalate(0), 1, "starts in the spin band");
+        assert_eq!(
+            escalate(SPIN_LIMIT - 1),
+            SPIN_LIMIT,
+            "crosses into yielding"
+        );
+        assert_eq!(
+            escalate(YIELD_LIMIT - 1),
+            YIELD_LIMIT,
+            "crosses into parking"
+        );
+        assert_eq!(
+            escalate(YIELD_LIMIT),
+            YIELD_LIMIT,
+            "stays parked once parking: never drops back to yielding"
+        );
+        assert_eq!(escalate(u32::MAX), YIELD_LIMIT, "cannot overflow");
+    }
+
+    /// CPU time of the thread identified by `tid`, in microseconds, from
+    /// `utime + stime` in `/proc`. Linux-only, like the rest of this crate.
+    fn thread_cpu_us(tid: i64) -> u64 {
+        let stat = std::fs::read_to_string(format!("/proc/self/task/{tid}/stat")).unwrap();
+        // Fields after the (possibly space-containing) comm are positional:
+        // utime is 14th and stime 15th overall, i.e. 12th and 13th after ')'.
+        let after = &stat[stat.rfind(')').unwrap() + 2..];
+        let f: Vec<&str> = after.split_whitespace().collect();
+        let ticks: u64 = f[11].parse::<u64>().unwrap() + f[12].parse::<u64>().unwrap();
+        // USER_HZ is 100 on every Linux target this runs on.
+        ticks * 10_000
+    }
+
+    /// A receiver blocked on an empty channel must actually *block*, not spin.
+    ///
+    /// This is a regression test for a real bug with a real cost: the escalation
+    /// counter used to reset into the yield band after parking, so an idle
+    /// receiver issued roughly 191 `sched_yield` syscalls per 50 µs park and burned
+    /// most of a core forever. One such thread — a channel-to-eventfd bridge that
+    /// relays a handful of teardown messages — was measured at 65% of a core on an
+    /// otherwise idle server.
+    ///
+    /// Asserts on CPU time rather than wall time so a loaded machine cannot make it
+    /// flaky, with a wide margin: parked should be ~1% of wall, spinning was ~65%.
+    #[test]
+    fn an_idle_receiver_blocks_instead_of_spinning() {
+        let ch = SpscChannel::<u32>::new(4);
+        let rx = ch.receiver().unwrap();
+        let tx = ch.sender().unwrap(); // keep the channel open so recv waits
+
+        let (tid_tx, tid_rx) = std::sync::mpsc::channel();
+        let waiter = thread::spawn(move || {
+            // SAFETY: `gettid` takes no arguments and only reads the caller's id.
+            tid_tx.send(i64::from(unsafe { libc::gettid() })).unwrap();
+            // Blocks until the channel closes when `tx`/`ch` drop.
+            let _ = rx.recv();
+        });
+        let tid = tid_rx.recv().unwrap();
+
+        let wall = std::time::Duration::from_millis(400);
+        let before = thread_cpu_us(tid);
+        thread::sleep(wall);
+        let used = thread_cpu_us(tid).saturating_sub(before);
+
+        let budget = u64::try_from(wall.as_micros()).unwrap() / 4; // 25% of wall
+        assert!(
+            used < budget,
+            "idle receiver burned {used}us of CPU over {}us of wall clock \
+             (budget {budget}us) — it is spinning, not blocking",
+            wall.as_micros()
+        );
+
+        drop(tx);
+        drop(ch);
+        waiter.join().unwrap();
+    }
+
+    #[test]
+    fn channel_error_display() {
+        assert_eq!(ChannelError::Full.to_string(), "channel is full");
+        assert_eq!(ChannelError::Empty.to_string(), "channel is empty");
+        assert_eq!(ChannelError::Closed.to_string(), "channel is closed");
+        assert_eq!(
+            ChannelError::BindingRejected {
+                reason: "test".into()
+            }
+            .to_string(),
+            "binding rejected: test"
+        );
+    }
+
+    #[test]
+    fn sender_receiver_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Sender<u32>>();
+        assert_send_sync::<Receiver<u32>>();
+    }
+}

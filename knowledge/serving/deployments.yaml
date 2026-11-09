@@ -1,0 +1,139 @@
+# One model served by one engine version with given settings, and the KV layout that engine
+# gives it. Byte sizes are derived by knowledge/serving/check.py from models.yaml; not stored.
+# Layout rule: knowledge/contracts/vllm-offloading-interface-v030.yaml (kv_caches_layout_at_v030).
+# vLLM 0.30 resolves the layout as: VLLM_KV_CACHE_LAYOUT env, else the connector's
+# get_required_kvcache_layout(), else the backends' first preference (LBNHC)
+# (vllm/v1/attention/backends/utils.py L254-318).
+schema_version: 1
+
+deployments:
+  llama-3-8b@vllm-0.30-bf16-tp1-lbhnc:
+    model: llama-3-8b
+    engine: {name: vllm, version: "0.30.0"}
+    kv_dtype: bf16
+    tensor_parallel: 1
+    tokens_per_block: 16
+    offload_block_tokens: 16   # the Certus connector refuses block_size_factor / blocks_per_chunk != 1 (certus_shmq_connector/spec.py)
+    layout:
+      kv_cache_layout: LBHNC
+      how_selected: >-
+        Requested by the stock vLLM OffloadingConnector's get_required_kvcache_layout()
+        (offloading_connector.py L230-233; BLHNC only with a hisparse config), no
+        VLLM_KV_CACHE_LAYOUT set. Layer-outermost: one tensor per layer.
+      rule_source: "knowledge/contracts/vllm-offloading-interface-v030.yaml kv_caches_layout_at_v030"
+      pieces_per_block: {value: 32, basis: observed, observation: ldq-llama-3-8b-lbhnc-2026-10-26}
+
+  llama-3-8b@vllm-0.30-bf16-tp1-blhnc:
+    model: llama-3-8b
+    engine: {name: vllm, version: "0.30.0"}
+    kv_dtype: bf16
+    tensor_parallel: 1
+    tokens_per_block: 16
+    offload_block_tokens: 16   # the Certus connector refuses block_size_factor / blocks_per_chunk != 1
+    layout:
+      kv_cache_layout: BLHNC
+      how_selected: >-
+        Either VLLM_KV_CACHE_LAYOUT=BLHNC (env, overrides any connector request), or the
+        Certus connector class CertusConnector (certus_shmq_connector.connector) requesting
+        BLHNC from get_required_kvcache_layout() on vLLM >= 0.29; both were observed
+        (ldq-llama-3-8b-blhnc-2026-10-26, ldq-llama-3-8b-blhnc-certusconnector-2026-10-26). Block-outermost: the offload worker sees a packed stride and registers one
+        tensor covering the whole block. Every attention backend in use must accept BLHNC
+        (FLASH_ATTN does).
+      rule_source: "knowledge/contracts/vllm-offloading-interface-v030.yaml kv_caches_layout_at_v030"
+      pieces_per_block: {value: 1, basis: observed, observation: ldq-llama-3-8b-blhnc-2026-10-26}
+
+  # --- assumed: not run. Uniform full-attention models under vLLM 0.30 LBHNC, where the rule
+  # gives one tensor per layer, so pieces_per_block = number of KV layers.
+  llama-3.1-8b@vllm-0.30-bf16-tp1-lbhnc:
+    model: llama-3.1-8b
+    engine: {name: vllm, version: "0.30.0"}
+    kv_dtype: bf16
+    tensor_parallel: 1
+    tokens_per_block: 16
+    offload_block_tokens: 16
+    layout:
+      kv_cache_layout: LBHNC
+      how_selected: stock OffloadingConnector request (not run)
+      rule_source: "knowledge/contracts/vllm-offloading-interface-v030.yaml kv_caches_layout_at_v030"
+      pieces_per_block: {value: 32, basis: assumed}
+
+  llama-3.1-8b@vllm-0.30-bf16-tp8-lbhnc:
+    model: llama-3.1-8b
+    engine: {name: vllm, version: "0.30.0"}
+    kv_dtype: bf16
+    tensor_parallel: 8   # 1 KV head per rank; piece/block bytes are per rank
+    tokens_per_block: 16
+    offload_block_tokens: 16
+    layout:
+      kv_cache_layout: LBHNC
+      how_selected: stock OffloadingConnector request (not run)
+      rule_source: "knowledge/contracts/vllm-offloading-interface-v030.yaml kv_caches_layout_at_v030"
+      pieces_per_block: {value: 32, basis: assumed}
+
+  llama-3.1-70b@vllm-0.30-bf16-tp1-lbhnc:
+    model: llama-3.1-70b
+    engine: {name: vllm, version: "0.30.0"}
+    kv_dtype: bf16
+    tensor_parallel: 1
+    tokens_per_block: 16
+    offload_block_tokens: 16
+    layout:
+      kv_cache_layout: LBHNC
+      how_selected: stock OffloadingConnector request (not run)
+      rule_source: "knowledge/contracts/vllm-offloading-interface-v030.yaml kv_caches_layout_at_v030"
+      pieces_per_block: {value: 80, basis: assumed}
+
+  llama-3.1-70b@vllm-0.30-bf16-tp8-lbhnc:
+    model: llama-3.1-70b
+    engine: {name: vllm, version: "0.30.0"}
+    kv_dtype: bf16
+    tensor_parallel: 8   # 1 KV head per rank: piece 8 KiB per rank (K or V half 4 KiB)
+    tokens_per_block: 16
+    offload_block_tokens: 16
+    layout:
+      kv_cache_layout: LBHNC
+      how_selected: stock OffloadingConnector request (not run)
+      rule_source: "knowledge/contracts/vllm-offloading-interface-v030.yaml kv_caches_layout_at_v030"
+      pieces_per_block: {value: 80, basis: assumed}
+
+  qwen2.5-7b-instruct@vllm-0.30-bf16-tp1-lbhnc:
+    model: qwen2.5-7b-instruct
+    engine: {name: vllm, version: "0.30.0"}
+    kv_dtype: bf16
+    tensor_parallel: 1
+    tokens_per_block: 16
+    offload_block_tokens: 16
+    layout:
+      kv_cache_layout: LBHNC
+      how_selected: stock OffloadingConnector request (not run); assumes all 28 layers full attention (see model notes)
+      rule_source: "knowledge/contracts/vllm-offloading-interface-v030.yaml kv_caches_layout_at_v030"
+      pieces_per_block: {value: 28, basis: assumed}
+
+  qwen3-0.6b@vllm-0.30-bf16-tp1-lbhnc:
+    model: qwen3-0.6b
+    engine: {name: vllm, version: "0.30.0"}
+    kv_dtype: bf16
+    tensor_parallel: 1
+    tokens_per_block: 16
+    offload_block_tokens: 16
+    layout:
+      kv_cache_layout: LBHNC
+      how_selected: stock OffloadingConnector request (not run)
+      rule_source: "knowledge/contracts/vllm-offloading-interface-v030.yaml kv_caches_layout_at_v030"
+      pieces_per_block: {value: 28, basis: assumed}
+
+  granite-4.1-8b@vllm-0.30-bf16-tp1-lbhnc:
+    model: granite-4.1-8b
+    engine: {name: vllm, version: "0.30.0"}
+    kv_dtype: bf16
+    tensor_parallel: 1
+    tokens_per_block: 16
+    offload_block_tokens: 16
+    layout:
+      kv_cache_layout: LBHNC
+      how_selected: stock OffloadingConnector request (not run)
+      rule_source: "knowledge/contracts/vllm-offloading-interface-v030.yaml kv_caches_layout_at_v030"
+      pieces_per_block: {value: 40, basis: assumed}
+
+  # Not listed: deepseek-v3 (MLA kernels may force block 64/128 in vLLM 0.30, unverified) and
+  # gemma-2-27b (sliding + full layers form separate KV cache groups; not uniform).

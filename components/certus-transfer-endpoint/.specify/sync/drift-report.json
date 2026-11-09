@@ -1,0 +1,247 @@
+{
+  "generated": "2026-10-22T01:03:54Z",
+  "project": "certus-transfer-endpoint",
+  "baseline": {
+    "commit": "c9429de6",
+    "cargo_test": "exit 0 (173 unit + 2 doc)",
+    "cargo_clippy": "exit 0",
+    "cargo_doc_warnings": 0,
+    "not_run": ["--features rdma", "--features spdk"]
+  },
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 59,
+    "aligned": 48,
+    "drifted": 11,
+    "not_implemented": 0,
+    "unspecced_features": 10,
+    "other_drift_items": 15
+  },
+  "specs": [
+    {
+      "id": "001-rdma-cache-transfer",
+      "title": "Explicit certus-to-certus KV cache transfer over a symmetric RDMA endpoint",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-007", "FR-008", "FR-009",
+        "FR-010", "FR-011", "FR-012", "FR-013", "FR-015", "FR-017", "FR-018", "FR-019",
+        "FR-021", "FR-022", "FR-023", "FR-027",
+        "SC-001", "SC-003", "SC-004", "SC-005", "SC-006", "SC-007", "SC-009", "SC-010",
+        "SC-011", "SC-012", "SC-013", "SC-014", "SC-015", "SC-016",
+        "INV-1", "INV-2", "INV-3", "INV-4", "INV-5", "INV-6", "INV-7", "INV-8", "INV-9",
+        "INV-11", "INV-12", "INV-14", "INV-15", "INV-16"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-006",
+          "spec_text": "A transfer request MUST carry: a context ID, the destination's rkey, base address, per-entry size, and a list of (block key, landing slot index) pairs.",
+          "actual": "OP_FETCH carries a header with context_id, then per entry (key u64, addr u64, size u32, rkey u32); no base address, no slot index. Key Entities TransferContext/RemoteRegion also stale.",
+          "location": "components/certus-transfer-endpoint/src/message.rs:253",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "FR-014",
+          "spec_text": "send-queue credits — in-flight RDMA writes per connection",
+          "actual": "Send credits are taken by every send-queue request, message SENDs included.",
+          "location": "components/certus-transfer-endpoint/src/endpoint.rs:1225",
+          "severity": "minor"
+        },
+        {
+          "requirement": "FR-016",
+          "spec_text": "The deadline MUST run from when the request is sent",
+          "actual": "Clock starts when the chunk is encoded into the outbox after a message credit is taken, before flush_outbox posts it (which may wait on a send credit).",
+          "location": "components/certus-transfer-endpoint/src/endpoint.rs:797",
+          "severity": "minor"
+        },
+        {
+          "requirement": "FR-020",
+          "spec_text": "remote-lookup MUST NOT be modified as part of delivering P1.",
+          "actual": "The branch adds bounce-reserve and read_to_bounce impls to remote-lookup's pub seams module, forced by interface growth (T083).",
+          "location": "components/remote-lookup/src/seams.rs:589",
+          "severity": "minor"
+        },
+        {
+          "requirement": "FR-024",
+          "spec_text": "The endpoint MUST answer a request it cannot process with an explicit protocol error reply ... never with silence.",
+          "actual": "An OP_FETCH over quota or before OP_HELLO, a malformed or duplicate OP_HELLO, and an OP_ERROR naming a kind other than OP_FETCH all tear the connection down instead of being answered.",
+          "location": "components/certus-transfer-endpoint/src/endpoint.rs:1311",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "INV-13",
+          "spec_text": "A request that cannot be processed draws a protocol error reply naming the offending opcode",
+          "actual": "Same exceptions as FR-024.",
+          "location": "components/certus-transfer-endpoint/src/endpoint.rs:1410",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "FR-025",
+          "spec_text": "A requester MUST respect the peer's maximum request size rather than its own.",
+          "actual": "Chunks to min(peer max_entries, local MAX_ENTRIES=340); also fails the connection on max_entries == 0 (unspecced).",
+          "location": "components/certus-transfer-endpoint/src/session.rs:221",
+          "severity": "minor"
+        },
+        {
+          "requirement": "FR-026",
+          "spec_text": "Message credits are per direction ... (contract: stats() snapshots the credit domains per direction)",
+          "actual": "TransferStats.requests_outstanding_outbound and requests_in_service_inbound are never written; they always read 0. Session::outbound()/inbound() hold the real values but only test code reads them.",
+          "location": "components/certus-transfer-endpoint/src/telemetry.rs:49",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "INV-10",
+          "spec_text": "The reply deadline runs from when the request is sent, not from the fetch call",
+          "actual": "Same as FR-016: clock starts at outbox enqueue.",
+          "location": "components/certus-transfer-endpoint/src/endpoint.rs:797",
+          "severity": "minor"
+        },
+        {
+          "requirement": "SC-002",
+          "spec_text": "The existing remote-lookup test layer and the initiator's loopback_push_writes_into_remote_buffer hardware loopback test pass against this endpoint with messaging unused.",
+          "actual": "The loopback scenario is reproduced in this crate's own loopback_test.rs (T055); the remote-lookup test layer has never run against this endpoint (needs T065, out of scope).",
+          "location": "components/certus-transfer-endpoint/src/loopback_test.rs:220",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "SC-008",
+          "spec_text": "The duplicated verbs FFI layer is defined once.",
+          "actual": "This crate has one copy; the two predecessor copies remain until T066, so the workspace has three.",
+          "location": "components/certus-transfer-endpoint/src/ffi.rs:1",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": [],
+      "other_drift": [
+        {
+          "id": "CT-1",
+          "spec_text": "TransferEndpointError::IncompatiblePeer — fetch returns it if the peer's version range does not intersect",
+          "actual": "Never constructed. A non-intersecting OP_HELLO tears down; waiting fetches fail as Transport('connection ... was lost'); diagnostic only in the log.",
+          "location": "components/certus-transfer-endpoint/src/endpoint.rs:1314",
+          "severity": "moderate"
+        },
+        {
+          "id": "CT-2",
+          "spec_text": "fetch: NotInitialized if no landing region is registered",
+          "actual": "fetch checks no landing region.",
+          "location": "components/interfaces/src/itransfer_endpoint.rs:589",
+          "severity": "minor"
+        },
+        {
+          "id": "CT-3",
+          "spec_text": "US1: destination reserves unpublished slots in its own memory tier; contract: landing region is in practice the memory tier's own pool",
+          "actual": "The pool is registered REMOTE_WRITE at initialize but no public API exposes its rkey; register_landing_region refuses any range overlapping the pool. Only test code (cfg(test) PoolKey) can land into the pool.",
+          "location": "components/certus-transfer-endpoint/src/endpoint.rs:1519",
+          "severity": "major"
+        },
+        {
+          "id": "CT-4",
+          "spec_text": "bounce_alloc(&self, len) -> Result<*mut u8, BounceError>; bounce_free(&self, ptr, len)",
+          "actual": "bounce_alloc -> Result<BounceLease, BounceError>; bounce_free(&self, lease: BounceLease)",
+          "location": "components/interfaces/src/imemory_tier.rs:230",
+          "severity": "minor"
+        },
+        {
+          "id": "CT-5",
+          "spec_text": "Until initialize succeeds, every ITransferEndpoint method returns NotInitialized",
+          "actual": "stats() returns all-zero TransferStats.",
+          "location": "components/certus-transfer-endpoint/src/lib.rs:707",
+          "severity": "minor"
+        },
+        {
+          "id": "CT-6",
+          "spec_text": "protocol_faults: Protocol error replies received or sent; wire-protocol Bad replies: counts it as a protocol fault",
+          "actual": "Only a received OP_ERROR increments protocol_faults; sending one does not (asserted by test); a bad-reply teardown increments nothing.",
+          "location": "components/certus-transfer-endpoint/src/endpoint.rs:1331",
+          "severity": "moderate"
+        },
+        {
+          "id": "WP-1",
+          "spec_text": "version: Zero and ignored for OP_HELLO/OP_ERROR",
+          "actual": "Must be exactly 0 for all frozen kinds incl. OP_HELLO_REPLY; non-zero refused as UnsupportedVersion.",
+          "location": "components/certus-transfer-endpoint/src/message.rs:231",
+          "severity": "minor"
+        },
+        {
+          "id": "WP-2",
+          "spec_text": "bounds OP_FETCH_REPLY at 24 + 340 = 364 bytes",
+          "actual": "Body is padded to 8 bytes: 24 + 344 = 368.",
+          "location": "components/certus-transfer-endpoint/src/message.rs:332",
+          "severity": "minor"
+        },
+        {
+          "id": "WP-3",
+          "spec_text": "each end must have at least one reply-reserve buffer and one quota buffer posted before the connection is established (also T080)",
+          "actual": "Receives are posted in bring_up on TableEvent::Up, after establishment; the initiator's OP_HELLO can RNR-stall, absorbed only by infinite RNR retry.",
+          "location": "components/certus-transfer-endpoint/src/endpoint.rs:1132",
+          "severity": "moderate"
+        },
+        {
+          "id": "WP-4",
+          "spec_text": "a normalized \"ip:port\"",
+          "actual": "Any host string, bracketed IPv6, no resolution (\"host:port\").",
+          "location": "components/certus-transfer-endpoint/src/connection/mod.rs:90",
+          "severity": "minor"
+        },
+        {
+          "id": "SPEC-1",
+          "spec_text": "the sender's highest supported version for that kind",
+          "actual": "The sender's highest protocol version, or 0 if the kind is unknown; there are no per-kind versions.",
+          "location": "components/certus-transfer-endpoint/src/message.rs:496",
+          "severity": "minor"
+        },
+        {
+          "id": "TK-1",
+          "spec_text": "T031 [X]: context table in src/message.rs: TransferContext = context id, peer, key list, landing slots, outstanding-entry count, deadline",
+          "actual": "No TransferContext; tables are Conn.outbound/Fetch/Chunk in endpoint.rs.",
+          "location": "components/certus-transfer-endpoint/src/endpoint.rs:258",
+          "severity": "minor"
+        },
+        {
+          "id": "DOC-1",
+          "spec_text": "CLAUDE.md Current state: 'disconnect and stats work; the rest say which task they land in. The verbs side of the seam is T053.'",
+          "actual": "Every method is implemented; T053 is done.",
+          "location": "components/certus-transfer-endpoint/CLAUDE.md:286",
+          "severity": "minor"
+        },
+        {
+          "id": "DOC-2",
+          "spec_text": "plan.md Next Step: 67 tasks, T001-T067; Begin at T001-T002",
+          "actual": "83 tasks; Phases 1-10 done.",
+          "location": "components/certus-transfer-endpoint/specs/001-rdma-cache-transfer/plan.md:228",
+          "severity": "minor"
+        },
+        {
+          "id": "SRC-1",
+          "spec_text": "(source comments) block-tier until T037-T040; telemetry fields belong to tasks not yet built; dead_code allows for slice C",
+          "actual": "All built; comments stale.",
+          "location": "components/certus-transfer-endpoint/src/lib.rs:643",
+          "severity": "minor"
+        },
+        {
+          "id": "SRC-2",
+          "spec_text": "FR-007: miss = absent, a different size, or a tier this build cannot serve; failed = any other reason",
+          "actual": "A memory-tier pointer outside the registered pool is reported Miss (with a warn).",
+          "location": "components/certus-transfer-endpoint/src/serve.rs:185",
+          "severity": "minor"
+        }
+      ]
+    }
+  ],
+  "unspecced": [
+    {"feature": "Abort-on-panic on endpoint and reader threads (fatal_on_panic)", "location": "components/certus-transfer-endpoint/src/endpoint.rs:156", "lines": 25, "suggested_spec": "001-rdma-cache-transfer (new FR)"},
+    {"feature": "push refused on an endpoint thread (deadlock guard)", "location": "components/certus-transfer-endpoint/src/lib.rs:676", "lines": 15, "suggested_spec": "001-rdma-cache-transfer FR-019"},
+    {"feature": "Landing-region validation (null/empty/wrap/overlap refused; no deregistration)", "location": "components/certus-transfer-endpoint/src/endpoint.rs:1508", "lines": 40, "suggested_spec": "001-rdma-cache-transfer contract"},
+    {"feature": "Simultaneous-connect extensions: newer wins, Draining reject, NameMismatch, self-connect refusal", "location": "components/certus-transfer-endpoint/src/connection/table.rs:13", "lines": 80, "suggested_spec": "001-rdma-cache-transfer FR-027"},
+    {"feature": "Frozen connect private_data identity format", "location": "components/certus-transfer-endpoint/src/connection/identity.rs:1", "lines": 110, "suggested_spec": "001-rdma-cache-transfer wire-protocol"},
+    {"feature": "Shutdown drain-stall leak (DRAIN_STALL 5 s)", "location": "components/certus-transfer-endpoint/src/endpoint.rs:1600", "lines": 55, "suggested_spec": "001-rdma-cache-transfer Admin contract"},
+    {"feature": "Feature-gated Extras connect counters", "location": "components/certus-transfer-endpoint/src/telemetry.rs:117", "lines": 60, "suggested_spec": "001-rdma-cache-transfer stats contract"},
+    {"feature": "Send credits clamped to device grant, logged", "location": "components/certus-transfer-endpoint/src/connection/table.rs:834", "lines": 15, "suggested_spec": "001-rdma-cache-transfer FR-014"},
+    {"feature": "Strict reply validation (padding/reserved fields)", "location": "components/certus-transfer-endpoint/src/message.rs:220", "lines": 15, "suggested_spec": "001-rdma-cache-transfer wire-protocol"},
+    {"feature": "Block-reader stale-NoSpace free-count guard", "location": "components/certus-transfer-endpoint/src/bounce.rs:66", "lines": 15, "suggested_spec": "001-rdma-cache-transfer FR-014"}
+  ],
+  "conflicts": [
+    "spec.md FR-006 (base address + slot index) vs wire-protocol.md OP_FETCH (per-entry address + rkey; slot indices rejected)",
+    "contract register_landing_region ('in practice the memory tier's own pool') vs interface doc and code (overlapping the pool is an error)",
+    "TransferStats.protocol_faults doc ('received or sent') vs wire-protocol Bad replies ('counts it as a protocol fault') vs code (received OP_ERROR only)",
+    "wire-protocol/T080 (receives posted before establishment) vs code (posted at Up)"
+  ]
+}

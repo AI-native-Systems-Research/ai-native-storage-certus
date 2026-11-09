@@ -1,0 +1,210 @@
+---
+spec_sync_component: eviction-policy-lru
+spec_sync_drift_status: clean
+spec_sync_synced_at: 2026-11-05T10:19:50Z
+spec_sync_git_commit: 32ffa627f
+spec_sync_inputs_sha256: b2183d355a4065b7d614ec9d2a1d983914543eceeb2bf1405a9f18a8bf206b6a
+spec_sync_hash_tool: scripts/spec-sync-hash.sh
+---
+> **Re-stamp 2026-11-05 (branch `certus-host-setup`, on unstable `bb0c9b9c`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them (its previous stamp was re-verified against `git archive origin/unstable`); its digest moves because `components/interfaces` changed (`ISPDKEnv::init_with_allowed`, added for the two-process drive race; see the spdk-env and interfaces syncs of the same date). This component does not implement `ISPDKEnv`. No analysis below changes.
+
+> **Re-stamp 2026-10-29 (branch `fix/dispatcher-remove-ssd-extent`, merged with unstable `e35618b2`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (the `IDispatcher::check` doc gains an `# Errors` section, B-17 of the dispatcher sync). No analysis below changes.
+> **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IDispatcher::clear_all`) and the rebase brought unstable's changes. No analysis below changes.
+
+> **Re-stamp 2026-10-23 (branch `unstable`, commit `d7a24d58` "Fix workspace build warnings" plus the spec-sync follow-up).** That commit only fixed warnings under the workspace lint posture: it added `Debug` impls, narrowed unreachable `pub` items to `pub(crate)`, wrapped `unsafe fn` bodies in explicit `unsafe {}` blocks, and the follow-up ran `rustfmt`. It also touched `components/interfaces` (a `Debug` impl for `Command`), which changes every component's digest. This component's own `src/` was in that commit. Every changed item was checked: none is part of a provided interface, none is named as public by the spec, and no behaviour changed. No spec citation into this component's source moved. All citations were re-verified by diff-mapping each base line to its new position. Status stays `clean`.
+
+> **Re-stamp 2026-10-21 (transitive, `components/interfaces` changed on branch `fix/dispatcher-remove-clear-mt`).** Only `components/interfaces` changed for this component: `IDispatcher` doc comments (`flush_to_ssd` errors, `clear_memory_tier`, `batch_lookup`) and the interfaces spec (FR-008, FR-009, FR-017, FR-018, FR-018a, FR-021, FR-023, Overview, NFR-002, Implementation Notes; text only, no type or signature changed). This component uses none of the changed items (grep over its src/ and specs/: 0 hits). This component's last full sync below stands; no re-analysis was needed.
+
+> **Re-stamp 2026-10-14 (transitive: `components/interfaces` changed, branch `fix/cold-staging-buf-16mib`).** The spec-sync digest folds `components/interfaces/{src,specs}` into every component's hash, so the single interface change on this branch — `DispatcherConfig::cold_staging_buf_bytes` default 4 MiB → 16 MiB (commit `8e12e49f`) and the matching correction to interfaces FR-027 — invalidates every component's stamp at once; this is the design, not a defect. **No code re-analysis was performed for this component, and none was needed:** its own `src/**` and `specs/**` are unchanged on this branch, and it does not reference `cold_staging_buf_bytes` (consumed only by the dispatcher's host-DRAM cold-staging pool). Digest refreshed to the recomputed value.
+
+> **Re-stamp 2026-10-09 (transitive: `components/interfaces` changed, branch `fix/evict-blocked-by-pin`).** The only change to this component's hashed inputs is a doc-comment correction on `IDispatchMap::try_evict_to_block` in `components/interfaces/src/idispatch_map.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and its previous stamp was re-verified to match `origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
+
+> **Re-stamp 2026-10-05 (transitive: `components/interfaces` changed, branch `fix/poller-cpu-placement-logging`).** The only change to this component's hashed inputs is a doc-comment correction on `DispatcherConfig::poller_base_cpu` in `components/interfaces/src/idispatcher.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and it does not reference `poller_base_cpu` (verified by grep over its src/ and specs/). Its previous stamp was re-verified to match `git archive origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
+
+> **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
+> folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
+> change invalidates all of them at once -- which is the design, not a defect. The interface
+> change is the `served_by` attribution work: new `ServedBy` and `LookupOutcome` types, and
+> `IDispatcher::batch_lookup` widened to return `Vec<LookupOutcome>`.
+>
+> **No re-analysis was performed for this component, and the digest bump asserts only what was
+> actually checked**: the interface change is additive except for `batch_lookup`'s return type,
+> which the compiler enforces across all implementors, and this component's own `src/**` and
+> `specs/**` are unchanged. Components that implement `IDispatcher` (`dispatcher`,
+> `dispatcher-p2p`) had their specs updated substantively; this one did not need it. If a later
+> sweep finds drift here, this stamp is not evidence against it.
+
+> **Re-stamp 2026-09-15 (interfaces-fold; no drift).** Branch `fix-reserve-batch-deadline` (`bec6c6ec`) added a `deadline: Option<std::time::Instant>` parameter to `IDispatcher::reserve_memory` in `components/interfaces/src/idispatcher.rs` (shared batch backpressure deadline for the shm-queue OP_RESERVE handler). `scripts/spec-sync-hash.sh` folds the whole `components/interfaces` tree into every component's hash, so this component's digest moved even though its own spec/implementation did not change. This component does not describe or call `reserve_memory`; the interface delta cannot affect its spec↔implementation alignment. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.
+
+> **Re-stamp 2026-09-09 (merged-branch interfaces-fold; no drift).** Branch
+> `fix-dispatcher-store-backpressure` was merged into `unstable` at `3411518a`; that
+> branch adds `DispatcherConfig::store_backpressure_ms` plus two `TierEventStats`
+> counters (`store_backpressure_events`, `store_drops_on_full`) to
+> `components/interfaces/src/idispatcher.rs`. `scripts/spec-sync-hash.sh` folds
+> the whole `components/interfaces/` tree into every component's hash, so this
+> component's digest moved even though its own `src/`+`specs/` are byte-for-byte
+> unchanged and it references none of those new dispatcher symbols (verified by
+> grep across `components/` and `lib/`). The merge's conflict resolution had
+> reverted this stamp to unstable's `b220a1c8` value; the digest is recomputed
+> here at merged HEAD. Drift status remains `clean`; the report body stands
+> verbatim.
+
+# Drift Report: eviction-policy-lru
+
+**This sweep (2026-09-04)** independently re-verified spec
+`001-lru-eviction-policy` (FR-001..FR-012, NFR-001..004, SC-001..004) against
+`src/{lib,lru_list}.rs` and the shared interface
+(`components/interfaces/src/ieviction_policy.rs`). The prior report
+(2026-08-07) claimed "20 aligned, 0 drift, clean" but was **unstamped** and did
+not examine the `track()` re-registration contract. A fresh read found **two
+documentation drifts** (both resolved by BACKFILL this sweep) and one
+cross-component contract question that was escalated and resolved by an explicit
+product decision (**document LRU, defer the interface** — see below). No code
+bug was found; no code was changed.
+
+**Why `drift_status: clean`:** after the two BACKFILLs, the component's own spec
+now accurately describes the implementation, and `src/` is unchanged and green
+(22 unit tests pass, `clippy -D warnings` clean, `fmt --check` clean — verified
+locally this sweep). The only residual is a wording choice in the *shared*
+`IEvictionPolicy` interface doc (idempotency clause worded as universal but
+honored only by lineage policies); that is a coordinated interfaces-crate change,
+deliberately deferred (editing `components/interfaces/` invalidates every stamped
+component's folded hash), and is recorded as a non-blocking follow-up rather than
+left as unresolved component drift.
+
+## Summary
+
+| Metric | Count |
+|---|---|
+| Specs Analyzed | 1 (`001-lru-eviction-policy`) |
+| Requirements Checked | 20 (FR-001..012 + NFR-001..004 + SC-001..004) |
+| Aligned | 20 |
+| Drift → doc fix applied (BACKFILL) | 2 (D1 FR-002 re-registration; D2 `EvictionKey`→`CacheKey`) |
+| Drift → code fix (ALIGN) | 0 |
+| Cross-component (deferred by decision) | 1 (interface idempotency wording) |
+| Not Implemented | 0 |
+| Unspecced | 0 |
+
+## Resolved this sweep — doc fixes (BACKFILL; doc lag / doc error against correct code)
+
+**D1 — `track()` idempotent-re-registration contract (`spec.md` FR-002; interface
+doc `ieviction_policy.rs:82-87`).** The shared `IEvictionPolicy::track` doc states
+re-registration "is idempotent: it refreshes recency and returns the existing
+handle without creating a new node." The LRU implementation is **NOT** idempotent:
+`track` unconditionally `push_back`s a new node and returns a new handle
+(`src/lib.rs:69`). Investigation established this is **not a live bug**:
+- The idempotency clause was added in interfaces commit `1da4e777` (the
+  session-lineage policy commit), whose message states *"eviction-policy-lru
+  ignores the new param (behavior preserved)"* — LRU's non-idempotent behavior was
+  intentional, not an oversight.
+- Only the sibling lineage policy implements it: `eviction-policy-session-lists`
+  `register()` dedupes via a `by_key` map (`session_list.rs:90-119`).
+- **No production caller re-tracks a live key.** All consumers guard first:
+  `dispatch-map` (`src/lib.rs:395-399`, `576-579`, `contains_key`→`AlreadyExists`)
+  and `memory-tier` (`src/lib.rs:356-366`, same guard); the benchmark
+  (`apps/eviction-replay-benchmark/src/sim.rs`) removes a key before re-tracking.
+- The LRU component's *own* spec never promised idempotency.
+
+**Resolution (BACKFILL, per product decision "document LRU, defer interface"):**
+reworded FR-002 to explicitly state re-registration is **not** idempotent in this
+policy (new node + new handle on re-`track`), that this deliberately diverges from
+the interface's general clause (written for lineage-aware policies), and that
+callers MUST NOT re-`track` a live key (consumers enforce this upstream). This is
+a BACKFILL, not a masked bug: the behavior is intentional, exercised by no caller,
+and never claimed by this component's spec.
+
+**D2 — non-existent `EvictionKey` entity (`spec.md` Key Entities; `plan.md:16`).**
+The Key Entities list named "**EvictionKey** (`u64`) … same underlying type as
+`CacheKey`", but there is **no** `EvictionKey` type or alias anywhere in the code
+(grep confirms: mentioned only in the spec/plan). The tracked key is
+`interfaces::CacheKey` (`idispatch_map::CacheKey`, `u64`) throughout `src/` and the
+interface. **Resolution (BACKFILL):** renamed the entity to `CacheKey` with a note
+that no distinct `EvictionKey` exists; corrected the identical stale reference in
+`plan.md:16`.
+
+## Cross-component follow-up (deferred by explicit decision — non-blocking)
+
+**Interface idempotency wording over-generalization.** The
+`IEvictionPolicy::track` doc (`components/interfaces/src/ieviction_policy.rs:82-87`)
+states re-registration idempotency as an unqualified contract for all implementors,
+yet only lineage-aware policies honor it (LRU deliberately does not — see D1). The
+clean root-cause fix is to scope the interface wording to "policy-defined" (idempotent
+for lineage policies; non-idempotent for LRU). This was **deliberately deferred**
+(product decision this sweep): editing `components/interfaces/` invalidates the
+folded input hash of **every** stamped component, so it belongs in a coordinated
+interfaces pass, not a single-component sync. Recorded here so the divergence is
+tracked rather than silently stamped away. Until then, the LRU-side divergence is
+fully documented in this component's FR-002 (D1).
+
+## Known limitation (pre-existing; not spec↔code drift; non-blocking)
+
+**Stale-handle ABA after free-list recycling.** FR-010 guarantees `touch`/`remove`
+on an *already-removed* handle are no-ops (via the `active` flag,
+`lru_list.rs:71-73,122-124`). But FR-011's free-list recycling
+(`lru_list.rs:38-45,143`) reuses a removed node's slot index for a later `track`.
+A handle retained across that removal+recycle would then reference the slot's *new*
+occupant (a live node), so `touch`/`remove` would silently affect the wrong entry —
+the classic index-handle ABA hazard. The spec does not promise ABA safety: FR-010
+scopes its guarantee to an "already-removed handle", and the `InvalidHandle`
+variant is explicitly "reserved for future stricter validation" (FR-010). No caller
+retains handles across a remove of the same key today. Fixing it properly needs a
+generation counter in the handle — a code + interface change, out of scope for a
+doc sync. Recorded as a latent hazard, not stamped as drift.
+
+## Verification
+
+- **Local (authoritative — this is a pure-Rust default workspace member):**
+  `cargo test -p eviction-policy-lru` → 22 passed / 0 failed (SC-001, SC-002).
+  `cargo clippy -p eviction-policy-lru --all-targets -- -D warnings` → clean (SC-003).
+  `cargo fmt -p eviction-policy-lru --check` → clean (SC-003). All run this sweep.
+- **No `src/` change** this sweep — the two resolutions are spec-doc BACKFILLs only,
+  so the green build state is unaffected and the input hash is unchanged.
+
+## Gate & tooling note
+
+This sweep also **relocated** the spec tree from `.specify/specs/` to a top-level
+`components/eviction-policy-lru/specs/001-lru-eviction-policy/` (`git mv`, no
+content change) so the component is now genuinely enforced by the CI Spec-Sync
+Gate. Two consequences, both now in effect:
+1. The CI Spec-Sync Gate discovers targets via `find components -maxdepth 2 -type d
+   -name specs`, which now matches `components/eviction-policy-lru/specs` — so this
+   component **is gated by CI** and this stamp is load-bearing (the gate fails the
+   build on `drift_status != clean` or a recomputed-hash mismatch).
+2. `scripts/spec-sync-hash.sh` hashes `<dir>/src` + `<dir>/specs` (+ interfaces);
+   with the specs now at a top-level `specs/`, the digest **includes** this spec
+   markdown. Editing `spec.md`/`plan.md`/`tasks.md` now changes the hash and
+   requires re-stamping. (This is why the stamped `spec_sync_inputs_sha256`
+   changed this sweep even though `src/` was untouched — the spec markdown entered
+   the hash for the first time.) The sync artifacts under `.specify/sync/` are
+   **not** hashed (the digest walks only `src/` + `specs/` + interfaces), so
+   editing this report does not perturb the stamp.
+
+## Aligned ✓
+
+| ID | Evidence |
+|----|----------|
+| FR-001 create_pool sequential from 0 | `src/lib.rs:41-51` |
+| FR-002 track → MRU, returns handle, ignores semantics; non-idempotent (documented) | `src/lib.rs:53-71`, `:69` |
+| FR-003 touch O(1) → MRU | `src/lib.rs:73-87`; `lru_list.rs:70-96` |
+| FR-004 remove O(1) unlink | `src/lib.rs:117-131`; `lru_list.rs:121-145` |
+| FR-005 identify_next_to_evict removes+returns LRU or None | `src/lib.rs:133-138`; `lru_list.rs:99-104` |
+| FR-006 get_eviction_candidates(n) no removal, O(n) | `src/lib.rs:140-149`; `lru_list.rs:107-118` |
+| FR-007 len(pool) | `src/lib.rs:151-160` |
+| FR-008 clear_pool(pool) | `src/lib.rs:162-168`; `lru_list.rs:148-154` |
+| FR-009 Result methods → InvalidPool; Option/scalar degrade | `src/lib.rs:60-67,75-83,119-127,135,142-147,153-158,164` |
+| FR-010 touch/remove idempotent on removed handle, Ok(()); InvalidHandle unused | `lru_list.rs:71-73,122-124` |
+| FR-011 free-list node recycling | `lru_list.rs:21,38-45,143` |
+| FR-012 batch_touch single lock per pool-run | `src/lib.rs:89-115` |
+| NFR-001 O(1) single-entry ops | index-based DLL, `lru_list.rs` |
+| NFR-002 thread-safe, no corruption | `RwLock`+per-pool `Mutex`; `concurrent_access` `src/lib.rs:308-336` |
+| NFR-003 per-pool locking granularity | `Vec<Mutex<Pool>>` behind `RwLock` `src/lib.rs:22-25` |
+| NFR-004 component model, provides IEvictionPolicy, ILogger receptacle | `define_component!` `src/lib.rs:27-38` |
+| SC-001 lib.rs + lru_list.rs tests pass | 22 tests pass (this sweep) |
+| SC-002 4×100 concurrent, no corruption | `concurrent_access` `src/lib.rs:308-336` |
+| SC-003 clippy -D warnings + fmt | clean (this sweep) |
+| SC-004 integrates via query_interface!/receptacle in consumers | consumer crates (spec-declared; not re-verified this sweep) |
+
+## Unspecced Features
+
+None. `peek_front_n` and `Node.active` are internal helpers already described in
+the spec's Implementation Notes; no public surface beyond `IEvictionPolicy`.

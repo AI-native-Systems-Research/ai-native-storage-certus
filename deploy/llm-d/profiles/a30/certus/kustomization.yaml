@@ -1,0 +1,43 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Layered on top of the plain A30 overlay rather than folded into it, so the
+# deployment can still be rolled out without certus by applying ../agg.
+resources:
+  - ../agg
+
+configMapGenerator:
+  - name: certus-entrypoint
+    files:
+      - entrypoint-certus.sh
+
+patches:
+  - path: patch.yaml
+  # The GPU KV cache every certus and comparison arm gets: 37,184 tokens of
+  # Qwen3-8B, what P/D's engines get from --gpu-memory-utilization=0.90. Here
+  # the offloading connector's non-torch GPU memory would shrink it to 29,936
+  # at 0.90, a fifth less than the P/D arms; vLLM reports up to 5.86 GiB fits.
+  # Added after ../agg's args rather than in them, so plain aggregated serving
+  # keeps its own sizing.
+  - target: {kind: Deployment, name: optimized-baseline-nvidia-gpu-vllm-decode}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: "--kv-cache-memory-bytes=5483003904"
+
+# Swap the stock vLLM image for the connector-bearing build published by
+# ../../../publish-image.sh.
+#
+# newName carries a REGISTRY/REPO placeholder so that no particular site's
+# registry is committed here. install.sh rewrites it from CERTUS_REGISTRY and
+# CERTUS_REPO -- the same variables publish-image.sh pushes with -- in the copy
+# it materializes under the llm-d checkout, and fails loudly if they are unset.
+#
+# Pin the exact tag after each build rather than editing it by hand:
+#   (cd profiles/<profile>/certus && kustomize edit set image \
+#      docker.io/vllm/vllm-openai=<registry>/<repo>/llm-d-vllm-certus:<tag>)
+# Tag scheme: vllm<version>-<certus sha of the source the image was built from>.
+images:
+  - name: docker.io/vllm/vllm-openai
+    newName: REGISTRY/REPO/llm-d-vllm-certus
+    newTag: vllm0.30.0-04548e47

@@ -1,0 +1,165 @@
+---
+spec_sync_component: block-device-filesys
+spec_sync_drift_status: clean
+spec_sync_synced_at: 2026-11-05T10:19:50Z
+spec_sync_git_commit: 32ffa627f
+spec_sync_inputs_sha256: cc58808179a3d0fcccef2b585e6ca9b0f1542520fdd0bef915b2670ff2cabf5c
+spec_sync_hash_tool: scripts/spec-sync-hash.sh
+---
+> **Re-stamp 2026-11-05 (branch `certus-host-setup`, on unstable `bb0c9b9c`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them (its previous stamp was re-verified against `git archive origin/unstable`); its digest moves because `components/interfaces` changed (`ISPDKEnv::init_with_allowed`, added for the two-process drive race; see the spdk-env and interfaces syncs of the same date). This component does not implement `ISPDKEnv`. No analysis below changes.
+
+> **Re-stamp 2026-10-29 (branch `fix/dispatcher-remove-ssd-extent`, merged with unstable `e35618b2`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (the `IDispatcher::check` doc gains an `# Errors` section, B-17 of the dispatcher sync). No analysis below changes.
+> **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IDispatcher::clear_all`) and the rebase brought unstable's changes. No analysis below changes.
+
+> **Re-stamp 2026-10-23 (branch `unstable`, commit `d7a24d58` "Fix workspace build warnings" plus the spec-sync follow-up).** That commit only fixed warnings under the workspace lint posture: it added `Debug` impls, narrowed unreachable `pub` items to `pub(crate)`, wrapped `unsafe fn` bodies in explicit `unsafe {}` blocks, and the follow-up ran `rustfmt`. It also touched `components/interfaces` (a `Debug` impl for `Command`), which changes every component's digest. This component's own `src/` was in that commit. Every changed item was checked: none is part of a provided interface, none is named as public by the spec, and no behaviour changed. `FilesysHandler` became `pub(crate)` (it lives in the private `actor` module). Spec citations updated for the io_uring submission-queue-full paths: `src/actor.rs:468-480`→`:492-504` and `:588-601`→`:612-625`. All citations were re-verified by diff-mapping each base line to its new position. Status stays `clean`.
+
+> **Re-stamp 2026-10-21 (transitive, `components/interfaces` changed on branch `fix/dispatcher-remove-clear-mt`).** Only `components/interfaces` changed for this component: `IDispatcher` doc comments (`flush_to_ssd` errors, `clear_memory_tier`, `batch_lookup`) and the interfaces spec (FR-008, FR-009, FR-017, FR-018, FR-018a, FR-021, FR-023, Overview, NFR-002, Implementation Notes; text only, no type or signature changed). This component uses some of the named items (7 files), but no type, signature or behaviour of them changed. This component's last full sync below stands; no re-analysis was needed.
+
+> **Re-stamp 2026-10-14 (transitive: `components/interfaces` changed, branch `fix/cold-staging-buf-16mib`).** The spec-sync digest folds `components/interfaces/{src,specs}` into every component's hash, so the single interface change on this branch — `DispatcherConfig::cold_staging_buf_bytes` default 4 MiB → 16 MiB (commit `8e12e49f`) and the matching correction to interfaces FR-027 — invalidates every component's stamp at once; this is the design, not a defect. **No code re-analysis was performed for this component, and none was needed:** its own `src/**` and `specs/**` are unchanged on this branch, and it does not reference `cold_staging_buf_bytes` (consumed only by the dispatcher's host-DRAM cold-staging pool). Digest refreshed to the recomputed value.
+
+> **Re-stamp 2026-10-09 (transitive: `components/interfaces` changed, branch `fix/evict-blocked-by-pin`).** The only change to this component's hashed inputs is a doc-comment correction on `IDispatchMap::try_evict_to_block` in `components/interfaces/src/idispatch_map.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and its previous stamp was re-verified to match `origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
+
+> **Re-stamp 2026-10-05 (transitive: `components/interfaces` changed, branch `fix/poller-cpu-placement-logging`).** The only change to this component's hashed inputs is a doc-comment correction on `DispatcherConfig::poller_base_cpu` in `components/interfaces/src/idispatcher.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and it does not reference `poller_base_cpu` (verified by grep over its src/ and specs/). Its previous stamp was re-verified to match `git archive origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
+
+> **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
+> folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
+> change invalidates all of them at once -- which is the design, not a defect. The interface
+> change is the `served_by` attribution work: new `ServedBy` and `LookupOutcome` types, and
+> `IDispatcher::batch_lookup` widened to return `Vec<LookupOutcome>`.
+>
+> **No re-analysis was performed for this component, and the digest bump asserts only what was
+> actually checked**: the interface change is additive except for `batch_lookup`'s return type,
+> which the compiler enforces across all implementors, and this component's own `src/**` and
+> `specs/**` are unchanged. Components that implement `IDispatcher` (`dispatcher`,
+> `dispatcher-p2p`) had their specs updated substantively; this one did not need it. If a later
+> sweep finds drift here, this stamp is not evidence against it.
+
+> **Re-stamp 2026-09-15 (workspace `cargo fmt` sweep; no drift).** Commit `f9bcd965` ("Add shmq RESERVE batch shared-deadline regression test") ran `cargo fmt` across the whole workspace, reflowing this component's `src/*.rs` (multi-line ↔ single-line argument lists and struct literals, import reordering). `git diff -w` confirms no token-level logic, signature, or contract change — the only substantive addition in that commit is a regression test in `lib/shmq-dispatcher/src/translate.rs`, which is outside this component and outside the spec-sync gate's `components/` scope. The formatting moved this component's `spec_sync_inputs_sha256`, but its spec↔implementation alignment is unchanged. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.
+
+> **Re-stamp 2026-09-15 (interfaces-fold; no drift).** Branch `fix-reserve-batch-deadline` (`bec6c6ec`) added a `deadline: Option<std::time::Instant>` parameter to `IDispatcher::reserve_memory` in `components/interfaces/src/idispatcher.rs` (shared batch backpressure deadline for the shm-queue OP_RESERVE handler). `scripts/spec-sync-hash.sh` folds the whole `components/interfaces` tree into every component's hash, so this component's digest moved even though its own spec/implementation did not change. This component does not describe or call `reserve_memory`; the interface delta cannot affect its spec↔implementation alignment. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.
+
+> **Re-stamp 2026-09-09 (merged-branch interfaces-fold; no drift).** Branch
+> `fix-dispatcher-store-backpressure` was merged into `unstable` at `3411518a`; that
+> branch adds `DispatcherConfig::store_backpressure_ms` plus two `TierEventStats`
+> counters (`store_backpressure_events`, `store_drops_on_full`) to
+> `components/interfaces/src/idispatcher.rs`. `scripts/spec-sync-hash.sh` folds
+> the whole `components/interfaces/` tree into every component's hash, so this
+> component's digest moved even though its own `src/`+`specs/` are byte-for-byte
+> unchanged and it references none of those new dispatcher symbols (verified by
+> grep across `components/` and `lib/`). The merge's conflict resolution had
+> reverted this stamp to unstable's `b220a1c8` value; the digest is recomputed
+> here at merged HEAD. Drift status remains `clean`; the report body stands
+> verbatim.
+
+# Spec ↔ Implementation Drift Report — block-device-filesys
+
+**Generated**: 2026-09-03
+**Mode**: Read-only drift analysis, then BACKFILL apply to `spec.md` (code authoritative).
+
+This report supersedes the earlier stale artifact (which read "Generated:
+pending", flagged FR-015 as *Drifted*, and listed the `pub(crate)` config
+setters as *Unspecced*). Both of those were resolved by the 2026-08-20 Phase B
+sync — FR-015 now correctly describes `create()`'s example as ` ```ignore `,
+and the setters are specified by FR-023 — so neither is drift against the
+**current** spec. This sweep re-verifies the full requirement set against the
+current tree and finds one residual drift, resolved by backfill.
+
+## Summary
+
+| Metric | Count |
+|--------|-------|
+| Specs Analyzed | 1 (`001-block-device-filesys`) |
+| Requirements Checked | 23 FR + 6 SC + 5 Key Entities |
+| Aligned | 33 |
+| Drifted (this sweep) | 1 → resolved by BACKFILL |
+| Not Implemented | 0 |
+| Unspecced | 0 |
+
+**Verification runs this sweep** (all green):
+- `cargo test -p block-device-filesys -- --test-threads 1` — 13 unit + 15 integration = **28 passed, 0 failed**
+- doctests — 2 runnable (`config.rs` `DeviceConfig` line 12, `DeviceConfig::new` line 42), 2 `ignored` (`lib.rs` module example line 17, `create()` line 77) — matches FR-015 exactly
+- `cargo clippy -p block-device-filesys -- -D warnings` — clean
+- `cargo clippy -p block-device-filesys --features telemetry -- -D warnings` — clean (exercises the FR-019 `record_op` call sites)
+
+## Spec: 001-block-device-filesys — Block Device Filesys Component
+
+### Aligned ✓ (verified this sweep)
+
+| Req | Evidence |
+|-----|----------|
+| FR-001 implements IBlockDevice | `impl IBlockDevice` `src/lib.rs:224` |
+| FR-002 ILogger receptacle + log levels; SQ-full surfaced as error, not logged | receptacle `src/lib.rs:59`; warn on io_uring fallback `src/actor.rs:128`; warn on fsync-SQE-push failure `src/actor.rs:603-605`; SQ-full → error `Completion` (not logged) `src/actor.rs:468-480,588-601`; debug on connect `src/actor.rs:930`, `src/lib.rs:236-238`; info on init `src/lib.rs:130,180` |
+| FR-003 `define_component!`/`define_interface!` | `src/lib.rs:54-70` |
+| FR-004 config module public; `create`/`initialize`/`shutdown` public | `pub mod config` `src/lib.rs:27`; `src/lib.rs:82,113,187` |
+| FR-005 regular-file backing store | `open_or_create_backing_file` `src/config.rs:114` |
+| FR-006 `create(path,block_size,num_blocks)`; block_size pow2, min 512 | `src/lib.rs:82`; validated `src/config.rs:59-71` |
+| FR-007 sync R/W pread/pwrite, O_DIRECT\|O_SYNC + fdatasync, EINVAL→buffered via `eprintln!` | O_DIRECT\|O_SYNC `src/config.rs:173`; EINVAL fallback `src/config.rs:180-194`; write fdatasync `src/actor.rs:402` |
+| FR-008 async R/W via io_uring; write+fsync IO_LINK chain; sync fallback when ring absent | IO_LINK write SQE `src/actor.rs:574-578`, fsync SQE `:580-583`; read fallback `:505-540`; write fallback `:631-677` |
+| FR-009 WriteZeros zero-fill + fdatasync | `handle_write_zeros` `src/actor.rs:680`; fdatasync `:737` |
+| FR-010 BatchSubmit sequential | `src/actor.rs:238-242` |
+| FR-011 AbortOp via io_uring AsyncCancel | `handle_abort` `src/actor.rs:759-772` (AsyncCancel `:761`) |
+| FR-012 NsProbe single namespace | `handle_ns_probe` `src/actor.rs:774-786` |
+| FR-013 actor model + io_uring event loop | `ActorHandler` impl `src/actor.rs:925-957`; `on_idle` polls/harvests/checks timeouts `:946-956` |
+| FR-014 Criterion latency + throughput benches | `Cargo.toml` `[[bench]]`; `benches/{latency,throughput}.rs` |
+| FR-015 `DeviceConfig::new` runnable doc example; `create()` illustrative `ignore` | runnable `src/config.rs:42-57`; `ignore` `src/lib.rs:77-81` — confirmed by doctest run (2 pass, 2 ignored) |
+| FR-016 fallocate-if-absent, exact-size-open, size-mismatch error | create/fallocate `src/config.rs:151-166`; mismatch error `:126-132` |
+| FR-017 direct DmaBuffer slice access, no intermediate copies | `as_slice`/`as_mut_slice` `src/actor.rs:329,378,458,572,634` |
+| FR-018 `io-uring` crate dependency (kernel ≥ 5.6) | `Cargo.toml` `io-uring = "0.7"` |
+| FR-019 feature-gated atomics TelemetryStats; real per-op latency in ALL paths incl. async harvest | `src/telemetry.rs:13-102`; `start.elapsed()` recorded — sync read `src/actor.rs:352-353`, sync write `:417-418`, read fallback `:535-536`, write fallback `:672-673`, WriteZeros `:752-753`, async completion `:821-823` (start captured at submit `:500,626`) |
+| FR-020 non-blocking per-client FIFO backlog | `ClientSession.pending` `src/actor.rs:39`; `deliver` `:60-65`; `flush_pending` `:70-81`; drained in `poll_clients` `:904-906` |
+| FR-021 device-info surface (fixed placeholders) | numa_node `-1` `src/lib.rs:300-302`; nvme_version "N/A (file-backed)" `:304-306`; num_io_queues `1` `:288-290`; max_transfer_size `block_size*256` (saturating) `:292-294`; read_write_stats default `:340-342` |
+| FR-022 FlushSync → fdatasync; ns_id≠1 → InvalidNamespace w/o touching file; fdatasync fail → WriteFailed | `src/actor.rs:249-276` |
+| FR-023 reserved `pub(crate)` config mutators, `#[allow(dead_code)]`, unused | `set_file_path`/`set_block_size`/`set_num_blocks` `src/lib.rs:94-109` |
+| SC-001 read-after-write integrity + durability | `tests/integration.rs` `write_sync_read_sync_roundtrip:85`, `data_integrity_multi_block_patterns:424` — pass |
+| SC-002 concurrent ops without corruption | multi-block / multi-client `tests/integration.rs:365,424` — pass |
+| SC-003 <1ms 4KB sync latency | design/benchmark target (not unit-asserted) |
+| SC-004 tests pass w/o hardware/root, temp dir only | 28 tests pass using `tempfile`; no SPDK/hardware |
+| SC-005 Criterion CoV < 15% | benchmark quality target |
+| SC-006 drop-in IBlockDevice replacement | full `IBlockDevice`/`IBlockDeviceAdmin` surface implemented; `unsupported_operations_return_not_supported` confirms NVMe-admin ops → NotSupported |
+
+### Key Entities — aligned ✓
+
+`BlockDeviceFilesysComponent` (`src/lib.rs:54-70`), `FilesysActor`/`FilesysHandler`
+(`src/actor.rs:109`), `DeviceConfig` (`src/config.rs:21-104`), `ClientSession`
+with FIFO `pending` (`src/actor.rs:27-40`), and feature-gated `TelemetryStats`
+(`src/telemetry.rs:13`) all match their descriptions.
+
+### Drifted ⚠️ → resolved by BACKFILL
+
+- **Edge Cases — "io_uring submission queue is full"** — severity: moderate
+  (documentation; spec self-contradiction).
+  - Spec (Edge Cases, before this sweep) said: *"The actor MUST back-pressure by
+    waiting for completions before submitting new operations."*
+  - Actual: on the ReadAsync/WriteAsync hot paths the actor **surfaces the
+    condition to the caller** as an error `Completion` — `ReadDone`/`WriteDone`
+    carrying `Err(NotInitialized("io_uring submission queue full"))` — and
+    returns, never blocking the single-threaded actor
+    (`src/actor.rs:468-480` ReadAsync, `src/actor.rs:588-601` WriteAsync).
+  - Direction — **code authoritative (BACKFILL)**: this is the shipped, deliberate
+    behavior and is *already* specified by FR-002 ("io_uring submission-queue-full
+    conditions … are surfaced directly to the caller as an error `Completion` …").
+    The Edge Cases bullet was stale prose predating the FR-002 decision, so it
+    contradicted another requirement in the same document. Blocking the actor to
+    wait would head-of-line-block completion delivery to every other client on the
+    device (the FR-020 rationale), so aligning code→spec is not desirable.
+  - Backfill: the Edge Cases bullet was rewritten to describe the error-surfacing
+    behavior, cross-reference FR-002, and note that `ring.submit()` after each push
+    keeps the 128-deep SQ (`DEFAULT_RING_DEPTH`) from filling under normal
+    single-op submission (the guard covers a pathological burst).
+
+### Not Implemented ✗
+
+None.
+
+## Unspecced Features
+
+None. The `pub(crate)` config setters (`set_file_path`/`set_block_size`/
+`set_num_blocks`) that the previous report listed as unspecced are now covered by
+FR-023 (backfilled 2026-08-20) and remain `#[allow(dead_code)]`, reserved,
+non-public.
+
+## Recommendations
+
+None outstanding. Commit this stamped `drift-report.md` together with the
+`spec.md` Edge Cases backfill so the CI Spec-Sync Gate sees a fresh report whose
+input hash matches the tree. No code changes were made or are required this sweep.
