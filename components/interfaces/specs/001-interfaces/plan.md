@@ -5,7 +5,7 @@
 
 ## Summary
 
-The `interfaces` crate is fully implemented and serves as the centralized definition point for all Certus component interface traits. It defines 20 `define_interface!` interface traits (179 methods), their supporting types, and feature gates (`spdk`, `integrity-check`, `gpu`) that allow builds without hardware dependencies. This plan documents the existing architecture for maintenance and evolution purposes.
+The `interfaces` crate is fully implemented and serves as the centralized definition point for all Certus component interface traits. It defines 20 `define_interface!` interface traits (180 methods), their supporting types, and feature gates (`spdk`, `integrity-check`, `gpu`) that allow builds without hardware dependencies. This plan documents the existing architecture for maintenance and evolution purposes.
 
 ## Technical Context
 
@@ -25,7 +25,7 @@ components/interfaces/
     idispatcher.rs                   # IDispatcher (24 methods, trait spdk-gated), + ungated types
     imemory_tier.rs                  # IMemoryTier (21 methods), + bounce-reserve types
     iextent_manager.rs               # IExtentManager (14 methods, trait spdk-gated), + ungated types
-    igpu_services.rs                 # IGpuServices (24 methods, 10 of them spdk-gated), + types
+    igpu_services.rs                 # IGpuServices (25 methods, 11 of them spdk-gated), + types
     iremote_lookup.rs                # IRemoteLookup (5 methods), + types
     iremote_lookup_rdma_initiator.rs # IRemoteLookupRdmaInitiator (6 methods), + RemoteRegion, PushStatus
     iremote_lookup_rdma_responder.rs # IRemoteLookupRdmaResponder (3), IRemoteLookupRdmaResponderAdmin (5), + types
@@ -52,7 +52,7 @@ Counted from the `define_interface!` blocks in `src/`. `IZyreNode` is a plain tr
 | IDispatcher | 24 | spdk |
 | IMemoryTier | 21 | none |
 | IExtentManager | 14 | spdk |
-| IGpuServices | 24 | none (10 DMA methods spdk-gated) |
+| IGpuServices | 25 | none (11 DMA methods spdk-gated) |
 | IRemoteLookup | 5 | none |
 | IRemoteLookupRdmaInitiator | 6 | none |
 | IRemoteLookupRdmaResponder | 3 | none |
@@ -62,7 +62,7 @@ Counted from the `define_interface!` blocks in `src/`. `IZyreNode` is a plain tr
 | IZyre | 2 | none |
 | IExtendedMetadataStore | 5 | none |
 | IPartitionTable | 4 | spdk |
-| **Total** | **179** | |
+| **Total** | **180** | |
 
 ## Architecture
 

@@ -408,6 +408,15 @@ by a verification read-back.
   operation fails.
   *(Backfilled 2026-07-22 from `src/lib.rs:853-895`,
   `interfaces/src/igpu_services.rs:716-735`.)*
+- **FR-026**: Component MUST provide `memcpy_h2d_batch_async(srcs, dsts,
+  sizes, stream)` (gated behind `spdk` feature) that queues a batch of
+  host-to-device copies (entry `i` copies `sizes[i]` bytes from `srcs[i]`
+  to `dsts[i]`) in one `cudaMemcpyBatchAsync` call on the given created
+  `GpuStream`. The batch as a whole runs in stream order; its copies are
+  unordered with respect to each other, so destination ranges MUST NOT
+  overlap. An empty batch is a no-op. MUST return an error if GPU support
+  is not compiled, the component is not initialized, the slices differ in
+  length, or the CUDA batch call fails.
 
 ### Key Entities
 

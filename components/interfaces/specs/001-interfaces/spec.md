@@ -260,6 +260,7 @@ The crate has three Cargo features:
 - **Method**: `dma_copy_to_device_async(&self, src, dst, size, stream) -> Result<(), String>` (feature: spdk) - Async host-to-GPU copy.
 - **Method**: `memcpy_h2d_async(&self, src, dst, size, stream) -> Result<(), String>` (feature: spdk) - Async raw-pointer H2D copy.
 - **Method**: `dma_copy_to_host_async(&self, src, dst, size, stream) -> Result<(), String>` (feature: spdk) - Async GPU-to-host copy.
+- **Method**: `memcpy_h2d_batch_async(&self, srcs, dsts, sizes, stream) -> Result<(), String>` (feature: spdk) - Queue a batch of raw-pointer H2D copies with one `cudaMemcpyBatchAsync` call; entries unordered among themselves, destinations must not overlap, `stream` must be a created stream.
 - **Method**: `memcpy_d2h_async(&self, src, dst, size, stream) -> Result<(), String>` (feature: spdk) - Async raw-pointer D2H copy.
 - **Method**: `allocate_pinned_dma_buffer(&self, size) -> Result<DmaBuffer, String>` (feature: spdk) - Allocate CUDA-pinned + SPDK-registered buffer.
 - **Method**: `register_host_memory(&self, ptr, size) -> Result<(), String>` (feature: spdk) - Register existing memory for DMA.

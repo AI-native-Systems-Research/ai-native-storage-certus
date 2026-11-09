@@ -135,6 +135,17 @@ pub struct GpuDeviceInfo {
   "DmaBuffer creation failed: {detail}"
 - **Performance**: <50ms
 
+### memcpy_h2d_batch_async(srcs, dsts, sizes, stream)
+
+- **Feature**: `spdk`
+- **Preconditions**: component initialized; the three slices have equal
+  length; each entry satisfies the `memcpy_h2d_async` contract; destination
+  ranges do not overlap; `stream` is a created stream
+- **Postconditions**: one `cudaMemcpyBatchAsync` queued on `stream` for all
+  entries (unordered among themselves); an empty batch queues nothing
+- **Errors**: "memcpy_h2d_batch_async: length mismatch (...)",
+  "Not initialized: call initialize() first", "cudaMemcpyBatchAsync H2D failed: {cuda_error}"
+
 ### dma_copy_to_host(src, dst, size)
 
 - **Feature gate**: `spdk`
