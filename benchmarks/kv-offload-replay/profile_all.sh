@@ -1345,6 +1345,7 @@ run_container_bench() {  # variant image extra-args...
         -e "TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-1}" \
         -e "GPU_KV_GB=${GPU_KV_GB}" \
         -e "TIER_DEBUG=${TIER_DEBUG:-0}" \
+        -e "VLLM_ALLOW_LONG_MAX_MODEL_LEN=${VLLM_ALLOW_LONG_MAX_MODEL_LEN:-1}" \
         -v "${HF_CACHE}:/root/.cache/huggingface:z" \
         "${wl[@]}" \
         "${extra[@]}" \
@@ -1838,6 +1839,7 @@ if want certus-spdk; then
             LONGDOC_NUM_DOCS="$LONGDOC_NUM_DOCS" \
             LONGDOC_SEED="$LONGDOC_SEED" \
             HF_CACHE="$HF_CACHE" \
+            VLLM_ALLOW_LONG_MAX_MODEL_LEN="${VLLM_ALLOW_LONG_MAX_MODEL_LEN:-1}" \
             PODMAN_STORE="$PODMAN_STORE" \
             PODMAN_RUNROOT="$PODMAN_RUNROOT" \
                 bash "${REPO_ROOT}/certus-shmq-connector/run-bench.sh" 2>&1 | tee "$f"
