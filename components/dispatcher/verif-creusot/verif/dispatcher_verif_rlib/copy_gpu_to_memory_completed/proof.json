@@ -4,18 +4,18 @@
     "Coma": {
       "vc_copy_gpu_to_memory_completed": {
         "prover": "alt-ergo",
-        "time": 2.5
+        "time": 3.1
       },
-      "vc_dm_create": { "prover": "alt-ergo", "time": 0.026 },
-      "vc_dm_downgrade": { "prover": "alt-ergo", "time": 0.031 },
+      "vc_dm_create": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_dm_downgrade": { "prover": "alt-ergo", "time": 0.03 },
       "vc_drive_index": { "prover": "alt-ergo", "time": 0.029 },
-      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.023 },
-      "vc_elim_Err'0": { "prover": "alt-ergo", "time": 0.026 },
-      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_ensure_initialized": { "prover": "alt-ergo", "time": 0.023 },
-      "vc_max1": { "prover": "alt-ergo", "time": 0.031 },
-      "vc_mt_get": { "prover": "alt-ergo", "time": 0.022 },
-      "vc_mt_remove": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_elim_Err": { "prover": "alt-ergo", "time": 0.027 },
+      "vc_elim_Err'0": { "prover": "alt-ergo", "time": 0.028 },
+      "vc_elim_Some": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_ensure_initialized": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_max1": { "prover": "alt-ergo", "time": 0.03 },
+      "vc_mt_get": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_mt_remove": { "prover": "alt-ergo", "time": 0.029 },
       "vc_writer_enqueue": { "prover": "alt-ergo", "time": 0.029 }
     }
   }

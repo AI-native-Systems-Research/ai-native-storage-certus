@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_initialize": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_initialize": { "prover": "alt-ergo", "time": 0.025 },
       "vc_verify_dis_initialize_register_host_memory": {
         "prover": "alt-ergo",
-        "time": 0.091
+        "time": 0.11
       }
     }
   }

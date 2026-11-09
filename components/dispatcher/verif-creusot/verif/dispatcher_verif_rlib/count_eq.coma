@@ -1,16 +1,16 @@
-(* #"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 787 0 787 51 *)
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 656 0 656 51 *)
 
-let%span swell_founded = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
-let%span sbatch = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 786 10 786 11
-let%span sbatch'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 784 11 784 100
-let%span sbatch'1 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 785 10 785 46
-let%span sbatch'2 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 400 10 400 11
-let%span sbatch'3 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 402 16 402 92
+let%span swell_founded = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span sbatch = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 655 10 655 11
+let%span sbatch'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 653 11 653 100
+let%span sbatch'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 654 10 654 46
+let%span sbatch'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 340 10 340 11
+let%span sbatch'3 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 342 16 342 92
 
 use seq.Seq
 use int.Int
 
-function count_true [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 401 0 401 46] (s: Seq.seq bool) (n: int) : int
+function count_true [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 341 0 341 46] (s: Seq.seq bool) (n: int) : int
 
 axiom count_true_def: forall s: Seq.seq bool, n: int [count_true s n]. count_true s n
     = ([%#sbatch'3] if n <= 0 then 0 else count_true s (n - 1) + (if Seq.get s (n - 1) then 1 else 0))
@@ -30,7 +30,7 @@ constant b : Seq.seq bool
 
 constant n : int
 
-function count_eq [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 787 0 787 51] (a: Seq.seq bool) (b: Seq.seq bool) (n: int) : ()
+function count_eq [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 656 0 656 51] (a: Seq.seq bool) (b: Seq.seq bool) (n: int) : ()
 
 goal vc_count_eq: ([%#sbatch'0] 0 <= n
     /\ n <= Seq.length a /\ n <= Seq.length b /\ (forall i: int. 0 <= i /\ i < n -> Seq.get a i = Seq.get b i))

@@ -1,13 +1,14 @@
-(* #"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/evict.rs" 16 0 16 41 *)
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 16 0 16 41 *)
 
-let%span sevict = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/evict.rs" 17 20 17 80
-let%span sevict'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/evict.rs" 15 10 15 104
+let%span sevict = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 17 20 17 80
+let%span sevict'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 15 10 15 104
 
 use creusot.prelude.MutBorrow
 use creusot.int.UInt64
 use creusot.int.UInt32
 use seq.Seq
 use map.Map
+use creusot.int.Int32
 use creusot.prelude.Any
 use int.Int
 
@@ -114,7 +115,8 @@ type t_W = {
   threads: int;
   rw: Map.map int UInt64.t;
   cfree: Map.map int int;
-  wf: Map.map UInt64.t bool }
+  wf: Map.map UInt64.t bool;
+  sdev: Map.map UInt64.t Int32.t }
 
 type t_S = { p: t_P; g: t_W }
 
@@ -126,7 +128,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let rec_blocked_unpersisted [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/evict.rs" 16 0 16 41]
+let rec_blocked_unpersisted [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/evict.rs" 16 0 16 41]
   (s: MutBorrow.t t_S) (return (x: ())) = (! bb0
   [ bb0 = s0
     [ s0 = [ &s <- { s with current = { s.current with g = ([%#sevict] { dm = s.current.g.dm;
@@ -162,7 +164,8 @@ let rec_blocked_unpersisted [#"/home/cornel/repair-j33-rc4/components/dispatcher
                                                                          threads = s.current.g.threads;
                                                                          rw = s.current.g.rw;
                                                                          cfree = s.current.g.cfree;
-                                                                         wf = s.current.g.wf }) } } ] s1
+                                                                         wf = s.current.g.wf;
+                                                                         sdev = s.current.g.sdev }) } } ] s1
     | s1 = -{resolve_refmut_S s}- s2
     | s2 = return {_ret} ] ] [ & _ret: () = Any.any_l () | & s: MutBorrow.t t_S = s ])
   [ return (result: ()) -> {[@stop_split] [@expl:rec_blocked_unpersisted ensures] [%#sevict'0] s.final.p = s.current.p
@@ -200,5 +203,6 @@ let rec_blocked_unpersisted [#"/home/cornel/repair-j33-rc4/components/dispatcher
         threads = s.current.g.threads;
         rw = s.current.g.rw;
         cfree = s.current.g.cfree;
-        wf = s.current.g.wf }}
+        wf = s.current.g.wf;
+        sdev = s.current.g.sdev }}
     (! return {result}) ]

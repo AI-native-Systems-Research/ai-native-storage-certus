@@ -1220,10 +1220,6 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
         .map(|dw| vec![false; dw.jobs.len()])
         .collect();
 
-    // Last NVMe read timeout seen on each drive, for the error message of the
-    // incomplete-object pass below (None: no timeout on that drive).
-    let mut timeout_msg: Vec<Option<String>> = vec![None; num_drives];
-
     let mut stream_idx: usize = 0;
 
     // Tag encoding: (drive_idx << 32) | (obj_idx * max_segs + seg_idx)
@@ -1403,20 +1399,15 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
                 idle_spins = 0;
                 completed[d] += 1;
                 total_completed += 1;
-                // One read on this drive timed out. The completion carries only
-                // the actor-assigned handle — not the caller tag — so the
-                // affected object cannot be named here, but this is NOT a
-                // whole-drive failure (US-11 AS-4): the actor forgets a
-                // timed-out op, so that segment's ReadDone never arrives and
-                // its object is exactly the one left with segments outstanding
-                // after the loop. Keep submitting and draining; the
-                // incomplete-object pass below fails that entry alone, and
-                // every other entry keeps its completions and is processed
-                // independently. A late drive write for the forgotten op can
-                // only land in the timed-out object's own slot: each segment
-                // reads into its own chunk of its own object's slot, and the
-                // chunk_bufs Arc keeps that memory alive for the whole call.
-                timeout_msg[d] = Some(format!("NVMe read timeout drive={d} (handle {handle:?})"));
+                for r in all_results[d].iter_mut() {
+                    if r.is_ok() {
+                        *r = Err(DispatcherError::IoError(format!(
+                            "NVMe read timeout drive={d} (handle {handle:?})"
+                        )));
+                    }
+                }
+                obj_failed[d].fill(true);
+                stop_submitting[d] = true;
             }
             Ok(_) => {
                 idle_spins = 0;
@@ -1475,21 +1466,6 @@ pub unsafe fn scatter_gather_multi_drive_zero_copy(
             if all_results[d][obj_idx].is_ok() {
                 all_results[d][obj_idx] = Err(DispatcherError::IoError(
                     "cold read aborted before segment was submitted".into(),
-                ));
-            }
-        }
-        // An object whose reads did not all complete — its NVMe read timed out
-        // (the actor forgets a timed-out op, so its ReadDone never arrives and
-        // obj_remaining never reaches zero) — is failed for that entry only;
-        // the objects that did complete were already delivered or failed
-        // above. This is the per-entry attribution the timeout completion
-        // itself cannot provide (US-11 AS-4).
-        for obj_idx in 0..ds.objs.len() {
-            if obj_remaining[d][obj_idx] > 0 && all_results[d][obj_idx].is_ok() {
-                all_results[d][obj_idx] = Err(DispatcherError::IoError(
-                    timeout_msg[d]
-                        .clone()
-                        .unwrap_or_else(|| "cold read did not complete".into()),
                 ));
             }
         }

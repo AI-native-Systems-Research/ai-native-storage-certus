@@ -1,6 +1,6 @@
 {
   "profile": [],
   "proofs": {
-    "Coma": { "vc_nd_served_ext": { "prover": "z3", "time": 0.181 } }
+    "Coma": { "vc_nd_served_ext": { "prover": "cvc5", "time": 0.127 } }
   }
 }

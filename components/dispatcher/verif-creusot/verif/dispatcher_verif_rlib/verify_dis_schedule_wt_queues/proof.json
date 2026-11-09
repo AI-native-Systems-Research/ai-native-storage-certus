@@ -2,9 +2,9 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_schedule_write_through": { "prover": "alt-ergo", "time": 0.021 },
-      "vc_verify_dis_schedule_wt_queues": { "prover": "z3", "time": 0.033 },
-      "vc_writer_step": { "prover": "alt-ergo", "time": 0.029 }
+      "vc_schedule_write_through": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_verify_dis_schedule_wt_queues": { "prover": "z3", "time": 0.042 },
+      "vc_writer_step": { "prover": "alt-ergo", "time": 0.031 }
     }
   }
 }

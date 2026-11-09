@@ -1,7 +1,7 @@
-(* #"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 258 0 258 42 *)
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 258 0 258 42 *)
 
-let%span swell_founded = "/home/cornel/repair-j33-rc4/components/dispatcher/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
-let%span sbatch = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 257 10 257 17
+let%span swell_founded = "/home/cornel/repair-j33-rc24/components/dispatcher/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+let%span sbatch = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 257 10 257 17
 
 use creusot.int.UInt64
 use seq.Seq
@@ -20,7 +20,7 @@ constant s : Seq.seq UInt64.t
 
 constant k : UInt64.t
 
-function count_k [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/batch.rs" 258 0 258 42] (s: Seq.seq UInt64.t) (k: UInt64.t) : int
+function count_k [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/batch.rs" 258 0 258 42] (s: Seq.seq UInt64.t) (k: UInt64.t) : int
 
 goal vc_count_k: if Seq.length s = 0 then
     true

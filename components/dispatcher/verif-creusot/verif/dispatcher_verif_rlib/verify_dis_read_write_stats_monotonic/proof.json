@@ -2,11 +2,11 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_read_write_stats": { "prover": "alt-ergo", "time": 0.027 },
-      "vc_shutdown": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_read_write_stats": { "prover": "alt-ergo", "time": 0.024 },
+      "vc_shutdown": { "prover": "alt-ergo", "time": 0.024 },
       "vc_verify_dis_read_write_stats_monotonic": {
         "prover": "z3",
-        "time": 0.021
+        "time": 0.029
       }
     }
   }

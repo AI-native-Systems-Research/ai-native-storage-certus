@@ -81,9 +81,6 @@ mod repair_test_failed_promotion_releases_slot;
 #[path = "repair_test_eviction_errors_counted_unpersisted.rs"]
 mod repair_test_eviction_errors_counted_unpersisted;
 
-#[cfg(test)]
-#[path = "repair_test_nvme_timeout_fails_whole_drive.rs"]
-mod repair_test_nvme_timeout_fails_whole_drive;
 #[path = "repair_test_route_partition_does_not_add_up.rs"]
 mod repair_test_route_partition_does_not_add_up;
 

@@ -1,8 +1,8 @@
-(* #"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/drivers.rs" 186 0 186 42 *)
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 186 0 186 42 *)
 
-let%span smisc = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/misc.rs" 399 10 406 92
-let%span sdrivers = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/drivers.rs" 187 4 187 20
-let%span sdrivers'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/drivers.rs" 185 10 185 850
+let%span smisc = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/misc.rs" 399 10 406 92
+let%span sdrivers = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 187 4 187 20
+let%span sdrivers'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 185 10 185 850
 
 use creusot.int.UInt64
 use creusot.prelude.Any
@@ -57,7 +57,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let verify_dis_config_defaults [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/drivers.rs" 186 0 186 42]
+let verify_dis_config_defaults [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 186 0 186 42]
   (return (x: t_Cfg)) = (! bb0
   [ bb0 = s0 [ s0 = config_default [%#sdrivers] (fun (_x: t_Cfg) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ] ]
   [ & _ret: t_Cfg = Any.any_l () ])

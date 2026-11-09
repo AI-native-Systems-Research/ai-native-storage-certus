@@ -2,10 +2,10 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_served_by_is_hit": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_served_by_is_hit": { "prover": "alt-ergo", "time": 0.017 },
       "vc_verify_dis_servedby_is_hit": {
         "prover": "alt-ergo",
-        "time": 0.016
+        "time": 0.024
       }
     }
   }

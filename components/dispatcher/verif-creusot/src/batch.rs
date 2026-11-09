@@ -356,14 +356,6 @@ pub struct ColdG {
     pub nd: NdG,
     /// nd record q belongs to entries@[nd_idx[q]] (= cold@[q].idx)
     pub nd_idx: Seq<Int>,
-    /// batch index i -> entry i's cold entry was served by the pooled path at
-    /// the read/promote level: its scatter-gather read completed AND its
-    /// dispatch-map promotion landed (DIS-BATCH-LOOKUP-ERROR-ISOLATION: a
-    /// read failure on a sibling entry must not turn this entry's result into
-    /// an error). False for entries that are not cold, never reached the
-    /// scatter-gather (no drives, staged, prep-failed), or whose drive's
-    /// channel checkout failed.
-    pub ok: Seq<bool>,
 }
 
 /// The no-drives cold path's per-entry record: whether the entry was promoted, and the log
@@ -433,14 +425,6 @@ pub struct Job2 {
     pub d: usize,
     pub q: usize,
     pub ptr: u64,
-}
-
-/// `bl_cold_pooled`'s ghost outputs: per-cold-entry promotion flags (`prom`,
-/// q-indexed) and the batch-indexed per-entry serve record (`ok`, indexed by
-/// the entry's position in the batch — see `ColdG.ok`).
-pub struct PgG {
-    pub prom: Seq<bool>,
-    pub ok: Seq<bool>,
 }
 
 /// Per-drive cold prep (lib.rs:2540-2598): evict_and_insert per entry, drive by drive.
@@ -662,41 +646,30 @@ pub fn bl_cold_nodrive(s: &mut S, cold: &Vec<ColdE>, results: &mut Vec<Res>, ent
 
 /// Pooled cold jobs (lib.rs:2600-2718): streams, one channel checkout per active drive, the
 /// multiplexed scatter-gather, then per-job promotion (+ multi-region scatter).
-/// Error isolation (DIS-BATCH-LOOKUP-ERROR-ISOLATION, US-11 AS-4): the scatter-gather is
-/// modelled per job (`sg_job`), so a read failure — including an NVMe read timeout, which
-/// fails exactly the job whose segments did not complete — is reported for that entry only
-/// (`Err(DE::Io(IoK::Ssd))` at its own batch index); `ok` records, per batch index, the
-/// entries whose own read and promotion landed, and those entries' results are Ok.
 #[requires(forall<q: Int> 0 <= q && q < cold@.len() ==> cold@[q].idx@ < results@.len() && cold@[q].idx@ < entries@.len())]
-#[requires(forall<q: Int, r: Int> 0 <= q && q < r && r < cold@.len() ==> cold@[q].idx@ < cold@[r].idx@)]
 #[requires(forall<j: Int> 0 <= j && j < jobs@.len() ==> jobs@[j].q@ < cold@.len())]
 #[requires(forall<j: Int, k: Int> 0 <= j && j < k && k < jobs@.len() ==> jobs@[j].d@ <= jobs@[k].d@ && jobs@[j].q != jobs@[k].q)]
 #[ensures((^s).p == s.p && log_ext(*s.g, *(^s).g) && same_env(*s.g, *(^s).g) && (*(^s).g).wq == (*s.g).wq)]
 #[ensures((^results)@.len() == results@.len())]
 #[ensures(forall<i: Int> 0 <= i && i < results@.len() && (forall<j: Int> 0 <= j && j < jobs@.len() ==> cold@[jobs@[j].q@].idx@ != i) ==> (^results)@[i] == results@[i])]
-#[ensures(result.prom.len() == cold@.len())]
-#[ensures(result.ok.len() == results@.len())]
-#[ensures(forall<q: Int> 0 <= q && q < cold@.len() && result.prom[q] ==> exists<j: Int> 0 <= j && j < jobs@.len() && jobs@[j].q@ == q)]
-#[ensures(forall<i: Int> 0 <= i && i < results@.len() && result.ok[i] ==> exists<j: Int> 0 <= j && j < jobs@.len() && cold@[jobs@[j].q@].idx@ == i)]
-#[ensures(forall<i: Int> 0 <= i && i < results@.len() && i < entries@.len() && result.ok[i] && entries@[i].regions@.len() == 1
-    ==> (^results)@[i] == Some(Ok(())))]
-#[ensures((*(^s).g).c.promo_mem == (*s.g).c.promo_mem + count_true(result.prom, cold@.len()))]
+#[ensures(result.len() == cold@.len())]
+#[ensures(forall<q: Int> 0 <= q && q < cold@.len() && result[q] ==> exists<j: Int> 0 <= j && j < jobs@.len() && jobs@[j].q@ == q)]
+#[ensures((*(^s).g).c.promo_mem == (*s.g).c.promo_mem + count_true(*result, cold@.len()))]
 #[ensures(rd_ctr((*s.g).c, (*(^s).g).c) && (*(^s).g).c.promo_gpu == (*s.g).c.promo_gpu)]
 #[ensures(no_reg(*s.g, *(^s).g) && own_reads(*s.g, *(^s).g) && own_writes(*s.g, *(^s).g))]
 #[ensures(jobs@.len() == 1 && has_streams && all_from((*s.g).ob, (*s.g).tick) && (forall<t: Int> !(*s.g).os[t]) ==>
-    !result.prom[jobs@[0].q@] && (*(^s).g).dm == (*s.g).dm && (*(^s).g).mt == (*s.g).mt
+    !result[jobs@[0].q@] && (*(^s).g).dm == (*s.g).dm && (*(^s).g).mt == (*s.g).mt
     && match (^results)@[cold@[jobs@[0].q@].idx@] { Some(Err(_)) => true, _ => false })]
 #[ensures(no_new_kn(results@, (^results)@))]
-pub fn bl_cold_pooled(s: &mut S, cold: &Vec<ColdE>, jobs: &Vec<Job2>, results: &mut Vec<Res>, entries: &[Be], has_streams: bool, warm_raw: u64) -> Snapshot<PgG> {
+pub fn bl_cold_pooled(s: &mut S, cold: &Vec<ColdE>, jobs: &Vec<Job2>, results: &mut Vec<Res>, entries: &[Be], has_streams: bool, warm_raw: u64) -> Snapshot<Seq<bool>> {
     let g0 = snapshot!(*s.g);
     let p0 = snapshot!(s.p);
     let r0 = snapshot!(results@);
     let nc = cold.len();
     let none = snapshot!(Seq::create(nc@, |q: Int| false));
-    let oknone = snapshot!(Seq::create(r0.len(), |i: Int| false));
     proof_assert!(forall<k: Int> 0 <= k && k <= nc@ ==> count_zero(*none, k) == ());
     if jobs.len() == 0 {
-        return snapshot!(PgG { prom: *none, ok: *oknone });
+        return none;
     }
     // Streams: the device's pipeline pair, or two temporary streams.
     if !has_streams {
@@ -714,7 +687,7 @@ pub fn bl_cold_pooled(s: &mut S, cold: &Vec<ColdE>, jobs: &Vec<Job2>, results: &
                 results[cold[jobs[j].q].idx] = Some(Err(DE::Io(IoK::Stream)));
                 j += 1;
             }
-            return snapshot!(PgG { prom: *none, ok: *oknone });
+            return none;
         }
     }
     // One channel checkout per active drive (jobs are grouped by drive, in drive order).
@@ -745,7 +718,7 @@ pub fn bl_cold_pooled(s: &mut S, cold: &Vec<ColdE>, jobs: &Vec<Job2>, results: &
         j += 1;
     }
     if !checkout_ok {
-        return snapshot!(PgG { prom: *none, ok: *oknone });
+        return none;
     }
     // The scatter-gather: every job's NVMe reads (+ coalesced H2D for single-region objects).
     let g2 = snapshot!(*s.g);
@@ -768,16 +741,13 @@ pub fn bl_cold_pooled(s: &mut S, cold: &Vec<ColdE>, jobs: &Vec<Job2>, results: &
     // Process results: promote and scatter.
     let g3 = snapshot!(*s.g);
     let mut prom: Snapshot<Seq<bool>> = none;
-    let mut okv: Snapshot<Seq<bool>> = oknone;
     let mut j: usize = 0;
-    #[invariant(s.p == *p0 && j@ <= jobs@.len() && results@.len() == r0.len() && prom.len() == nc@ && okv.len() == r0.len())]
+    #[invariant(s.p == *p0 && j@ <= jobs@.len() && results@.len() == r0.len() && prom.len() == nc@)]
     #[invariant(no_new_kn(*r0, results@))]
     #[invariant(log_ext(*g0, *s.g) && same_env(*g0, *s.g) && s.g.wq == g0.wq)]
     #[invariant(forall<i: Int> 0 <= i && i < r0.len() && (forall<k: Int> 0 <= k && k < jobs@.len() ==> cold@[jobs@[k].q@].idx@ != i) ==> results@[i] == r0[i])]
     #[invariant(forall<q: Int> 0 <= q && q < nc@ && prom[q] ==> exists<k: Int> 0 <= k && k < j@ && jobs@[k].q@ == q)]
-    #[invariant(forall<k: Int> j@ <= k && k < jobs@.len() ==> !prom[jobs@[k].q@] && !okv[cold@[jobs@[k].q@].idx@])]
-    #[invariant(forall<i: Int> 0 <= i && i < r0.len() && okv[i] ==> exists<k: Int> 0 <= k && k < j@ && cold@[jobs@[k].q@].idx@ == i)]
-    #[invariant(forall<i: Int> 0 <= i && i < r0.len() && i < entries@.len() && okv[i] && entries@[i].regions@.len() == 1 ==> results@[i] == Some(Ok(())))]
+    #[invariant(forall<k: Int> j@ <= k && k < jobs@.len() ==> !prom[jobs@[k].q@])]
     #[invariant(s.g.c.promo_mem == g0.c.promo_mem + count_true(*prom, nc@))]
     #[invariant(rd_ctr(g0.c, s.g.c) && s.g.c.promo_gpu == g0.c.promo_gpu)]
     #[invariant(no_reg(*g0, *s.g) && own_reads(*g0, *s.g) && own_writes(*g0, *s.g))]
@@ -793,7 +763,6 @@ pub fn bl_cold_pooled(s: &mut S, cold: &Vec<ColdE>, jobs: &Vec<Job2>, results: &
                     proof_assert!(!prom[job.q@]);
                     proof_assert!(count_set(*prom, job.q@, nc@) == ());
                     prom = snapshot!(prom.set(job.q@, true));
-                    okv = snapshot!(okv.set(e.idx@, true));
                     if entries[e.idx].regions.len() > 1 {
                         let (r, _sv) = serve_memory_tier_to_gpu(s, job.ptr, e.total, &entries[e.idx].regions, warm_raw, true);
                         r
@@ -809,7 +778,7 @@ pub fn bl_cold_pooled(s: &mut S, cold: &Vec<ColdE>, jobs: &Vec<Job2>, results: &
         results[e.idx] = Some(res);
         j += 1;
     }
-    snapshot!(PgG { prom: *prom, ok: *okv })
+    prom
 }
 
 #[logic]
@@ -870,9 +839,6 @@ pub fn count_eq(a: Seq<bool>, b: Seq<bool>, n: Int) {
     ==> result.kind[0] == CK::Pooled && !result.prom[0] && mt_has(*(^s).g, cold@[0].key)
         && (*(^s).g).dm.get(cold@[0].key) == (*s.g).dm.get(cold@[0].key)
         && match (^results)@[cold@[0].idx@] { Some(Err(_)) => true, _ => false })]
-#[ensures(result.ok.len() == results@.len())]
-#[ensures(forall<i: Int> 0 <= i && i < results@.len() && i < entries@.len() && result.ok[i] && entries@[i].regions@.len() == 1
-    ==> (^results)@[i] == Some(Ok(())))]
 pub fn bl_cold(s: &mut S, cold: &Vec<ColdE>, results: &mut Vec<Res>, entries: &[Be], has_streams: bool, batch_device: i32, warm_raw: u64) -> Snapshot<ColdG> {
     let mut ndidx: Snapshot<Seq<Int>> = snapshot!(Seq::empty());
     let mut q0: usize = 0;
@@ -884,8 +850,7 @@ pub fn bl_cold(s: &mut S, cold: &Vec<ColdE>, results: &mut Vec<Res>, entries: &[
     if s.p.nd == 0 {
         let ndg = bl_cold_nodrive(s, cold, results, entries);
         let promv = snapshot!(ndg.prom);
-        let okv = snapshot!(Seq::create(results@.len(), |i: Int| false));
-        return snapshot!(ColdG { kind: Seq::create(cold@.len(), |q: Int| CK::NoDrive), prom: *promv, nd: *ndg, nd_idx: *ndidx, ok: *okv });
+        return snapshot!(ColdG { kind: Seq::create(cold@.len(), |q: Int| CK::NoDrive), prom: *promv, nd: *ndg, nd_idx: *ndidx });
     }
     let g0 = snapshot!(*s.g);
     let p0 = snapshot!(s.p);
@@ -894,12 +859,9 @@ pub fn bl_cold(s: &mut S, cold: &Vec<ColdE>, results: &mut Vec<Res>, entries: &[
     let g1 = snapshot!(*s.g);
     proof_assert!(all_from(g0.ob, g0.tick) && g1.ob == g0.ob && g1.tick >= g0.tick ==> all_from(g1.ob, g1.tick));
     proof_assert!(forall<j: Int> 0 <= j && j < jobs@.len() ==> cold@[jobs@[j].q@].idx@ < r0.len());
-    let pg = bl_cold_pooled(s, cold, &jobs, results, entries, has_streams, warm_raw);
+    let prom = bl_cold_pooled(s, cold, &jobs, results, entries, has_streams, warm_raw);
     let g2 = snapshot!(*s.g);
     let r2 = snapshot!(results@);
-    // A staged entry never reached the scatter-gather, so its `ok` is false and
-    // the staging post-pass below may freely rewrite its result.
-    proof_assert!(forall<t: Int> 0 <= t && t < staged@.len() ==> !pg.ok[cold@[staged@[t]@].idx@]);
     // Staging post-pass (channel leases released).
     let mut j: usize = 0;
     #[invariant(s.p == *p0 && j@ <= staged@.len() && results@.len() == r0.len())]
@@ -913,9 +875,7 @@ pub fn bl_cold(s: &mut S, cold: &Vec<ColdE>, results: &mut Vec<Res>, entries: &[
         results[e.idx] = Some(r);
         j += 1;
     }
-    let promv = snapshot!(pg.prom);
-    let okv = snapshot!(pg.ok);
-    snapshot!(ColdG { kind: *kind, prom: *promv, nd: NdG { prom: Seq::empty(), ins_at: Seq::empty(), sv: Seq::empty(), ptr: Seq::empty(), pr_at: Seq::empty() }, nd_idx: *ndidx, ok: *okv })
+    snapshot!(ColdG { kind: *kind, prom: *prom, nd: NdG { prom: Seq::empty(), ins_at: Seq::empty(), sv: Seq::empty(), ptr: Seq::empty(), pr_at: Seq::empty() }, nd_idx: *ndidx })
 }
 
 
@@ -1358,23 +1318,12 @@ pub fn first_addr(entries: &[Be]) -> u64 {
     && result.1.cold.nd_idx.len() == 1 && result.1.cold.nd_idx[0] == 0
     && result.1.cold.nd.prom[0]
     && nd_served(*(^s).g, (*s.g).log.len(), entries@[0].regions@, entries@[0].key, sum_sz(entries@[0].regions@), result.1.cold.nd, 0))]
-/// DIS-BATCH-LOOKUP-ERROR-ISOLATION (US-11 AS-4): when one cold entry reports a read
-/// failure (`Err(DE::Io(IoK::Ssd))` — an NVMe read that did not complete, e.g. a
-/// timeout), every OTHER cold entry whose own scatter-gather read and promotion landed
-/// (`cold.ok[j]`, single region, so the read delivered inside the scatter-gather) is
-/// still served: its result is Ok, not an error inherited from the sibling.
-#[ensures(result.1.ready ==> result.1.cold.ok.len() == entries@.len()
-    && forall<i: Int, j: Int> 0 <= i && i < entries@.len() && 0 <= j && j < entries@.len() && i != j
-        && (match result.0@[i].result { Err(DE::Io(IoK::Ssd)) => true, _ => false })
-        && (match result.1.cls[j] { Cls::Cold { .. } => true, _ => false })
-        && result.1.cold.ok[j] && entries@[j].regions@.len() == 1
-        ==> result.0@[j].result == Ok(()))]
 pub fn batch_lookup(s: &mut S, entries: &[Be]) -> (Vec<Outcome>, Snapshot<BlG>) {
     let g0 = snapshot!(*s.g);
     let p0 = snapshot!(s.p);
     let n = entries.len();
     let dummy = snapshot!(BlG { cls: Seq::empty(), tier: Seq::empty(), cold: ColdG { kind: Seq::empty(), prom: Seq::empty(),
-        nd: NdG { prom: Seq::empty(), ins_at: Seq::empty(), sv: Seq::empty(), ptr: Seq::empty(), pr_at: Seq::empty() }, nd_idx: Seq::empty(), ok: Seq::empty() },
+        nd: NdG { prom: Seq::empty(), ins_at: Seq::empty(), sv: Seq::empty(), ptr: Seq::empty(), pr_at: Seq::empty() }, nd_idx: Seq::empty() },
         rem: RemG { nf: Seq::empty(), ans: Seq::empty(), sync_at: -1, rel_from: 0 }, touch_at: 0, cold_from: 0,
         wsync_at: -1, wrel_from: 0, wrel_to: 0, warm: 0u64, ready: false });
     if n == 0 {
@@ -1418,7 +1367,7 @@ pub fn batch_lookup(s: &mut S, entries: &[Be]) -> (Vec<Outcome>, Snapshot<BlG>) 
         bl_cold(s, &bl.cold, &mut bl.results, entries, has_streams, batch_device, warm_raw)
     } else {
         snapshot!(ColdG { kind: Seq::empty(), prom: Seq::empty(),
-            nd: NdG { prom: Seq::empty(), ins_at: Seq::empty(), sv: Seq::empty(), ptr: Seq::empty(), pr_at: Seq::empty() }, nd_idx: Seq::empty(), ok: Seq::create(n@, |i: Int| false) })
+            nd: NdG { prom: Seq::empty(), ins_at: Seq::empty(), sv: Seq::empty(), ptr: Seq::empty(), pr_at: Seq::empty() }, nd_idx: Seq::empty() })
     };
     let g4 = snapshot!(*s.g);
     let r_cold = snapshot!(bl.results@);
@@ -1435,11 +1384,6 @@ pub fn batch_lookup(s: &mut S, entries: &[Be]) -> (Vec<Outcome>, Snapshot<BlG>) 
             && nd_served(*g4, g0.log.len(), entries@[0].regions@, entries@[0].key, sum_sz(entries@[0].regions@), cgh.nd, 0)
             && r_cold[0] == Some(Ok(())) && bl.tier@[0] == Some(ServedBy::Ssd));
     proof_assert!(bl.warm_keys@.len() > 0 ==> s.g.log[*touch_at] == Ev::MtBatchTouch);
-    // DIS-BATCH-LOOKUP-ERROR-ISOLATION: a cold entry whose own read and promotion
-    // landed (cold.ok, single region) is Some(Ok) after the cold path, and the
-    // warm sync, pin release, remote pass and recovery pass below never rewrite
-    // a Some(Ok) — only KeyNotFound and AlreadyExists results are touched.
-    proof_assert!(forall<j: Int> 0 <= j && j < n@ && cgh.ok[j] && entries@[j].regions@.len() == 1 ==> r_cold[j] == Some(Ok(())));
     // Deferred batched warm-stream sync, then release the warm pins.
     let mut wsync_at: Snapshot<Int> = snapshot!(-1);
     if bl.warm_keys.len() > 0 && warm_raw != 0 {
@@ -1466,7 +1410,6 @@ pub fn batch_lookup(s: &mut S, entries: &[Be]) -> (Vec<Outcome>, Snapshot<BlG>) 
         ==> r_rem[0] == Some(Ok(())) && bl.tier@[0] == Some(ServedBy::Ssd));
     proof_assert!(r_cold[0] == Some(Ok(())) ==> forall<t: Int> 0 <= t && t < g4.log.len() ==> s.g.log[t] == g4.log[t]);
     proof_assert!(bl.warm_keys@.len() > 0 ==> s.g.log[*touch_at] == Ev::MtBatchTouch);
-    proof_assert!(forall<j: Int> 0 <= j && j < n@ && cgh.ok[j] && entries@[j].regions@.len() == 1 ==> r_rem[j] == Some(Ok(())));
     // Recover concurrent-promotion losers.
     let mut i: usize = 0;
     #[invariant(s.p == *p0 && i@ <= n@ && bl.results@.len() == n@ && log_ext(*g7, *s.g) && same_env(*g7, *s.g) && s.g.wq == g7.wq && same_ctr(g7.c, s.g.c))]
@@ -1485,7 +1428,6 @@ pub fn batch_lookup(s: &mut S, entries: &[Be]) -> (Vec<Outcome>, Snapshot<BlG>) 
     }
     let tier_end = snapshot!(bl.tier@);
     let r_end = snapshot!(bl.results@);
-    proof_assert!(forall<j: Int> 0 <= j && j < n@ && cgh.ok[j] && entries@[j].regions@.len() == 1 ==> r_end[j] == Some(Ok(())));
     proof_assert!((match cg.cls[0] { Cls::Cold { .. } => true, _ => false }) && r_cold[0] == Some(Ok(()))
         ==> r_end[0] == Some(Ok(())) && tier_end[0] == Some(ServedBy::Ssd));
     proof_assert!(r_cold[0] == Some(Ok(())) ==> forall<t: Int> 0 <= t && t < g4.log.len() ==> s.g.log[t] == g4.log[t]);

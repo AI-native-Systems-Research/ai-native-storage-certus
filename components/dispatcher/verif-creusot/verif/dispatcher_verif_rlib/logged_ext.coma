@@ -1,14 +1,15 @@
-(* #"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 713 0 713 48 *)
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 717 0 717 48 *)
 
-let%span score = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 711 11 711 73
-let%span score'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 712 10 712 25
-let%span score'1 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 465 16 465 83
-let%span score'2 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 423 16 423 111
+let%span score = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 715 11 715 73
+let%span score'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 716 10 716 25
+let%span score'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 469 16 469 83
+let%span score'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 427 16 427 111
 
 use creusot.int.UInt64
 use creusot.int.UInt32
 use seq.Seq
 use map.Map
+use creusot.int.Int32
 use int.Int
 
 type t_FMap_u64_Ent
@@ -93,12 +94,13 @@ type t_W = {
   threads: int;
   rw: Map.map int UInt64.t;
   cfree: Map.map int int;
-  wf: Map.map UInt64.t bool }
+  wf: Map.map UInt64.t bool;
+  sdev: Map.map UInt64.t Int32.t }
 
-predicate logged [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 464 0 464 40] (a: t_W) (b: t_W) (e: t_Ev) =
+predicate logged [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 468 0 468 40] (a: t_W) (b: t_W) (e: t_Ev) =
   [%#score'1] exists i: int. Seq.length a.log <= i /\ i < Seq.length b.log /\ Seq.get b.log i = e
 
-predicate log_ext [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 422 0 422 34] (a: t_W) (b: t_W) =
+predicate log_ext [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 426 0 426 34] (a: t_W) (b: t_W) =
   [%#score'2] Seq.length a.log <= Seq.length b.log
   /\ (forall i: int. 0 <= i /\ i < Seq.length a.log -> Seq.get b.log i = Seq.get a.log i)
 
@@ -116,7 +118,7 @@ constant c'0 : t_W
 
 constant e : t_Ev
 
-function logged_ext [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 713 0 713 48] (g: t_W) (a: t_W) (b: t_W) (c'0: t_W) (e: t_Ev) : ()
+function logged_ext [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 717 0 717 48] (g: t_W) (a: t_W) (b: t_W) (c'0: t_W) (e: t_Ev) : ()
 
 goal vc_logged_ext: ([%#score] logged a b e /\ log_ext b c'0 /\ Seq.length g.log <= Seq.length a.log)
   -> ([@stop_split] [@expl:logged_ext ensures] [%#score'0] logged g c'0 e)

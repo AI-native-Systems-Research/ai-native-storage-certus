@@ -1,21 +1,22 @@
-(* #"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/drivers.rs" 2025 0 2025 91 *)
+(* #"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2014 0 2014 91 *)
 
-let%span score = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 607 16 607 102
-let%span score'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 301 16 301 50
-let%span smethods = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/methods.rs" 424 11 424 20
-let%span smethods'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/methods.rs" 425 10 425 23
-let%span smethods'1 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/methods.rs" 426 10 426 85
-let%span smethods'2 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/methods.rs" 427 10 429 120
-let%span sstore = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/store.rs" 136 16 136 87
-let%span sdrivers = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/drivers.rs" 2026 4 2026 40
-let%span sdrivers'0 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/drivers.rs" 2023 11 2023 32
-let%span sdrivers'1 = "/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/drivers.rs" 2024 10 2024 116
+let%span score = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 611 16 611 102
+let%span score'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 305 16 305 50
+let%span smethods = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 424 11 424 20
+let%span smethods'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 425 10 425 23
+let%span smethods'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 426 10 426 85
+let%span smethods'2 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/methods.rs" 427 10 429 120
+let%span sstore = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/store.rs" 136 16 136 87
+let%span sdrivers = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2015 4 2015 40
+let%span sdrivers'0 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2012 11 2012 32
+let%span sdrivers'1 = "/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2013 10 2013 116
 
 use creusot.prelude.MutBorrow
 use creusot.int.UInt64
 use creusot.int.UInt32
 use seq.Seq
 use map.Map
+use creusot.int.Int32
 use creusot.prelude.Any
 
 type t_P = {
@@ -121,7 +122,8 @@ type t_W = {
   threads: int;
   rw: Map.map int UInt64.t;
   cfree: Map.map int int;
-  wf: Map.map UInt64.t bool }
+  wf: Map.map UInt64.t bool;
+  sdev: Map.map UInt64.t Int32.t }
 
 type t_S = { p: t_P; g: t_W }
 
@@ -144,10 +146,10 @@ type t_DE = NotInit t_Ni | InvalidParam | KeyNotFound UInt64.t | AlreadyExists U
 
 type t_Result_unit_DE = Ok () | Err t_DE
 
-predicate pinv [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 606 0 606 25] (p'0: t_P) =
+predicate pinv [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 610 0 610 25] (p'0: t_P) =
   [%#score] (p'0.init -> p'0.has_dm /\ p'0.has_mt /\ p'0.writer) /\ (not p'0.init -> not p'0.ssd_ev /\ not p'0.mt_ev)
 
-function lg [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 300 0 300 27] (w: t_W) (e: t_Ev) : t_W
+function lg [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 304 0 304 27] (w: t_W) (e: t_Ev) : t_W
  = [%#score'0] { dm = w.dm;
                  mt = w.mt;
                  used = w.used;
@@ -168,9 +170,10 @@ function lg [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/s
                  threads = w.threads;
                  rw = w.rw;
                  cfree = w.cfree;
-                 wf = w.wf }
+                 wf = w.wf;
+                 sdev = w.sdev }
 
-function di [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/core.rs" 624 0 624 36] (k: UInt64.t) (n: UInt64.t) : UInt64.t
+function di [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/core.rs" 628 0 628 36] (k: UInt64.t) (n: UInt64.t) : UInt64.t
 
 let schedule_write_through (s: MutBorrow.t t_S) (key'1: UInt64.t) (size'1: UInt32.t) (return (x: t_Result_unit_DE)) =
 {[@stop_split] [@expl:schedule_write_through requires] [%#smethods] pinv s.current.p}
@@ -209,27 +212,28 @@ let schedule_write_through (s: MutBorrow.t t_S) (key'1: UInt64.t) (size'1: UInt3
            threads = s.current.g.threads;
            rw = s.current.g.rw;
            cfree = s.current.g.cfree;
-           wf = s.current.g.wf } (Enq { key = key'1;
-                                        size = size'1;
-                                        dev = di key'1 (if UInt64.t'int s.current.p.nd = 0 then
-                                          (1: UInt64.t)
-                                        else
-                                          s.current.p.nd
-                                        ) }))}
+           wf = s.current.g.wf;
+           sdev = s.current.g.sdev } (Enq { key = key'1;
+                                            size = size'1;
+                                            dev = di key'1 (if UInt64.t'int s.current.p.nd = 0 then
+                                              (1: UInt64.t)
+                                            else
+                                              s.current.p.nd
+                                            ) }))}
     (! return {result}) ]
 
 predicate resolve_refmut_S [@inline:trivial] (_1: MutBorrow.t t_S) = _1.final = _1.current
 
 meta "rewrite_def" predicate resolve_refmut_S
 
-function wjob [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/store.rs" 135 0 135 45] (p'0: t_P) (key'1: UInt64.t) (size'1: UInt32.t) : t_Job
+function wjob [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/store.rs" 135 0 135 45] (p'0: t_P) (key'1: UInt64.t) (size'1: UInt32.t) : t_Job
  = [%#sstore] { key = key'1; size = size'1; dev = di key'1 (if UInt64.t'int p'0.nd = 0 then (1: UInt64.t) else p'0.nd) }
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let verify_dis_schedule_wt_nonblocking [#"/home/cornel/repair-j33-rc4/components/dispatcher/verif-creusot/src/drivers.rs" 2025 0 2025 91]
+let verify_dis_schedule_wt_nonblocking [#"/home/cornel/repair-j33-rc24/components/dispatcher/verif-creusot/src/drivers.rs" 2014 0 2014 91]
   (s: MutBorrow.t t_S) (key'1: UInt64.t) (size'1: UInt32.t) (return (x: t_Result_unit_DE)) =
 {[@stop_split] [@expl:verify_dis_schedule_wt_nonblocking requires] [%#sdrivers'0] pinv s.current.p /\ s.current.p.init}
   (! bb0

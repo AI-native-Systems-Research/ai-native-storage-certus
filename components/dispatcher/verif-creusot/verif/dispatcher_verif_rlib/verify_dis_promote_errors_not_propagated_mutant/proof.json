@@ -2,7 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_promote_to_memory_tier": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_promote_to_memory_tier": { "prover": "alt-ergo", "time": 0.028 },
       "vc_verify_dis_promote_errors_not_propagated__mutant": null
     }
   }

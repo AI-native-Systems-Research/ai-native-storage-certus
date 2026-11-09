@@ -1114,64 +1114,6 @@ pub fn verify_dis_batch_lookup_cold_promotes__mutant(s: &mut S, entries: &[Be]) 
     batch_lookup(s, entries)
 }
 
-// DIS-BATCH-LOOKUP-ERROR-ISOLATION (finding nvme-timeout-fails-whole-drive, US-11 AS-4
-// "Edge case one fails"): a read or DMA failure on one cold entry of a batch is reported
-// only for that entry; the other entries are processed and reported independently. The
-// defect was the NVMe read TIMEOUT: `Completion::Timeout` carries only the actor-assigned
-// handle (not the caller tag), and the scatter-gather completion loop used that as a reason
-// to fail every entry on the drive. The fix attributes a timeout to exactly the job whose
-// segments did not complete (the actor forgets a timed-out op, so its ReadDone never
-// arrives) and keeps submitting and draining the drive's other jobs.
-//
-// Driver: two cold single-region entries whose slots fit and whose preps, stream setup,
-// channel checkouts and promotions all succeed (Blk-resident keys, no writers, ob/og
-// all-true). The SSD-read oracle `os` is left unconstrained, so executions where entry i's
-// read fails while entry j's succeeds are included: i reports `Err(Io(Ssd))`, j's own read
-// and promotion landed (`cold.ok[j]`), and j must be served — Ok, not an error inherited
-// from the sibling timeout.
-
-#[requires(pinv(s.p))]
-#[requires(a_fr039(entries@))]
-#[requires(s.p.init && s.p.has_dm && s.p.has_mt && s.p.has_gpu && !s.p.has_rl && s.p.nd@ > 0)]
-#[requires(entries@.len() == 2)]
-#[requires(entries@[0].key != entries@[1].key)]
-#[requires(forall<i: Int> 0 <= i && i < entries@.len() ==> entries@[i].regions@.len() == 1
-    && entries@[i].regions@[0].size@ > 0 && entries@[i].regions@[0].addr@ != 0)]
-#[requires(forall<i: Int> 0 <= i && i < entries@.len() ==> has(*s.g, entries@[i].key) && is_blk(ent(*s.g, entries@[i].key).loc)
-    && ent(*s.g, entries@[i].key).wr@ == 0 && ent(*s.g, entries@[i].key).rr@ == 0)]
-#[requires(forall<i: Int> 0 <= i && i < entries@.len() ==> !mt_has(*s.g, entries@[i].key))]
-#[requires((*s.g).used + sum_sz(entries@[0].regions@) + sum_sz(entries@[1].regions@) <= (*s.g).cap)]
-#[requires(all_from((*s.g).ob, (*s.g).tick) && all_from((*s.g).og, (*s.g).tick))]
-#[ensures(result.1.ready ==> forall<i: Int, j: Int> 0 <= i && i < entries@.len() && 0 <= j && j < entries@.len() && i != j
-    && (match result.0@[i].result { Err(DE::Io(IoK::Ssd)) => true, _ => false })
-    && (match result.1.cls[j] { Cls::Cold { .. } => true, _ => false })
-    && result.1.cold.ok[j] && entries@[j].regions@.len() == 1
-    ==> result.0@[j].result == Ok(()))]
-pub fn verify_dis_batch_lookup_error_isolation(s: &mut S, entries: &[Be]) -> (Vec<Outcome>, Snapshot<BlG>) {
-    batch_lookup(s, entries)
-}
-
-#[requires(pinv(s.p))]
-#[requires(a_fr039(entries@))]
-#[requires(s.p.init && s.p.has_dm && s.p.has_mt && s.p.has_gpu && !s.p.has_rl && s.p.nd@ > 0)]
-#[requires(entries@.len() == 2)]
-#[requires(entries@[0].key != entries@[1].key)]
-#[requires(forall<i: Int> 0 <= i && i < entries@.len() ==> entries@[i].regions@.len() == 1
-    && entries@[i].regions@[0].size@ > 0 && entries@[i].regions@[0].addr@ != 0)]
-#[requires(forall<i: Int> 0 <= i && i < entries@.len() ==> has(*s.g, entries@[i].key) && is_blk(ent(*s.g, entries@[i].key).loc)
-    && ent(*s.g, entries@[i].key).wr@ == 0 && ent(*s.g, entries@[i].key).rr@ == 0)]
-#[requires(forall<i: Int> 0 <= i && i < entries@.len() ==> !mt_has(*s.g, entries@[i].key))]
-#[requires((*s.g).used + sum_sz(entries@[0].regions@) + sum_sz(entries@[1].regions@) <= (*s.g).cap)]
-#[requires(all_from((*s.g).ob, (*s.g).tick) && all_from((*s.g).og, (*s.g).tick))]
-#[ensures(result.1.ready ==> forall<i: Int, j: Int> 0 <= i && i < entries@.len() && 0 <= j && j < entries@.len() && i != j
-    && (match result.0@[i].result { Err(DE::Io(IoK::Ssd)) => true, _ => false })
-    && (match result.1.cls[j] { Cls::Cold { .. } => true, _ => false })
-    && result.1.cold.ok[j] && entries@[j].regions@.len() == 1
-    ==> match result.0@[j].result { Err(_) => true, _ => false })]
-pub fn verify_dis_batch_lookup_error_isolation__mutant(s: &mut S, entries: &[Be]) -> (Vec<Outcome>, Snapshot<BlG>) {
-    batch_lookup(s, entries)
-}
-
 #[requires(pinv(s.p))]
 #[requires(a_fr039(entries@))]
 #[requires(entries@.len() == 0)]

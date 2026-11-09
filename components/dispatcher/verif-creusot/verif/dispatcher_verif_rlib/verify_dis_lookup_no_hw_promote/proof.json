@@ -2,8 +2,8 @@
   "profile": [],
   "proofs": {
     "Coma": {
-      "vc_lookup_async": { "prover": "alt-ergo", "time": 0.027 },
-      "vc_verify_dis_lookup_no_hw_promote": { "prover": "z3", "time": 0.048 }
+      "vc_lookup_async": { "prover": "alt-ergo", "time": 0.025 },
+      "vc_verify_dis_lookup_no_hw_promote": { "prover": "z3", "time": 0.047 }
     }
   }
 }
