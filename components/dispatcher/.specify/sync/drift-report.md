@@ -1,9 +1,9 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-11-08T00:39:49Z
-spec_sync_git_commit: b153ea11e
-spec_sync_inputs_sha256: beba51e020232e890025f048b084a4379e35ba4805c7411c18e5ae4fca4656bc
+spec_sync_synced_at: 2026-11-09T07:24:06Z
+spec_sync_git_commit: 2024ea765
+spec_sync_inputs_sha256: e7e0a41a374271dd74596305bf249a4e55a1ac2f08f1f75dd222e1f25548ec05
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Apply 2026-11-08 (branch fix/dispatcher-j33-repairs, approved by Cornel).** Approval note on every proposal: *"Approved by Cornel 2026-11-08 (all proposals of the 2026-11-08 analysis except gpu-services P-5)."* All four proposals of the 2026-11-08 analysis are `approved: true`, so all were taken. Applied at HEAD `d45ab524d` in BATCH mode. The edited spec is backed up in `.specify/sync/backups/20261109T071309Z/` (byte-identical, checked with `diff`), along with the previous apply reports. Every old text was checked to occur exactly once before it was replaced; none failed.

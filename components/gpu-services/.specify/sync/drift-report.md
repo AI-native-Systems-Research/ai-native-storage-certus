@@ -1,9 +1,9 @@
 ---
 spec_sync_component: gpu-services
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-11-08T00:39:49Z
-spec_sync_git_commit: b153ea11e
-spec_sync_inputs_sha256: 2f3894e6af01459e77889ddde1e3295937364762b7cfe62eae259147ff4c18ea
+spec_sync_synced_at: 2026-11-09T07:24:06Z
+spec_sync_git_commit: 2024ea765
+spec_sync_inputs_sha256: afeedf75f366d328439d2b19fe766a48121cad232ee5c4632bcd9879266b6148
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
 > **Apply 2026-11-08 (branch fix/dispatcher-j33-repairs, approved by Cornel).** Applied **P-6** (001 FR-016) as BACKFILL: if `spdk_mem_unregister` fails, `unregister_host_memory` still calls `cudaHostUnregister` and then returns the SPDK error; a CUDA failure returns the CUDA error (commit `d45ab524d`, review of PR #591, `src/lib.rs:1218-1242`). The old text occurred exactly once and was replaced with the exact text from `proposals.md`; a provenance note and a 2026-11-08 `Last-Synced` line were added. Backup: `backups/20261109T070901Z/`. **Tasks:** none (no ALIGN proposals). **Open:** **P-5** (`IGpuServices` doc comments in `components/interfaces/src/igpu_services.rs`) is not approved ("Cornel 2026-11-08: not in this PR (edits components/interfaces, re-stamps every component); bundle with the next interfaces change") and is recorded as open in `align-tasks.md` with the refreshed wording. The four observations (vacuous no-GPU test pass, no test for the SPDK-failure path, unpinned region after that `Err`, unguarded `allocate_pinned_dma_buffer` → `src/dma.rs:259`) remain for a human. No `src/` or interfaces file changed; no tests run. Frontmatter not touched. **Status to stamp: `clean`.** Details in `apply-report.md`.
