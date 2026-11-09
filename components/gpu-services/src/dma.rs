@@ -111,6 +111,10 @@ pub unsafe extern "C" fn spdk_unregister_unpin_and_ipc_close(ptr: *mut std::ffi:
 /// * `was_already_pinned = true` → uses close-only free (no unpin on drop)
 /// * `was_already_pinned = false` → uses unpin + close free (undo pin on drop)
 #[cfg(all(feature = "gpu", feature = "spdk"))]
+#[expect(
+    clippy::not_unsafe_ptr_arg_deref,
+    reason = "takes a device/host address as a raw pointer; the caller guarantees it is valid for `size` bytes"
+)]
 pub fn create_spdk_dma_buffer_from_gpu(
     ptr: *mut std::ffi::c_void,
     size: usize,
@@ -186,6 +190,10 @@ pub unsafe extern "C" fn spdk_unregister_and_cuda_free(ptr: *mut std::ffi::c_voi
 /// nvidia-peermem and returns a `DmaBuffer` that will unregister and
 /// `cudaFree` on drop.
 #[cfg(all(feature = "gpu", feature = "spdk"))]
+#[expect(
+    clippy::not_unsafe_ptr_arg_deref,
+    reason = "takes a device/host address as a raw pointer; the caller guarantees it is valid for `size` bytes"
+)]
 pub fn create_spdk_dma_buffer_from_cuda_malloc(
     ptr: *mut std::ffi::c_void,
     size: usize,
@@ -250,6 +258,10 @@ pub unsafe extern "C" fn spdk_unregister_and_cuda_free_host(ptr: *mut std::ffi::
 /// physical addresses. The GPU accesses it via P2P mapping managed by the
 /// nvidia driver (nvidia-peermem).
 #[cfg(all(feature = "gpu", feature = "spdk"))]
+#[expect(
+    clippy::not_unsafe_ptr_arg_deref,
+    reason = "takes a device/host address as a raw pointer; the caller guarantees it is valid for `size` bytes"
+)]
 pub fn create_spdk_dma_buffer_from_cuda_host_alloc(
     ptr: *mut std::ffi::c_void,
     size: usize,

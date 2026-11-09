@@ -1011,6 +1011,13 @@ impl IGpuServices for GpuServicesComponent {
     }
 
     #[cfg(feature = "spdk")]
+    #[cfg_attr(
+        feature = "gpu",
+        expect(
+            clippy::not_unsafe_ptr_arg_deref,
+            reason = "IGpuServices takes device/host addresses as raw pointers; the caller guarantees each is valid for `size` bytes"
+        )
+    )]
     fn register_host_memory(&self, ptr: *mut std::ffi::c_void, size: usize) -> Result<(), String> {
         #[cfg(not(feature = "gpu"))]
         {
@@ -1065,6 +1072,13 @@ impl IGpuServices for GpuServicesComponent {
     }
 
     #[cfg(feature = "spdk")]
+    #[cfg_attr(
+        feature = "gpu",
+        expect(
+            clippy::not_unsafe_ptr_arg_deref,
+            reason = "IGpuServices takes device/host addresses as raw pointers; the caller guarantees each is valid for `size` bytes"
+        )
+    )]
     fn unregister_host_memory(
         &self,
         ptr: *mut std::ffi::c_void,
