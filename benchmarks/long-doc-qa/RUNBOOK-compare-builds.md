@@ -146,6 +146,25 @@ A faster load of wrong bytes is not a gain. Before trusting a speed-up from a ch
 the data path, check a byte-exact round trip at the deployment's layout (store stamped
 random blocks, flush or overflow the memory tier, load back, compare every byte). The
 2026-10-26 comparison did this for every build at 32 × 64 KiB pieces per block, from the
-memory tier, from SSD, and with 7,000–7,500 blocks overflowing the tier. In LongDocQA,
-query outputs differ from warmup outputs for the early documents; that is the RoPE-scaled
-model's junk output, not corruption.
+memory tier, from SSD, and with 7,000–7,500 blocks overflowing the tier.
+
+A byte round trip is not enough: it stores data the test wrote and synchronized, so it
+cannot see a store that reads vLLM's KV before vLLM has written it. **Also compare a run's
+query outputs with recompute.** LongDocQA runs at temperature 0, so the query round's
+output for a document is the same whether its KV is loaded or recomputed. The responses are
+printed to `client.stdout.log` (`Response of request N: ...`, the last 51 are the query
+round); a reference run with no `--kv-transfer-config` gives the recompute answer (`' '` for
+every document with the default shape). Any document whose query output differs is
+corruption, even when the run looks healthy.
+
+Until the fix on branch `fix/store-after-compute` (2026-11-08), every Certus build gave a
+different query output for the first 4–5 documents (`Query round successful prompt count:
+47` of 51, the failing ones returning an empty first token). This was earlier read as "the
+RoPE-scaled model's junk output"; it was not: the no-offload run and vLLM's own CPU offloader
+(`OffloadingConnector` with `cpu_bytes_to_use` holding all 51 documents) return `' '` for all
+51. The cause was that certus-server copied a store's KV from vLLM's GPU memory, out of
+process, before vLLM's compute stream had finished writing it: under async scheduling (on by
+default with `vllm serve`) the worker submits a step's stores while the GPU still runs that
+step. `--no-async-scheduling` hid it. The connector now waits for vLLM's stream before each
+transfer (`handler.py`, `_compute_stream_mark`). A run with all 51 query prompts successful
+and every output equal to recompute is the check.
