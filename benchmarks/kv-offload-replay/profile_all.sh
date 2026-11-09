@@ -1663,15 +1663,15 @@ fi
 SERVER_PID=""
 stop_server() {
     [[ -z "$SERVER_PID" ]] && return 0
-    kill -0 "$SERVER_PID" 2>/dev/null || { SERVER_PID=""; return 0; }
+    sudo kill -0 "$SERVER_PID" 2>/dev/null || { SERVER_PID=""; return 0; }
     log "stopping Certus-SPDK server (pid ${SERVER_PID})"
-    kill -TERM "$SERVER_PID" 2>/dev/null
+    sudo kill -TERM "$SERVER_PID" 2>/dev/null
     for _ in $(seq 1 8); do
-        kill -0 "$SERVER_PID" 2>/dev/null || { SERVER_PID=""; return 0; }
+        sudo kill -0 "$SERVER_PID" 2>/dev/null || { SERVER_PID=""; return 0; }
         sleep 1
     done
     warn "server ignored SIGTERM (SPDK teardown) — escalating to SIGKILL"
-    kill -9 "$SERVER_PID" 2>/dev/null
+    sudo kill -9 "$SERVER_PID" 2>/dev/null
     wait "$SERVER_PID" 2>/dev/null
     SERVER_PID=""
 }
@@ -1775,7 +1775,7 @@ if want certus-spdk; then
                 warn "Certus-SPDK server: libcuda.so.1 not found off the ldconfig path; CUDA init may fail (set LD_LIBRARY_PATH to the NVIDIA driver dir)"
             fi
         fi
-        "${numa_prefix[@]}" "$SERVER_BIN" "${dev_flags[@]}" \
+        sudo env LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}" "${numa_prefix[@]}" "$SERVER_BIN" "${dev_flags[@]}" \
             --memory-tier-size "$MEM_TIER_SIZE" \
             --memory-tier-eviction-threshold "$EVICT_THRESH" \
             --shm-path "$SHM_PATH" \
@@ -1789,8 +1789,8 @@ if want certus-spdk; then
         # server is serving and the client container can attach via --ipc=host.
         up=0
         for _ in $(seq 1 "$SERVER_WAIT"); do
-            if ! kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
-            if [[ -e "$SHM_PATH" ]]; then up=1; break; fi
+            if ! sudo kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
+            if [[ -e "$SHM_PATH" ]]; then up=1; sudo chmod a+rw "$SHM_PATH"; break; fi
             sleep 1
         done
 
