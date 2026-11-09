@@ -1,0 +1,57 @@
+# inference-perf `synthetic_agentic` workload for the KV-offload comparison.
+#
+# This is the WORKLOAD (client) side and is completely backend-agnostic: it only
+# targets an OpenAI endpoint via server.base_url. The KV backend (NoOffload /
+# CPUOffload / Tiered-CPU-FS / Certus) is chosen entirely on the vLLM SERVER via
+# --kv-transfer-config (see serve_vllm.sh) and is invisible here.
+#
+# ${BASE_URL} and ${MODEL} are placeholders rendered by the client container's
+# entrypoint (envsubst) so the SAME config drives every backend unchanged. The
+# fixed `seed` is what makes the workload deterministic + replayable: all
+# randomness derives from (seed, session_index), so every backend sees a
+# byte-identical request stream (the "generate once, replay for fair comparison"
+# property) with no materialised trace file required.
+#
+# Sizing note: num_sessions x concurrent long sessions is chosen so the aggregate
+# KV working set overflows the GPU KV budget (Llama-3-8B @ 0.90 util), forcing
+# evicted blocks to be re-fetched from the offload tier — otherwise the tier is
+# written but never read and every backend looks identical. Tune num_sessions /
+# input_tokens_per_turn / concurrent_sessions up if the tier stays cold.
+
+api:
+  type: chat
+  streaming: false
+
+data:
+  type: synthetic_agentic
+  synthetic_agentic:
+    num_sessions: ${NUM_SESSIONS}                     # rendered by the entrypoint (default 200); lower it for a quick smoke
+    seed: 42                                          # determinism / replayability across backends
+    shared_system_prompt_len: 2000                    # large shared prefix (prefix-cache + offload pressure)
+    turns_per_session:          {type: uniform, min: ${SA_TURNS_MIN}, max: ${SA_TURNS_MAX}}   # per-session turn range; profile_all maps --min-turns/--max-turns here (default 3..8)
+    theme_mix:                  {code_change_task: {weight: 1.0}}
+    tool_loop_depth:            {type: uniform, min: 0, max: 4}   # some turns answer directly, some loop deep
+    tool_catalog_size_per_agent: {type: fixed, mean: 20}
+    fanout_probability: 0.3                           # ~30% of agents delegate to sub-agents
+    sub_agents_per_spawn:       {type: uniform, min: 1, max: 3}
+    max_depth: 2
+    input_tokens_per_turn:      {type: lognormal, mean: 2000, std_dev: 800}
+    output_tokens_per_turn:     {type: fixed, mean: 150}
+    context_compaction:
+      trigger_tokens: {type: fixed, mean: 8500}       # mid-session KV reset above this (needs max-model-len > 8192)
+      target_tokens:  {type: fixed, mean: 1500}
+
+load:
+  type: trace_session_replay
+  stages:
+    - {concurrent_sessions: 16}
+
+server:
+  type: vllm
+  base_url: "${BASE_URL}"
+  model_name: "${MODEL}"
+
+# Required by the offline graph-inspection utility (generate_trace.sh); harmless
+# for a normal run.
+tokenizer:
+  pretrained_model_name_or_path: "${MODEL}"

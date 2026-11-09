@@ -1,0 +1,10 @@
+Upto and including.
+
+/cost                                                                                                                                                           
+  ⎿  Total cost:            $60.75
+     Total duration (API):  2h 27m 55s                                                                                                                            
+     Total duration (wall): 4h 17m 58s                                                                                           
+     Total code changes:    12572 lines added, 1038 lines removed                                                                                                 
+     Usage by model:                                                                                                                                              
+          claude-opus-4-6:  53.5k input, 326.6k output, 62.1m cache read, 3.1m cache write ($58.99)                                                               
+        claude-sonnet-4-6:  36.0k input, 21.9k output, 1.9m cache read, 201.7k cache write ($1.76)

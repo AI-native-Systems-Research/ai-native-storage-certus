@@ -1,0 +1,267 @@
+---
+spec_sync_component: block-device-spdk-nvme
+spec_sync_drift_status: clean
+spec_sync_synced_at: 2026-11-05T10:19:50Z
+spec_sync_git_commit: 32ffa627f
+spec_sync_inputs_sha256: 9cc34434320139634a7667e13c8fef0ea1f10959f2939f79787238a3b0c3d509
+spec_sync_hash_tool: scripts/spec-sync-hash.sh
+---
+> **Re-stamp 2026-11-05 (branch `certus-host-setup`, on unstable `bb0c9b9c`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them (its previous stamp was re-verified against `git archive origin/unstable`); its digest moves because `components/interfaces` changed (`ISPDKEnv::init_with_allowed`, added for the two-process drive race; see the spdk-env and interfaces syncs of the same date). This component does not implement `ISPDKEnv`. No analysis below changes.
+
+> **Re-stamp 2026-10-29 (branch `fix/dispatcher-remove-ssd-extent`, merged with unstable `e35618b2`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (the `IDispatcher::check` doc gains an `# Errors` section, B-17 of the dispatcher sync). No analysis below changes.
+> **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IDispatcher::clear_all`) and the rebase brought unstable's changes. No analysis below changes.
+
+> **Re-stamp 2026-10-23 (test-compile fixes, on top of `a70da5cc`).** Test-only fix: the `#[cfg(feature = "telemetry")]` unit tests in `src/telemetry.rs` (`stats_record_single_op`, `stats_record_multiple_ops`) still called `TelemetryStats::record` with two arguments after the per-direction counters added `is_read`. They now pass `true` (read). Production code and every FR are unchanged; `cargo test -p block-device-spdk-nvme --features telemetry` passes. The cited `telemetry.rs:150` (`read_write_stats`) is unchanged. Status stays `clean`.
+
+> **Re-stamp 2026-10-23 (branch `unstable`, commit `d7a24d58` "Fix workspace build warnings" plus the spec-sync follow-up).** That commit only fixed warnings under the workspace lint posture: it added `Debug` impls, narrowed unreachable `pub` items to `pub(crate)`, wrapped `unsafe fn` bodies in explicit `unsafe {}` blocks, and the follow-up ran `rustfmt`. It also touched `components/interfaces` (a `Debug` impl for `Command`), which changes every component's digest. This component's own `src/` was in that commit. Every changed item was checked: none is part of a provided interface, none is named as public by the spec, and no behaviour changed. `unsafe fn` bodies are now wrapped in explicit `unsafe {}` blocks (`unsafe_op_in_unsafe_fn`); `NvmeController::attach` and the `tsc` helpers became `pub(crate)` (no caller outside the crate). Spec citations updated: `controller.rs:156-161`→`:157-162`, `:169-177`→`:170-178`, `iblock_device.rs:589`→`:597`, `namespace.rs:20-47`→`:20-49`, and two that were already stale: `lib.rs:525`→`:535` (`read_write_stats` impl) and `lib.rs:333-334`→`:342-343` (NUMA default 0). All citations were re-verified by diff-mapping each base line to its new position. Status stays `clean`.
+
+> **Re-stamp 2026-10-21 (transitive, `components/interfaces` changed on branch `fix/dispatcher-remove-clear-mt`).** Only `components/interfaces` changed for this component: `IDispatcher` doc comments (`flush_to_ssd` errors, `clear_memory_tier`, `batch_lookup`) and the interfaces spec (FR-008, FR-009, FR-017, FR-018, FR-018a, FR-021, FR-023, Overview, NFR-002, Implementation Notes; text only, no type or signature changed). This component uses some of the named items (8 files), but no type, signature or behaviour of them changed. This component's last full sync below stands; no re-analysis was needed.
+
+> **Re-stamp 2026-10-14 (transitive: `components/interfaces` changed, branch `fix/cold-staging-buf-16mib`).** The spec-sync digest folds `components/interfaces/{src,specs}` into every component's hash, so the single interface change on this branch — `DispatcherConfig::cold_staging_buf_bytes` default 4 MiB → 16 MiB (commit `8e12e49f`) and the matching correction to interfaces FR-027 — invalidates every component's stamp at once; this is the design, not a defect. **No code re-analysis was performed for this component, and none was needed:** its own `src/**` and `specs/**` are unchanged on this branch, and it does not reference `cold_staging_buf_bytes` (consumed only by the dispatcher's host-DRAM cold-staging pool). Digest refreshed to the recomputed value.
+
+> **Re-stamp 2026-10-09 (transitive: `components/interfaces` changed, branch `fix/evict-blocked-by-pin`).** The only change to this component's hashed inputs is a doc-comment correction on `IDispatchMap::try_evict_to_block` in `components/interfaces/src/idispatch_map.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and its previous stamp was re-verified to match `origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
+
+> **Sync 2026-10-05 (branch `fix/poller-cpu-placement-logging`).** Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.
+>
+> - **FR-013 — ALIGN+BACKFILL (major).** Branch revision used `cpus().iter().nth(2)` for the fallback core, which returns None on a NUMA node with <=2 cores and left the actor UNPINNED (violates the MUST). Fixed: `.nth(2).or_else(|| first core)`. `components/block-device-spdk-nvme/src/lib.rs:229-250`. *Regression introduced by this branch, caught by this sync before stamping.* Resolution: Code fixed; FR-013 now documents set_actor_cpu precedence and the third-core / first-core fallback.
+>
+> No actionable drift remains for this component after apply.
+
+> **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
+> folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
+> change invalidates all of them at once -- which is the design, not a defect. The interface
+> change is the `served_by` attribution work: new `ServedBy` and `LookupOutcome` types, and
+> `IDispatcher::batch_lookup` widened to return `Vec<LookupOutcome>`.
+>
+> **No re-analysis was performed for this component, and the digest bump asserts only what was
+> actually checked**: the interface change is additive except for `batch_lookup`'s return type,
+> which the compiler enforces across all implementors, and this component's own `src/**` and
+> `specs/**` are unchanged. Components that implement `IDispatcher` (`dispatcher`,
+> `dispatcher-p2p`) had their specs updated substantively; this one did not need it. If a later
+> sweep finds drift here, this stamp is not evidence against it.
+
+> **Re-stamp 2026-09-15 (interfaces-fold; no drift).** Branch `fix-reserve-batch-deadline` (`bec6c6ec`) added a `deadline: Option<std::time::Instant>` parameter to `IDispatcher::reserve_memory` in `components/interfaces/src/idispatcher.rs` (shared batch backpressure deadline for the shm-queue OP_RESERVE handler). `scripts/spec-sync-hash.sh` folds the whole `components/interfaces` tree into every component's hash, so this component's digest moved even though its own spec/implementation did not change. This component does not describe or call `reserve_memory`; the interface delta cannot affect its spec↔implementation alignment. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.
+
+> **Re-stamp 2026-09-09 (merged-branch interfaces-fold; no drift).** Branch
+> `fix-dispatcher-store-backpressure` was merged into `unstable` at `3411518a`; that
+> branch adds `DispatcherConfig::store_backpressure_ms` plus two `TierEventStats`
+> counters (`store_backpressure_events`, `store_drops_on_full`) to
+> `components/interfaces/src/idispatcher.rs`. `scripts/spec-sync-hash.sh` folds
+> the whole `components/interfaces/` tree into every component's hash, so this
+> component's digest moved even though its own `src/`+`specs/` are byte-for-byte
+> unchanged and it references none of those new dispatcher symbols (verified by
+> grep across `components/` and `lib/`). The merge's conflict resolution had
+> reverted this stamp to unstable's `b220a1c8` value; the digest is recomputed
+> here at merged HEAD. Drift status remains `clean`; the report body stands
+> verbatim.
+
+# Drift Report — block-device-spdk-nvme
+
+> **Digest refreshed 2026-09-03 (spec-sync gate fix).** The earlier
+> `spec_sync_inputs_sha256` was computed in a working tree that contained an
+> untracked `components/interfaces/src/iipc.rs` — a local file not part of this
+> branch — which `scripts/spec-sync-hash.sh` folds into every component's
+> interface hash, so CI's clean checkout recomputed a different digest. The
+> stray file was removed and the digest recomputed in a clean tree. No `src/`,
+> `specs/`, or report content changed; drift status remains `clean`.
+
+**Generated**: 2026-09-03
+**Mode**: Spec↔implementation drift analysis with ALIGN + BACKFILL edits applied
+to `specs/**` only. No `src/` or `interfaces/src/` code was changed this sweep.
+Two specs:
+- `specs/001-spdk-nvme-block-device/spec.md` → `src/{lib.rs,actor.rs,qpair.rs,controller.rs,namespace.rs,command.rs,telemetry.rs,tsc.rs}` + `components/interfaces/src/iblock_device.rs`
+- `specs/002-iops-benchmark/spec.md` → `apps/iops-benchmark/src/{main.rs,config.rs,worker.rs,stats.rs,report.rs,lba.rs}` (implementation lives in `apps/`, **outside** this crate's `src/` and therefore outside the CI input hash — see note below).
+
+> **Correction of the prior artifact.** The previous report read
+> "**Generated**: pending" and claimed **3 drifted / 8 unspecced** items
+> (FR-005 "drafted", FR-010/SC-005 `max_transfer_size`, unspecced FlushSync,
+> GB/s, per-thread breakdown, batch rollback, parallel init, barrier sync). That
+> report was **stale**: it was generated against an older spec revision. The
+> 2026-08-20 (spec 002) and 2026-08-27 (spec 001) syncs had **already backfilled
+> every one of those items** into the current `spec.md` files, and the prior
+> report's own `file:line` anchors had themselves drifted. This sweep re-verifies
+> the current specs against the current code and finds the behavior fully
+> aligned; the only remaining spec-level drift was **stale embedded line anchors**
+> (fixed) plus **one unspecced interface cluster** (backfilled).
+
+> **Note on the CI input hash.** `scripts/spec-sync-hash.sh components/block-device-spdk-nvme`
+> hashes this crate's `src/**` + `specs/**` and the `components/interfaces`
+> tree. Spec 002's implementation lives in `apps/iops-benchmark/src/**`, which is
+> **not** in the hash scope, so the committed digest does not cover it; the spec
+> 002 findings below were nonetheless verified by hand against that tree.
+
+## Summary
+
+| Metric | Count |
+|---|---|
+| Specs Analyzed | 2 |
+| Requirements Checked (FR + SC) | 73 (001: FR-001..032 + SC-001..008; 002: FR-001..026 incl. 006a/006b + SC-001..007) |
+| Aligned (behavior) | 73 |
+| Drifted this sweep | 6 spec-anchor/backfill items → **all resolved via ALIGN/BACKFILL** |
+| Not Implemented | 0 |
+| Unspecced Features | 1 (backfilled this sweep) |
+| Parked (documented, hardware-discovery / cosmetic) | 3 |
+
+**Verification run this sweep** (grounds the SC claims): `cargo test -p
+block-device-spdk-nvme --no-fail-fast` — **exit 0** (SPDK prebuilt at
+`deps/spdk-build/`; tests use mocks, no hardware needed).
+
+---
+
+## Spec 001-spdk-nvme-block-device — SPDK NVMe Block Device Component
+
+**Behavior: all 32 FRs + 8 SCs verified CONFIRMED against the current code.**
+The only spec drift was stale embedded `file:line` anchors (code shifted since
+the 2026-08-27 sync) plus one unspecced interface cluster. Both resolved.
+
+### Resolved this sweep
+
+- **FR-005 (ALIGN — stale anchors).** Behavior confirmed: `Command::AbortOp`
+  marks the op `aborting`, retains the `PendingOp`+buffer, issues a real
+  `spdk_nvme_ctrlr_cmd_abort_ext` matched by `cmd_cb_arg`, defers `AbortAck`
+  until the real completion, and acks an unknown handle immediately. The spec's
+  cited anchors had drifted: abort dispatch `972-1020` → **`src/actor.rs:999-1047`**;
+  deferred ack `528-537` → **`src/actor.rs:543-576`** (the `pending.aborting`
+  branch that emits `AbortAck` on the real completion). Spec anchors corrected.
+- **FR-030 (ALIGN — stale anchors + BACKFILL — unspecced surface).** Behavior
+  confirmed: `read_write_stats()` returns per-direction byte/op/latency counters.
+  Anchors corrected: trait decl `iblock_device.rs:494` → **`:589`**; impl
+  `lib.rs:511` → **`:525`**; backing accumulation `telemetry.rs:140` → **`:150`**.
+  **Unspecced cluster backfilled:** `ReadWriteStats` also carries per-transfer-size
+  IO histograms (`read_size_buckets`/`write_size_buckets`, `IO_SIZE_BUCKETS = 25`
+  log2-spaced buckets via `size_bucket()`/`bucket_lower_bound()`) and a
+  `merge_from()` dispatcher-wide aggregation helper
+  (`components/interfaces/src/iblock_device.rs:139,155-161,177,193,218`) — none of
+  which FR-030 previously mentioned. Backfilled into FR-030.
+- **FR-031 (ALIGN — stale anchors).** Behavior confirmed: `Command::FlushSync
+  { ns_id }` validates the namespace, issues `spdk_nvme_ns_cmd_flush`, delivers
+  `Completion::FlushDone`, and surfaces a bad ns / non-zero submit rc as an error
+  rather than crashing. Anchors corrected: dispatch `941-951` →
+  **`src/actor.rs:968-978`**; `do_sync_flush` `1214-1260` → **`src/actor.rs:1249-1288`**.
+
+### Verified accurate (no edit needed)
+
+- **FR-010 / SC-005.** `max_transfer_size` MDTS-derived via
+  `spdk_nvme_ctrlr_get_max_xfer_size` (`controller.rs:171`, within the cited
+  `169-177`), 131072 fallback only when MDTS==0; `nvme_version` fixed at 1.0.0
+  (`controller.rs:157`, within cited `156-161`); `numa_id` hardcoded 0
+  (`lib.rs:333`). All cited anchors accurate. The two fixed fields
+  (`nvme_version`, `numa_id`) remain **parked** pending hardware-discovery Task
+  BD-2 (documented in spec + align-tasks.md) — not actionable drift.
+- **FR-032.** `log_dma_issue!` macro `actor.rs:50`; invocations `:825`
+  (read-async), `:945` (write-async), `:1189` (read-sync), `:1240`
+  (write-sync) — **all five exact.** `#[cfg(debug_assertions)]`-gated,
+  telemetry-independent.
+- **FR-013 / SC-007.** Actor pinned NUMA-local (`lib.rs:229-245`); controller
+  NUMA hardcoded 0 (`lib.rs:333-334`) — matches the node-0 caveat (Task BD-2).
+- **FR-015.** Qpair pool depths `[4,16,64,256]` (`qpair.rs:141`), capped by ctrlr
+  max (`:162-164`), shallowest-with-capacity (`:261-265`), fallback most-available
+  (`:274-279`), `io_queue_requests = depth*4` (`:173`).
+- **FR-021.** `IBlockDeviceAdmin::{set_pci_address,set_actor_cpu,initialize,shutdown}`
+  (`iblock_device.rs:601,607,610,625`; impl `lib.rs:352-390`).
+- **FR-022.** `TscClock` calibrated at construction (`tsc.rs:43-49,79-102`);
+  timeout throttled ~1ms (`actor.rs:1418-1422`, field `:296-297`).
+- **FR-023.** `ContextPool` slab, cap **340** (`actor.rs:344`), acquire/release
+  (`:118-139`), acquire sites `:751`/`:873`.
+- **FR-025.** ENOMEM (`-12`) retry to `min(timeout,1000)` via `clamp(1,1000)`,
+  polling all qpairs each iter (`actor.rs:35`; read `:771-808`; write `:893-928`).
+- **FR-026.** Non-blocking per-client FIFO backlog `deliver`/`flush_pending`
+  (`command.rs:35-56`); `Completion` derives `Clone` (`iblock_device.rs:438`);
+  flush-retry call site `actor.rs:441-445`.
+- **FR-029.** Round-robin via rotating `poll_start_idx` (`actor.rs:447-455`);
+  `MAX_COMMANDS_PER_CLIENT_PER_POLL = 64` (`actor.rs:433`, cap break `:463`).
+- **Assumption (dead `probe()`)** — `namespace.rs:19-47`, `#[allow(dead_code)]`,
+  off all live paths. Accurately documented.
+- **crossbeam-channel** — fully removed from production path; only stale doc
+  references remain (below threshold).
+
+All 13 `Command` variants, 12 `Completion` variants, 11 `IBlockDevice` methods,
+and 6 `IBlockDeviceAdmin` methods map to existing FRs (after the FR-030 backfill).
+
+---
+
+## Spec 002-iops-benchmark — IOPS Benchmark Example Application
+
+Implementation: `apps/iops-benchmark/src/` (outside the CI hash scope).
+
+**Behavior: all FRs + SCs verified CONFIRMED.** Two additive, previously
+unspecced reporting behaviors were backfilled this sweep.
+
+### Resolved this sweep
+
+- **FR-013 (BACKFILL).** The per-second progress line also prints instantaneous
+  throughput (MB/s) and, with >1 worker thread, a per-thread instantaneous-IOPS
+  breakdown (`report.rs:37-62`, called from `main.rs:374`) — additive to the
+  required elapsed-time + instantaneous-IOPS fields. Backfilled.
+- **FR-012 (BACKFILL).** The startup config summary also shows the active IO mode
+  (already required by FR-022) and, when `--batch-size > 1`, the batch size
+  (`report.rs:25-27`); the multi-device path emits an `[info] assigning actor
+  CPUs …` diagnostic to stderr (`main.rs:127-130`). Backfilled.
+
+### Verified accurate (no edit needed)
+
+- **FR-001..006** defaults: `--op`=read (`config.rs:68`), `--block-size`=4096
+  (`:74`), `--queue-depth`=32 (`:84`), `--threads`=1 (`:88`), `--duration`=10
+  (`:92`), `--ns-id`=1 (`:96`). **FR-006a** `--pci-addr` first-if-omitted
+  (`config.rs:100-101`; `main.rs:87-91`). **FR-006b** `--pattern`=random
+  (`config.rs:108`).
+- **FR-007** validation (`config.rs:133-152`); **FR-008** clamp+warn
+  (`config.rs:182-190`).
+- **FR-011** rw 50/50 via `rand::random::<bool>()` (`worker.rs:225`);
+  **FR-017** random/sequential non-overlapping per-thread regions
+  (`lba.rs:38-78`; `worker.rs:73-81`).
+- **FR-015** GB/s + per-thread breakdown (`stats.rs:38,83`; `report.rs:74-103,122`);
+  latency min/mean/p50/p99/max present.
+- **FR-022** `--io-mode`=async (`config.rs:112`; `worker.rs:192-217`);
+  **FR-023** comma-list block sizes, per-IO random (`config.rs:74`; `worker.rs:177-182`);
+  **FR-024** `--batch-size`=1 + send-failure rollback of in-flight entries
+  (`worker.rs:165-171`).
+- **FR-025** NUMA worker pinning (`main.rs:221-246`, affinity ~`296-302`,
+  actor CPU `483-485`); **FR-026** `--device-count`=1, parallel init via
+  `std::thread::scope` + `[timing]` lines + `=== Per-Device Summary ===`
+  (`main.rs:52-55,132-153,397-428`).
+- **SC-001** barrier start sync `Barrier::new(total_workers+1)`, `bench_start`
+  before `wait()` (`main.rs:262,328-329`; `worker.rs:106`).
+- **SC-006** stats from client-side completion timestamps; telemetry cross-check
+  intentionally unwired — iops depends on `block-device-spdk-nvme` without the
+  `telemetry` feature (`apps/iops-benchmark/Cargo.toml`). Matches backfilled text.
+
+---
+
+## Parked (documented; not actionable spec↔impl behavioral drift)
+
+1. **`nvme_version` / `numa_id` hardcoded** (spec 001, FR-010/FR-013/SC-005/SC-007).
+   Tracked as align-tasks.md **Task BD-2** (hardware discovery). Documented in the
+   spec; behavior matches the documented caveat.
+2. **iops per-device summary cosmetic format defect** — unbalanced `(` in the
+   format string at `apps/iops-benchmark/src/main.rs:423` (confirmed still
+   present this sweep). Tracked as an ALIGN task in
+   `apps/iops-benchmark/.specify/sync/align-tasks.md`. Cosmetic output only; not a
+   behavioral or spec discrepancy.
+3. **iops telemetry cross-check unwired** (spec 002, SC-006). Tracked as
+   align-tasks.md **Task BD-3**. Documented in the spec.
+
+## Below-threshold notes (no change)
+
+- **`stats.rs:127` "nearest-rank" doc comment** contradicts the interpolating
+  `percentile` implementation (`stats.rs:135-143`). This is a **code-internal
+  doc-comment** inconsistency, not spec↔impl drift — spec 002 Assumptions
+  explicitly states the percentile algorithm "is an implementation detail." Worth
+  fixing the comment when `stats.rs` is next touched.
+- Stale `crossbeam-channel` references in `CLAUDE.md` / design docs (dependency
+  already removed). Doc-only.
+
+## Stamp rationale
+
+`drift_status: clean`. All 73 FR+SC across both specs are behaviorally aligned
+with the shipped code (independently re-verified this sweep, not carried over
+from the stale prior report). The six spec-level drift items found — four stale
+embedded line anchors (FR-005, FR-030, FR-031) and two additive-reporting gaps
+plus one unspecced interface cluster (FR-013, FR-012, FR-030 histograms) — were
+all resolved in-place via ALIGN/BACKFILL edits to `specs/**`. No `src/` or
+`interfaces/src/` code was changed, so no test/clippy/doc/bench state changed
+(`cargo test -p block-device-spdk-nvme` was green before and remains applicable).
+The three parked items are documented hardware-discovery tasks (BD-2, BD-3) and
+one cosmetic format defect — none is a spec↔implementation behavioral
+contradiction. This is not a clean stamp over an unacknowledged mismatch; every
+remaining gap is documented here and in the specs.

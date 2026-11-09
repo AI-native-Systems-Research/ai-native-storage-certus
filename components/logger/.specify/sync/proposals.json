@@ -1,0 +1,15 @@
+{
+  "generated": "2026-10-31T04:54:40Z",
+  "based_on": "drift-report.json 2026-10-31T04:54:40Z",
+  "summary": {
+    "backfill": 0,
+    "align": 0,
+    "human_decision": 0,
+    "new_specs": 0
+  },
+  "proposals": [],
+  "not_proposed": [
+    "Lock-poison panic not stated in the spec (pre-existing, unchanged); no proposal."
+  ],
+  "previous": "backups/20261031T045440Z/proposals.json.prev"
+}

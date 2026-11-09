@@ -1,0 +1,41 @@
+{
+  "applied_at": "2026-06-19T00:00:00Z",
+  "changes": {
+    "specs_updated": [
+      {
+        "spec": "001-lru-eviction-policy",
+        "requirement": "FR-009",
+        "change_type": "modified",
+        "proposal": "P1",
+        "before": "Operations on an invalid PoolId MUST return EvictionPolicyError::InvalidPool",
+        "after": "Methods returning Result (track, touch, remove) MUST return EvictionPolicyError::InvalidPool when given a non-existent pool. Methods returning Option or scalar (pop_oldest, peek_oldest, len, clear_pool) MUST gracefully degrade: returning None, empty collection, 0, or no-op respectively."
+      },
+      {
+        "spec": "001-lru-eviction-policy",
+        "requirement": "FR-010",
+        "change_type": "modified",
+        "proposal": "P2",
+        "before": "remove and move_to_back on an already-removed entry MUST be idempotent (no panic, no effect)",
+        "after": "touch and remove on an already-removed handle MUST be idempotent (no panic, no effect)."
+      },
+      {
+        "spec": "001-lru-eviction-policy",
+        "requirement": "SC-001",
+        "change_type": "modified",
+        "proposal": "P4",
+        "before": "All 8 unit tests in lib.rs and 12 unit tests in lru_list.rs pass",
+        "after": "All tests in lib.rs and lru_list.rs pass (cargo test -p eviction-policy-lru)."
+      }
+    ],
+    "new_specs": [],
+    "align_tasks": [
+      {
+        "proposal": "P3",
+        "requirement": "NFR-004",
+        "description": "Add trace-level logging for create_pool and error paths",
+        "effort": "small"
+      }
+    ]
+  },
+  "backup": ".specify/sync/backups/spec.md.2026-06-19.bak"
+}

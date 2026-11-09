@@ -1,0 +1,70 @@
+id: selective-kv-retrieval
+kind: atomic
+name: Query-Aware Page Selection From Offload
+status: candidate
+parameters:
+  total_pages:
+    type: integer
+    range:
+    - 16
+    - 65536
+    default: 1024
+  selection_ratio:
+    type: number
+    range:
+    - 0.02
+    - 0.3
+    default: 0.1
+  page_size:
+    type: integer
+    range:
+    - 8
+    - 256
+    default: 16
+  num_layers:
+    type: integer
+    range:
+    - 24
+    - 128
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range:
+    - 256
+    - 16384
+    default: 4096
+keyspaces:
+  selected_pages:
+    cardinality: ceil(total_pages * selection_ratio)
+    object_bytes: page_size * num_layers * kv_bytes_per_token_per_layer
+    sharing: per_actor
+    disjoint_between_actors: true
+preconditions:
+- subject: selected_pages
+  state: present_in_store
+  value: true
+- subject: selected_pages
+  state: absent_from_local_cache
+  value: true
+phases:
+- id: selective-load
+  actors:
+    count: 1
+    arrival: burst
+    concurrency: 1
+  operations:
+  - op: load
+    keys: selected_pages
+    order: random
+    repeat: ceil(total_pages * selection_ratio)
+    batch_size: ceil(total_pages * selection_ratio)
+measure:
+- phase: selective-load
+  operation: load
+  metrics:
+  - throughput_MBps
+  - latency_p50_ms
+  - latency_p99_ms
+expected_io:
+  stores: '0'
+  loads: ceil(total_pages * selection_ratio)

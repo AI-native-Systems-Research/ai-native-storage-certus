@@ -1,0 +1,994 @@
+# SPDX-License-Identifier: Apache-2.0
+"""OffloadingManager backed by a remote certus-server over shared memory.
+
+Identical in behaviour to the gRPC connector's manager — only the transport
+changes: every ``self._stub.X(pb.Y(...))`` gRPC call becomes a ``self._ring.x``
+call over the ``/dev/shm`` mailbox (``ring.py``). The op → lifecycle mapping is
+unchanged:
+
+    lookup        -> Check (unless answered from a fresh touch or commit-group
+                     Check reply, see ``CERTUS_LOOKUP_CACHE_TTL_US``); a miss on
+                     a key with a commit-group record Checks its whole group
+    prepare_store -> Check (filter) + Reserve (best-effort: store the subset
+                     that fits, drop blocks the saturated tier can't reserve)
+    complete_store-> CommitStore (success) / AbortStore (failure)
+    prepare_load  -> Pin(promote=false)
+    complete_load -> Unpin
+    touch         -> TouchCheck
+    take_events   -> TakeEvents(max_events=0)
+"""
+
+from __future__ import annotations
+
+import atexit
+import hashlib
+import os
+import sys
+import time
+from collections import OrderedDict
+from collections.abc import Iterable
+
+from .compat import (
+    LoadStoreSpec,
+    OffloadingEvent,
+    OffloadingManager,
+    OffloadKey,
+    PrepareStoreOutput,
+    offload_event_medium,
+)
+from . import compat as _compat
+
+from .mediums import BlockLocation, CertusLoadStoreSpec, denamespace_key, ns_key
+from .ring import CHECK_MISS, CHECK_PENDING, CHECK_RESIDENT, FETCH_OK, REASON_REMOVED
+
+# Clock for the lookup cache's age limit. Monotonic (never steps back with
+# wall-clock changes), integer nanoseconds. Module-level so tests can replace it.
+_monotonic_ns = time.monotonic_ns
+
+
+def _lookup_cache_ttl_ns() -> int:
+    """Read ``CERTUS_LOOKUP_CACHE_TTL_US`` (microseconds, default 1000) and
+    return it in nanoseconds. 0 (or a negative value) disables the cache."""
+    raw = os.environ.get("CERTUS_LOOKUP_CACHE_TTL_US", "1000")
+    try:
+        ttl_us = int(raw)
+    except ValueError:
+        raise ValueError(
+            f"CERTUS_LOOKUP_CACHE_TTL_US must be an integer number of "
+            f"microseconds, got {raw!r}"
+        ) from None
+    return max(0, ttl_us) * 1000
+
+
+def _fetch_budget_ns() -> int:
+    """Read ``CERTUS_FETCH_BUDGET_MS`` (default 500): the fixed part of how long a
+    request may wait on an explicit fetch before vLLM is told to compute the
+    rest -- enough for a first contact with a peer. 0 disables fetching
+    altogether."""
+    raw = os.environ.get("CERTUS_FETCH_BUDGET_MS", "500")
+    try:
+        ms = int(raw)
+    except ValueError:
+        raise ValueError(
+            f"CERTUS_FETCH_BUDGET_MS must be an integer number of ms, got {raw!r}"
+        ) from None
+    return max(0, ms) * 1_000_000
+
+
+def _fetch_budget_per_key_ns() -> int:
+    """Read ``CERTUS_FETCH_BUDGET_US_PER_BLOCK`` (default 2500): the part of the
+    budget that grows with the run, per key of the run the request waits on
+    (a block of one rank: under TP=W a logical block is W keys, each 1/W the
+    size). Both a fetch and
+    the recompute it saves grow with the run, so a flat budget is too short for
+    a long prompt or too long for a short one. The default is about twice the
+    measured warm fetch of a 2.25 MiB block (~1.2 ms) and under the measured
+    prefill recompute of one (~3 ms on an A30)."""
+    raw = os.environ.get("CERTUS_FETCH_BUDGET_US_PER_BLOCK", "2500")
+    try:
+        us = int(raw)
+    except ValueError:
+        raise ValueError(
+            f"CERTUS_FETCH_BUDGET_US_PER_BLOCK must be an integer number of "
+            f"microseconds, got {raw!r}"
+        ) from None
+    return max(0, us) * 1000
+
+
+#: The kv_transfer_params key naming the peer to fetch from, "host:port".
+FETCH_HINT_KEY = "certus_fetch_from"
+#: Where llm-d's routing sidecar names a peer pod for a cached-prefix pull.
+LLMD_SOURCE_KEY = "remote_kv_source"
+
+_PEERS: "PeerResolver | None" = None
+
+
+def _peer_resolver():
+    global _PEERS
+    if _PEERS is None:
+        from .peers import PeerResolver
+
+        _PEERS = PeerResolver()
+    return _PEERS
+
+
+def _fetch_peer(req_context) -> str | None:
+    """The certus instance to fetch this request's miss run from, or None.
+
+    ``certus_fetch_from`` (set by a client or proxy) names it directly and wins.
+    Otherwise llm-d's sidecar may name a source pod, ``remote_kv_source``; its
+    certus is resolved from the pod's ``certus.ai/transfer-endpoint`` annotation
+    (``peers.py``)."""
+    params = getattr(req_context, "kv_transfer_params", None)
+    if not params:
+        return None
+    peer = params.get(FETCH_HINT_KEY)
+    if peer:
+        return str(peer)
+    src = params.get(LLMD_SOURCE_KEY)
+    if isinstance(src, dict) and src.get("remote_host"):
+        return _peer_resolver().resolve(str(src["remote_host"]))
+    return None
+
+
+class _Fetch:
+    """One request's explicit fetch: the run of keys it is fetching, in prefix
+    order, and where it stands.
+
+    ``collecting``: the request's scan is being answered HIT_PENDING key by key
+    from its first local miss, gathering the run; ``on_schedule_end`` sends it.
+    ``sent``: the FETCH went out; run keys answer from their state (PENDING is
+    HIT_PENDING). ``done``: the budget ran out or the fetch could not start;
+    answer as if there were no hint."""
+
+    __slots__ = ("peer", "started_ns", "budget_ns", "run", "keys", "phase", "closed")
+
+    def __init__(self, peer: str, now_ns: int, budget_ns: int):
+        self.peer = peer
+        self.started_ns = now_ns
+        # The fixed part until the FETCH is sent; then it grows by the run.
+        self.budget_ns = budget_ns
+        self.run: list[int] = []
+        self.keys: set[int] = set()
+        self.phase = "collecting"
+        # A key that is not a local miss ended the run being gathered.
+        self.closed = False
+
+
+def _key_to_u64(key: OffloadKey) -> int:
+    """Fold an OffloadKey to the u64 the server is keyed by.
+
+    Ints pass through unchanged (already a server key). A byte key is hashed
+    WHOLE (BLAKE2b, 8-byte digest) rather than truncated to its first 8 bytes:
+    a vLLM OffloadKey is a 32-byte block hash + 4-byte KV-cache-group index, so
+    the old ``key[:8]`` discarded the group index and 24 bytes of the hash,
+    aliasing distinct blocks onto one u64 (two blocks that share a hash prefix,
+    or the same block across different groups, collided). Folding the full key
+    keeps the map collision-resistant across groups and hash suffixes. The fold
+    is deterministic, so the u64 the scheduler computes here matches the one
+    carried downstream in the load/store spec and recomputed on later calls.
+    """
+    if isinstance(key, int):
+        return key
+    return int.from_bytes(hashlib.blake2b(key, digest_size=8).digest(), "big")
+
+
+def _keys_to_u64s(keys: Iterable[OffloadKey]) -> list[int]:
+    return [_key_to_u64(k) for k in keys]
+
+
+def _session_id_to_u64(req_context) -> int:
+    """Extract a session id from the request context and fold it to a u64.
+
+    vLLM exposes per-request custom params via ``req_context.kv_transfer_params``
+    (a dict populated from ``SamplingParams.extra_args["kv_transfer_params"]``).
+    A caller opts in by setting ``{"session_id": <str|int>}`` there. The server
+    and Certus are u64-keyed, so a string id is folded to u64 with a stable hash
+    (BLAKE2b, first 8 bytes big-endian). Returns 0 (== "unset") when absent, so
+    clients that don't set it stay wire-compatible.
+    """
+    kv_params = getattr(req_context, "kv_transfer_params", None)
+    if not kv_params:
+        return 0
+    sid = kv_params.get("session_id")
+    if sid is None:
+        return 0
+    if isinstance(sid, int):
+        return sid & 0xFFFFFFFFFFFFFFFF
+    digest = hashlib.blake2b(str(sid).encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, "big")
+
+
+_KEY_REVERSE_MAX = 1 << 20
+
+# Bounds of the commit-group record (see ShmqCertusOffloadingManager.__init__):
+# logical keys per group, and logical keys recorded in total.
+_COMMIT_GROUP_MAX = 64
+_COMMIT_GROUP_KEYS_MAX = 1 << 18
+
+
+class _LookupCheckLog:
+    """Diagnostic log of the Checks lookup() sends, one JSON line per Check, in
+    ``$OPTIMIZER_ARTIFACTS_DIR/lookup_checks.<pid>.jsonl``. Exists only when
+    that variable is set. Lines are buffered and written every 64 lines and at
+    interpreter exit; a write error disables the log, it never raises."""
+
+    _FLUSH_LINES = 64
+
+    def __init__(self, directory: str):
+        self._path: str | None = os.path.join(
+            directory, f"lookup_checks.{os.getpid()}.jsonl"
+        )
+        self._lines: list[str] = []
+        self._t0_ns: int | None = None
+        # Lookups answered from the maps since the previous Check line.
+        self.hits = 0
+        atexit.register(self.flush)
+
+    def record(self, keys: int, group: bool, dur_ns: int) -> None:
+        if self._path is None:
+            return
+        now_ns = time.monotonic_ns()
+        if self._t0_ns is None:
+            self._t0_ns = now_ns
+        self._lines.append(
+            f'{{"t_us":{(now_ns - self._t0_ns) // 1000},"keys":{keys},'
+            f'"group":{"true" if group else "false"},'
+            f'"hits_before":{self.hits},"dur_us":{dur_ns / 1000:.1f}}}\n'
+        )
+        self.hits = 0
+        if len(self._lines) >= self._FLUSH_LINES:
+            self.flush()
+
+    def flush(self) -> None:
+        if self._path is None or not self._lines:
+            return
+        lines, self._lines = self._lines, []
+        try:
+            with open(self._path, "a") as f:
+                f.write("".join(lines))
+        except OSError:
+            self._path = None
+
+
+class ShmqCertusOffloadingManager(OffloadingManager):
+    """Manager delegating to a remote certus-server via a shared-memory ring."""
+
+    def __init__(
+        self,
+        ring,
+        block_size_bytes: int,
+        world_size: int = 1,
+        events_enabled: bool = False,
+    ):
+        self._ring = ring
+        # take_events() is drained by vLLM's core scheduler every step whether or
+        # not KV events are enabled, so only yield events when they are.
+        self._events_enabled = bool(events_enabled)
+        # Store events, emitted by complete_store and drained by take_events.
+        self._pending_events: list = []
+        # bounded reverse map: folded u64 -> original OffloadKey, so REMOVED
+        # events can carry real keys (the fold is not reversible).
+        self._key_reverse: OrderedDict[int, bytes] = OrderedDict()
+        self._block_size_bytes = int(block_size_bytes)
+        # Number of TP shards. Under TP>1 each logical vLLM block is physically W
+        # separate per-rank entries in the shared server (one head-shard each,
+        # under keys namespaced by rank — see mediums.ns_key). This scheduler-side
+        # manager mirrors what the W workers store: every server op expands a
+        # logical key K into {ns_key(K, r) : r in range(W)}, and residency is
+        # AND-across-ranks (a block is loadable only if EVERY shard is present).
+        # W==1 → ns_key is identity and each expansion is [K] → exact baseline.
+        self._world_size = max(1, int(world_size))
+        # Cumulative count of blocks we could not offload because the server's
+        # memory tier was saturated (Reserve failed). Logged in throttled
+        # summaries rather than per-request, so a persistently-full tier does
+        # not produce a warning storm.
+        self._store_dropped_blocks = 0
+        self._store_drop_log_next = 1000
+        # Short-lived lookup cache, filled by touch() and read by lookup().
+        #
+        # Call order in vLLM's offloading scheduler
+        # (offloading/scheduler.py::get_num_new_matched_tokens): since vLLM 0.21
+        # (upstream PR #41228) it runs the prefix lookup FIRST — one lookup()
+        # per key, stopping at the first miss (_maximal_prefix_lookup) — and
+        # calls touch() for the request's keys AFTER it. Only vLLM <= 0.20
+        # touched first. After upstream PR #51787 (post-0.30) the scheduler no
+        # longer calls touch() at all, so this map stays empty and every lookup
+        # is a Check. So a request's own lookups never read its own touch: what
+        # touch() fills is read by the lookups of the NEXT request(s) the
+        # scheduler handles. That still saves Check round trips when requests
+        # scheduled one after another share a prefix (same system prompt,
+        # multi-turn history): the shared blocks' residency came back in the
+        # previous request's TouchCheck reply.
+        #
+        # touch() is also called from _build_store_jobs, after prepare_store, so
+        # the maps can be filled at the end of one scheduling pass and read by
+        # the first lookups of the next.
+        #
+        # Why the age limit: the next lookup can come much later — in the next
+        # scheduler step, after a store or an eviction — and a stale positive
+        # makes vLLM schedule a load whose Pin then fails. The connector cannot
+        # fail a load safely (a failed load stops vLLM), so an entry is used only
+        # while it is at most CERTUS_LOOKUP_CACHE_TTL_US old, measured from just
+        # before the TouchCheck that produced it. The default, 1000 us, covers
+        # requests handled back to back in one scheduling pass; a synchronous
+        # scheduler step (which waits for a model forward pass) normally lasts
+        # longer, so answers are not carried into the next step (the benchmark's
+        # scheduler-step mode measures this). That is not guaranteed — with
+        # async scheduling the next pass can start right away — so the TTL is
+        # the bound, not the step: an answer is at most TTL older than a fresh
+        # Check would be, on top of the Check -> Pin gap that exists anyway.
+        # A second fill source is the commit-group record below: a lookup that
+        # misses the maps, for a key committed together with others, Checks its
+        # whole commit group in one round trip and keeps every answer. Those
+        # answers obey the same rules as touch answers — the TTL counts from
+        # just before that Check, only RESIDENT counts, AND across TP ranks, and
+        # the drop rules below and touch-after-lookup apply unchanged.
+        #
+        # Evictions this connector can know about drop the maps at once:
+        # prepare_store (its Reserve may evict to make room) and a REMOVED event
+        # from take_events. Older entries, and keys not in the map, fall back to
+        # the authoritative per-key Check — the cache only ever saves round
+        # trips, it never changes an answer's meaning (resident only, AND across
+        # TP ranks). TTL 0 disables the cache: touch() still sends its
+        # TouchCheck but fills nothing. Do not raise the TTL far beyond a
+        # scheduling pass: a long TTL brings back the stale-positive hazard.
+        #
+        # ``_lookup_cache_filled_at_ns`` is the time of the OLDEST fill still in
+        # the maps (a touch restarts it only when the maps are empty or it
+        # clears them), so checking it never under-ages an entry. A touch()
+        # clears the maps when it follows a lookup() (the previous request's
+        # answers are replaced by this one's) or finds them already expired;
+        # this also keeps them bounded. ``_raw_lookup_cache`` holds the same
+        # answers keyed by the caller's original OffloadKey, so a cached key's
+        # lookup() skips the fold; it shares the u64 map's age and clear rules.
+        self._lookup_cache: dict[int, bool] = {}
+        self._raw_lookup_cache: dict = {}
+        self._last_op_was_lookup = False
+        self._lookup_cache_ttl_ns = _lookup_cache_ttl_ns()
+        self._lookup_cache_filled_at_ns = 0
+        # Commit-group record: logical u64 key -> the (orig_key, u64) pairs
+        # committed with it by one complete_store (de-duplicated by u64, in
+        # commit order, at most _COMMIT_GROUP_MAX per group; one tuple shared by
+        # every key of its group). It is only a hint for which keys one lookup
+        # Check asks about — it never answers a lookup and never changes one,
+        # holds no pin or reservation, and a key without a record (or after a
+        # restart) is a single-key Check. Bounded at _COMMIT_GROUP_KEYS_MAX
+        # keys, oldest dropped first.
+        self._commit_groups: OrderedDict[int, tuple] = OrderedDict()
+        # Diagnostic Check log, only when OPTIMIZER_ARTIFACTS_DIR is set.
+        artifacts_dir = os.environ.get("OPTIMIZER_ARTIFACTS_DIR")
+        self._check_log = _LookupCheckLog(artifacts_dir) if artifacts_dir else None
+        # Explicit fetches, by request id (see contracts/shmq-fetch.md). vLLM's
+        # prefix scan continues past HIT_PENDING and stops at MISS, so answering
+        # HIT_PENDING from a hinted request's first local miss shows the manager
+        # the rest of the run in the same scan; on_schedule_end, called once per
+        # scheduler step after scheduling, sends one FETCH for it.
+        self._fetch_budget_ns = _fetch_budget_ns()
+        self._fetch_budget_per_key_ns = _fetch_budget_per_key_ns()
+        self._fetches: dict[str, _Fetch] = {}
+        # Counters (fetch_stats()): fetches sent, runs refused by the server,
+        # HIT_PENDING answers, budgets spent, run keys answered HIT afterwards.
+        self.fetch_counts = {
+            "sent": 0,
+            "refused": 0,
+            "pending_answers": 0,
+            "budget_spent": 0,
+            "hits_after_fetch": 0,
+        }
+
+    def set_block_size_bytes(self, block_size_bytes: int) -> None:
+        """Update the per-block Reserve size once the true KV-cache tensor
+        stride is known (the manager is constructed before get_handlers can
+        resolve it). Reserve sizes are per-call, so changing this affects only
+        subsequent stores."""
+        self._block_size_bytes = int(block_size_bytes)
+
+    # ── per-rank key expansion (TP>1) ──
+
+    def _ns_all(self, logical_key: int) -> list[int]:
+        """The W physical per-rank server keys for one logical block. At W==1
+        this is ``[logical_key]`` (ns_key is identity) → exact baseline."""
+        return [ns_key(logical_key, r, self._world_size) for r in range(self._world_size)]
+
+    def _check_all_present(
+        self, logical_keys: list[int], *, resident_only: bool = False
+    ) -> dict[int, bool]:
+        """Batched Check over every per-rank key. A logical block is present iff
+        ALL W of its shards are present — a load needs every shard, so partial
+        residency (some ranks evicted) must read as a MISS. One batched Check
+        RPC covers the whole expanded list; flags return in expansion order.
+
+        ``resident_only`` selects which tri-state counts as "present":
+
+        - ``False`` (store dedup): a shard counts as present when RESIDENT *or*
+          PENDING. A PENDING shard is a store another rank/session already has in
+          flight, so we must not re-store it — dedup wants pending-counts-present.
+        - ``True`` (load decision): only RESIDENT counts; a PENDING shard reads as
+          absent. This is mandatory for the paths that feed vLLM's matched-token /
+          cache-hit decision (``lookup``/``touch``): a PENDING key is reserved but
+          has no dispatch-map entry yet, so if vLLM counts it as a hit it issues a
+          load that finds NotExist and fatally fails the transfer. Treating it as a
+          miss makes vLLM recompute the (not-yet-loadable) block instead — correct
+          and cheap, since it only affects blocks momentarily in flight."""
+        w = self._world_size
+        if not logical_keys:
+            return {}
+        expanded = [nk for k in logical_keys for nk in self._ns_all(k)]
+        states = self._ring.check_states(expanded)
+        if resident_only:
+            flags = [s == CHECK_RESIDENT for s in states]
+        else:
+            flags = [s != CHECK_MISS for s in states]
+        out: dict[int, bool] = {}
+        for i, k in enumerate(logical_keys):
+            chunk = flags[i * w:(i + 1) * w]
+            out[k] = len(chunk) == w and all(chunk)
+        return out
+
+    # ── request lifecycle ──
+
+    def on_new_request(self, req_context=None):
+        """Called once when the scheduler first sees a request (vLLM 0.24+).
+
+        Returns the default ``RequestOffloadingContext`` (BLOCK_LEVEL policy:
+        offload newly-computed blocks, skip prefix hits already offloaded by a
+        prior request) — matching the Check filter in ``prepare_store``. This
+        method is a no-op contract on <0.24 (the base neither declares nor calls
+        it); the return type is built lazily through compat because it does not
+        exist before 0.24.
+        """
+        from .compat import new_request_offloading_context
+
+        return new_request_offloading_context()
+
+    # ── lookup / touch ──
+
+    def lookup(self, key: OffloadKey, req_context=None):
+        # Returns ``bool`` on ≤0.24 and a ``LookupResult`` enum (HIT/MISS) on
+        # 0.26+, which rewrote ``lookup``'s return type. The shim absorbs the
+        # difference so this body stays a single Check call. The shim is bound
+        # at module level and resolved per call (``_compat.lookup_result``), so
+        # a patched or reloaded compat still applies.
+        self._last_op_was_lookup = True
+        if self._fetch_budget_ns and _compat.CAPS.lookup_returns_enum:
+            peer = _fetch_peer(req_context)
+            if peer is not None:
+                answer = self._fetch_lookup(_key_to_u64(key), peer, req_context)
+                if answer is not None:
+                    return answer
+        # The maps are used only while the TouchCheck that filled them is at
+        # most the TTL old (see __init__); TTL 0 never uses them.
+        fresh = bool(self._lookup_cache_ttl_ns) and (
+            _monotonic_ns() - self._lookup_cache_filled_at_ns
+            <= self._lookup_cache_ttl_ns
+        )
+        cached = None
+        if fresh:
+            # Fastest path: a key a recent touch() saw is answered from the
+            # raw-key map without folding. Unhashable keys (bytearray) fall
+            # through.
+            try:
+                cached = self._raw_lookup_cache.get(key)
+            except TypeError:
+                pass
+        if cached is None:
+            int_key = _key_to_u64(key)
+            # Fast path: answer from the map a recent touch() filled. A miss
+            # (key not in it, e.g. the first request with this prefix) or an
+            # expired map falls back to the authoritative single-key Check —
+            # correctness is never traded for the batch, only latency.
+            if fresh:
+                cached = self._lookup_cache.get(int_key)
+            if cached is None:
+                return _compat.lookup_result(self._lookup_check(key, int_key))
+        if self._check_log is not None:
+            self._check_log.hits += 1
+        return _compat.lookup_result(cached)
+
+    def _lookup_check(self, key: OffloadKey, int_key: int) -> bool:
+        """Answer a lookup the maps could not with a server Check. A key with a
+        commit-group record (and the cache enabled) Checks its whole group in
+        one RPC and keeps every answer in the maps; any other key is a single-key
+        Check whose answer is not kept."""
+        ttl_ns = self._lookup_cache_ttl_ns
+        group = self._commit_groups.get(int_key) if ttl_ns else None
+        log = self._check_log
+        if group is None or len(group) < 2:
+            # AND across all W shards — a load needs every rank's shard present.
+            if log is None:
+                return self._check_all_present(
+                    [int_key], resident_only=True
+                ).get(int_key, False)
+            t0_ns = time.perf_counter_ns()
+            hit = self._check_all_present([int_key], resident_only=True).get(
+                int_key, False
+            )
+            log.record(1, False, time.perf_counter_ns() - t0_ns)
+            return hit
+        # The fill time is taken BEFORE the Check, so no answer is under-aged.
+        # Expired (or empty) maps are dropped and restart the fill time; fresh
+        # ones keep their older fill time (same rule as touch()).
+        now_ns = _monotonic_ns()
+        if (
+            not self._lookup_cache
+            or now_ns - self._lookup_cache_filled_at_ns > ttl_ns
+        ):
+            self._drop_lookup_cache()
+            self._lookup_cache_filled_at_ns = now_ns
+        # The looked-up key first and exactly once: the server rejects a Check
+        # with a duplicate key, and the group is de-duplicated when recorded.
+        u64s = [int_key]
+        u64s.extend(k for _, k in group if k != int_key)
+        if log is None:
+            answers = self._check_all_present(u64s, resident_only=True)
+        else:
+            t0_ns = time.perf_counter_ns()
+            answers = self._check_all_present(u64s, resident_only=True)
+            log.record(len(u64s), True, time.perf_counter_ns() - t0_ns)
+        self._lookup_cache.update(answers)
+        # Raw-key entries copy the final u64-map value, as touch() does.
+        cache = self._lookup_cache
+        try:
+            self._raw_lookup_cache.update(
+                (orig, cache[k]) for orig, k in group
+            )
+        except TypeError:  # unhashable recorded key (e.g. bytearray): fold path
+            self._raw_lookup_cache.clear()
+        hit = cache.get(int_key, False)
+        try:
+            self._raw_lookup_cache[key] = hit
+        except TypeError:  # an unhashable key cannot have a raw entry
+            pass
+        return hit
+
+    # ── explicit fetch ──
+
+    def _state_of(self, logical_key: int) -> int:
+        """One logical block's state across its W shards: RESIDENT if every
+        shard is, PENDING if any is (and none missing), MISS otherwise."""
+        states = self._ring.check_states(self._ns_all(logical_key))
+        if states and all(s == CHECK_RESIDENT for s in states):
+            return CHECK_RESIDENT
+        if states and all(s != CHECK_MISS for s in states):
+            return CHECK_PENDING
+        return CHECK_MISS
+
+    def _fetch_lookup(self, k: int, peer: str, req_context):
+        """Lookup for a request that names a peer. Returns the answer, or None
+        to answer as if there were no hint."""
+        req_id = getattr(req_context, "req_id", None)
+        if req_id is None:
+            return None
+        now = _monotonic_ns()
+        f = self._fetches.get(req_id)
+        if f is None:
+            f = self._fetches[req_id] = _Fetch(peer, now, self._fetch_budget_ns)
+        if f.phase != "done" and now - f.started_ns > f.budget_ns:
+            # The wait is over: vLLM computes what has not landed. The fetch
+            # itself carries on and lands in the cache for later requests.
+            f.phase = "done"
+            self.fetch_counts["budget_spent"] += 1
+        if f.phase == "done":
+            return None
+        state = self._state_of(k)
+        if f.phase == "sent":
+            if k not in f.keys:
+                # Not part of the run: the run ended before it.
+                return _compat.lookup_result(state == CHECK_RESIDENT)
+            if state == CHECK_PENDING:
+                self.fetch_counts["pending_answers"] += 1
+                return _compat.lookup_result_pending()
+            if state == CHECK_RESIDENT:
+                self.fetch_counts["hits_after_fetch"] += 1
+            return _compat.lookup_result(state == CHECK_RESIDENT)
+        # collecting
+        if state == CHECK_MISS and not f.closed:
+            if k not in f.keys:
+                f.run.append(k)
+                f.keys.add(k)
+            self.fetch_counts["pending_answers"] += 1
+            return _compat.lookup_result_pending()
+        if f.run:
+            f.closed = True  # a key already here, or pending, ends the run
+        if state == CHECK_PENDING:
+            # Someone else's store in flight: not loadable yet (see
+            # _check_all_present).
+            return _compat.lookup_result(False)
+        return _compat.lookup_result(state == CHECK_RESIDENT)
+
+    def _send_fetches(self) -> None:
+        """Send one FETCH per request whose run was gathered this step."""
+        for req_id, f in list(self._fetches.items()):
+            if f.phase != "collecting" or not f.run:
+                continue
+            entries = [
+                (nk, self._block_size_bytes) for k in f.run for nk in self._ns_all(k)
+            ]
+            status, started = self._ring.fetch(f.peer, entries)
+            if status != FETCH_OK:
+                # No endpoint, a bad peer, too many keys: never retried for this
+                # request, which then behaves as if it named no peer.
+                f.phase = "done"
+                self.fetch_counts["refused"] += 1
+                print(
+                    f"[certus-shmq] fetch for {req_id} from {f.peer} refused "
+                    f"(status {status}); computing instead",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                continue
+            # A logical block is in the run only if all W of its shards started;
+            # the run ends at the first that is not.
+            w = self._world_size
+            run = []
+            for i, k in enumerate(f.run):
+                if not all(started[i * w:(i + 1) * w]):
+                    break
+                run.append(k)
+            f.run = run
+            f.keys = set(run)
+            f.budget_ns += self._fetch_budget_per_key_ns * len(run) * w
+            f.phase = "sent"
+            self.fetch_counts["sent"] += 1
+
+    def on_schedule_end(self, context=None) -> None:
+        """Once per scheduler step, after scheduling: send the runs gathered."""
+        self._send_fetches()
+
+    def on_request_finished(self, req_context=None) -> None:
+        req_id = getattr(req_context, "req_id", None)
+        if req_id is not None:
+            self._fetches.pop(req_id, None)
+
+    def fetch_stats(self) -> dict[str, int]:
+        return dict(self.fetch_counts, live=len(self._fetches))
+
+    def _drop_lookup_cache(self) -> None:
+        """Forget every kept lookup answer (both maps)."""
+        self._lookup_cache.clear()
+        self._raw_lookup_cache.clear()
+
+    def touch(self, keys: Iterable[OffloadKey], req_context=None) -> None:
+        # A touch that follows a lookup replaces the previous request's answers
+        # with this one's; a touch that finds the maps expired drops them. In
+        # both cases, and when the maps are empty, the fill time restarts now.
+        # Otherwise (several touches in a row, e.g. one per KV group of one
+        # request) the maps keep their OLDEST fill time, so no entry is ever
+        # treated as younger than it is.
+        ttl_ns = self._lookup_cache_ttl_ns
+        now_ns = _monotonic_ns() if ttl_ns else 0
+        if (
+            self._last_op_was_lookup
+            or now_ns - self._lookup_cache_filled_at_ns > ttl_ns
+        ):
+            self._drop_lookup_cache()
+            self._last_op_was_lookup = False
+        if not self._lookup_cache:
+            self._lookup_cache_filled_at_ns = now_ns
+        keys = list(keys)
+        int_keys = _keys_to_u64s(keys)
+        if not int_keys:
+            return
+        if not ttl_ns:
+            # Cache disabled: the TouchCheck still advances every shard's LRU
+            # position; its residency reply is not kept.
+            if self._world_size == 1:
+                self._ring.touch_states(int_keys, promote=False)
+            else:
+                self._ring.touch_states(
+                    [nk for k in int_keys for nk in self._ns_all(k)], promote=False
+                )
+            return
+        # Residency comes from the touch reply itself (fused TouchCheck) and is
+        # kept for the lookups of the requests the scheduler handles next (see
+        # __init__). resident_only semantics: only RESIDENT counts, a PENDING
+        # shard reads as a miss (see _check_all_present). AND-across-ranks per
+        # logical key (a block is a hit only if all shards are present); states
+        # return in expansion order.
+        if self._world_size == 1:
+            # W==1: ns_key is identity, so skip the expansion and fill the map
+            # in one bulk update (same items, same order, resident_only). The
+            # raw-key map is filled after the branch, on every fill path.
+            states = self._ring.touch_states(int_keys, promote=False)
+            if len(states) == len(int_keys):
+                self._lookup_cache.update(zip(int_keys, map(CHECK_RESIDENT.__eq__, states)))
+            else:
+                # Short reply (test fakes only): a key with no state reads as a miss.
+                flags = [s == CHECK_RESIDENT for s in states]
+                for i, k in enumerate(int_keys):
+                    self._lookup_cache[k] = i < len(flags) and flags[i]
+        else:
+            # Touch every per-rank key so all W shards' LRU positions advance.
+            expanded = [nk for k in int_keys for nk in self._ns_all(k)]
+            states = self._ring.touch_states(expanded, promote=False)
+            flags = [s == CHECK_RESIDENT for s in states]
+            w = self._world_size
+            for i, k in enumerate(int_keys):
+                chunk = flags[i * w:(i + 1) * w]
+                self._lookup_cache[k] = len(chunk) == w and all(chunk)
+        # Raw-key entries copy the FINAL u64-map value for each key, so a raw hit
+        # returns exactly what the fold path would have returned.
+        try:
+            self._raw_lookup_cache.update(
+                zip(keys, map(self._lookup_cache.__getitem__, int_keys))
+            )
+        except TypeError:  # unhashable caller key (e.g. bytearray): fold path
+            # update() stops at the unhashable key, which could leave an earlier
+            # touch()'s raw entry for a later key stale; drop the whole map so
+            # every lookup takes the fold path until the maps are next cleared.
+            self._raw_lookup_cache.clear()
+
+    # ── store ──
+
+    def prepare_store(
+        self, keys: Iterable[OffloadKey], req_context=None
+    ) -> PrepareStoreOutput | None:
+        keys_list = list(keys)
+        int_keys = _keys_to_u64s(keys_list)
+        session_id = _session_id_to_u64(req_context)
+        # The Reserve below may make the server evict other blocks, which kept
+        # lookup answers could still report as resident: drop them all.
+        self._drop_lookup_cache()
+
+        # Filter out keys already cached (consecutive dedup is vLLM's concern;
+        # here we just avoid re-storing existing entries). "Already cached" means
+        # ALL W shards present; a partially-resident block (some ranks evicted)
+        # is re-stored so every shard is repopulated together.
+        exists = self._check_all_present(int_keys)
+        to_store_pairs = [
+            (orig, k) for orig, k in zip(keys_list, int_keys) if not exists.get(k, False)
+        ]
+
+        if not to_store_pairs:
+            return PrepareStoreOutput(
+                keys_to_store=[],
+                store_spec=CertusLoadStoreSpec([]),
+                evicted_keys=[],
+            )
+
+        to_store_ints = [k for _, k in to_store_pairs]
+
+        # Reserve DRAM slots (server evicts LRU internally to make room). A
+        # per-key failure means the server could not free enough space for that
+        # block — the memory tier is saturated (e.g. capped at its max size with
+        # a working set larger than it, or the evictable set is small because
+        # entries are pinned by in-flight loads or not yet written through to
+        # SSD). Reserve is per-key independent, so we treat this as best-effort:
+        # keep the keys that reserved and drop the rest, rather than rejecting
+        # the whole request. A whole-request reject (return None) does NOT
+        # advance vLLM's stored-block index, so the same blocks are retried
+        # every scheduler step, each logging "cannot store blocks" — a warning
+        # storm under sustained pressure. Storing the subset that fits advances
+        # the index and offloads what it can.
+        # Reserve ALL W per-rank shards of each block. A logical block is storable
+        # only if EVERY shard reserves (else a load — which needs all W — could
+        # never succeed): all-or-nothing per block. One batched Reserve covers the
+        # expanded list; flags return in expansion order.
+        w = self._world_size
+        reserve_reqs = [
+            (nk, self._block_size_bytes, session_id)
+            for k in to_store_ints
+            for nk in self._ns_all(k)
+        ]
+        reserved_flags = self._ring.reserve(reserve_reqs)
+        reserved_ok: set[int] = set()
+        orphan_aborts: list[int] = []  # partial reserves to roll back
+        for i, k in enumerate(to_store_ints):
+            chunk = reserved_flags[i * w:(i + 1) * w]
+            if len(chunk) == w and all(chunk):
+                reserved_ok.add(k)
+            else:
+                # Some shards reserved, some didn't: abort the ones that DID so a
+                # half-reserved block can't leak or later publish as a false hit.
+                for r, ok in enumerate(chunk):
+                    if ok:
+                        orphan_aborts.append(ns_key(k, r, w))
+        if orphan_aborts:
+            try:
+                self._ring.abort_store(orphan_aborts)
+            except Exception:  # noqa: BLE001 - best-effort rollback
+                pass
+
+        # Keep reserved keys in the original offload order (the scheduler
+        # positionally zips src GPU block ids with dst keys, deriving src order
+        # from offload_keys filtered by keys_to_store — so store_spec must stay
+        # in offload order for a partial subset to line up).
+        stored_pairs = [
+            (orig, k) for orig, k in to_store_pairs if k in reserved_ok
+        ]
+        dropped = len(to_store_pairs) - len(stored_pairs)
+        if dropped:
+            self._note_store_drops(dropped)
+
+        if not stored_pairs:
+            # Nothing fit. Return an empty (non-None) result so vLLM advances
+            # past these tokens quietly instead of retrying + warning every step.
+            return PrepareStoreOutput(
+                keys_to_store=[],
+                store_spec=CertusLoadStoreSpec([]),
+                evicted_keys=[],
+            )
+
+        stored_orig = [orig for orig, _ in stored_pairs]
+        stored_ints = [k for _, k in stored_pairs]
+        for orig, k in stored_pairs:
+            if isinstance(orig, (bytes, bytearray)):
+                self._key_reverse[k] = bytes(orig)
+                self._key_reverse.move_to_end(k)
+        while len(self._key_reverse) > _KEY_REVERSE_MAX:
+            self._key_reverse.popitem(last=False)
+        locations = [BlockLocation(key=k) for k in stored_ints]
+        return PrepareStoreOutput(
+            keys_to_store=stored_orig,
+            store_spec=CertusLoadStoreSpec(locations),
+            # Evictions are surfaced asynchronously via take_events()/TakeEvents.
+            evicted_keys=[],
+        )
+
+    def _note_store_drops(self, dropped: int) -> None:
+        """Account for blocks skipped due to a saturated memory tier and emit a
+        throttled summary (never per-request, to avoid a warning storm)."""
+        self._store_dropped_blocks += dropped
+        if self._store_dropped_blocks >= self._store_drop_log_next:
+            print(
+                f"[certus-shmq] memory tier saturated: skipped offloading "
+                f"{self._store_dropped_blocks} blocks so far (best-effort store; "
+                f"blocks stay in GPU). Consider a larger --memory-tier-size or "
+                f"lower concurrency.",
+                file=sys.stderr,
+                flush=True,
+            )
+            # Back off the log cadence so a persistently-full tier stays quiet.
+            self._store_drop_log_next = self._store_dropped_blocks * 2
+
+    def complete_store(
+        self, keys: Iterable[OffloadKey], req_context=None, success: bool = True
+    ) -> None:
+        keys = list(keys)  # read more than once: the commit, its group, the store event
+        int_keys = _keys_to_u64s(keys)
+        if not int_keys:
+            return
+        # Commit/abort every per-rank shard the W workers stored under this key.
+        expanded = [nk for k in int_keys for nk in self._ns_all(k)]
+        if success:
+            self._ring.commit_store(expanded)
+            self._record_commit_group(keys, int_keys)
+            if self._events_enabled:
+                # Tell vLLM's events tracker these blocks are now in certus; it
+                # publishes them as BlockStored (with the token ids it took at
+                # store time, when self_describing_kv_events is on), so a router
+                # indexing KV events learns this pod's certus holds them -- the
+                # decode pod that generated an answer, for one
+                # (peer-selection.md, milestone 3). One event per call, logical
+                # keys, as vLLM's own keys: each W-shard commit is one store.
+                self._pending_events.append(
+                    OffloadingEvent(
+                        keys=keys, medium=offload_event_medium(), removed=False
+                    )
+                )
+        else:
+            self._ring.abort_store(expanded)
+            for k in int_keys:
+                self._commit_groups.pop(k, None)
+
+    def _record_commit_group(self, keys: list, int_keys: list[int]) -> None:
+        """Record the keys of one successful commit as commit groups (see
+        __init__): de-duplicated by u64, split into consecutive chunks of at most
+        _COMMIT_GROUP_MAX, each chunk's tuple shared by its keys. A chunk of one
+        key records nothing."""
+        seen: set[int] = set()
+        pairs = []
+        for orig, k in zip(keys, int_keys):
+            if k not in seen:
+                seen.add(k)
+                pairs.append((orig, k))
+        groups = self._commit_groups
+        for i in range(0, len(pairs), _COMMIT_GROUP_MAX):
+            chunk = tuple(pairs[i:i + _COMMIT_GROUP_MAX])
+            if len(chunk) < 2:
+                continue
+            for _, k in chunk:
+                groups[k] = chunk
+                groups.move_to_end(k)
+        while len(groups) > _COMMIT_GROUP_KEYS_MAX:
+            groups.popitem(last=False)
+
+    # ── load ──
+
+    def prepare_load(self, keys: Iterable[OffloadKey], req_context=None) -> LoadStoreSpec:
+        int_keys = _keys_to_u64s(keys)
+        # Pin every per-rank shard: each of the W workers loads its own shard, so
+        # all W must be eviction-protected for the duration of the load. The
+        # returned spec carries LOGICAL keys — each worker folds in its own rank.
+        pin_keys = [nk for k in int_keys for nk in self._ns_all(k)]
+        # Pin (promote=FALSE) only takes the eviction-protecting read-ref. We must
+        # NOT ask Pin to promote, because the Lookup that immediately follows (in
+        # the load handler) already promotes cold (BlockDevice) entries itself.
+        # Two promotes race on the same key — both do mt.insert() — and the loser
+        # hits MemoryTierError::AlreadyExists, surfaced as ALLOCATION_FAILED,
+        # which fails the load and crashes vLLM (worker asserts transfer success).
+        # Lookup is self-sufficient: it serves MemoryTier hits directly and
+        # promotes BlockDevice misses in one path.
+        #
+        # This comment used to give "Pin's promote is async/fire-and-forget" as
+        # the reason, and that is NOT true of the server we talk to, whatever
+        # IDispatcher's "fire-and-forget" wording suggests. translate.rs::op_pin
+        # calls promote_to_memory_tier INLINE, and that function joins its
+        # per-drive threads (std::thread::scope) before returning, so the SSD
+        # reads complete before the Pin reply is written. promote=True would
+        # therefore not merely race with Lookup — it would also hold this
+        # request's mailbox reply for the length of those reads. The race is the
+        # reason; the blocking is a second one. (The dispatcher spec's FR-040
+        # describes this as a detached background task, which does not match the
+        # inline call above. Which of the two is meant to change is a dispatcher
+        # question, deliberately not settled here.)
+        pin_ok = self._ring.pin(pin_keys, promote=False)
+        # Diagnostic: vLLM only reaches here for keys lookup()/Check reported as
+        # present, and cannot drop keys from the returned spec (dst block ids are
+        # positionally zipped). So a Pin failure here is the earliest signal that
+        # a Check-hit entry vanished — log which (namespaced) key.
+        for nk, ok in zip(pin_keys, pin_ok):
+            if not ok:
+                print(
+                    f"[certus-shmq] PIN FAILURE key={nk} "
+                    f"(Check said present, Pin says gone — eviction race)",
+                    flush=True,
+                )
+        return CertusLoadStoreSpec([BlockLocation(key=k) for k in int_keys])
+
+    def complete_load(self, keys: Iterable[OffloadKey], req_context=None) -> None:
+        int_keys = _keys_to_u64s(keys)
+        if int_keys:
+            expanded = [nk for k in int_keys for nk in self._ns_all(k)]
+            self._ring.unpin(expanded)
+
+    # ── events / shutdown ──
+
+    def take_events(self) -> Iterable[OffloadingEvent]:
+        events, dropped = self._ring.take_events(0)
+        if dropped:
+            print(
+                f"[certus-shmq] WARNING: {dropped} eviction events "
+                "dropped by server (event view is lossy)",
+                file=sys.stderr,
+                flush=True,
+            )
+        # Only REMOVED means the key is no longer accessible. DEMOTED entries
+        # stay on SSD and remain loadable, so they are not eviction events for
+        # vLLM's accounting. Under TP>1 each logical block is W per-rank keys;
+        # map each REMOVED key back to its logical key and dedup so vLLM sees one
+        # eviction per logical block. This is conservative-safe: emitting a
+        # logical eviction when ANY shard is removed matches lookup()'s AND
+        # semantics (a block with a missing shard already reads as a MISS), and
+        # the authoritative pre-load Check prevents loading a partially-evicted
+        # block regardless — so no reverse map from logical→rank is needed.
+        seen: set[int] = set()
+        removed: list[bytes] = []
+        for key, reason in events:
+            if reason != REASON_REMOVED:
+                continue
+            logical = denamespace_key(key, self._world_size)
+            if logical in seen:
+                continue
+            seen.add(logical)
+            orig = self._key_reverse.pop(logical, None)
+            if orig is not None:
+                removed.append(orig)
+        if seen:
+            # A removed block may still be in the kept lookup answers.
+            self._drop_lookup_cache()
+        # Stores first: a block stored and evicted between two drains must read
+        # stored-then-removed.
+        stored, self._pending_events = self._pending_events, []
+        yield from stored
+        if removed and self._events_enabled:
+            yield OffloadingEvent(
+                keys=removed,
+                medium=offload_event_medium(),
+                removed=True,
+            )
+
+    def shutdown(self) -> None:
+        # Ring is owned by the spec singleton; nothing per-manager to close.
+        pass

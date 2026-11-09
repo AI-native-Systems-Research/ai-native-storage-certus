@@ -1,0 +1,30 @@
+research_question: >
+  Using a bounce buffer SSD->CPU->GPU with pipelined transfers is faster
+  than direct SSD->GPU for transfer of 4MiB broken into a stream of 128KiB
+  transfers. Must use pipelined implementation, implement if not present.
+
+run_id: h8-pipelined
+
+max_iterations: 2
+
+target_system:
+  name: "Certus Storage Engine — GPU Data Transfer Path"
+  description: >
+    AI-native KV-cache storage system. Benchmark server at
+    components/gpu-services/v0/src/bin/p2p_server.rs supports
+    --mode bounce|p2p|p2p-cold.
+  observable_metrics:
+    - "end-to-end transfer latency (ms) for 4 MiB"
+    - "sustained throughput (MB/s)"
+  controllable_knobs:
+    - "transfer mode: bounce | p2p | p2p-cold"
+    - "chunk size (128 KiB)"
+  repo_path: /home/nara/certus/ai-native-storage-certus
+
+models:
+  design: "claude-opus-4-6"
+  execute_analyze: "claude-sonnet-4-6"
+
+prompts:
+  methodology_layer: "prompts/methodology"
+  domain_adapter_layer: null

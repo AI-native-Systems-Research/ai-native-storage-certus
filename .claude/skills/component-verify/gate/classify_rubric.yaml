@@ -1,0 +1,41 @@
+# LEVEL-1 CLASSIFIER RUBRIC (2026-10-07). Read by the two independent classifier agents and by classify_merge.py.
+# Purpose: decide, for every level-1 candidate (a divergent or spec-only property), what happens to it, and
+# for every property which tool can check it. Minimise work: only class B goes to the repair agent.
+classes:
+  A:
+    name: reader missed it
+    meaning: The code DOES what the specification asks; the blind code reader simply did not state it.
+    evidence_required: code lines (file:line) that implement the behaviour, and one sentence saying how.
+    action: goes into level 2 like any agreed property; the provers decide. Refuted -> handled as a level-2 bug.
+  B:
+    name: real disagreement
+    meaning: The specification and the code describe DIFFERENT behaviour for the same situation, or the
+      specification requires something the code does not do.
+    evidence_required: code lines (file:line) showing what the code does instead, and one sentence saying
+      what differs.
+    action: stays a discordance; the repair agent handles all B rows of a component in ONE run (test first,
+      then fix the code or write a spec note).
+  C:
+    name: not checkable by Creusot or Kani
+    meaning: The obligation is about something these two tools cannot express. Use ONLY one of the reasons
+      below; "hard to prove" is not a reason.
+    reasons:
+      interleaving: depends on how several threads interleave (data races, lost updates, atomicity across calls)
+      liveness: something eventually happens / no deadlock / protocol ordering between components
+      timing: wall-clock durations, timeouts as time, rates
+      performance: cost or complexity bounds (work independent of size, O(1))
+      logging-io: log output, printing, external I/O side effects
+      external: behaviour owned by another component or the framework
+    action: listed with the tool that can check it; never sent to the repair agent.
+tools:   # checked_by — the tool that can check the obligation
+  creusot: sequential functional behaviour, unbounded (proof over all inputs)
+  kani: sequential functional behaviour on the real code, bounded; panics, overflow, out-of-bounds
+  loom: thread interleavings of the real code (class C / interleaving)
+  spin: protocol / liveness models between components (class C / liveness)
+  test: timing, logging-io, performance measured by a test or benchmark
+  review: external or not mechanically checkable
+rules:
+  - Decide from the CODE, not from the property's origin label. Cite lines for A and B; no lines, no A or B.
+  - If the code does part of it, it is B (say which part is missing).
+  - Never use C for something the provers could express but might find hard.
+  - When genuinely unsure between A and B, say B and explain; the merge flags disagreements for a person.

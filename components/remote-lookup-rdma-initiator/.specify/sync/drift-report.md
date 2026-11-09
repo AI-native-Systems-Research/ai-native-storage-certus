@@ -1,0 +1,186 @@
+---
+spec_sync_component: remote-lookup-rdma-initiator
+spec_sync_drift_status: clean
+spec_sync_synced_at: 2026-11-05T10:19:50Z
+spec_sync_git_commit: 32ffa627f
+spec_sync_inputs_sha256: 774628c609c1ae5211d1f45ba437c07edbbe9053023c76c607a1ef6ac9722574
+spec_sync_hash_tool: scripts/spec-sync-hash.sh
+---
+> **Re-stamp 2026-11-05 (branch `certus-host-setup`, on unstable `bb0c9b9c`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them (its previous stamp was re-verified against `git archive origin/unstable`); its digest moves because `components/interfaces` changed (`ISPDKEnv::init_with_allowed`, added for the two-process drive race; see the spdk-env and interfaces syncs of the same date). This component does not implement `ISPDKEnv`. No analysis below changes.
+
+> **Re-stamp 2026-10-29 (branch `fix/dispatcher-remove-ssd-extent`, merged with unstable `e35618b2`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (the `IDispatcher::check` doc gains an `# Errors` section, B-17 of the dispatcher sync). No analysis below changes.
+> **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IDispatcher::clear_all`) and the rebase brought unstable's changes. No analysis below changes.
+
+> **Re-stamp 2026-10-23 (branch `unstable`, commit `d7a24d58` "Fix workspace build warnings" plus the spec-sync follow-up).** That commit only fixed warnings under the workspace lint posture: it added `Debug` impls, narrowed unreachable `pub` items to `pub(crate)`, wrapped `unsafe fn` bodies in explicit `unsafe {}` blocks, and the follow-up ran `rustfmt`. It also touched `components/interfaces` (a `Debug` impl for `Command`), which changes every component's digest. This component's own `src/` was in that commit. Every changed item was checked: none is part of a provided interface, none is named as public by the spec, and no behaviour changed. Spec citation updated: telemetry call sites `connection.rs:1025,968,1064,380`→`:1032,975,1071,381`. All citations were re-verified by diff-mapping each base line to its new position. Status stays `clean`.
+
+> **Re-stamp 2026-10-21 (transitive, `components/interfaces` changed on branch `fix/dispatcher-remove-clear-mt`).** Only `components/interfaces` changed for this component: `IDispatcher` doc comments (`flush_to_ssd` errors, `clear_memory_tier`, `batch_lookup`) and the interfaces spec (FR-008, FR-009, FR-017, FR-018, FR-018a, FR-021, FR-023, Overview, NFR-002, Implementation Notes; text only, no type or signature changed). This component uses some of the named items (6 files), but no type, signature or behaviour of them changed. This component's last full sync below stands; no re-analysis was needed.
+
+> **Re-stamp 2026-10-14 (transitive: `components/interfaces` changed, branch `fix/cold-staging-buf-16mib`).** The spec-sync digest folds `components/interfaces/{src,specs}` into every component's hash, so the single interface change on this branch — `DispatcherConfig::cold_staging_buf_bytes` default 4 MiB → 16 MiB (commit `8e12e49f`) and the matching correction to interfaces FR-027 — invalidates every component's stamp at once; this is the design, not a defect. **No code re-analysis was performed for this component, and none was needed:** its own `src/**` and `specs/**` are unchanged on this branch, and it does not reference `cold_staging_buf_bytes` (consumed only by the dispatcher's host-DRAM cold-staging pool). Digest refreshed to the recomputed value.
+
+> **Re-stamp 2026-10-09 (transitive: `components/interfaces` changed, branch `fix/evict-blocked-by-pin`).** The only change to this component's hashed inputs is a doc-comment correction on `IDispatchMap::try_evict_to_block` in `components/interfaces/src/idispatch_map.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and its previous stamp was re-verified to match `origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
+
+> **Re-stamp 2026-10-05 (transitive: `components/interfaces` changed, branch `fix/poller-cpu-placement-logging`).** The only change to this component's hashed inputs is a doc-comment correction on `DispatcherConfig::poller_base_cpu` in `components/interfaces/src/idispatcher.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and it does not reference `poller_base_cpu` (verified by grep over its src/ and specs/). Its previous stamp was re-verified to match `git archive origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
+
+> **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
+> folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
+> change invalidates all of them at once -- which is the design, not a defect. The interface
+> change is the `served_by` attribution work: new `ServedBy` and `LookupOutcome` types, and
+> `IDispatcher::batch_lookup` widened to return `Vec<LookupOutcome>`.
+>
+> **No re-analysis was performed for this component, and the digest bump asserts only what was
+> actually checked**: the interface change is additive except for `batch_lookup`'s return type,
+> which the compiler enforces across all implementors, and this component's own `src/**` and
+> `specs/**` are unchanged. Components that implement `IDispatcher` (`dispatcher`,
+> `dispatcher-p2p`) had their specs updated substantively; this one did not need it. If a later
+> sweep finds drift here, this stamp is not evidence against it.
+
+> **Re-stamp 2026-09-15 (interfaces-fold; no drift).** Branch `fix-reserve-batch-deadline` (`bec6c6ec`) added a `deadline: Option<std::time::Instant>` parameter to `IDispatcher::reserve_memory` in `components/interfaces/src/idispatcher.rs` (shared batch backpressure deadline for the shm-queue OP_RESERVE handler). `scripts/spec-sync-hash.sh` folds the whole `components/interfaces` tree into every component's hash, so this component's digest moved even though its own spec/implementation did not change. This component does not describe or call `reserve_memory`; the interface delta cannot affect its spec↔implementation alignment. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.
+
+> **Re-stamp 2026-09-09 (merged-branch interfaces-fold; no drift).** Branch
+> `fix-dispatcher-store-backpressure` was merged into `unstable` at `3411518a`; that
+> branch adds `DispatcherConfig::store_backpressure_ms` plus two `TierEventStats`
+> counters (`store_backpressure_events`, `store_drops_on_full`) to
+> `components/interfaces/src/idispatcher.rs`. `scripts/spec-sync-hash.sh` folds
+> the whole `components/interfaces/` tree into every component's hash, so this
+> component's digest moved even though its own `src/`+`specs/` are byte-for-byte
+> unchanged and it references none of those new dispatcher symbols (verified by
+> grep across `components/` and `lib/`). The merge's conflict resolution had
+> reverted this stamp to unstable's `b220a1c8` value; the digest is recomputed
+> here at merged HEAD. Drift status remains `clean`; the report body stands
+> verbatim.
+
+# Spec-vs-Implementation Drift Report — remote-lookup-rdma-initiator
+
+**Re-verified 2026-09-03** (independent re-sweep, not a re-stamp). Every spec-002
+FR/SC re-checked against `src/`; verification builds all green this sweep:
+`cargo build/clippy(--all-targets, -D warnings)/test -p remote-lookup-rdma-initiator`
+(26 + 1 passed; 0 failed) and `cargo clippy --features rdma --all-targets -- -D warnings`
+— all clean (rdma-core present in this environment). No drift found; **no code or
+active-spec change this sweep.**
+
+## Summary
+
+| Metric | Count |
+|---|---|
+| Specs Analyzed | 2 (1 active, 1 superseded) |
+| Requirements Checked | 23 (spec-002 only; spec-001 is superseded) |
+| Aligned | 23 |
+| Drifted | 0 |
+| Not Implemented | 0 |
+| Unspecced Features | 0 |
+
+**Verdict: CLEAN.** The active spec (`002-rdma-push-initiator`) is fully aligned
+with `src/` and `tests/`. Spec-001 is formally superseded and honored as such;
+its historical drift is already self-annotated in the spec text.
+
+---
+
+## Spec 001-rdma-remote-request-handler — SUPERSEDED (honored)
+
+**Status:** `Superseded by spec-002 (RDMA Push Initiator)` (spec.md:15-17).
+
+This spec describes the original *passive RDMA responder* (inbound listener →
+session state machine → protobuf handshake → RDMA-write-back). That entire stack
+was removed in the initiator rework. Per the supersession notice, its FR-001..
+FR-017 / SC-001..SC-006 are **not** evaluated as live drift against the current
+outbound-initiator code — they describe a design that no longer exists by intent.
+
+The spec already carries two in-line `⚠️ STALE SELF-ANNOTATION (2026-08-07)`
+markers on FR-014 and FR-015 that document exactly how those sentences invert the
+current code (telemetry *is* wired in; the trait methods are *not* stubs and there
+is no `serve` module). These are retained historical markers, not new drift.
+
+No action required beyond eventual regeneration/retirement of the stale spec
+(also noted in the component CLAUDE.md).
+
+---
+
+## Spec 002-rdma-push-initiator — Detailed Findings
+
+Active spec. Drift-swept 2026-08-07 (`sync/spec-drift-sweep-20260807`, "zero drift
+against code"). This re-analysis confirms it remains aligned.
+
+### Aligned ✓
+
+| Req | Requirement (short) | Location |
+|---|---|---|
+| FR-001 | `push_async(endpoint, items, on_complete)` enqueues and returns; one status per item in order | `lib.rs:196-204`, `connection.rs:550-569` |
+| FR-001a | `on_complete` invoked exactly once on every outcome; dropped (not invoked) when `push_async` returns `Err` | `connection.rs:370-385` (`Batch::finish`, idempotent), `connection.rs:387-398` (`Batch::drop`); tests `the_callback_fires_exactly_once` (1566), `invalid_endpoint_drops_the_callback` (1969) |
+| FR-001b | `push()` blocking wrapper over `push_async`, identical per-item semantics | `lib.rs:218-225`, `connection.rs:576-599` |
+| FR-002 | Resolve each key via `IMemoryTier::peek`; absent→`KeyNotFound`, size≠length→`SizeMismatch` before any write | `lib.rs:146-174` (`plan`); test `statuses_mapped_in_order` (1329) |
+| FR-003 | RDMA-write matching value into remote region using `addr`+`rkey` | `connection.rs:1156-1169` (`RealConn::post_write`), `lib.rs:163-168` |
+| FR-004 | Register memory-tier pool (`pool_info` base+size) as RDMA MR once per connection; writes from `peek` pointer within region | `lib.rs:107-111,125-129`, `connection.rs:1122-1140` (`RealTransport::connect` → `register_existing_mr`) |
+| FR-005 | Connection table keyed by normalized `"ip:port"`, per-host state, lazy establish + reuse; one thread per entry (QP `Send` not `Sync`) | `connection.rs:447-455,479-525` (`slot`), `ConnWorker`; tests `reused_connection_does_not_reconnect` (1936) |
+| FR-006 | Different hosts concurrent, same host queues; multiple batches in flight bounded by send-queue depth, overlapping | per-host thread + `PUSH_WINDOW` credits (`connection.rs:203,767-851`); test `successive_batches_overlap_on_the_wire` (1808) |
+| FR-006a | Bound submit queue and tracked batches; reject-as-`UnableToConnect` rather than queue when bounds reached | `SUBMIT_QUEUE_DEPTH=256` (123), `MAX_TRACKED_BATCHES=64` (136), `run` drain cap (703); test `a_full_submit_queue_fails_fast` (1596) |
+| FR-007 | Detect QP error / failed / stalled write; destroy QP before reporting; rebuild once; replay all outstanding; second failure → `UnableToConnect` | `connection.rs:944-980` (`recover`), `983-997` (`check_stalled`), `recoveries` budget; tests `lost_writes_are_replayed...` (1422), `failing_again...gives_up` (1452), `a_stalled_transfer...` (1731) |
+| FR-008 | `disconnect(endpoint)` idempotent + `disconnect_all()`; both block until threads exit and report every held batch | `connection.rs:619-641`, `435-443` (`shutdown_and_join` joins), `1058-1071` (`shutdown`); test `teardown_reports_batches_it_still_holds` (1671) |
+| FR-009 | Parse `"ip:port"`; `InvalidEndpoint` for anything else | `connection.rs:1075-1090` (`parse_endpoint`); tests `parse_endpoint_rejects_bad_input` (1319), `invalid_endpoint_is_method_error` (1956) |
+| FR-010 | Diagnostics via optional `ILogger`; no-op logger when unbound (never fails a push) | `lib.rs:59-66` (`NoopLogger`), `121-124` (fallback) |
+| FR-011 | Telemetry behind `telemetry` feature, ZST no-op when off; full metric set incl. per-phase connect breakdown + running averages | `telemetry.rs` (enabled 19-202, ZST 207-276), wired at `connection.rs:968,1025-1032,1064,370-384`; tests `telemetry_records_*` (2069-2127) |
+| FR-012 | Security = trusted-fabric isolation, no app auth | No auth code by design (nothing to implement) |
+| FR-013 | Unit tests: connection-table state machine, `PushStatus` mapping, mock transport seam, telemetry wiring | `connection.rs:1178-2128` test module (mock `RdmaTransport`/`RdmaConn`) |
+| FR-014 | `connect(endpoint)` warm-connect: idempotent, caching; unestablishable→`Ok(())` caching nothing; `NotInitialized`/`InvalidEndpoint` as applicable | `lib.rs:236-242`, `connection.rs:606-613`; tests `warm_connect_establishes_and_push_reuses` (1997), `warm_connect_failure_is_ok_and_caches_nothing` (2021), `warm_connect_invalid_endpoint...` (2045) |
+| FR-015 | `set_local_peer_id(peer)`; stamp into connect `private_data`; snapshotted at first table build; later call ignored | `lib.rs:256-261,112-118`, `connection.rs:1097-1140` (`RealTransport` stores + passes to `rdma::client_connect`); test `set_local_peer_id_is_stored` (306) |
+| SC-001 | One `PushStatus` per item in order, correct terminal statuses | test `statuses_mapped_in_order` (1329) |
+| SC-001a | Every accepted batch reports exactly once (incl. rejected / torn-down); multiple batches in flight | tests `the_callback_fires_exactly_once` (1566), `a_full_submit_queue_fails_fast` (1596), `successive_batches_overlap_on_the_wire` (1808) |
+| SC-002 | Second push to connected host reuses connection (no new CM connect) | test `reused_connection_does_not_reconnect` (1936) |
+| SC-003 | QP error → exactly one reconnect-and-retry before `UnableToConnect` | tests `lost_writes_are_replayed...` (1422), `failing_again...gives_up` (1452) |
+| SC-004 | Telemetry per-push = small fixed cost / ZST when off; measured by benchmark | `benches/push_telemetry.rs` (Criterion two-baseline workflow) |
+
+### Drifted ⚠️
+
+None.
+
+### Not Implemented ✗
+
+None.
+
+---
+
+## Unspecced Features
+
+| Feature | Location | Lines | Note |
+|---|---|---|---|
+| _(none)_ | — | — | All implementation surfaces map to a spec-002 requirement, assumption, or explicitly-backfilled Known-Limitations item. |
+
+Notes on items considered but *not* flagged as unspecced:
+- `src/rdma.rs`, `src/ffi.rs`, `src/wrapper.c` — the real rdma-core transport
+  internals; they are the mechanism behind FR-003/FR-004/FR-015 and are gated by
+  the `rdma` Cargo feature backfilled into spec-002 Assumptions (2026-08-07).
+- `src/loopback_test.rs`, `tests/mr_registration_bench.rs` — explicitly
+  acknowledged as hardware-gated validation/measurement tooling in spec-002
+  "Known Limitations / Follow-ups" (no FR behind them, by design).
+- Telemetry read accessors (`avg_push_duration_us`, `throughput_bytes_per_sec`,
+  `avg_connect_phases_us`) fall within FR-011's metric surface.
+
+---
+
+## Stale-Path Check (components/ → lib/ move)
+
+No stale-path drift. `component-framework` and `spdk-sys` moved to `lib/`, but
+this component's specs do not reference either. The only crate-path reference in
+the specs is `components/interfaces/...` (superseded spec-001 `tasks.md:135`),
+which is correct — the `interfaces` crate still lives at `components/interfaces`.
+
+---
+
+## Recommendations
+
+1. **No code or active-spec changes needed** — spec-002 and the implementation
+   are in sync.
+2. **Retire or regenerate spec-001.** It is formally superseded and now serves
+   only as historical intent; the component `CLAUDE.md` already flags it as stale.
+   Consider archiving it (or replacing its body with a pointer to spec-002) so it
+   stops appearing in requirement counts and drift sweeps.
+3. **Keep the SC-004 benchmark result honest.** The `push_telemetry` overhead
+   figure is measured against a ~200  ns mock; if the mock path changes, re-run
+   the two-baseline workflow so the "small fixed absolute cost" claim stays valid.
+4. **Cross-component interfaces-doc nit (deferred).** The interface module doc
+   `components/interfaces/src/iremote_lookup_rdma_initiator.rs:9-12` enumerates
+   connection states ("connecting", "connected", "recovering") that should be
+   reconciled against the current implementation's actual state surface. This is an
+   interfaces-crate doc concern, **not** an initiator `src/`/`specs/` drift — editing
+   `components/interfaces/` invalidates the folded input hash of every stamped
+   component, so it is deferred to a coordinated interfaces-doc pass + re-stamp rather
+   than fixed here.

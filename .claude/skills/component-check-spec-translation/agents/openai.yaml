@@ -1,0 +1,4 @@
+interface:
+  display_name: "Check Component Spec Translation"
+  short_description: "Compare component specs with generated code"
+  default_prompt: "Use $component-check-spec-translation to audit a component implementation against its nested spec.md files."

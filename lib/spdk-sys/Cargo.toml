@@ -1,0 +1,14 @@
+[package]
+name = "spdk-sys"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+links = "spdk"
+build = "build.rs"
+
+[build-dependencies]
+bindgen = "0.71"
+
+[lints]
+workspace = true

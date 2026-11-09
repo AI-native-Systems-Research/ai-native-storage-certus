@@ -1,0 +1,33 @@
+[package]
+name = "workload-wire"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# The generator-to-node-agent TCP protocol, per contracts/node-agent-wire.md.
+# CUDA-free and a workspace default member: framing, the Hello handshake, and
+# the six conformance cases are all testable with no agent and no GPU.
+
+[dependencies]
+workload-model.workspace = true
+
+[features]
+# Opt-in switch for this crate's unit and integration tests. OFF by default, so
+# `cargo test --workspace` skips the workload-generator suites (they are slow and
+# isolated from the rest of the tree). Turn it on to run them, e.g.
+#   cargo test -p workload-gen --features workload-gen/workload-tests
+# Doctests still run without it; cargo cannot gate them on a feature.
+workload-tests = []
+# Skips tests that exceed the per-PR time budget. OFF by default, so
+# `cargo test --features workload-tests` runs everything. CI opts in explicitly.
+#
+# Deliberately a feature and not a bare #[ignore]: #[ignore] is already used
+# here for tests needing a live Certus server, an agent and a GPU, and
+# overloading it would make `--include-ignored` unable to run the slow tests
+# without also running the ones that cannot pass off-cluster.
+ci-fast = []
+
+[lints]
+workspace = true

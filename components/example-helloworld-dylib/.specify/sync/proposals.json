@@ -1,0 +1,28 @@
+{
+  "generated": "2026-08-20",
+  "phase": "Spec-Sync Phase B",
+  "component": "example-helloworld-dylib",
+  "based_on": "drift-report.{json,md} (2026-08-20T09:24 regeneration)",
+  "policy": ".specify/sync/PHASE_B_POLICY.md",
+  "summary": {
+    "backfill": 0,
+    "align": 1,
+    "unspecced_backfilled": 0,
+    "resolved": 0,
+    "human_decision": 0
+  },
+  "proposals": [
+    {
+      "requirement": "FR-4 / Overview",
+      "spec": "001-example-helloworld-dylib",
+      "direction": "ALIGN",
+      "rationale": "The spec is already correct: FR-4 and the Overview were corrected (2026-07-22 backfill) to describe compile-time TypeId identity via static rlib embedding, with no shared .so linkage. Runtime behavior satisfies FR-4 (drift report marks the requirement itself as satisfied). The drift is the reverse direction (spec->code): the source module doc comment src/lib.rs:4-7 still claims the dylib and host 'dynamically link the same component-core and example-helloworld shared libraries', which contradicts the corrected spec. Since the spec is correct and the code doc is stale/inaccurate, this is not spec-lag (not BACKFILL); it is a real code-side defect against a correct spec, so it is queued as an ALIGN task. Per policy the .rs source is NOT edited here.",
+      "before": "spec.md unchanged. FR-4 currently reads: \"TypeId consistency is maintained by compiling both the dylib and host against the same component-core/example-helloworld source with the same rustc version (each side statically embeds its own copy; no shared .so linkage is involved)\" — this is already correct.",
+      "after": "spec.md unchanged (no BACKFILL). Code-side fix queued as align-tasks.md Task 2: rewrite src/lib.rs:4-7 to state each side statically embeds its own rlib copy and that TypeId equality is a same-rustc compile-time property; drop the 'dynamically link the same shared libraries' wording.",
+      "severity": "moderate",
+      "location": "src/lib.rs:4-7",
+      "queued_as": "align-tasks.md Task 2"
+    }
+  ],
+  "notes": "Zero BACKFILL edits applied; spec text is already correct. Zero spec.md files edited => zero new spec backups required. The out-of-scope host-app doc at apps/dynamic-loading-example/src/main.rs:6-9 repeats the same stale claim; noted in the align task but not modified (outside this component)."
+}

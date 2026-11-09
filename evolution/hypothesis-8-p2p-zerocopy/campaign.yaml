@@ -1,0 +1,38 @@
+research_question: >
+  Eliminating the server-side GPU staging buffer and DMA-ing directly into
+  the client's GPU memory is faster than the current P2P path (server staging
+  + D2D copy) for 4 MiB lookups (32x128 KiB chunks) through certus-server.
+
+run_id: h8-p2p-zerocopy
+
+max_iterations: 2
+
+target_system:
+  name: "Certus Storage Engine — P2P zero-copy (client BAR1) vs P2P with staging"
+  description: >
+    AI-native KV-cache storage system. This experiment tests whether
+    eliminating the server-side staging buffer D2D copy — by having the client
+    provide a GPU buffer that the server can DMA into directly — improves
+    P2P lookup latency.
+    CONSTRAINTS:
+    - Do NOT use or modify gpu-p2p-server.
+    - Do NOT create standalone benchmark binaries.
+    - All benchmarks MUST run through certus-server (apps/certus-server/) with --dispatcher-version v0.
+    - Compare against P2P with server-side staging as baseline.
+    - The bounce path is not under test — this is P2P zero-copy vs P2P staged.
+  observable_metrics:
+    - "end-to-end lookup latency (ms) for a single 4 MiB key"
+    - "sustained lookup throughput (MB/s) over N sequential lookups"
+  controllable_knobs:
+    - "P2P mode: zero-copy (client BAR1) | staged (server staging + D2D copy)"
+    - "value size (4 MiB)"
+    - "chunk size (128 KiB, NVMe MDTS limited)"
+  repo_path: /home/nara/certus/ai-native-storage-certus
+
+models:
+  design: "claude-opus-4-6"
+  execute_analyze: "claude-sonnet-4-6"
+
+prompts:
+  methodology_layer: "prompts/methodology"
+  domain_adapter_layer: null

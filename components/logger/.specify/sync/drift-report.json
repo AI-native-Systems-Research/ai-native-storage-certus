@@ -1,0 +1,72 @@
+{
+  "generated": "2026-10-31T04:54:40Z",
+  "project": "logger",
+  "branch": "specsync-c",
+  "base": "a0292be6",
+  "head": "0a71990e",
+  "scope": "55a4ddd4 (clippy) only; components/interfaces analysed by its own sync",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 8,
+    "aligned": 8,
+    "drifted": 0,
+    "stale_citations_backfilled": 0,
+    "not_implemented": 0,
+    "unspecced_features": 0
+  },
+  "specs": [
+    {
+      "id": "specs/001-logger-component/spec.md",
+      "items": [
+        {
+          "id": "FR-004",
+          "status": "aligned",
+          "location": "src/lib.rs:58-66"
+        },
+        {
+          "id": "FR-011",
+          "status": "aligned",
+          "location": "src/lib.rs:58-66,68-73"
+        },
+        {
+          "id": "FR-012",
+          "status": "aligned",
+          "location": "src/lib.rs:196-206"
+        },
+        {
+          "id": "FR-014",
+          "status": "aligned",
+          "location": "src/lib.rs:43-66,94-100"
+        },
+        {
+          "id": "Key Entities LogLevel (parsing)",
+          "status": "aligned",
+          "location": "src/lib.rs:58-66; test test_log_level_from_env_str src/lib.rs:290"
+        },
+        {
+          "id": "Edge cases invalid RUST_LOG / trace",
+          "status": "aligned",
+          "location": "src/lib.rs:62-65"
+        },
+        {
+          "id": "FR-010 / SC-005 thread safety",
+          "status": "aligned",
+          "location": "src/lib.rs:231 (writer Mutex, unchanged)"
+        },
+        {
+          "id": "SC-007",
+          "status": "aligned",
+          "location": "benches/log_throughput.rs (lint attributes only)"
+        }
+      ],
+      "citation_drift": []
+    }
+  ],
+  "notes": [
+    "Lock poisoning panics (unchanged by 55a4ddd4); not stated in the spec; recorded, not proposed."
+  ],
+  "unspecced": [],
+  "conflicts": [],
+  "drift_status": "clean",
+  "previous_report": "backups/20261031T045440Z/drift-report.json.prev"
+}

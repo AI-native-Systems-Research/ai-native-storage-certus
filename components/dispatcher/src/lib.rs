@@ -1,0 +1,8585 @@
+//! Dispatcher component — the central data-plane orchestrator for Certus.
+//!
+//! # Architecture
+//!
+//! The dispatcher sits between shmq clients and the storage/GPU subsystems,
+//! implementing all cache operations: populate, lookup, check, remove, touch.
+//!
+//! ```text
+//! ┌──────────┐     shmq      ┌────────────┐
+//! │ Client   │──────────────▶│ Dispatcher │
+//! │ (GPU app)│◀──────────────│            │
+//! └──────────┘               └─────┬──────┘
+//!                                  │
+//!                 ┌────────────────┼──────────────┐
+//!                 │                │              │
+//!          ┌──────▼──────┐  ┌─────▼─────┐  ┌──────▼──────┐
+//!          │ DispatchMap │  │ MemoryTier│  │ BlockDevice │
+//!          │ (key→loc)   │  │(DRAM tier)│  │ (NVMe SSD)  │
+//!          └─────────────┘  └───────────┘  └─────────────┘
+//! ```
+//!
+//! # Data paths
+//!
+//! **Populate** (GPU → DRAM → SSD):
+//! 1. Open client GPU IPC handle
+//! 2. Allocate memory-tier slot - evict existing entries to make space if needed.
+//! 3. `cudaMemcpy` D2H from GPU into memory-tier
+//! 4. Background writer asynchronously flushes to SSD via extent manager
+//!
+//! **Hot Lookup** (DRAM → GPU):
+//! 1. `DispatchMap::lookup(key)` → `MemoryTier { pointer }`
+//! 2. `cudaMemcpyAsync` H2D from memory-tier to client GPU (multi-stream)
+//! 3. Single `stream_synchronize` after all copies in the batch
+//!
+//! **Cold Lookup** (SSD → DRAM → GPU):
+//! 1. `DispatchMap::lookup(key)` → `BlockDevice { offset }`
+//! 2. Evict entries from memory-tier to make space
+//! 3. Insert new slot in memory-tier
+//! 4. Pipelined NVMe reads directly into memory-tier (zero-copy)
+//! 5. Async H2D DMA to client GPU (overlapped with reads)
+//!
+//! # Threading model
+//!
+//! - Control-plane requests arrive from the shmq serve layer on blocking worker threads
+//! - Hot path: runs on the blocking thread, multi-stream GPU DMA
+//! - Cold batch path (`batch_lookup`): a single multiplexed scatter-gather
+//!   poll loop on the calling thread (`scatter_gather_multi_drive_zero_copy`)
+//!   fans NVMe reads across all drives at once — no per-drive worker threads.
+//!   The DRAM-only prefetch path (`promote_to_memory_tier`) still uses
+//!   `std::thread::scope` to read per drive in parallel
+//! - Background writer: separate thread pool for staging → SSD flush
+//!
+//! # Key design decisions
+//!
+//! - **Zero-copy cold path**: memory-tier pool is co-registered with SPDK
+//!   (`spdk_mem_register`) and CUDA (`cudaHostRegister`), so NVMe DMA and
+//!   GPU DMA both operate on the same pinned memory without CPU copies.
+//! - **Multi-stream hot path**: 4 CUDA streams distribute H2D copies
+//!   round-robin so the GPU can overlap transfers on its copy engines.
+//! - **Configurable eviction**: `max_eviction_attempts` controls how hard
+//!   the dispatcher tries to free memory-tier space before giving up.
+
+#![allow(clippy::too_many_arguments)]
+
+mod background;
+pub mod io_segmenter;
+pub mod metrics;
+mod pins;
+pub mod pipeline;
+mod remote_probe;
+
+#[cfg(test)]
+#[path = "repair_test_eviction_events_dropped.rs"]
+mod repair_test_eviction_events_dropped;
+
+#[cfg(test)]
+#[path = "repair_test_failed_promotion_releases_slot.rs"]
+mod repair_test_failed_promotion_releases_slot;
+
+use parking_lot::RwLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::sync::Mutex;
+
+use component_framework::define_component;
+use interfaces::{
+    CacheKey, ClientChannels, Command, Completion, DispatcherConfig, DispatcherError, DmaAllocFn,
+    DmaBuffer, FormatParams, GpuStream, IBlockDevice, IBlockDeviceAdmin, IDispatchMap, IDispatcher,
+    IExtentManager, IGpuServices, ILogger, IMemoryTier, IRemoteLookup, IpcHandle, LookupOutcome,
+    LookupResult, PciAddress, ServedBy, TierEventStats,
+};
+
+use component_core::binding::bind;
+use spdk_env::ISPDKEnv;
+
+use crate::background::{
+    BackgroundEvictor, EvictionSender, EvictorConfig, JobStart, MemoryTierEvictor,
+    MemoryTierEvictorConfig, ParallelBackgroundWriter, WriteJob, WriteThroughPins,
+};
+pub use crate::metrics::PipelineMetrics;
+
+// Re-exported, not redefined: this type crosses a component boundary (both dispatchers
+// produce it, the shm-queue host consumes it), so it lives in `interfaces`. Keeping the
+// re-export means `dispatcher::EvictionEvent` still resolves for existing callers.
+pub use interfaces::{EvictionEvent, EvictionReason};
+
+/// Lifetime counters for KV-cache tier movement events. All fields are
+/// monotonic (cumulative since process start); `snapshot()` reads them without
+/// resetting, so a periodic telemetry tick and a final summary can both read
+/// independently and a caller derives per-interval deltas by subtracting
+/// successive snapshots. Shared behind an `Arc` so the background evictor
+/// threads can bump the same counters as the foreground dispatcher paths.
+#[derive(Debug, Default)]
+pub struct TierEventCounters {
+    /// Blocks promoted SSD -> DRAM (memory tier), across all promote paths.
+    promotions_to_memory: AtomicU64,
+    /// Lookups served up to the GPU (one per successfully-served lookup key),
+    /// whether the source was the memory tier or SSD.
+    promotions_to_gpu: AtomicU64,
+    /// Memory-tier (DRAM) entries evicted — demoted to SSD or dropped — by
+    /// either the foreground clean-eviction path or the background evictor.
+    evictions_from_memory: AtomicU64,
+    /// Extents freed on SSD by the background extent evictor.
+    evictions_from_ssd: AtomicU64,
+    /// Keys a peer served, via `IRemoteLookup`. Requester-side.
+    lookup_hits_dram: AtomicU64,
+    lookup_hits_ssd: AtomicU64,
+    remote_lookup_hits: AtomicU64,
+    /// Keys forwarded to a peer that no peer held.
+    remote_lookup_misses: AtomicU64,
+    /// Store-allocation retries taken while backpressuring on a momentarily
+    /// full memory tier (see `reserve_memory`). Bumped once per retry sleep.
+    store_backpressure_events: AtomicU64,
+    /// Stores dropped best-effort because the memory tier was still full after
+    /// the backpressure budget elapsed (see `populate`/`batch_populate`). The
+    /// KV block is not cached — a later load misses and recomputes — but the
+    /// store reports success so the vLLM offloading connector does not treat a
+    /// full cache as a fatal transfer failure.
+    store_drops_on_full: AtomicU64,
+    /// Reserves refused because the key was already resident (`mt.insert` returned
+    /// `AlreadyExists`). Not a capacity refusal, and it bypasses the backpressure
+    /// retry entirely, so it appears in neither store counter above.
+    store_already_resident: AtomicU64,
+    /// Eviction candidates skipped because a read pin was held
+    /// (`DispatchMapError::ActiveReferences`). Counted per candidate examined.
+    evictions_blocked_by_pin: AtomicU64,
+    /// Clean-eviction scans that examined every candidate and freed none.
+    eviction_scans_exhausted: AtomicU64,
+    /// Eviction candidates skipped because write-through had not landed (no
+    /// `ssd_offset`), so there was nowhere to demote them to.
+    evictions_blocked_unpersisted: AtomicU64,
+}
+
+impl TierEventCounters {
+    #[inline]
+    pub fn record_promotion_to_memory(&self) {
+        self.promotions_to_memory.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_promotion_to_gpu(&self) {
+        self.promotions_to_gpu.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_promotions_to_gpu(&self, n: u64) {
+        self.promotions_to_gpu.fetch_add(n, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_eviction_from_memory(&self) {
+        self.evictions_from_memory.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_eviction_from_ssd(&self) {
+        self.evictions_from_ssd.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record the outcome of one forwarded batch: `hits` keys a peer served and
+    /// `misses` keys no peer held.
+    ///
+    /// Taken per batch rather than per key because the remote path resolves a
+    /// batch at a time, and because a per-key call on this path would add an
+    /// atomic per key to a loop that already has one.
+    #[inline]
+    /// Record the local half of the route partition for one batch.
+    ///
+    /// Counted beside `record_remote_lookup` so that dram + ssd + remote equals the
+    /// served count for the same batch -- a partition, not three loosely related
+    /// numbers. Taken from the attribution the dispatcher just derived, so the
+    /// counters cannot disagree with the per-key `served_by` returned to the caller.
+    pub fn record_local_hits(&self, dram: u64, ssd: u64) {
+        if dram > 0 {
+            self.lookup_hits_dram.fetch_add(dram, Ordering::Relaxed);
+        }
+        if ssd > 0 {
+            self.lookup_hits_ssd.fetch_add(ssd, Ordering::Relaxed);
+        }
+    }
+
+    pub fn record_remote_lookup(&self, hits: u64, misses: u64) {
+        if hits > 0 {
+            self.remote_lookup_hits.fetch_add(hits, Ordering::Relaxed);
+        }
+        if misses > 0 {
+            self.remote_lookup_misses
+                .fetch_add(misses, Ordering::Relaxed);
+        }
+    }
+
+    /// Record one store-backpressure retry. Returns the count *before* this
+    /// call, so a caller can log a one-shot line on the first engagement
+    /// (return value `0`).
+    #[inline]
+    pub fn record_store_backpressure(&self) -> u64 {
+        self.store_backpressure_events
+            .fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Record one best-effort store drop (tier full after backpressure). Returns
+    /// the count *before* this call, so a caller can log a one-shot line on the
+    /// first drop (return value `0`).
+    #[inline]
+    pub fn record_store_drop_on_full(&self) -> u64 {
+        self.store_drops_on_full.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// One reserve refused because the key was already resident in the memory tier.
+    #[inline]
+    pub fn record_store_already_resident(&self) {
+        self.store_already_resident.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// One eviction candidate skipped because a read pin was held on it.
+    #[inline]
+    pub fn record_eviction_blocked_by_pin(&self) {
+        self.evictions_blocked_by_pin
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// One clean-eviction scan that could free nothing.
+    #[inline]
+    pub fn record_eviction_scan_exhausted(&self) {
+        self.eviction_scans_exhausted
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// One eviction candidate skipped because write-through had not landed.
+    #[inline]
+    pub fn record_eviction_blocked_unpersisted(&self) {
+        self.evictions_blocked_unpersisted
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Read the cumulative counters without resetting them.
+    pub fn snapshot(&self) -> TierEventStats {
+        TierEventStats {
+            promotions_to_memory: self.promotions_to_memory.load(Ordering::Relaxed),
+            promotions_to_gpu: self.promotions_to_gpu.load(Ordering::Relaxed),
+            evictions_from_memory: self.evictions_from_memory.load(Ordering::Relaxed),
+            evictions_from_ssd: self.evictions_from_ssd.load(Ordering::Relaxed),
+            lookup_hits_dram: self.lookup_hits_dram.load(Ordering::Relaxed),
+            lookup_hits_ssd: self.lookup_hits_ssd.load(Ordering::Relaxed),
+            remote_lookup_hits: self.remote_lookup_hits.load(Ordering::Relaxed),
+            remote_lookup_misses: self.remote_lookup_misses.load(Ordering::Relaxed),
+            store_backpressure_events: self.store_backpressure_events.load(Ordering::Relaxed),
+            store_drops_on_full: self.store_drops_on_full.load(Ordering::Relaxed),
+            store_already_resident: self.store_already_resident.load(Ordering::Relaxed),
+            evictions_blocked_by_pin: self.evictions_blocked_by_pin.load(Ordering::Relaxed),
+            eviction_scans_exhausted: self.eviction_scans_exhausted.load(Ordering::Relaxed),
+            evictions_blocked_unpersisted: self
+                .evictions_blocked_unpersisted
+                .load(Ordering::Relaxed),
+            // Gauges, filled in by `tier_event_stats` which has the receptacles to
+            // sample them. The counters struct holds no dispatch-map handle.
+            oldest_sampled: 0,
+            oldest_persisted: 0,
+        }
+    }
+}
+
+/// Holds one (block-device, extent-manager) pair for a data drive.
+#[allow(dead_code)]
+struct DataDrive {
+    _block_dev: Arc<dyn component_core::IUnknown + Send + Sync>,
+    block_dev_admin: Option<Arc<dyn IBlockDeviceAdmin + Send + Sync>>,
+    block_dev_iface: Arc<dyn IBlockDevice + Send + Sync>,
+    _extent_mgr_component: Arc<dyn component_core::IUnknown + Send + Sync>,
+    extent_mgr: Arc<dyn IExtentManager + Send + Sync>,
+    /// Shared so a bounce read can hold it without holding the drive list.
+    channel_pool: Arc<ChannelPool>,
+}
+
+/// A pool of per-drive client channels for the read pipeline.
+///
+/// Each [`ClientChannels`] is an SPSC pair (single producer / single consumer)
+/// and must be used by exactly one thread at a time. `batch_lookup` and the
+/// prefetch path run concurrently on separate `spawn_blocking` threads, so a
+/// single shared channel would let one thread's completions be dequeued by
+/// another (completion theft → the victim waits on `completion_rx` forever).
+/// Each concurrent reader therefore checks out its own channel; channels are
+/// reused across checkouts and the pool grows on demand up to peak concurrency.
+struct ChannelPool {
+    block_dev: Arc<dyn IBlockDevice + Send + Sync>,
+    free: Mutex<Vec<ClientChannels>>,
+}
+
+impl ChannelPool {
+    fn new(block_dev: Arc<dyn IBlockDevice + Send + Sync>) -> Self {
+        Self {
+            block_dev,
+            free: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Check out an exclusive channel, connecting a fresh one if the pool is
+    /// empty. The returned lease returns the channel to the pool on drop.
+    fn checkout(&self) -> Result<ChannelLease<'_>, DispatcherError> {
+        let reused = self.free.lock().unwrap_or_else(|e| e.into_inner()).pop();
+        let channels = match reused {
+            Some(ch) => ch,
+            None => self.block_dev.connect_client().map_err(|e| {
+                DispatcherError::IoError(format!("channel pool connect_client failed: {e}"))
+            })?,
+        };
+        // Discard any late completions left by a prior user that errored out, so
+        // the next pipeline starts from a clean completion stream (tags from an
+        // old op must never be matched against a new op's segments).
+        while channels.completion_rx.try_recv().is_ok() {}
+        Ok(ChannelLease {
+            pool: self,
+            channels: Some(channels),
+        })
+    }
+}
+
+/// RAII guard for a checked-out [`ClientChannels`]; returns it to the pool on drop.
+struct ChannelLease<'a> {
+    pool: &'a ChannelPool,
+    channels: Option<ClientChannels>,
+}
+
+impl ChannelLease<'_> {
+    fn channels(&self) -> &ClientChannels {
+        self.channels
+            .as_ref()
+            .expect("channel lease used after channel taken")
+    }
+}
+
+impl Drop for ChannelLease<'_> {
+    fn drop(&mut self) {
+        if let Some(ch) = self.channels.take() {
+            self.pool
+                .free
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(ch);
+        }
+    }
+}
+
+fn format_bytes(bytes: usize) -> String {
+    const KIB: usize = 1024;
+    const MIB: usize = 1024 * 1024;
+    const GIB: usize = 1024 * 1024 * 1024;
+    if bytes >= GIB {
+        format!("{:.2} GiB", bytes as f64 / GIB as f64)
+    } else if bytes >= MIB {
+        format!("{:.2} MiB", bytes as f64 / MIB as f64)
+    } else if bytes >= KIB {
+        format!("{:.2} KiB", bytes as f64 / KIB as f64)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+/// Factory function type for creating block device components.
+/// Receives SPDK env, logger, drive index, PCI address, and optional CPU pin.
+/// Returns a fully-initialized block device: (IUnknown holder, IBlockDevice, IBlockDeviceAdmin).
+/// The factory is responsible for calling initialize() internally.
+pub type BlockDeviceFactory = Box<
+    dyn Fn(
+            &Arc<dyn ISPDKEnv + Send + Sync>,
+            &Arc<dyn ILogger + Send + Sync>,
+            usize,
+            PciAddress,
+            Option<usize>,
+        ) -> Result<
+            (
+                Arc<dyn component_core::IUnknown + Send + Sync>,
+                Arc<dyn IBlockDevice + Send + Sync>,
+                Arc<dyn IBlockDeviceAdmin + Send + Sync>,
+            ),
+            String,
+        > + Send
+        + Sync,
+>;
+
+/// Factory function type for creating extent manager components.
+/// Receives logger and DMA allocator so it can wire receptacles.
+/// Returns an `Arc<dyn IUnknown>` that provides `IExtentManager`.
+pub type ExtentManagerFactory = Box<
+    dyn Fn(
+            &Arc<dyn ILogger + Send + Sync>,
+            DmaAllocFn,
+        ) -> Arc<dyn component_core::IUnknown + Send + Sync>
+        + Send
+        + Sync,
+>;
+
+define_component! {
+    pub DispatcherComponent {
+        version: "0.1.0",
+        provides: [IDispatcher],
+        receptacles: {
+            logger: ILogger,
+            dispatch_map: IDispatchMap,
+            gpu_services: IGpuServices,
+            spdk_env: ISPDKEnv,
+            memory_tier: IMemoryTier,
+            remote_lookup: IRemoteLookup,
+        },
+        fields: {
+            initialized: AtomicBool,
+            bg_writer: Mutex<Option<ParallelBackgroundWriter>>,
+            bg_evictor: Mutex<Option<BackgroundEvictor>>,
+            bg_mt_evictor: Mutex<Option<MemoryTierEvictor>>,
+            data_drives: RwLock<Vec<DataDrive>>,
+            pipeline_ring: RwLock<Option<pipeline::PipelineRing>>,
+            warm_stream: AtomicU64,
+            block_device_factory: Mutex<Option<BlockDeviceFactory>>,
+            extent_manager_factory: Mutex<Option<ExtentManagerFactory>>,
+            max_eviction_attempts: AtomicUsize,
+            store_backpressure_ms: AtomicU64,
+            pipeline_metrics: RwLock<Option<Arc<dyn PipelineMetrics>>>,
+            eviction_tx: Arc<Mutex<Option<EvictionSender>>>,
+            eviction_dropped: Arc<AtomicU64>,
+            tier_counters: Arc<TierEventCounters>,
+            write_through_pins: Arc<WriteThroughPins>,
+        },
+    }
+}
+
+/// Eviction candidates scanned per foreground eviction step, multiplied by the
+/// step number so the scan reaches past pinned / unpersisted entries as pressure
+/// persists.
+const EVICT_SCAN_STEP: usize = 4;
+
+/// Deepest foreground eviction scan; also the depth of the last-chance scan taken
+/// before reporting the memory tier full.
+const EVICT_SCAN_MAX: usize = 1024;
+
+/// No-op free function for temporary DmaBuffer wrappers around memory-tier pointers.
+/// The memory-tier component owns the memory; this wrapper must not free it.
+unsafe extern "C" fn noop_free(_ptr: *mut std::ffi::c_void) {}
+
+/// Per-GPU-device CUDA streams for the load/store DMA paths.
+///
+/// A CUDA stream is bound to the device that was current when it was created,
+/// and `cudaMemcpyAsync` rejects a source/destination pointer that lives on a
+/// different device than the stream. Under tensor parallelism the server DMAs
+/// to more than one GPU, so a single shared stream fails ("invalid argument")
+/// for every transfer whose peer GPU isn't the stream's device. We therefore
+/// keep one warm stream and one pair of pipeline streams per device.
+///
+/// Process-global by design: there is a single dispatcher instance serving all
+/// local GPUs, and CUDA streams are process-wide resources. Entries are created
+/// lazily on first use for each device and live until the process exits.
+pub(crate) struct DeviceStreams {
+    /// Warm-path stream for memory-tier -> GPU (H2D) async copies (load path).
+    warm: u64,
+    /// Dedicated stream for GPU -> memory-tier (D2H) async copies (store path).
+    /// Separating D2H from H2D allows the GPU's two copy engines to run
+    /// concurrently, enabling PCIe full-duplex under bidirectional load.
+    store: u64,
+    /// Dual streams for the pipelined SSD -> GPU cold path.
+    pub(crate) pipe: [u64; 2],
+}
+
+static DEVICE_STREAMS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<i32, DeviceStreams>>,
+> = std::sync::OnceLock::new();
+
+/// Ensure per-device streams exist for `device`, creating them on that device.
+/// Returns `None` if `device` is negative (no GPU association) or stream setup
+/// fails — callers then fall back to the synchronous `DmaBuffer` path.
+pub(crate) fn device_streams_for(gpu: &dyn IGpuServices, device: i32) -> Option<DeviceStreams> {
+    if device < 0 {
+        return None;
+    }
+    let map =
+        DEVICE_STREAMS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let mut guard = map.lock().unwrap();
+    if let Some(s) = guard.get(&device) {
+        return Some(DeviceStreams {
+            warm: s.warm,
+            store: s.store,
+            pipe: s.pipe,
+        });
+    }
+    // Create all streams on the target device (streams inherit the current device).
+    gpu.set_device(device).ok()?;
+    let warm = gpu.create_stream().ok()?;
+    let store_s = gpu.create_stream().ok()?;
+    let pipe_a = gpu.create_stream().ok()?;
+    let pipe_b = gpu.create_stream().ok()?;
+    let entry = DeviceStreams {
+        warm: warm.0 as u64,
+        store: store_s.0 as u64,
+        pipe: [pipe_a.0 as u64, pipe_b.0 as u64],
+    };
+    let ret = DeviceStreams {
+        warm: entry.warm,
+        store: entry.store,
+        pipe: entry.pipe,
+    };
+    guard.insert(device, entry);
+    Some(ret)
+}
+
+/// Resolve the GPU device a batch's blocks live on from the first block's IPC
+/// address, and make it the calling thread's current device (CUDA tracks the
+/// current device per thread). Returns the device ordinal, or -1 if unknown.
+/// All entries in one RPC come from a single rank, hence a single device.
+fn set_batch_device(gpu: &dyn IGpuServices, addr: *mut u8) -> i32 {
+    match gpu.device_of_ptr(addr as *const std::ffi::c_void) {
+        Ok(dev) if dev >= 0 => {
+            let _ = gpu.set_device(dev);
+            dev
+        }
+        _ => -1,
+    }
+}
+
+/// Bit position of the drive index in an SSD location.
+///
+/// An entry's SSD location is `(drive << DRIVE_SHIFT) | extent_offset`: the
+/// drive is chosen once at store commit and recorded with the entry. The
+/// dispatch map stores the location opaquely and carries it unchanged through
+/// `convert_to_storage`, `promote_block_to_memory_tier`, `try_evict_to_block`
+/// and `convert_memory_tier_to_block`. Drive 0 encodes to the raw offset.
+const DRIVE_SHIFT: u32 = 56;
+
+/// Encode a drive index and a device byte offset into an SSD location.
+pub(crate) fn encode_loc(drive: usize, offset: u64) -> u64 {
+    debug_assert!(drive < 256 && offset < 1 << DRIVE_SHIFT);
+    ((drive as u64) << DRIVE_SHIFT) | offset
+}
+
+/// Split an SSD location into its drive index and device byte offset.
+pub(crate) fn decode_loc(loc: u64) -> (usize, u64) {
+    (
+        (loc >> DRIVE_SHIFT) as usize,
+        loc & ((1u64 << DRIVE_SHIFT) - 1),
+    )
+}
+
+/// Select the per-drive item an SSD location points at, with the raw offset.
+/// `None` if the decoded drive is out of range.
+pub(crate) fn select_drive<T>(items: &[T], loc: u64) -> Option<(&T, u64)> {
+    let (drive, raw) = decode_loc(loc);
+    items.get(drive).map(|item| (item, raw))
+}
+
+/// Seeds each thread's store-drive cursor, so threads start on different drives.
+static STORE_DRIVE_SEED: AtomicUsize = AtomicUsize::new(0);
+
+thread_local! {
+    /// This thread's round-robin store-drive cursor (see `next_store_drive`).
+    static STORE_DRIVE_CURSOR: std::cell::Cell<Option<usize>> =
+        const { std::cell::Cell::new(None) };
+}
+
+impl DispatcherComponent {
+    fn log_info(&self, msg: &str) {
+        if let Ok(logger) = self.logger.get() {
+            logger.info(msg);
+        }
+    }
+
+    fn log_warn(&self, msg: &str) {
+        if let Ok(logger) = self.logger.get() {
+            logger.warn(msg);
+        }
+    }
+
+    #[allow(dead_code)]
+    fn log_error(&self, msg: &str) {
+        if let Ok(logger) = self.logger.get() {
+            logger.error(msg);
+        }
+    }
+
+    /// Set a factory function for creating block device components.
+    /// When set, the dispatcher uses this instead of the hard-coded SPDK NVMe implementation.
+    pub fn set_block_device_factory(&self, factory: BlockDeviceFactory) {
+        *self.block_device_factory.lock().unwrap() = Some(factory);
+    }
+
+    /// Set a factory function for creating extent manager components.
+    /// When set, the dispatcher uses this instead of the hard-coded default.
+    pub fn set_extent_manager_factory(&self, factory: ExtentManagerFactory) {
+        *self.extent_manager_factory.lock().unwrap() = Some(factory);
+    }
+
+    /// Attach a pipeline metrics reporter for observability.
+    /// When set, internal data-path stages report timing through this trait.
+    pub fn set_pipeline_metrics(&self, m: Arc<dyn PipelineMetrics>) {
+        *self.pipeline_metrics.write() = Some(m);
+    }
+
+    /// Create a bounded eviction event channel and install the sender.
+    /// Returns the receiver that the shmq serve layer should drain via `TakeEvents`.
+    pub fn create_eviction_channel(
+        &self,
+        capacity: usize,
+    ) -> crossbeam_channel::Receiver<EvictionEvent> {
+        let (tx, rx) = crossbeam_channel::bounded(capacity);
+        *self.eviction_tx.lock().unwrap() = Some(EvictionSender {
+            tx,
+            dropped: Arc::clone(&self.eviction_dropped),
+        });
+        rx
+    }
+
+    /// Read and reset the count of eviction events dropped due to a full channel.
+    pub fn eviction_dropped_count(&self) -> u64 {
+        self.eviction_dropped.swap(0, Ordering::Relaxed)
+    }
+
+    fn emit_eviction(&self, key: CacheKey, reason: EvictionReason) {
+        let guard = self.eviction_tx.lock().unwrap();
+        if let Some(ref tx) = *guard {
+            tx.emit(EvictionEvent { key, reason });
+        }
+    }
+
+    /// Drive for the next block this thread commits, round-robin over
+    /// `num_drives`.
+    ///
+    /// The shmq `CommitStore` handler commits one batch's keys back to back on
+    /// one worker thread, so a batch gets consecutive drives (at most
+    /// ⌈k/N⌉ per drive). The cursor is per thread rather than one shared
+    /// counter, so concurrent batches on other threads cannot interleave a
+    /// batch's sequence. Each thread's start is seeded from a global counter.
+    pub(crate) fn next_store_drive(num_drives: usize) -> usize {
+        if num_drives <= 1 {
+            return 0;
+        }
+        STORE_DRIVE_CURSOR.with(|c| {
+            let cur = c
+                .get()
+                .unwrap_or_else(|| STORE_DRIVE_SEED.fetch_add(1, Ordering::Relaxed));
+            c.set(Some(cur.wrapping_add(1)));
+            cur % num_drives
+        })
+    }
+
+    /// Compute per-drive CPU assignments based on NUMA topology.
+    ///
+    /// For each PCI address, looks up the device's NUMA node from SPDK's
+    /// device list, then assigns CPUs round-robin from that node's available
+    /// cores, skipping the node's first two cores (left for the OS and other
+    /// housekeeping threads). Returns `None` for any drive whose NUMA node can't be resolved
+    /// (the block device component will fall back to its own NUMA heuristic).
+    fn compute_numa_cpu_assignments(
+        spdk_env: &Arc<dyn ISPDKEnv + Send + Sync>,
+        pci_addrs: &[String],
+        logger: &Arc<dyn ILogger + Send + Sync>,
+    ) -> Vec<Option<usize>> {
+        use std::collections::HashMap;
+
+        let topo = match component_core::numa::NumaTopology::discover() {
+            Ok(t) => t,
+            Err(_) => {
+                logger
+                    .warn("dispatcher: NUMA topology unavailable, poller CPUs will not be pinned");
+                return vec![None; pci_addrs.len()];
+            }
+        };
+
+        let devices = spdk_env.devices();
+        let device_map: HashMap<String, i32> = devices
+            .iter()
+            .map(|d| (d.address.to_string(), d.numa_node))
+            .collect();
+
+        // Track next available CPU index per NUMA node for round-robin.
+        let mut node_cpu_idx: HashMap<usize, usize> = HashMap::new();
+
+        pci_addrs
+            .iter()
+            .map(|addr| {
+                let numa_node = device_map.get(addr).copied().unwrap_or(-1);
+                if numa_node < 0 {
+                    return None;
+                }
+                let node_id = numa_node as usize;
+                let node = match topo.node(node_id) {
+                    Some(n) => n,
+                    None => return None,
+                };
+                let cpus: Vec<usize> = node.cpus().iter().skip(2).collect();
+                if cpus.is_empty() {
+                    return None;
+                }
+                let idx = node_cpu_idx.entry(node_id).or_insert(0);
+                let cpu = cpus[*idx % cpus.len()];
+                *idx += 1;
+                logger.info(&format!(
+                    "dispatcher: auto-pinning poller for {addr} to CPU {cpu} (NUMA node {node_id})"
+                ));
+                Some(cpu)
+            })
+            .collect()
+    }
+
+    fn ensure_initialized(&self) -> Result<(), DispatcherError> {
+        if !self.initialized.load(Ordering::Acquire) {
+            return Err(DispatcherError::NotInitialized(
+                "dispatcher not initialized".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Write `buffer` contents to SSD using MDTS-aware segmented I/O.
+    ///
+    /// Splits the write into segments that respect the drive's maximum transfer
+    /// size. When `source_is_dma` is true, wraps slices of the source buffer
+    /// directly for NVMe writes (zero-copy). Otherwise allocates per-segment
+    /// staging buffers and copies into them.
+    fn write_buffer_to_ssd(
+        drive: &dyn IBlockDevice,
+        buffer: &DmaBuffer,
+        start_lba: u64,
+        total_bytes: usize,
+        source_is_dma: bool,
+    ) -> Result<(), DispatcherError> {
+        let block_size = drive.block_size() as usize;
+        let max_transfer = drive.max_transfer_size();
+        let numa_node = drive.numa_node();
+        let aligned_bytes = total_bytes.next_multiple_of(block_size);
+
+        let channels = drive
+            .connect_client()
+            .map_err(|e| DispatcherError::IoError(format!("connect_client failed: {e}")))?;
+
+        let segments =
+            io_segmenter::segment_io(start_lba, aligned_bytes, max_transfer, block_size as u32);
+
+        for seg in &segments {
+            let seg_buf = if source_is_dma {
+                // Zero-copy: source buffer is SPDK-allocated, wrap the slice directly.
+                // SAFETY: buffer pointer + offset is valid for seg.length bytes and DMA-capable.
+                let ptr = unsafe {
+                    (buffer.as_ptr() as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void
+                };
+                unsafe { DmaBuffer::from_raw(ptr, seg.length, noop_free, numa_node) }.map_err(
+                    |e| DispatcherError::AllocationFailed(format!("DmaBuffer wrap segment: {e}")),
+                )?
+            } else {
+                let staging =
+                    DmaBuffer::new(seg.length, block_size, Some(numa_node)).map_err(|e| {
+                        DispatcherError::AllocationFailed(format!("DMA segment buffer: {e}"))
+                    })?;
+
+                let copy_len = seg
+                    .length
+                    .min(total_bytes.saturating_sub(seg.buffer_offset));
+                if copy_len > 0 {
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(
+                            (buffer.as_ptr() as *const u8).add(seg.buffer_offset),
+                            staging.as_ptr() as *mut u8,
+                            copy_len,
+                        );
+                    }
+                }
+                staging
+            };
+
+            let seg_buf = Arc::new(seg_buf);
+            channels
+                .command_tx
+                .send(Command::WriteSync {
+                    ns_id: 1,
+                    lba: seg.lba,
+                    buf: seg_buf,
+                })
+                .map_err(|_| DispatcherError::IoError("send WriteSync failed".into()))?;
+
+            match channels.completion_rx.recv() {
+                Ok(Completion::WriteDone { result, .. }) => {
+                    result
+                        .map_err(|e| DispatcherError::IoError(format!("SSD write failed: {e}")))?;
+                }
+                Ok(other) => {
+                    return Err(DispatcherError::IoError(format!(
+                        "unexpected completion: {other:?}"
+                    )));
+                }
+                Err(_) => {
+                    return Err(DispatcherError::IoError(
+                        "completion channel disconnected".into(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Promote an SSD-resident entry back into the memory-tier and serve to GPU.
+    ///
+    /// Uses pipelined chunked reads: SSD→DRAM (memory-tier) while streaming
+    /// chunks from DRAM→GPU.
+    fn promote_and_serve(
+        &self,
+        key: CacheKey,
+        offset: u64,
+        ipc_handle: &IpcHandle,
+        gpu: &Arc<dyn IGpuServices + Send + Sync>,
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        device: i32,
+    ) -> Result<(), DispatcherError> {
+        let total_bytes = ipc_handle.size as usize;
+
+        // Evict and insert into memory-tier (retries on shard fragmentation).
+        // On tier saturation, fall back to a staging buffer so the load still
+        // succeeds (served uncached) instead of failing — see StagingPool.
+        let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
+        let has_drives = !self.data_drives.read().is_empty();
+        let (mem_ptr, staging_lease) =
+            match self.evict_and_insert(dm, mt, key, ipc_handle.size, max_attempts) {
+                Ok(p) => (p, None),
+                Err(DispatcherError::AllocationFailed(_)) if has_drives => {
+                    let sp = self
+                        .pipeline_ring
+                        .read()
+                        .as_ref()
+                        .and_then(|r| r.staging.clone());
+                    match sp {
+                        Some(sp) if total_bytes <= sp.buf_bytes() => {
+                            let lease = sp.checkout();
+                            (lease.ptr(), Some(lease))
+                        }
+                        _ => {
+                            return Err(DispatcherError::AllocationFailed(
+                                "memory-tier full and no staging buffer available for cold load"
+                                    .into(),
+                            ))
+                        }
+                    }
+                }
+                Err(e) => return Err(e),
+            };
+        let staged = staging_lease.is_some();
+
+        // Read from SSD into memory-tier using pipelined reader.
+        let drives = self.data_drives.read();
+        if drives.is_empty() {
+            // No hardware: just copy zeros to GPU (test/staging-only mode).
+            let aligned = total_bytes.next_multiple_of(4096).max(4096);
+            let temp_buf = unsafe {
+                DmaBuffer::from_raw(mem_ptr as *mut std::ffi::c_void, aligned, noop_free, -1)
+            }
+            .map_err(|e| DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}")))?;
+            let result = gpu.dma_copy_to_device(
+                &temp_buf,
+                ipc_handle.address as *mut std::ffi::c_void,
+                total_bytes,
+            );
+            std::mem::forget(temp_buf);
+            // Register promoted entry in dispatch-map.
+            if dm
+                .create_memory_tier_entry(key, mem_ptr, ipc_handle.size)
+                .is_ok()
+            {
+                self.tier_counters.record_promotion_to_memory();
+            }
+            let _ = dm.release_write(key);
+            return result.map_err(|e| {
+                DispatcherError::IoError(format!("GPU DMA copy (promote) failed: {e}"))
+            });
+        }
+
+        let (idx, raw_offset) = decode_loc(offset);
+        let Some(drive) = drives.get(idx) else {
+            if !staged {
+                let _ = mt.remove(key);
+            }
+            return Err(DispatcherError::IoError(
+                "invalid drive in SSD location".into(),
+            ));
+        };
+        let block_size = drive.block_dev_iface.block_size();
+        let start_lba = raw_offset / u64::from(block_size);
+        let block_dev = Arc::clone(&drive.block_dev_iface);
+
+        // Check out an exclusive channel for this read. A single shared SPSC
+        // channel across concurrent readers lets one thread dequeue another's
+        // completions (completion theft → permanent hang); see ChannelPool.
+        let lease = match drive.channel_pool.checkout() {
+            Ok(lease) => lease,
+            Err(e) => {
+                // No I/O ran: release the reserved slot — the dispatch map
+                // still points the key at the SSD (a staged serve uses a pool
+                // buffer the dropping lease returns, not a tier slot).
+                if !staged {
+                    let _ = mt.remove(key);
+                }
+                return Err(e);
+            }
+        };
+
+        // Zero-copy pipelined reader: NVMe → memory-tier slot → GPU (no intermediate ring copy).
+        // SAFETY: mem_ptr is a valid, CUDA-pinned, SPDK-registered memory-tier slot.
+        // ipc_handle.address is a valid GPU destination pointer.
+        //
+        // Use CUDA streams bound to the destination GPU's device (multi-GPU): the
+        // shared init-device pipeline_ring streams would fail cudaMemcpyAsync for
+        // a block on another GPU. Fall back to the ring's streams only when the
+        // device is unknown.
+        let chunk_size = {
+            let ring_guard = self.pipeline_ring.read();
+            ring_guard.as_ref().map_or(131072, |r| r.chunk_size)
+        };
+        let dev_streams = device_streams_for(&**gpu, device);
+        let streams: [GpuStream; 2] = match &dev_streams {
+            Some(s) => [
+                GpuStream(s.pipe[0] as *mut std::ffi::c_void),
+                GpuStream(s.pipe[1] as *mut std::ffi::c_void),
+            ],
+            None => {
+                let ring_guard = self.pipeline_ring.read();
+                let ring_ref = match ring_guard.as_ref() {
+                    Some(r) => r,
+                    None => {
+                        // No I/O ran: release the reserved slot as above.
+                        if !staged {
+                            let _ = mt.remove(key);
+                        }
+                        return Err(DispatcherError::NotInitialized(
+                            "pipeline ring not allocated".into(),
+                        ));
+                    }
+                };
+                ring_ref.streams
+            }
+        };
+        // Use pipelined_multi_object_zero_copy with a single job — this is the
+        // same pipeline the cold-pool worker uses, with coalesced H2D (one
+        // memcpy_h2d_async per object after all NVMe reads complete) and no
+        // per-segment DmaBuffer mutex overhead. Empirically matches the cold
+        // pool path's p50 performance.
+        {
+            let job = pipeline::ColdReadJob {
+                mem_ptr,
+                gpu_dst: ipc_handle.address as *mut std::ffi::c_void,
+                start_lba,
+                total_bytes,
+                regions: &[],
+            };
+            let results = unsafe {
+                pipeline::pipelined_multi_object_zero_copy(
+                    &*block_dev,
+                    &**gpu,
+                    &streams,
+                    lease.channels(),
+                    &[job],
+                    chunk_size,
+                    128,
+                    None,
+                )
+            };
+            if let Some(Err(e)) = results.into_iter().next() {
+                // The SSD read (or its GPU delivery) failed: release the
+                // reserved slot — the dispatch map still points the key at
+                // the SSD, so keeping it would strand dead tier capacity.
+                if !staged {
+                    let _ = mt.remove(key);
+                }
+                return Err(e);
+            }
+        }
+        drop(lease);
+        drop(drives);
+
+        // Staged (uncached) serve: the DMA is done and the data was delivered to
+        // the GPU, but it lives in a transient staging buffer, not a tier slot —
+        // leave the entry as BlockDevice and return the buffer to the pool (the
+        // lease drops here). Do NOT promote.
+        if staged {
+            drop(staging_lease);
+            return Ok(());
+        }
+
+        // In-place BlockDevice->MemoryTier transition (retains the SSD offset so
+        // the entry stays demotable). Unlike the old remove+recreate, this works
+        // when the entry is pinned (read_ref > 0) by an in-flight load — remove
+        // rejects pinned entries, which crashed the load path.
+        let _ = offset; // offset retained inside promote_block_to_memory_tier
+        if let Err(e) = dm.promote_block_to_memory_tier(key, mem_ptr, ipc_handle.size) {
+            // The in-place transition did not land: release the reserved
+            // slot so the memory tier holds nothing the dispatch map does
+            // not point to (the key stays SSD resident).
+            let _ = mt.remove(key);
+            return Err(DispatcherError::IoError(format!(
+                "promote transition failed: {e}"
+            )));
+        }
+        self.tier_counters.record_promotion_to_memory();
+
+        Ok(())
+    }
+
+    /// Serve one cold key through a transient staging buffer (no caching).
+    ///
+    /// Used when the memory tier is saturated and `evict_and_insert` can't get a
+    /// slot: reads `SSD → staging buffer → GPU` and leaves the dispatch-map entry
+    /// as `BlockDevice`. Holds exactly one staging lease, for the duration of the
+    /// read only, and takes no other lock while blocked on `checkout` — so the
+    /// blocking checkout is deadlock-free (buffers are released independently of
+    /// any memory-tier pin).
+    #[allow(clippy::too_many_arguments)]
+    fn serve_cold_staged(
+        &self,
+        gpu: &Arc<dyn IGpuServices + Send + Sync>,
+        _key: CacheKey,
+        offset: u64,
+        regions: &[IpcHandle],
+        total_size: u32,
+        device: i32,
+    ) -> Result<(), DispatcherError> {
+        let sp = match self
+            .pipeline_ring
+            .read()
+            .as_ref()
+            .and_then(|r| r.staging.clone())
+        {
+            Some(s) if total_size as usize <= s.buf_bytes() => s,
+            _ => {
+                return Err(DispatcherError::AllocationFailed(
+                    "no staging buffer available for cold load".into(),
+                ))
+            }
+        };
+        let lease = sp.checkout();
+        let total_bytes = total_size as usize;
+
+        let drives = self.data_drives.read();
+        if drives.is_empty() {
+            return Err(DispatcherError::IoError(
+                "staged cold read requires a data drive".into(),
+            ));
+        }
+        let (idx, raw_offset) = decode_loc(offset);
+        let drive = drives
+            .get(idx)
+            .ok_or_else(|| DispatcherError::IoError("invalid drive in SSD location".into()))?;
+        let block_size = drive.block_dev_iface.block_size();
+        let start_lba = raw_offset / u64::from(block_size);
+        let block_dev = Arc::clone(&drive.block_dev_iface);
+        // Exclusive channel for this read (see ChannelPool: sharing one SPSC
+        // channel across concurrent readers causes completion theft).
+        let chan_lease = drive.channel_pool.checkout()?;
+
+        // Device-correct streams (multi-GPU), falling back to the ring's streams.
+        let chunk_size = {
+            let ring_guard = self.pipeline_ring.read();
+            ring_guard.as_ref().map_or(131072, |r| r.chunk_size)
+        };
+        let dev_streams = device_streams_for(&**gpu, device);
+        let streams: [GpuStream; 2] = match &dev_streams {
+            Some(s) => [
+                GpuStream(s.pipe[0] as *mut std::ffi::c_void),
+                GpuStream(s.pipe[1] as *mut std::ffi::c_void),
+            ],
+            None => {
+                let ring_guard = self.pipeline_ring.read();
+                let ring_ref = ring_guard.as_ref().ok_or_else(|| {
+                    DispatcherError::NotInitialized("pipeline ring not allocated".into())
+                })?;
+                ring_ref.streams
+            }
+        };
+
+        // Single-region (N==1): fuse SSD->GPU (gpu_dst = the one region), as
+        // before. Multi-region (N>1): read SSD->staging only (gpu_dst null) then
+        // scatter the staging buffer to the N GPU allocations below — the N
+        // regions are colocated in one contiguous slot.
+        let gpu_dst = if regions.len() == 1 {
+            regions[0].address as *mut std::ffi::c_void
+        } else {
+            std::ptr::null_mut()
+        };
+
+        // SAFETY: lease.ptr() is a valid CUDA-pinned + SPDK-registered buffer for
+        // `total_bytes`; gpu_dst is the GPU destination (null for the scatter
+        // case). The lease keeps the buffer alive until after the read completes
+        // below (and, for N>1, until the scatter completes).
+        let res = unsafe {
+            pipeline::pipelined_ssd_to_gpu_zero_copy(
+                &*block_dev,
+                &**gpu,
+                &streams,
+                chan_lease.channels(),
+                lease.ptr(),
+                gpu_dst,
+                start_lba,
+                total_bytes,
+                chunk_size,
+                16,
+            )
+        };
+        drop(chan_lease); // return the channel to the pool
+        drop(drives);
+
+        // Multi-region: the read only filled the staging buffer; scatter it to
+        // the client's N GPU regions before releasing the lease. Synchronize so
+        // the copies complete while lease.ptr() is still valid.
+        let res = res.and_then(|()| {
+            if regions.len() > 1 {
+                let warm_raw = dev_streams.as_ref().map_or(0, |s| s.warm);
+                self.serve_memory_tier_to_gpu(
+                    gpu,
+                    lease.ptr() as *mut u8,
+                    total_size,
+                    regions,
+                    warm_raw,
+                    true,
+                )
+            } else {
+                Ok(())
+            }
+        });
+        drop(lease); // return the staging buffer; do NOT promote (stays BlockDevice)
+        res
+    }
+
+    /// Free one pin-safe eviction victim, returning `true` if a slot was freed.
+    ///
+    /// Scans the `scan` oldest keys. For each candidate, in order of preference:
+    ///  1. **Demote** to BlockDevice via `dm.try_evict_to_block` (keeps the data
+    ///     on SSD and the entry resolvable). Succeeds only when write-through is
+    ///     complete and the entry is unpinned.
+    ///  2. Otherwise **drop** it via `dm.remove` (write-through not yet done, so
+    ///     the block is lost from cache and recomputed on next miss).
+    ///
+    /// Both dispatch-map operations reject entries with `read_ref > 0`, and in
+    /// both branches the dispatch-map transition happens *before* the DRAM slot
+    /// is freed. So this NEVER frees a slot that a pinned, in-flight load still
+    /// points at — the bug that let the old blind-eviction path reclaim a
+    /// pinned slot and corrupt the concurrent load (invalid H2D DMA / stale
+    /// data). A pinned candidate is skipped; the next one is tried.
+    ///
+    /// Returns `false` only when every scanned candidate is pinned — the caller
+    /// must surface pool-full rather than blind-free.
+    fn evict_one_clean(
+        &self,
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        scan: usize,
+    ) -> bool {
+        for cand in mt.oldest_keys(scan) {
+            // Preferred: demote to block (data preserved, entry stays resolvable).
+            //
+            // The error VARIANT is matched rather than `is_ok()` tested, because the
+            // two ways this fails mean opposite things and are indistinguishable
+            // otherwise: `ActiveReferences` means a reader holds a pin, which is the
+            // only failure that implicates a reader, while anything else means the
+            // entry is not persisted enough to demote — expected under write load and
+            // self-correcting. A single "eviction failed" count conflates them and can
+            // support neither conclusion.
+            match dm.try_evict_to_block(cand) {
+                Ok(()) => {
+                    let _ = mt.remove(cand);
+                    self.emit_eviction(cand, EvictionReason::Demoted);
+                    self.tier_counters.record_eviction_from_memory();
+                    return true;
+                }
+                Err(interfaces::DispatchMapError::ActiveReferences(_)) => {
+                    self.tier_counters.record_eviction_blocked_by_pin();
+                }
+                Err(_) => {
+                    // The only other refusal for a resident entry is a missing
+                    // ssd_offset, i.e. write-through has not landed. Counted rather
+                    // than inferred by subtraction, so a third cause appearing later
+                    // shows up as the two counters failing to sum to the scanned
+                    // total instead of being silently attributed to this one.
+                    self.tier_counters.record_eviction_blocked_unpersisted();
+                }
+            }
+            // Write-through incomplete (no ssd_offset) so it can't be demoted.
+            // Do NOT full-remove it: `dm.remove` returns NotExist for the key,
+            // which is UNRECOVERABLE. Under the Check→Pin race a connector may
+            // have already Checked this key resident and be about to load it; a
+            // just-Checked-but-not-yet-Pinned entry has read_ref==0, so dm.remove
+            // would succeed and silently drop it → the subsequent load misses →
+            // forwarded to remote-lookup → fatal IoError in the vLLM connector
+            // (assert transfer_result.success → EngineDeadError). Demotion is
+            // safe because it leaves the key resolvable (BlockDevice), but a full
+            // remove is not. So skip this candidate and try the next one; the
+            // widening scan in `evict_for_space` will reach a persisted (thus
+            // demotable) entry. If the whole tier is unpersisted we return false
+            // → AllocationFailed → the caller serves uncached (staging on load,
+            // dropped-from-store-set on save), never a fatal miss. The entry
+            // becomes demotable as soon as its write-through lands.
+            //
+            // Pinned by an in-flight load — also skip and try the next candidate.
+        }
+        // Every candidate was pinned or undemotable, so the caller must surface
+        // pool-full. This is the event that becomes a declined store once
+        // `reserve_memory` exhausts its backpressure budget retrying.
+        self.tier_counters.record_eviction_scan_exhausted();
+        false
+    }
+
+    /// Evict entries from the memory-tier until `needed` bytes are free.
+    ///
+    /// Every iteration frees one pin-safe eviction victim via [`Self::evict_one_clean`],
+    /// widening the scan as pressure persists; when the regular scan finds nothing it
+    /// retries once at the full depth ([`EVICT_SCAN_MAX`]) before giving up. Evicted
+    /// entries transition MemoryTier → BlockDevice in the dispatch-map (data remains
+    /// on SSD from the prior write-through). If no candidate within that depth is
+    /// evictable — every one is pinned by an in-flight load or not yet written
+    /// through — this returns `AllocationFailed` rather than corrupt a pinned slot;
+    /// the caller leaves the block uncached.
+    ///
+    /// The last-chance scan is what makes the widening real. Without it the first
+    /// scan that frees nothing returns at once, so the window never grows past
+    /// [`EVICT_SCAN_STEP`] and a front of unpersisted entries hides every demotable
+    /// one behind it. `eviction-policy-optimized` produces exactly that front: its
+    /// TinyLFU gate admits a not-more-popular store at the LRU head, so under a store
+    /// burst the head is all fresh, unpersisted keys.
+    // NOTE: This only handles global capacity pressure. If keys are heavily skewed
+    // to one shard (e.g., all keys ≡ 0 mod 16), the target shard can fill while
+    // global used() < capacity(). In that case insert() will return PoolFull after
+    // this function succeeds. Acceptable for now — real workloads distribute evenly.
+    fn evict_for_space(
+        &self,
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        needed: u32,
+        _target_key: CacheKey,
+        max_attempts: usize,
+    ) -> Result<(), DispatcherError> {
+        let mut attempts = 0usize;
+        while mt.used() + needed as usize > mt.capacity() {
+            attempts += 1;
+            if attempts > max_attempts {
+                static WARNED: std::sync::atomic::AtomicBool =
+                    std::sync::atomic::AtomicBool::new(false);
+                if !WARNED.swap(true, Ordering::Relaxed) {
+                    const GIB: f64 = (1024 * 1024 * 1024) as f64;
+                    eprintln!(
+                        "WARNING: memory-tier exhausted (used={:.2} GiB, capacity={:.2} GiB, needed={:.2} GiB). \
+                         Increase --memory-tier-size or reduce concurrent load.",
+                        mt.used() as f64 / GIB,
+                        mt.capacity() as f64 / GIB,
+                        needed as f64 / GIB,
+                    );
+                }
+                return Err(DispatcherError::AllocationFailed(
+                    "memory-tier pool full after eviction".into(),
+                ));
+            }
+
+            // Free one pin-safe victim, widening the scan as pressure persists so
+            // we look deeper into the eviction order past pinned/unpersisted entries.
+            // A miss at the regular depth gets one full-depth retry before failing;
+            // otherwise the first miss ends the loop and the scan never widens.
+            let scan = (EVICT_SCAN_STEP * attempts).min(EVICT_SCAN_MAX);
+            let freed = self.evict_one_clean(dm, mt, scan)
+                || (scan < EVICT_SCAN_MAX && self.evict_one_clean(dm, mt, EVICT_SCAN_MAX));
+            if !freed {
+                // Every candidate in reach is pinned or unpersisted. Do NOT
+                // blind-free — that would reclaim DRAM a load still points at, or
+                // drop a key a connector has just Checked. Surface pool-full; the
+                // caller leaves the block uncached.
+                return Err(DispatcherError::AllocationFailed(
+                    "memory-tier full: no eviction candidate is both written through and unpinned"
+                        .into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Evict and insert into memory-tier, retrying on fragmentation-induced PoolFull.
+    ///
+    /// After `evict_for_space` ensures global capacity, `mt.insert()` can still
+    /// fail if the freed space is non-contiguous (shard-level fragmentation).
+    /// This helper retries by force-evicting from the same shard until a
+    /// contiguous slot is available.
+    fn evict_and_insert(
+        &self,
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        key: CacheKey,
+        size: u32,
+        max_attempts: usize,
+    ) -> Result<*mut u8, DispatcherError> {
+        // Duplicate check BEFORE any eviction: a key that already has a
+        // memory-tier slot is refused with AlreadyExists immediately. Checking
+        // only at `mt.insert` below is too late when the tier is full, because
+        // `evict_for_space` runs first and does not exclude the key being
+        // inserted: it can demote the very entry being duplicated to make room
+        // for its own replacement slot — destroying the existing entry — and
+        // when nothing is evictable the refusal instead surfaces as
+        // AllocationFailed after the caller's full backpressure budget, not
+        // the immediate AlreadyExists the contract promises.
+        if mt.contains(key) {
+            // Not a capacity refusal: someone else — a concurrent writer, or a
+            // remote fetch's `publish_success` — already put this key in the
+            // tier. Counted by the callers that are stores (`reserve_memory`);
+            // the load paths treat this as a hit.
+            return Err(DispatcherError::AlreadyExists(key));
+        }
+        let mut attempts = 0usize;
+        loop {
+            self.evict_for_space(dm, mt, size, key, max_attempts.saturating_sub(attempts))?;
+            match mt.insert(key, size) {
+                Ok(ptr) => return Ok(ptr),
+                Err(interfaces::MemoryTierError::PoolFull) => {
+                    attempts += 1;
+                    if attempts >= max_attempts {
+                        return Err(DispatcherError::AllocationFailed(
+                            "memory-tier pool full (fragmentation after eviction)".into(),
+                        ));
+                    }
+                    // Force-evict one more pin-safe victim to relieve
+                    // fragmentation. If nothing is evictable (all pinned or
+                    // unpersisted), fail rather than blind-free a slot an
+                    // in-flight load still points at.
+                    if !self.evict_one_clean(dm, mt, EVICT_SCAN_MAX) {
+                        return Err(DispatcherError::AllocationFailed(
+                            "memory-tier full: no evictable (unpinned, persisted) entry to relieve fragmentation"
+                                .into(),
+                        ));
+                    }
+                }
+                Err(interfaces::MemoryTierError::AlreadyExists(k)) => {
+                    // Not a capacity refusal, and no longer the common path:
+                    // the pre-check above refuses an already-resident key
+                    // before any eviction. This arm is the race — between that
+                    // check and this insert a concurrent writer, or a remote
+                    // fetch's `publish_success`, put the same key in the tier.
+                    // Not counted here: this helper is shared with the load
+                    // paths, where a lost promotion race is a hit
+                    // (DIS-STORE-ALREADY-RESIDENT-COUNTS-STORES-ONLY);
+                    // `reserve_memory` counts the store refusals.
+                    return Err(DispatcherError::AlreadyExists(k));
+                }
+                Err(e) => {
+                    return Err(DispatcherError::AllocationFailed(e.to_string()));
+                }
+            }
+        }
+    }
+
+    /// Verify a warm slot's CRC-32 before it is served to the GPU. `expected`
+    /// is the checksum recorded on the store path (`None` = never recorded, so
+    /// nothing to check). The slot is pinned by the caller's read-ref, so the
+    /// `size` bytes at `pointer` are stable while we hash them on the CPU. This
+    /// is the latest correct point to check — immediately before the H2D copy
+    /// that feeds the GPU consumer. Returns `IoError` on mismatch.
+    #[cfg(feature = "integrity-check")]
+    fn verify_slot_crc(
+        expected: Option<u32>,
+        key: CacheKey,
+        pointer: *mut u8,
+        size: u32,
+    ) -> Result<(), DispatcherError> {
+        let Some(expected) = expected else {
+            return Ok(());
+        };
+        // SAFETY: the warm hit is pinned by read_ref (no concurrent writer), so
+        // `size` bytes at `pointer` are the resident, immutable slot contents.
+        let bytes = unsafe { std::slice::from_raw_parts(pointer as *const u8, size as usize) };
+        let mut hasher = crc32fast::Hasher::new();
+        hasher.update(bytes);
+        let actual = hasher.finalize();
+        if actual != expected {
+            return Err(DispatcherError::IoError(format!(
+                "integrity: CRC-32 mismatch for key {key:#018x}: expected {expected:#010x}, got {actual:#010x}"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Copy a resident memory-tier slot to a GPU block via DMA. Shared by the
+    /// `batch_lookup` warm fast-path and the concurrent-promotion recovery
+    /// serve. Uses the warm CUDA stream when one is bound, else the synchronous
+    /// `DmaBuffer` fallback (matching the no-warm-stream test/CPU path). When
+    /// `synchronize` is set and the warm stream is used, blocks until the copy
+    /// completes; the fast path passes `false` and defers to one batched sync.
+    fn serve_memory_tier_to_gpu(
+        &self,
+        gpu: &Arc<dyn IGpuServices + Send + Sync>,
+        pointer: *mut u8,
+        size: u32,
+        regions: &[IpcHandle],
+        warm_raw: u64,
+        synchronize: bool,
+    ) -> Result<(), DispatcherError> {
+        // Scatter the one contiguous DRAM slot back to the client's N GPU
+        // regions: region L reads from `slot + sum(sizes[0..L])`. A single-region
+        // block (legacy / populate) is just the L==0 case. `size` is the slot's
+        // byte length; we never read past it even if the regions sum larger.
+        // A zero-sized region receives zero bytes but does not end the
+        // scatter — the regions after it still get theirs. Only an exhausted
+        // slot (nothing left after the preceding regions' sizes) stops the
+        // loop, since no later region can have bytes left to copy.
+        // Use the caller-resolved warm stream for the destination's device; the
+        // stream must be on the same GPU as the region address or the async copy
+        // fails with "invalid argument" under multi-GPU.
+        let raw = warm_raw;
+        if raw != 0 {
+            let s = GpuStream(raw as *mut std::ffi::c_void);
+            let map_err = |e: String| {
+                DispatcherError::IoError(format!("GPU DMA copy (memory-tier→device) failed: {e}"))
+            };
+            pipeline::queue_slot_to_regions(&**gpu, s, pointer, size as usize, regions)
+                .map_err(map_err)?;
+            if synchronize {
+                gpu.stream_synchronize(s).map_err(|e| {
+                    DispatcherError::IoError(format!("stream_synchronize failed: {e}"))
+                })?;
+            }
+            Ok(())
+        } else {
+            let mut off: usize = 0;
+            for region in regions {
+                let rest = (size as usize).saturating_sub(off);
+                if rest == 0 {
+                    break;
+                }
+                let copy_size = (region.size as usize).min(rest);
+                if copy_size > 0 {
+                    let aligned = copy_size.next_multiple_of(4096).max(4096);
+                    let buf = unsafe {
+                        DmaBuffer::from_raw(
+                            (pointer as usize + off) as *mut std::ffi::c_void,
+                            aligned,
+                            noop_free,
+                            -1,
+                        )
+                    }
+                    .map_err(|e| DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}")))?;
+                    let r = gpu
+                        .dma_copy_to_device(
+                            &buf,
+                            region.address as *mut std::ffi::c_void,
+                            copy_size,
+                        )
+                        .map_err(|e| {
+                            DispatcherError::IoError(format!(
+                                "GPU DMA copy (memory-tier→device) failed: {e}"
+                            ))
+                        });
+                    std::mem::forget(buf);
+                    r?;
+                }
+                off += region.size as usize;
+            }
+            Ok(())
+        }
+    }
+
+    /// Serve a key whose promotion lost the `mt.insert` race to a concurrent
+    /// lookup — e.g. the other tensor-parallel rank requesting the same
+    /// content-hash key at the same time. When two `batch_lookup` calls both
+    /// classify a cold key as `BlockDevice`, both try to promote it; the loser
+    /// gets `MemoryTierError::AlreadyExists`. That is a hit, not a failure: the
+    /// winner flips the dispatch-map entry to `MemoryTier` only *after* its
+    /// SSD→DRAM read completes, so observing `MemoryTier` means the data is
+    /// resident. Wait (bounded) for that transition, then DMA to the GPU.
+    ///
+    /// The caller's load pin (`take_read` from `prepare_load`) keeps the entry
+    /// from being evicted while we wait.
+    fn serve_concurrently_promoted(
+        &self,
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        gpu: &Arc<dyn IGpuServices + Send + Sync>,
+        key: CacheKey,
+        regions: &[IpcHandle],
+        warm_raw: u64,
+    ) -> Result<(), DispatcherError> {
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(5);
+        loop {
+            match dm.lookup(key) {
+                Ok(LookupResult::MemoryTier { pointer, size }) => {
+                    let res =
+                        self.serve_memory_tier_to_gpu(gpu, pointer, size, regions, warm_raw, true);
+                    let _ = dm.release_read(key);
+                    let _ = dm.touch(key);
+                    return res;
+                }
+                Ok(LookupResult::BlockDevice { .. }) => {
+                    // Winner hasn't finished its SSD→DRAM read yet: release the
+                    // read-ref this lookup took and back off briefly.
+                    let _ = dm.release_read(key);
+                    if start.elapsed() >= timeout {
+                        return Err(DispatcherError::KeyNotFound(key));
+                    }
+                    std::thread::sleep(std::time::Duration::from_micros(50));
+                }
+                Ok(LookupResult::MismatchSize) => {
+                    let _ = dm.release_read(key);
+                    return Err(DispatcherError::InvalidParameter(
+                        "size mismatch on concurrent-promotion recovery".into(),
+                    ));
+                }
+                // NotExist does not take a read-ref, so nothing to release.
+                Ok(LookupResult::NotExist) => return Err(DispatcherError::KeyNotFound(key)),
+                Err(e) => return Err(DispatcherError::IoError(e.to_string())),
+            }
+        }
+    }
+
+    /// Returns whether the data landed (an SSD offset was recorded).
+    fn process_write_job(
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        drives: &[Arc<dyn IBlockDevice + Send + Sync>],
+        extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
+        job: WriteJob,
+    ) -> bool {
+        let written = Self::write_through(mt, drives, extent_mgrs, &job);
+        Self::settle_write_through(dm, job.key, written);
+        written.is_some()
+    }
+
+    /// Run a dequeued write-through job, coordinated with `remove` through `pins`
+    /// so that `remove` never has to wait for it (FR-018). The outcome is
+    /// recorded in `pins`, so that `flush_to_ssd` can report a failed write.
+    fn run_write_job(
+        pins: &WriteThroughPins,
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        drives: &[Arc<dyn IBlockDevice + Send + Sync>],
+        extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
+        job: WriteJob,
+    ) {
+        match pins.start(job.key) {
+            JobStart::Stale => return,
+            JobStart::Untracked => {
+                let key = job.key;
+                let landed = Self::process_write_job(dm, mt, drives, extent_mgrs, job);
+                return pins.record_write(key, landed);
+            }
+            JobStart::Owned => {}
+        }
+        let written = Self::write_through(mt, drives, extent_mgrs, &job);
+        pins.finish(job.key, |owned| {
+            if owned {
+                pins.record_write(job.key, written.is_some());
+                Self::settle_write_through(dm, job.key, written);
+                return;
+            }
+            // `remove` took the entry while we were reading the slot: free the
+            // slot, and the extent just written, which nothing points at now.
+            let _ = mt.remove(job.key);
+            if let (Some(loc), false) = (written, drives.is_empty()) {
+                if let Some((em, raw)) = select_drive(extent_mgrs, loc) {
+                    let _ = em.remove_extent(raw);
+                }
+            }
+        });
+    }
+
+    /// Release the write-through pin: `convert_to_storage` records the SSD copy
+    /// and decrements the read reference; without a copy the pin is just released.
+    fn settle_write_through(
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        key: CacheKey,
+        written: Option<u64>,
+    ) {
+        match written {
+            Some(block_offset) => {
+                let _ = dm.convert_to_storage(key, block_offset);
+            }
+            None => {
+                let _ = dm.release_read(key);
+            }
+        }
+    }
+
+    /// Copy the entry's DRAM slot to SSD. Returns the SSD location of the
+    /// published extent (`encode_loc(drive, offset)`; a synthetic raw offset
+    /// with no block devices), or `None` if nothing was written.
+    fn write_through(
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        drives: &[Arc<dyn IBlockDevice + Send + Sync>],
+        extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
+        job: &WriteJob,
+    ) -> Option<u64> {
+        // Get the memory-tier pointer without refreshing its eviction-order position —
+        // the write-through must not prevent this entry from being evicted under memory pressure.
+        let (mem_ptr, _size) = mt.peek(job.key)?;
+
+        if drives.is_empty() {
+            // No block devices: mark as converted with a synthetic offset.
+            return Some(job.key * 4096);
+        }
+
+        let drive_idx = job.device_index % drives.len();
+        let drive = &drives[drive_idx];
+        let block_size = drive.block_size() as usize;
+        let total_bytes = job.size as usize;
+        let aligned_bytes = total_bytes.next_multiple_of(block_size);
+
+        // Wrap memory-tier pointer as a temporary DmaBuffer (noop free).
+        // SAFETY: mem_ptr is valid for at least `aligned_bytes` and owned by memory-tier.
+        let temp_buf = match unsafe {
+            DmaBuffer::from_raw(
+                mem_ptr as *mut std::ffi::c_void,
+                aligned_bytes,
+                noop_free,
+                -1,
+            )
+        } {
+            Ok(buf) => buf,
+            Err(_) => return None,
+        };
+
+        // Allocate extent via the extent manager.
+        let iem = &extent_mgrs[drive_idx % extent_mgrs.len()];
+        let write_handle = match iem.reserve_extent(job.key, aligned_bytes as u32) {
+            Ok(wh) => wh,
+            Err(_) => return None,
+        };
+
+        let block_offset = write_handle.extent_offset();
+        let start_lba = block_offset / block_size as u64;
+
+        let dma_capable = mt.is_dma_capable();
+        if Self::write_buffer_to_ssd(&**drive, &temp_buf, start_lba, total_bytes, dma_capable)
+            .is_err()
+        {
+            return None; // write_handle drops → abort
+        }
+
+        // Prevent the noop-free DmaBuffer from being dropped normally.
+        std::mem::forget(temp_buf);
+
+        // Data written successfully — commit the extent metadata.
+        let _ = write_handle.publish();
+        Some(encode_loc(drive_idx, block_offset))
+    }
+}
+
+impl DispatcherComponent {
+    fn parse_pci_addr(s: &str) -> Result<PciAddress, DispatcherError> {
+        let parts: Vec<&str> = s.split(':').collect();
+        if parts.len() != 3 {
+            return Err(DispatcherError::InvalidParameter(format!(
+                "invalid PCI address format: {s}"
+            )));
+        }
+        let domain = u32::from_str_radix(parts[0], 16).map_err(|_| {
+            DispatcherError::InvalidParameter(format!("invalid PCI domain: {}", parts[0]))
+        })?;
+        let bus = u8::from_str_radix(parts[1], 16).map_err(|_| {
+            DispatcherError::InvalidParameter(format!("invalid PCI bus: {}", parts[1]))
+        })?;
+        let dev_func: Vec<&str> = parts[2].split('.').collect();
+        if dev_func.len() != 2 {
+            return Err(DispatcherError::InvalidParameter(format!(
+                "invalid PCI dev.func: {}",
+                parts[2]
+            )));
+        }
+        let dev = u8::from_str_radix(dev_func[0], 16).map_err(|_| {
+            DispatcherError::InvalidParameter(format!("invalid PCI dev: {}", dev_func[0]))
+        })?;
+        let func = u8::from_str_radix(dev_func[1], 16).map_err(|_| {
+            DispatcherError::InvalidParameter(format!("invalid PCI func: {}", dev_func[1]))
+        })?;
+        Ok(PciAddress {
+            domain,
+            bus,
+            dev,
+            func,
+        })
+    }
+
+    #[allow(clippy::type_complexity, unused_variables)]
+    fn create_block_device(
+        &self,
+        i: usize,
+        poller_cpu: Option<usize>,
+        spdk_env: &Arc<dyn ISPDKEnv + Send + Sync>,
+        logger: &Arc<dyn ILogger + Send + Sync>,
+        pci_addr: PciAddress,
+        addr_str: &str,
+    ) -> Result<
+        (
+            Arc<dyn component_core::IUnknown + Send + Sync>,
+            Option<Arc<dyn IBlockDeviceAdmin + Send + Sync>>,
+            Arc<dyn IBlockDevice + Send + Sync>,
+        ),
+        DispatcherError,
+    > {
+        let factory_guard = self.block_device_factory.lock().unwrap();
+        if let Some(ref factory) = *factory_guard {
+            // Factory still uses the base-cpu convention for backward compatibility.
+            let base = poller_cpu.map(|c| c.saturating_sub(i));
+            let (block_dev, ibd, admin) =
+                factory(spdk_env, logger, i, pci_addr, base).map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "block device factory failed for drive {i}: {e}"
+                    ))
+                })?;
+            Ok((block_dev, Some(admin), ibd))
+        } else {
+            drop(factory_guard);
+            #[cfg(feature = "spdk-backend")]
+            {
+                let component = block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent::new_default();
+                component
+                    .spdk_env
+                    .connect(Arc::clone(spdk_env))
+                    .map_err(|e| {
+                        DispatcherError::IoError(format!(
+                            "failed to wire spdk_env for data drive {i}: {e}"
+                        ))
+                    })?;
+                component.logger.connect(Arc::clone(logger)).map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "failed to wire logger for data drive {i}: {e}"
+                    ))
+                })?;
+                let block_dev = component as Arc<dyn component_core::IUnknown + Send + Sync>;
+                let admin: Arc<dyn IBlockDeviceAdmin + Send + Sync> =
+                    component_core::iunknown::query::<dyn IBlockDeviceAdmin + Send + Sync>(
+                        &*block_dev,
+                    )
+                    .ok_or_else(|| {
+                        DispatcherError::IoError(format!(
+                            "failed to query IBlockDeviceAdmin for data drive {i}"
+                        ))
+                    })?;
+                admin.set_pci_address(pci_addr);
+                if let Some(cpu) = poller_cpu {
+                    admin.set_actor_cpu(cpu);
+                }
+                admin.initialize().map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "failed to initialize block device at {addr_str}: {e}"
+                    ))
+                })?;
+                let ibd: Arc<dyn IBlockDevice + Send + Sync> =
+                    component_core::iunknown::query::<dyn IBlockDevice + Send + Sync>(&*block_dev)
+                        .ok_or_else(|| {
+                            DispatcherError::IoError(format!(
+                                "failed to query IBlockDevice for data drive {i}"
+                            ))
+                        })?;
+                Ok((block_dev, Some(admin), ibd))
+            }
+            #[cfg(not(feature = "spdk-backend"))]
+            {
+                Err(DispatcherError::IoError(
+                    "no block device factory set and spdk-backend feature not enabled".into(),
+                ))
+            }
+        }
+    }
+
+    fn create_data_drives(
+        &self,
+        config: &DispatcherConfig,
+    ) -> Result<Vec<DataDrive>, DispatcherError> {
+        let has_factory = self.block_device_factory.lock().unwrap().is_some();
+        let spdk_env: Arc<dyn ISPDKEnv + Send + Sync> = match self.spdk_env.get() {
+            Ok(env) => env,
+            Err(_) if has_factory => {
+                // Factory handles device creation; use uninitialized stub as placeholder
+                use component_core::query_interface;
+                let stub = spdk_env::SPDKEnvComponent::new_default();
+                query_interface!(stub, ISPDKEnv).expect("SPDKEnvComponent must provide ISPDKEnv")
+            }
+            Err(_) => {
+                return Err(DispatcherError::NotInitialized("spdk_env not bound".into()));
+            }
+        };
+
+        let logger = self
+            .logger
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("logger not bound".into()))?;
+
+        // Compute per-drive poller CPU assignments.
+        // When poller_base_cpu is set, drive i gets base + i (existing behavior).
+        // When None, assign CPUs round-robin from each drive's NUMA node.
+        let per_drive_cpu: Vec<Option<usize>> = if config.poller_base_cpu.is_some() {
+            config
+                .data_pci_addrs
+                .iter()
+                .enumerate()
+                .map(|(i, _)| config.poller_base_cpu.map(|base| base + i))
+                .collect()
+        } else {
+            Self::compute_numa_cpu_assignments(&spdk_env, &config.data_pci_addrs, &logger)
+        };
+
+        let mut drives = Vec::with_capacity(config.data_pci_addrs.len());
+
+        for (i, addr_str) in config.data_pci_addrs.iter().enumerate() {
+            let pci_addr = Self::parse_pci_addr(addr_str)?;
+
+            let poller_cpu = per_drive_cpu.get(i).copied().flatten();
+            let (block_dev_component, admin, ibd) =
+                self.create_block_device(i, poller_cpu, &spdk_env, &logger, pci_addr, addr_str)?;
+
+            let numa_node = ibd.numa_node();
+            let spdk_available = self.spdk_env.is_connected();
+            let dma_alloc: DmaAllocFn = if spdk_available {
+                // SPDK path: use hugepage-backed DMA buffers
+                Arc::new(move |size, align, _numa| {
+                    DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
+                })
+            } else {
+                // Non-SPDK path: use posix_memalign for DMA buffers
+                unsafe extern "C" fn libc_free(p: *mut std::ffi::c_void) {
+                    unsafe {
+                        libc::free(p);
+                    }
+                }
+                Arc::new(move |size, align, _numa| {
+                    let mut ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+                    // SAFETY: posix_memalign is safe with valid align (power of 2, multiple of sizeof(void*))
+                    let ret = unsafe { libc::posix_memalign(&mut ptr, align, size) };
+                    if ret != 0 || ptr.is_null() {
+                        return Err(format!(
+                            "posix_memalign failed ({size}, {align}): errno {ret}"
+                        ));
+                    }
+                    unsafe { std::ptr::write_bytes(ptr as *mut u8, 0, size) };
+                    // SAFETY: ptr is valid, non-null, allocated with posix_memalign
+                    unsafe {
+                        DmaBuffer::from_raw(ptr, size, libc_free, numa_node)
+                            .map_err(|e| e.to_string())
+                    }
+                })
+            };
+
+            let extent_mgr: Arc<dyn component_core::IUnknown + Send + Sync> = {
+                let factory_guard = self.extent_manager_factory.lock().unwrap();
+                if let Some(ref factory) = *factory_guard {
+                    factory(&logger, dma_alloc)
+                } else {
+                    let em = extent_manager::ExtentManager::new_inner();
+                    em.set_dma_alloc(dma_alloc);
+                    em.logger
+                        .connect(Arc::clone(&logger) as Arc<dyn ILogger + Send + Sync>)
+                        .map_err(|e| {
+                            DispatcherError::IoError(format!(
+                                "failed to wire logger for extent manager {i}: {e}"
+                            ))
+                        })?;
+                    if let Ok(mt) = self.memory_tier.get() {
+                        let mt_hook = Arc::clone(&mt);
+                        let logger_hook = Arc::clone(&logger) as Arc<dyn ILogger + Send + Sync>;
+                        em.set_post_checkpoint_hook(Arc::new(move || {
+                            let used = mt_hook.used();
+                            let capacity = mt_hook.capacity();
+                            let pct = if capacity > 0 {
+                                used as f64 / capacity as f64 * 100.0
+                            } else {
+                                0.0
+                            };
+                            logger_hook.info(&format!(
+                                "memory_tier_pool ({} / {}, {pct:.1}% used)",
+                                format_bytes(used),
+                                format_bytes(capacity),
+                            ));
+                        }));
+                    }
+                    em as Arc<dyn component_core::IUnknown + Send + Sync>
+                }
+            };
+
+            bind(
+                &*block_dev_component,
+                "IBlockDevice",
+                &*extent_mgr,
+                "metadata_device",
+            )
+            .map_err(|e| {
+                DispatcherError::IoError(format!(
+                    "failed to bind block device to extent manager {i}: {e}"
+                ))
+            })?;
+
+            let iem: Arc<dyn IExtentManager + Send + Sync> =
+                component_core::iunknown::query::<dyn IExtentManager + Send + Sync>(&*extent_mgr)
+                    .ok_or_else(|| {
+                    DispatcherError::IoError(format!(
+                        "failed to query IExtentManager for data drive {i}"
+                    ))
+                })?;
+            let sector_size = ibd.block_size();
+            let num_sectors = ibd.num_sectors(1).unwrap_or(0);
+
+            // --- Partition table management ---
+            let part_mgr = disk_partition_manager::DiskPartitionManager::new_default();
+            part_mgr.set_ns_id(1);
+            bind(
+                &*block_dev_component,
+                "IBlockDevice",
+                &*part_mgr,
+                "block_device",
+            )
+            .map_err(|e| {
+                DispatcherError::IoError(format!(
+                    "failed to bind block device to partition manager {i}: {e}"
+                ))
+            })?;
+
+            let partition_config = interfaces::PartitionConfig {
+                sector_size,
+                total_sectors: num_sectors,
+                ns_id: 1,
+                partitions: vec![
+                    interfaces::PartitionSpec {
+                        type_guid: interfaces::type_guids::CERTUS_METADATA,
+                        size_bytes: config.metadata_partition_size,
+                        name: "certus-metadata".into(),
+                    },
+                    interfaces::PartitionSpec {
+                        type_guid: interfaces::type_guids::CERTUS_EXTERNAL_META,
+                        size_bytes: config.extended_metadata_partition_size,
+                        name: "certus-extended-metadata".into(),
+                    },
+                    interfaces::PartitionSpec {
+                        type_guid: interfaces::type_guids::CERTUS_DATA,
+                        size_bytes: 0, // rest of disk
+                        name: "certus-data".into(),
+                    },
+                ],
+            };
+
+            let (table, formatted) = part_mgr
+                .initialize_or_format(config.format_on_init, partition_config)
+                .map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "failed to initialize partition table for data drive {i}: {e}"
+                    ))
+                })?;
+
+            // Configure extent-manager with partition offsets.
+            // The Certus layout requires exactly three partitions:
+            //   [0] metadata, [1] extended metadata (reserved), [2] data.
+            // A disk with a valid-but-incompatible GPT (e.g. an empty or
+            // non-Certus partition table) reads back with fewer entries, so
+            // guard against out-of-bounds access and fail with a clear error
+            // instead of panicking.
+            const EXPECTED_PARTITIONS: usize = 3;
+            if table.partitions.len() < EXPECTED_PARTITIONS {
+                return Err(DispatcherError::IoError(format!(
+                    "data drive {i} has an incompatible partition table: expected \
+                     {EXPECTED_PARTITIONS} Certus partitions (metadata, extended \
+                     metadata, data) but found {}. The disk has a valid GPT that is \
+                     not a Certus layout; re-run with format_on_init to (destructively) \
+                     format it.",
+                    table.partitions.len()
+                )));
+            }
+
+            iem.set_metadata_base_lba(table.partitions[0].start_lba);
+            // partition[1] = extended metadata (reserved for future use)
+            iem.set_data_base_lba(table.partitions[2].start_lba);
+
+            if formatted {
+                self.log_warn(&format!(
+                    "dispatcher: formatting disk for data drive {i} at {addr_str} \
+                     — all existing data will be destroyed"
+                ));
+            }
+
+            // Log partition layout
+            for p in &table.partitions {
+                let size_mib = p.num_sectors * sector_size as u64 / (1024 * 1024);
+                let size_str = if size_mib >= 1024 * 1024 {
+                    format!("{:.2} TiB", size_mib as f64 / (1024.0 * 1024.0))
+                } else if size_mib >= 1024 {
+                    format!("{:.2} GiB", size_mib as f64 / 1024.0)
+                } else {
+                    format!("{} MiB", size_mib)
+                };
+                self.log_info(&format!(
+                    "dispatcher: drive {i} partition {}: \"{}\" start_lba={} size={}",
+                    p.index, p.name, p.start_lba, size_str
+                ));
+            }
+
+            let data_disk_size = table.partitions[2].num_sectors * sector_size as u64;
+            let defaults = FormatParams::default();
+            let region_size = data_disk_size / defaults.region_count as u64;
+            // Slab must fit within a buddy-allocated region. Use 1/16 of region
+            // (rounded to a power-of-2 in blocks) to allow many size classes.
+            let blocks_in_region = region_size / sector_size as u64;
+            let target_slab_blocks = blocks_in_region / 16;
+            let slab_size = if target_slab_blocks > 0 {
+                let pow2 = 1u64 << (63 - target_slab_blocks.leading_zeros());
+                (pow2 * sector_size as u64).min(defaults.slab_size)
+            } else {
+                defaults.slab_size
+            };
+            let max_extent_size = (slab_size.min(defaults.max_extent_size as u64)) as u32;
+            if formatted {
+                iem.format(FormatParams {
+                    data_disk_size,
+                    sector_size,
+                    slab_size,
+                    max_extent_size,
+                    metadata_region_size: 0,
+                    ..defaults
+                })
+                .map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "failed to format extent manager for data drive {i}: {e}"
+                    ))
+                })?;
+            } else {
+                iem.initialize().map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "failed to recover extent manager for data drive {i}: {e}"
+                    ))
+                })?;
+            }
+
+            let cpu_msg = config
+                .poller_base_cpu
+                .map(|base| format!(", poller pinned to CPU {}", base + i))
+                .unwrap_or_default();
+            self.log_info(&format!(
+                "dispatcher: data drive {i} initialized at {addr_str}{cpu_msg}"
+            ));
+
+            let channel_pool = Arc::new(ChannelPool::new(Arc::clone(&ibd)));
+
+            drives.push(DataDrive {
+                _block_dev: block_dev_component,
+                block_dev_admin: admin,
+                block_dev_iface: ibd,
+                _extent_mgr_component: extent_mgr
+                    as Arc<dyn component_core::IUnknown + Send + Sync>,
+                extent_mgr: iem,
+                channel_pool,
+            });
+        }
+
+        Ok(drives)
+    }
+}
+
+impl IDispatcher for DispatcherComponent {
+    /// Initialize the dispatcher with N drives, CUDA streams, and background workers.
+    ///
+    /// Sequence:
+    /// 1. Create N block devices + N extent managers via factories
+    /// 2. Recover dispatch-map from on-disk extents (if not formatting)
+    /// 3. Allocate warm CUDA streams for hot-path DMA
+    /// 4. Allocate PipelineRing streams for cold-path DMA
+    /// 5. Register memory-tier pool with CUDA + SPDK for zero-copy DMA
+    /// 6. Start background write-through workers (one per drive)
+    /// 7. Start background SSD evictor (if threshold configured)
+    fn initialize(&self, config: DispatcherConfig) -> Result<(), DispatcherError> {
+        self.log_info("dispatcher: initializing");
+
+        self.max_eviction_attempts
+            .store(config.max_eviction_attempts, Ordering::Relaxed);
+        self.store_backpressure_ms
+            .store(config.store_backpressure_ms, Ordering::Relaxed);
+
+        self.dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        self.memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        if config.data_pci_addrs.is_empty() {
+            return Err(DispatcherError::InvalidParameter(
+                "data_pci_addrs must not be empty".into(),
+            ));
+        }
+
+        // Create N block devices and N extent managers from config.
+        // Skip drive creation only in memory-tier-only mode (no spdk_env AND no factory).
+        let has_bd_factory = self.block_device_factory.lock().unwrap().is_some();
+        if self.spdk_env.is_connected() || has_bd_factory {
+            let drives = self.create_data_drives(&config)?;
+            *self.data_drives.write() = drives;
+
+            // Rebuild dispatch-map from recovered extents when not formatting.
+            if !config.format_on_init {
+                let t0 = std::time::Instant::now();
+                let dm = self.dispatch_map.get().map_err(|_| {
+                    DispatcherError::NotInitialized("dispatch_map not bound".into())
+                })?;
+                let mut recovered: u64 = 0;
+                let drives_guard = self.data_drives.read();
+                for (i, drive) in drives_guard.iter().enumerate() {
+                    // The drive that lists the extent is the one it lives on.
+                    drive.extent_mgr.for_each_extent(&mut |extent| {
+                        let _ = dm.recover_extent(
+                            extent.key,
+                            encode_loc(i, extent.offset),
+                            extent.size,
+                        );
+                        recovered += 1;
+                    });
+                }
+                drop(drives_guard);
+                let elapsed = t0.elapsed();
+                self.log_info(&format!(
+                    "dispatcher: dispatch-map recovered {recovered} extents from disk ({elapsed:.2?})"
+                ));
+            }
+
+            // Pre-allocate pipeline ring and register memory with SPDK.
+            // Only when SPDK is available — spdk_mem_register segfaults otherwise.
+            if let Ok(gpu) = self.gpu_services.get() {
+                // Dedicated CUDA stream for warm-path DMA (avoids pipeline_ring lock).
+                match gpu.create_stream() {
+                    Ok(stream) => {
+                        self.warm_stream.store(stream.0 as u64, Ordering::Release);
+                    }
+                    Err(e) => {
+                        self.log_info(&format!("warm stream allocation failed (non-fatal): {e}"));
+                    }
+                }
+
+                if self.spdk_env.is_connected() {
+                    let chunk_size = {
+                        let dd = self.data_drives.read();
+                        dd.first()
+                            .map(|d| d.block_dev_iface.max_transfer_size() as usize)
+                            .unwrap_or(131072)
+                    };
+                    match pipeline::PipelineRing::new(
+                        &*gpu,
+                        chunk_size,
+                        config.cold_staging_slots,
+                        config.cold_staging_buf_bytes,
+                    ) {
+                        Ok(ring) => {
+                            if let Some(ref s) = ring.staging {
+                                self.log_info(&format!(
+                                    "dispatcher: cold-load staging pool ready ({} slots × {} KiB)",
+                                    config.cold_staging_slots,
+                                    config.cold_staging_buf_bytes / 1024,
+                                ));
+                                let _ = s;
+                            }
+                            *self.pipeline_ring.write() = Some(ring);
+                        }
+                        Err(e) => {
+                            self.log_info(&format!(
+                                "pipeline ring allocation failed (non-fatal): {e:?}"
+                            ));
+                        }
+                    }
+
+                    // Register memory-tier pool as CUDA-pinned + SPDK DMA-capable
+                    // for zero-copy NVMe reads and async GPU transfers.
+                    if let Ok(mt) = self.memory_tier.get() {
+                        if let Some((pool_ptr, pool_size)) = mt.pool_info() {
+                            match gpu
+                                .register_host_memory(pool_ptr as *mut std::ffi::c_void, pool_size)
+                            {
+                                Ok(()) => {
+                                    self.log_info(&format!(
+                                        "dispatcher: registered memory-tier pool ({} MiB) for zero-copy DMA",
+                                        pool_size / (1024 * 1024)
+                                    ));
+                                }
+                                Err(e) => {
+                                    self.log_info(&format!(
+                                        "memory-tier pool registration failed (non-fatal): {e}"
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let dm_for_writer = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        let mt_for_writer = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        // Collect block device interfaces and extent managers for the background writer.
+        let bg_drives: Vec<Arc<dyn IBlockDevice + Send + Sync>> = {
+            let dd = self.data_drives.read();
+            dd.iter().map(|d| Arc::clone(&d.block_dev_iface)).collect()
+        };
+        let bg_extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>> = {
+            let dd = self.data_drives.read();
+            dd.iter().map(|d| Arc::clone(&d.extent_mgr)).collect()
+        };
+
+        let num_writer_drives = bg_drives.len().max(1);
+        let writer = ParallelBackgroundWriter::start(num_writer_drives, |drive_idx| {
+            let pins = Arc::clone(&self.write_through_pins);
+            let dm = Arc::clone(&dm_for_writer);
+            let mt = Arc::clone(&mt_for_writer);
+            let drives = bg_drives.clone();
+            let extent_mgrs = bg_extent_mgrs.clone();
+            let _ = drive_idx;
+            move |job: WriteJob| {
+                Self::run_write_job(&pins, &dm, &mt, &drives, &extent_mgrs, job);
+            }
+        });
+
+        *self.bg_writer.lock().unwrap() = Some(writer);
+
+        // Start background SSD evictor if drives exist and threshold is configured.
+        if config.ssd_eviction_threshold > 0.0 {
+            let dm_for_evictor = self
+                .dispatch_map
+                .get()
+                .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+            let mt_for_evictor = self
+                .memory_tier
+                .get()
+                .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+            let evictor_extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>> = {
+                let dd = self.data_drives.read();
+                dd.iter().map(|d| Arc::clone(&d.extent_mgr)).collect()
+            };
+            let evictor_logger = self.logger.get().ok();
+
+            if !evictor_extent_mgrs.is_empty() {
+                let evictor = BackgroundEvictor::start(
+                    dm_for_evictor,
+                    mt_for_evictor,
+                    evictor_extent_mgrs,
+                    EvictorConfig {
+                        threshold: config.ssd_eviction_threshold,
+                        low_watermark: config.ssd_eviction_low_watermark,
+                        batch_size: config.ssd_eviction_batch_size,
+                        interval: std::time::Duration::from_secs(config.ssd_eviction_interval_secs),
+                    },
+                    evictor_logger,
+                    Arc::clone(&self.eviction_tx),
+                    Arc::clone(&self.tier_counters),
+                );
+                *self.bg_evictor.lock().unwrap() = Some(evictor);
+            }
+        }
+
+        // Start background memory-tier evictor (DRAM → SSD demotion) if configured.
+        if config.memory_tier_eviction_threshold > 0.0 {
+            let dm_for_mt_evictor = self
+                .dispatch_map
+                .get()
+                .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+            let mt_for_mt_evictor = self
+                .memory_tier
+                .get()
+                .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+            let mt_evictor_logger = self.logger.get().ok();
+            let mt_evictor = MemoryTierEvictor::start(
+                dm_for_mt_evictor,
+                mt_for_mt_evictor,
+                MemoryTierEvictorConfig {
+                    threshold: config.memory_tier_eviction_threshold,
+                    low_watermark: config.memory_tier_eviction_low_watermark,
+                    batch_size: config.memory_tier_eviction_batch_size,
+                    interval: std::time::Duration::from_secs(
+                        config.memory_tier_eviction_interval_secs,
+                    ),
+                },
+                mt_evictor_logger,
+                Arc::clone(&self.eviction_tx),
+                Arc::clone(&self.tier_counters),
+            );
+            *self.bg_mt_evictor.lock().unwrap() = Some(mt_evictor);
+        }
+
+        self.initialized.store(true, Ordering::Release);
+
+        if let Ok(rl) = self.remote_lookup.get() {
+            let _ = rl.join_cluster("certus://local-cluster");
+        }
+
+        self.log_info("dispatcher: initialized");
+        Ok(())
+    }
+
+    fn shutdown(&self) -> Result<(), DispatcherError> {
+        self.log_info("dispatcher: shutting down");
+
+        if let Some(mut evictor) = self.bg_evictor.lock().unwrap().take() {
+            evictor.shutdown();
+        }
+
+        if let Some(mut mt_evictor) = self.bg_mt_evictor.lock().unwrap().take() {
+            mt_evictor.shutdown();
+        }
+
+        if let Some(mut writer) = self.bg_writer.lock().unwrap().take() {
+            writer.shutdown();
+        }
+
+        // Checkpoint all extent managers to persist metadata before teardown.
+        {
+            let drives = self.data_drives.read();
+            for (i, drive) in drives.iter().enumerate() {
+                if let Err(e) = drive.extent_mgr.checkpoint() {
+                    self.log_error(&format!(
+                        "dispatcher: extent manager {i} checkpoint failed: {e}"
+                    ));
+                }
+            }
+        }
+
+        // Unregister memory-tier pool from CUDA/SPDK before tearing down.
+        if let (Ok(gpu), Ok(mt)) = (self.gpu_services.get(), self.memory_tier.get()) {
+            if let Some((pool_ptr, pool_size)) = mt.pool_info() {
+                let _ = gpu.unregister_host_memory(pool_ptr as *mut std::ffi::c_void, pool_size);
+            }
+        }
+
+        // Destroy warm stream and pipeline ring.
+        if let Ok(gpu) = self.gpu_services.get() {
+            let raw = self.warm_stream.swap(0, Ordering::AcqRel);
+            if raw != 0 {
+                let _ = gpu.destroy_stream(GpuStream(raw as *mut std::ffi::c_void));
+            }
+            let ring_opt = self.pipeline_ring.write().take();
+            if let Some(ring) = ring_opt {
+                ring.destroy(&*gpu);
+            }
+        }
+
+        // Two-phase block device shutdown: signal all actors to stop first,
+        // then join threads. This prevents crashes from SPDK transport teardown
+        // invalidating memory that other actors are still actively polling.
+        let drives = {
+            let mut g = self.data_drives.write();
+            std::mem::take(&mut *g)
+        };
+        // Phase 1: Signal all actors to stop (closes channels, actors exit poll loops)
+        for drive in &drives {
+            if let Some(ref admin) = drive.block_dev_admin {
+                admin.signal_stop();
+            }
+        }
+        // Phase 2: Join actor threads (safe now that all actors have been signaled)
+        for (i, drive) in drives.iter().enumerate().rev() {
+            if let Some(ref admin) = drive.block_dev_admin {
+                if let Err(e) = admin.shutdown() {
+                    self.log_error(&format!(
+                        "dispatcher: failed to shut down data drive {i}: {e}"
+                    ));
+                }
+            }
+        }
+        // Phase 3: Detach controllers (safe now that ALL actor threads have exited)
+        for drive in &drives {
+            if let Some(ref admin) = drive.block_dev_admin {
+                admin.detach_controller();
+            }
+        }
+
+        if let Ok(rl) = self.remote_lookup.get() {
+            let _ = rl.leave_cluster();
+        }
+
+        self.initialized.store(false, Ordering::Release);
+        self.log_info("dispatcher: shut down");
+        Ok(())
+    }
+
+    fn lookup(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError> {
+        let stream = self.lookup_async(key, ipc_handle)?;
+        if !stream.0.is_null() {
+            let gpu = self
+                .gpu_services
+                .get()
+                .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
+            gpu.stream_synchronize(stream)
+                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+        }
+        Ok(())
+    }
+
+    /// Batch lookup — the primary benchmark path for multi-key retrieval.
+    ///
+    /// Two-phase design:
+    /// 1. **Classification loop**: for each key, query dispatch-map:
+    ///    - MemoryTier hit → issue async H2D DMA (round-robin across 4 streams)
+    ///    - BlockDevice hit → collect into cold_entries for phase 2
+    ///    - NotExist → handle inline
+    ///      The warm copies are only queued here; the loop does not wait on them.
+    ///
+    /// 2. **Cold promotion** (if any BlockDevice hits):
+    ///    - Group cold entries by drive index
+    ///    - Spawn per-drive queue threads (up to 2 per drive)
+    ///    - Each thread: evict → insert memory-tier slot → pipelined NVMe reads
+    ///      directly into memory-tier → async H2D DMA to GPU
+    ///
+    /// Order: classify → warm copies queued async → cold prep → scatter-gather
+    /// (NVMe overlaps the warm H2D drain) → warm stream sync → warm pin release
+    /// → remote lookup → reply.
+    fn batch_lookup(&self, entries: &[(CacheKey, Vec<IpcHandle>)]) -> Vec<LookupOutcome> {
+        if entries.is_empty() {
+            return Vec::new();
+        }
+
+        let init_check = self.ensure_initialized();
+        if let Err(e) = init_check {
+            return entries
+                .iter()
+                .map(|_| LookupOutcome {
+                    // Nothing was attempted, so no tier was involved. `Error` rather
+                    // than `Miss`: an unbound receptacle is a fault, and reporting it
+                    // as absence would fold a broken server into the hit rate as a
+                    // cold cache.
+                    served_by: ServedBy::Error,
+                    result: Err(e.clone()),
+                })
+                .collect();
+        }
+
+        let dm = match self.dispatch_map.get() {
+            Ok(dm) => dm,
+            Err(_) => {
+                let e = DispatcherError::NotInitialized("dispatch_map not bound".into());
+                return entries
+                    .iter()
+                    .map(|_| LookupOutcome {
+                        // Nothing was attempted, so no tier was involved. `Error` rather
+                        // than `Miss`: an unbound receptacle is a fault, and reporting it
+                        // as absence would fold a broken server into the hit rate as a
+                        // cold cache.
+                        served_by: ServedBy::Error,
+                        result: Err(e.clone()),
+                    })
+                    .collect();
+            }
+        };
+        let mt = match self.memory_tier.get() {
+            Ok(mt) => mt,
+            Err(_) => {
+                let e = DispatcherError::NotInitialized("memory_tier not bound".into());
+                return entries
+                    .iter()
+                    .map(|_| LookupOutcome {
+                        // Nothing was attempted, so no tier was involved. `Error` rather
+                        // than `Miss`: an unbound receptacle is a fault, and reporting it
+                        // as absence would fold a broken server into the hit rate as a
+                        // cold cache.
+                        served_by: ServedBy::Error,
+                        result: Err(e.clone()),
+                    })
+                    .collect();
+            }
+        };
+        let gpu = match self.gpu_services.get() {
+            Ok(gpu) => gpu,
+            Err(_) => {
+                let e = DispatcherError::NotInitialized("gpu_services not bound".into());
+                return entries
+                    .iter()
+                    .map(|_| LookupOutcome {
+                        // Nothing was attempted, so no tier was involved. `Error` rather
+                        // than `Miss`: an unbound receptacle is a fault, and reporting it
+                        // as absence would fold a broken server into the hit rate as a
+                        // cold cache.
+                        served_by: ServedBy::Error,
+                        result: Err(e.clone()),
+                    })
+                    .collect();
+            }
+        };
+
+        let mut results: Vec<Option<Result<(), DispatcherError>>> = vec![None; entries.len()];
+
+        // Per-key serving tier, set by whichever pass actually serves the key.
+
+        // Deliberately `None` by default and deliberately NOT defaulted to a tier at
+
+        // the end: a key that was served without a pass recording how is a bug, and a
+
+        // plausible default (`Dram`) would hide it behind a number that looks right.
+
+        // Left `None`, it becomes `ServedBy::Error` on an `Ok` result, which breaks the
+
+        // `is_hit() <=> is_ok()` invariant loudly and fails its test.
+
+        let mut tier: Vec<Option<ServedBy>> = vec![None; entries.len()];
+        // Resolve the GPU device this batch's blocks live on (all entries come
+        // from a single rank → a single device) and make it current on this
+        // thread. Pick the warm/pipeline streams bound to that device: a stream
+        // on another GPU makes cudaMemcpyAsync fail with "invalid argument"
+        // under tensor parallelism.
+        let batch_device = entries
+            .iter()
+            .flat_map(|(_, regions)| regions.iter().map(|h| h.address))
+            .find(|a| !a.is_null())
+            .map_or(-1, |addr| set_batch_device(&*gpu, addr));
+        let dev_streams = device_streams_for(&*gpu, batch_device);
+        let warm_raw = dev_streams.as_ref().map_or(0, |s| s.warm);
+
+        // Classify entries and handle fast paths inline.
+        struct ColdEntry {
+            idx: usize,
+            key: CacheKey,
+            offset: u64,
+            // One block = N per-layer regions (0.23+); N==1 for a coalesced
+            // block (0.20/0.22). They land colocated in one slot of `total_size`
+            // bytes, then scatter to the N GPU allocations on load.
+            regions: Vec<IpcHandle>,
+            total_size: u32,
+        }
+        // SAFETY: ColdEntry contains raw pointers from IpcHandle (GPU device pointers).
+        // These pointers are valid across threads — CUDA IPC handles are designed for
+        // cross-process/thread use. We only read the pointer value to pass to CUDA APIs.
+        unsafe impl Send for ColdEntry {}
+        unsafe impl Sync for ColdEntry {}
+
+        let mut cold_entries: Vec<ColdEntry> = Vec::new();
+        let mut deferred_touch_keys: Vec<CacheKey> = Vec::new();
+        // Indices of the warm hits whose H2D copy is queued on the warm stream
+        // and only completed by the deferred sync below. If that sync fails,
+        // these are the entries whose destination buffers may not hold the
+        // data — each must be reported as an error, never as a hit.
+        let mut warm_inflight: Vec<usize> = Vec::new();
+        // Read pins for the warm hits below. The H2D copies are submitted async and
+        // synchronized once after the cold scatter-gather, so each pin must survive
+        // until *after* that deferred sync: releasing at submission would let the
+        // memory-tier evictor reclaim the DRAM slot from under an in-flight DMA.
+        let mut warm_pins = pins::PinnedKeys::new(Arc::clone(&dm));
+
+        for (i, (key, regions)) in entries.iter().enumerate() {
+            let key = *key;
+            // Σ of the per-region sizes = the reserved slot's byte length.
+            let total_size: u32 = regions.iter().map(|r| r.size).sum();
+
+            // A `dm.lookup` that returns Err means *timeout* waiting for a
+            // transient write_ref (a concurrent store-commit / promote) to
+            // clear, NOT a missing key: dispatch-map entries survive demotion
+            // (in-place flip to BlockDevice) and are removed only by the
+            // ssd-evictor / explicit remove. Collapsing that Err into
+            // `KeyNotFound` would forward a live key to remote-lookup, whose
+            // miss becomes a FATAL LOAD failure in the vLLM connector
+            // (EngineDeadError) — the remote-forward path has no graceful
+            // degrade. Retry the local lookup a few times so a writer holding
+            // write_ref past a single 2 s wait clears before we give up.
+            //
+            // Defensive: under the crash-repro workload this retry does not fire
+            // (write_ref windows are sub-millisecond with integrity gating off,
+            // so the first lookup already succeeds). The observed graceful
+            // degrade is restored by the two removal/allocation-path fixes
+            // (`evict_one_clean` no longer full-removes unpersisted victims; cold
+            // loads no longer take the no-staging inline fast path). This guards
+            // the one remaining fatal classification — Err(Timeout) misread as
+            // KeyNotFound — should lock contention ever widen that window.
+            const LOOKUP_RETRIES: u32 = 5;
+            let lookup = {
+                let mut lk = dm.lookup(key);
+                let mut retries = 0u32;
+                while matches!(lk, Err(_)) && retries < LOOKUP_RETRIES {
+                    retries += 1;
+                    lk = dm.lookup(key);
+                }
+                lk
+            };
+            match lookup {
+                Ok(lookup_result) => match lookup_result {
+                    LookupResult::NotExist => {
+                        results[i] = Some(Err(DispatcherError::KeyNotFound(key)));
+                    }
+                    LookupResult::MismatchSize => {
+                        let _ = dm.release_read(key);
+                        results[i] = Some(Err(DispatcherError::InvalidParameter(
+                            "size mismatch on lookup".into(),
+                        )));
+                    }
+                    LookupResult::MemoryTier { pointer, size } => {
+                        let t_hot = std::time::Instant::now();
+                        // Integrity: verify the slot's CRC-32 on the CPU before
+                        // the H2D copy feeds the GPU. A mismatch fails the load
+                        // for this key instead of serving corrupt KV.
+                        #[cfg(feature = "integrity-check")]
+                        {
+                            if let Err(e) =
+                                Self::verify_slot_crc(dm.get_checksum(key), key, pointer, size)
+                            {
+                                let _ = dm.release_read(key);
+                                results[i] = Some(Err(e));
+                                continue;
+                            }
+                        }
+                        // Warm hit: defer the stream sync to one batched sync
+                        // after the classification loop (synchronize = false).
+                        let res = self.serve_memory_tier_to_gpu(
+                            &gpu, pointer, size, regions, warm_raw, false,
+                        );
+                        if let Some(ref m) = *self.pipeline_metrics.read() {
+                            m.record_hot_gpu_dma(t_hot.elapsed().as_micros() as f64);
+                        }
+                        // The copy is only submitted, not complete: hand the pin to
+                        // `warm_pins`, which releases it after the batched sync.
+                        warm_pins.adopt(key);
+                        deferred_touch_keys.push(key);
+                        tier[i] = Some(ServedBy::Dram);
+                        // The copy is queued, not complete: it is in flight
+                        // until the deferred sync (warm_raw == 0 means the
+                        // synchronous path ran — nothing is in flight).
+                        if warm_raw != 0 && res.is_ok() {
+                            warm_inflight.push(i);
+                        }
+                        results[i] = Some(res);
+                    }
+                    LookupResult::BlockDevice { offset } => {
+                        let _ = dm.release_read(key);
+                        // Marked here rather than at each cold sub-path (pooled read,
+                        // inline fallback, staging post-pass, no-drives) so all four
+                        // inherit one attribution and cannot drift apart. `Ssd` is the
+                        // honest answer even though serving promotes into DRAM: the
+                        // taxonomy is the route, not the residency afterwards.
+                        tier[i] = Some(ServedBy::Ssd);
+                        cold_entries.push(ColdEntry {
+                            idx: i,
+                            key,
+                            offset,
+                            regions: regions.clone(),
+                            total_size,
+                        });
+                    }
+                },
+                Err(_) => {
+                    results[i] = Some(Err(DispatcherError::KeyNotFound(key)));
+                }
+            }
+        }
+
+        // Refresh warm-hit recency before cold prep so its evictor sees the same
+        // LRU order as before. The slots stay pinned by `warm_pins` meanwhile; the
+        // warm stream sync is deferred past the cold block below so the queued
+        // H2D copies drain while the NVMe reads run.
+        if !deferred_touch_keys.is_empty() {
+            mt.batch_touch(&deferred_touch_keys);
+        }
+
+        // Promote cold entries in parallel via a single multiplexed
+        // scatter-gather loop on this thread: one channel is checked out per
+        // active drive and `scatter_gather_multi_drive_zero_copy` fans NVMe
+        // reads across all drives at once (no per-drive worker threads).
+        //
+        // All cold entries — including a lone single-key load — go through the
+        // pooled path. It defers tier-saturation (`AllocationFailed`) to the
+        // staging post-pass so a cold load degrades to an uncached serve instead
+        // of failing. The single-key inline `promote_and_serve` fast path is
+        // intentionally NOT used here: it has no staging fallback, so under
+        // memory-tier pressure it turned a survivable cold miss into a fatal
+        // LOAD FAILURE (which crashes vLLM) — a regression vs unstable. The
+        // scheduling win is not worth reintroducing that failure mode.
+        if !cold_entries.is_empty() {
+            let chunk_size = {
+                let ring_guard = self.pipeline_ring.read();
+                ring_guard.as_ref().map_or(131072, |r| r.chunk_size)
+            };
+
+            let drives = self.data_drives.read();
+            let num_drives = drives.len();
+
+            if num_drives == 0 {
+                let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
+                for entry in &cold_entries {
+                    self.evict_for_space(&dm, &mt, entry.total_size, entry.key, max_attempts)
+                        .ok();
+                    let res = mt
+                        .insert(entry.key, entry.total_size)
+                        .map(|mem_ptr| {
+                            // In-place, pin-safe promote (no remove/recreate).
+                            if dm
+                                .promote_block_to_memory_tier(entry.key, mem_ptr, entry.total_size)
+                                .is_ok()
+                            {
+                                self.tier_counters.record_promotion_to_memory();
+                            } else {
+                                // The promotion did not land: release the
+                                // slot — the dispatch map still points the
+                                // key at the SSD.
+                                let _ = mt.remove(entry.key);
+                            }
+                        })
+                        .map_err(|e| match e {
+                            // Preserve AlreadyExists so the recovery pass below
+                            // can re-serve the block warm (concurrent promotion).
+                            interfaces::MemoryTierError::AlreadyExists(k) => {
+                                DispatcherError::AlreadyExists(k)
+                            }
+                            other => DispatcherError::AllocationFailed(format!(
+                                "promote insert failed: {other}"
+                            )),
+                        });
+                    results[entry.idx] = Some(res);
+                }
+            } else {
+                // Group cold entries by the drive recorded in their SSD location.
+                // An invalid drive fails the entry here, before any slot is reserved.
+                let mut per_drive: Vec<Vec<usize>> = vec![Vec::new(); num_drives];
+                for (ci, entry) in cold_entries.iter().enumerate() {
+                    let (drive_idx, _) = decode_loc(entry.offset);
+                    match per_drive.get_mut(drive_idx) {
+                        Some(v) => v.push(ci),
+                        None => {
+                            results[entry.idx] = Some(Err(DispatcherError::IoError(
+                                "invalid drive in SSD location".into(),
+                            )));
+                        }
+                    }
+                }
+
+                let queue_depth = 128;
+                let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
+                let pm = self.pipeline_metrics.read();
+                let pm_arc: Option<Arc<dyn PipelineMetrics>> = pm.as_ref().map(Arc::clone);
+                drop(pm);
+
+                let staging_available = self
+                    .pipeline_ring
+                    .read()
+                    .as_ref()
+                    .is_some_and(|r| r.staging.is_some());
+                let mut staged: Vec<usize> = Vec::new();
+
+                // Per-drive cold_prep: evict_and_insert per entry, build ColdReadJobs.
+                struct DriveJobSet<'a> {
+                    drive_idx: usize,
+                    jobs: Vec<pipeline::ColdReadJob<'a>>,
+                    job_ci: Vec<usize>,
+                    mem_ptrs: Vec<*mut u8>,
+                }
+                let mut drive_job_sets: Vec<DriveJobSet<'_>> = Vec::new();
+                let mut prep_failures: Vec<(usize, Result<(), DispatcherError>)> = Vec::new();
+
+                for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
+                    if entry_indices.is_empty() {
+                        continue;
+                    }
+
+                    let drive = &drives[drive_idx];
+                    let block_size = drive.block_dev_iface.block_size();
+
+                    let mut jobs: Vec<pipeline::ColdReadJob<'_>> =
+                        Vec::with_capacity(entry_indices.len());
+                    let mut job_ci: Vec<usize> = Vec::with_capacity(entry_indices.len());
+                    let mut mem_ptrs: Vec<*mut u8> = Vec::with_capacity(entry_indices.len());
+
+                    for &ci in entry_indices {
+                        let entry = &cold_entries[ci];
+                        let ipc_size = entry.total_size;
+
+                        let prep =
+                            self.evict_and_insert(&dm, &mt, entry.key, ipc_size, max_attempts);
+
+                        match prep {
+                            Ok(mem_ptr) => {
+                                let gpu_dst = if entry.regions.len() == 1 {
+                                    entry.regions[0].address as *mut std::ffi::c_void
+                                } else {
+                                    std::ptr::null_mut()
+                                };
+                                jobs.push(pipeline::ColdReadJob {
+                                    mem_ptr,
+                                    gpu_dst,
+                                    start_lba: decode_loc(entry.offset).1 / u64::from(block_size),
+                                    total_bytes: ipc_size as usize,
+                                    // A multi-region block is scattered to its
+                                    // pieces inside the scatter-gather loop.
+                                    regions: &entry.regions,
+                                });
+                                job_ci.push(ci);
+                                mem_ptrs.push(mem_ptr);
+                            }
+                            Err(DispatcherError::AllocationFailed(_)) if staging_available => {
+                                staged.push(ci);
+                            }
+                            Err(e) => {
+                                prep_failures.push((ci, Err(e)));
+                            }
+                        }
+                    }
+
+                    if !jobs.is_empty() {
+                        drive_job_sets.push(DriveJobSet {
+                            drive_idx,
+                            jobs,
+                            job_ci,
+                            mem_ptrs,
+                        });
+                    }
+                }
+
+                // Record prep failures.
+                for (ci, res) in prep_failures {
+                    results[cold_entries[ci].idx] = Some(res);
+                }
+
+                // Scatter-gather: check out one channel per active drive,
+                // run all drives' NVMe I/O in a single multiplexed loop.
+                if !drive_job_sets.is_empty() {
+                    let pipe_streams: [GpuStream; 2] = match &dev_streams {
+                        Some(s) => [
+                            GpuStream(s.pipe[0] as *mut std::ffi::c_void),
+                            GpuStream(s.pipe[1] as *mut std::ffi::c_void),
+                        ],
+                        None => {
+                            // Fallback: create temporary streams.
+                            let a = gpu.create_stream();
+                            let b = a
+                                .as_ref()
+                                .ok()
+                                .and_then(|&sa| gpu.create_stream().map(|sb| [sa, sb]).ok());
+                            match b {
+                                Some(st) => st,
+                                None => {
+                                    // Cannot get streams — fail all jobs.
+                                    for djs in &drive_job_sets {
+                                        for &ci in &djs.job_ci {
+                                            // No I/O ran: release the
+                                            // reserved slot — the dispatch map
+                                            // still points the key at the SSD.
+                                            let _ = mt.remove(cold_entries[ci].key);
+                                            results[cold_entries[ci].idx] =
+                                                Some(Err(DispatcherError::IoError(
+                                                    "create_stream failed for scatter-gather"
+                                                        .into(),
+                                                )));
+                                        }
+                                    }
+                                    drive_job_sets.clear();
+                                    [GpuStream(std::ptr::null_mut()); 2]
+                                }
+                            }
+                        }
+                    };
+
+                    if !drive_job_sets.is_empty() {
+                        let mut channel_leases: Vec<ChannelLease<'_>> = Vec::new();
+                        let mut drive_works: Vec<pipeline::DriveWork<'_>> = Vec::new();
+                        let mut checkout_ok = true;
+
+                        for djs in &drive_job_sets {
+                            match drives[djs.drive_idx].channel_pool.checkout() {
+                                Ok(lease) => {
+                                    channel_leases.push(lease);
+                                }
+                                Err(e) => {
+                                    // The scatter-gather cannot run for any
+                                    // drive: release every reserved slot —
+                                    // the dispatch map still points these
+                                    // keys at the SSD.
+                                    for djs2 in &drive_job_sets {
+                                        for &ci in &djs2.job_ci {
+                                            let _ = mt.remove(cold_entries[ci].key);
+                                        }
+                                    }
+                                    for &ci in &djs.job_ci {
+                                        results[cold_entries[ci].idx] = Some(Err(e.clone()));
+                                    }
+                                    checkout_ok = false;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if checkout_ok {
+                            for (i, djs) in drive_job_sets.iter().enumerate() {
+                                drive_works.push(pipeline::DriveWork {
+                                    channels: channel_leases[i].channels(),
+                                    drive: &*drives[djs.drive_idx].block_dev_iface,
+                                    jobs: &djs.jobs,
+                                });
+                            }
+
+                            let scatter_results = unsafe {
+                                pipeline::scatter_gather_multi_drive_zero_copy(
+                                    &*gpu,
+                                    &pipe_streams,
+                                    &drive_works,
+                                    chunk_size,
+                                    queue_depth,
+                                    pm_arc.as_deref(),
+                                )
+                            };
+
+                            // Process results: promote. Every Ok job (single- or
+                            // multi-region) was already delivered to its GPU
+                            // destinations inside the call, behind its checked
+                            // final pipe-stream sync.
+                            for (di, djs) in drive_job_sets.iter().enumerate() {
+                                for (job_idx, result) in scatter_results[di].iter().enumerate() {
+                                    let ci = djs.job_ci[job_idx];
+                                    let entry = &cold_entries[ci];
+                                    let res = match result {
+                                        Ok(()) => {
+                                            match dm.promote_block_to_memory_tier(
+                                                entry.key,
+                                                djs.mem_ptrs[job_idx],
+                                                entry.total_size,
+                                            ) {
+                                                Ok(()) => {
+                                                    self.tier_counters.record_promotion_to_memory();
+                                                    Ok(())
+                                                }
+                                                Err(e) => {
+                                                    // The promotion did not land: release
+                                                    // the reserved slot — the dispatch map
+                                                    // still points the key at the SSD.
+                                                    let _ = mt.remove(entry.key);
+                                                    Err(DispatcherError::IoError(format!(
+                                                        "promote transition failed: {e}"
+                                                    )))
+                                                }
+                                            }
+                                        }
+                                        // The NVMe read failed: same release.
+                                        Err(e) => {
+                                            let _ = mt.remove(entry.key);
+                                            Err(e.clone())
+                                        }
+                                    };
+                                    results[cold_entries[ci].idx] = Some(res);
+                                }
+                            }
+                        }
+                        // channel_leases drop here, returning channels to pools.
+                    }
+                }
+
+                // Staging post-pass (channel leases released): serve tier-saturated
+                // cold entries one buffer at a time. Each serve checks out a
+                // single staging buffer, does SSD→staging→GPU, and releases it —
+                // so at most one lease is held per call and never while holding a
+                // lock, making the blocking checkout deadlock-free.
+                if !staged.is_empty() {
+                    for &ci in &staged {
+                        let entry = &cold_entries[ci];
+                        let res = self.serve_cold_staged(
+                            &gpu,
+                            entry.key,
+                            entry.offset,
+                            &entry.regions,
+                            entry.total_size,
+                            batch_device,
+                        );
+                        results[entry.idx] = Some(res);
+                    }
+                }
+            }
+        }
+
+        // Deferred batched stream sync: wait for all submitted warm copies at once,
+        // now that the cold scatter-gather has run alongside them. Sync the same
+        // per-device warm stream the fast path issued them on. Cold piece copies
+        // are not on it: they go on the pipe streams, synced inside the call.
+        if !deferred_touch_keys.is_empty() && warm_raw != 0 {
+            let s = GpuStream(warm_raw as *mut std::ffi::c_void);
+            if let Err(e) = gpu.stream_synchronize(s) {
+                // The destination buffers may not hold the data, so none of
+                // the keys whose copies were in flight can be reported as a
+                // hit — their Ok is only the submission's, not the copy's.
+                // Mirrors the remote-delivery sync below (and spec 002: a
+                // result rewritten by the failed-batched-sync path is Error).
+                let msg = format!("batch stream_synchronize failed: {e}");
+                self.log_warn(&msg);
+                for &i in &warm_inflight {
+                    results[i] = Some(Err(DispatcherError::IoError(msg.clone())));
+                }
+            }
+        }
+        // Every warm copy has completed (or nothing was submitted): only now is it
+        // safe to let the entries become evictable again. Dropped explicitly so the
+        // pin lifetime is obvious rather than left to scope end.
+        drop(warm_pins);
+
+        // --- Remote lookup for entries not found locally ---
+        if let Ok(rl) = self.remote_lookup.get() {
+            let not_found: Vec<usize> = results
+                .iter()
+                .enumerate()
+                .filter_map(|(i, r)| match r {
+                    Some(Err(DispatcherError::KeyNotFound(_))) => Some(i),
+                    _ => None,
+                })
+                .collect();
+
+            if !not_found.is_empty() {
+                // remote-lookup works in CPU/DRAM only: it takes (key, size) and,
+                // on success, makes the value resident in the local memory tier.
+                // The dispatcher owns the subsequent DRAM->GPU delivery.
+                let remote_entries: Vec<(CacheKey, u32)> = not_found
+                    .iter()
+                    .map(|&i| {
+                        let (key, regions) = &entries[i];
+                        (*key, regions.iter().map(|r| r.size).sum())
+                    })
+                    .collect();
+
+                // Stage timings for the opt-in delivery probe (four Instants per
+                // batch, only when it is switched on).
+                let probing = remote_probe::enabled();
+                let t_fetch = probing.then(std::time::Instant::now);
+                let remote_results = rl.batch_lookup(&remote_entries);
+                let fetch_us = t_fetch.map_or(0, |t| t.elapsed().as_micros() as u64);
+                // Accumulated separately so the probe can tell a dispatch-map/LRU
+                // lock story apart from a CUDA-launch one; they are the same order
+                // of magnitude a priori and only one is fixed by lock work.
+                let mut lookup_us: u64 = 0;
+                let mut h2d_us: u64 = 0;
+
+                // On a successful remote fetch the value is now resident in the
+                // local memory tier; deliver it to the caller's GPU buffer with the
+                // same memory-tier->device scatter used for a local hot-path hit.
+                //
+                // Submit every copy first and synchronize the warm stream ONCE, the
+                // way the local warm path does. Blocking per key instead — one round
+                // trip to the GPU for every key in the batch — is what pinned remote
+                // lookup to a fixed per-key cost that did not respond to batch size.
+                //
+                // The read pin each `lookup` takes must therefore outlive the batched
+                // sync, not merely the submission; `remote_pins` owns them until then.
+                let mut remote_pins = pins::PinnedKeys::new(Arc::clone(&dm));
+                let mut submitted: Vec<usize> = Vec::with_capacity(not_found.len());
+
+                // Requester-side tally for this batch (FR-011, spec 002 Phase 1).
+                // Counted here because this is the only place that knows, per key,
+                // whether a peer served it -- `batch_lookup`'s return type collapses
+                // that away, and widening it is a later phase.
+                let mut remote_hits: u64 = 0;
+                let mut remote_misses: u64 = 0;
+
+                for (&pos, remote_res) in not_found.iter().zip(remote_results.into_iter()) {
+                    let (key, regions) = &entries[pos];
+                    let key = *key;
+                    if let Err(e) = remote_res {
+                        // A NotFound is a remote miss; a TransportError is neither a
+                        // hit nor a miss -- the question "did a peer have it" was not
+                        // answered, and counting it either way would invent data.
+                        if matches!(e, interfaces::RemoteLookupError::NotFound) {
+                            remote_misses += 1;
+                        }
+                        // A key no peer holds is a MISS, not an I/O failure. Collapsing
+                        // both into `IoError` lost the distinction `IRemoteLookup` had
+                        // already made, and the transport host counts only `KeyNotFound`
+                        // as a miss -- so every remotely-unfound key vanished from the
+                        // server's accounting. That is why `certus_lookup_misses_total`
+                        // read 0 against millions of reserves (spec 002 research R2).
+                        //
+                        // Not merely an accounting bug: it reported a cold cache as a
+                        // broken fabric, so anything watching error rates saw transport
+                        // failures that never happened.
+                        results[pos] = Some(Err(match e {
+                            interfaces::RemoteLookupError::NotFound => {
+                                DispatcherError::KeyNotFound(key)
+                            }
+                            other => DispatcherError::IoError(format!("remote lookup: {other}")),
+                        }));
+                        continue;
+                    }
+                    // The peer answered with data: a remote hit, whatever happens
+                    // next locally. A failure below is a local delivery fault, not
+                    // evidence about whether the peer held the key.
+                    remote_hits += 1;
+                    let t_lookup = probing.then(std::time::Instant::now);
+                    let looked_up = dm.lookup(key);
+                    if let Some(t) = t_lookup {
+                        lookup_us += t.elapsed().as_micros() as u64;
+                    }
+                    match looked_up {
+                        Ok(LookupResult::MemoryTier { pointer, size }) => {
+                            // `lookup` pinned the entry; the guard owns that pin now,
+                            // including on the failure paths below.
+                            remote_pins.adopt(key);
+                            // Integrity: verify the slot's CRC-32 on the CPU before
+                            // the H2D copy feeds the GPU, as the warm path does.
+                            #[cfg(feature = "integrity-check")]
+                            {
+                                if let Err(e) =
+                                    Self::verify_slot_crc(dm.get_checksum(key), key, pointer, size)
+                                {
+                                    results[pos] = Some(Err(e));
+                                    continue;
+                                }
+                            }
+                            let t_h2d = probing.then(std::time::Instant::now);
+                            let res = self.serve_memory_tier_to_gpu(
+                                &gpu, pointer, size, regions, warm_raw, false,
+                            );
+                            if let Some(t) = t_h2d {
+                                h2d_us += t.elapsed().as_micros() as u64;
+                            }
+                            if res.is_ok() {
+                                submitted.push(pos);
+                            }
+                            tier[pos] = Some(ServedBy::Remote);
+                            results[pos] = Some(res);
+                        }
+                        // A block-tier answer still holds a pin — `lookup` increments
+                        // read_ref before it inspects the location — but the value is
+                        // not where the remote fetch promised it would be.
+                        Ok(LookupResult::BlockDevice { .. }) => {
+                            let _ = dm.release_read(key);
+                            results[pos] = Some(Err(DispatcherError::KeyNotFound(key)));
+                        }
+                        // NotExist returns before the read_ref increment, and
+                        // MismatchSize takes no pin either, so releasing here would
+                        // decrement some *other* reader's pin.
+                        Ok(_) => {
+                            results[pos] = Some(Err(DispatcherError::KeyNotFound(key)));
+                        }
+                        Err(e) => {
+                            results[pos] = Some(Err(DispatcherError::IoError(format!(
+                                "post-remote lookup: {e}"
+                            ))));
+                        }
+                    }
+                }
+
+                // One sync for the whole batch, on the same per-device warm stream
+                // every submission above was issued to.
+                let t_sync = probing.then(std::time::Instant::now);
+                if !submitted.is_empty() && warm_raw != 0 {
+                    let s = GpuStream(warm_raw as *mut std::ffi::c_void);
+                    if let Err(e) = gpu.stream_synchronize(s) {
+                        // The destination buffers may not hold the data, so none of
+                        // these keys can be reported as a hit.
+                        let msg = format!("remote-delivery stream_synchronize failed: {e}");
+                        self.log_warn(&msg);
+                        for &pos in &submitted {
+                            results[pos] = Some(Err(DispatcherError::IoError(msg.clone())));
+                        }
+                    }
+                }
+                // Every remote copy has completed: release the pins.
+                drop(remote_pins);
+
+                // One atomic pair per forwarded batch, after the walk, so the tally
+                // is whole even if a delivery failed partway.
+                self.tier_counters
+                    .record_remote_lookup(remote_hits, remote_misses);
+
+                if probing {
+                    let sync_us = t_sync.map_or(0, |t| t.elapsed().as_micros() as u64);
+                    if let Some(line) = remote_probe::record(
+                        not_found.len() as u64,
+                        fetch_us,
+                        lookup_us,
+                        h2d_us,
+                        sync_us,
+                    ) {
+                        self.log_warn(&line);
+                    }
+                }
+            }
+        }
+
+        // Recover concurrent-promotion losers: an entry left as AlreadyExists
+        // means a sibling lookup (e.g. the other TP rank) won the mt.insert
+        // race for this key. The block is resident (or being read in); wait for
+        // the MemoryTier transition and serve the DMA warm instead of failing.
+        for (i, (key, regions)) in entries.iter().enumerate() {
+            if matches!(results[i], Some(Err(DispatcherError::AlreadyExists(_)))) {
+                results[i] =
+                    Some(self.serve_concurrently_promoted(&dm, &gpu, *key, regions, warm_raw));
+                // Rewritten with the result: classification marked the key `Ssd`, but
+                // this pass served it out of DRAM after the winner's promotion (FR-009,
+                // FR-010). On a failed recovery the result alone decides the bucket.
+                tier[i] = Some(ServedBy::Dram);
+            }
+        }
+
+        // Attribution is derived here, once, from the result plus the tier the serving
+        // pass recorded -- rather than constructed at each of the dozen assignment
+        // sites, so the mapping from error to taxonomy value exists in exactly one
+        // place and the two dispatchers cannot disagree about it.
+        let out: Vec<LookupOutcome> = results
+            .into_iter()
+            .zip(tier)
+            .map(|(r, t)| {
+                let result = r.unwrap();
+                let served_by = match (&result, t) {
+                    (Ok(()), Some(t)) => t,
+                    // Served, but no pass said how. A bug, and reported as one: `Error`
+                    // on an `Ok` result violates `is_hit() <=> is_ok()` and fails that
+                    // invariant's test. Defaulting to `Dram` here would be the same
+                    // class of mistake as a counter wired to the wrong quantity --
+                    // plausible, and silently wrong.
+                    (Ok(()), None) => {
+                        debug_assert!(false, "served a key with no recorded tier");
+                        ServedBy::Error
+                    }
+                    (Err(DispatcherError::KeyNotFound(_)), _) => ServedBy::Miss,
+                    // A size mismatch is its own bucket: the key IS present, so
+                    // "populate from scratch" and "your size model disagrees with what
+                    // is stored" are different problems for a caller.
+                    (Err(DispatcherError::InvalidParameter(_)), _) => ServedBy::SizeMismatch,
+                    (Err(_), _) => ServedBy::Error,
+                };
+                LookupOutcome { served_by, result }
+            })
+            .collect();
+        // One "promotion to GPU" per key successfully served up to the caller's
+        // GPU buffer this batch (warm hit, cold promote, or remote fetch alike).
+        let served = out.iter().filter(|r| r.result.is_ok()).count() as u64;
+        if served > 0 {
+            self.tier_counters.record_promotions_to_gpu(served);
+        }
+        // The local half of the route partition, taken from the attribution derived
+        // immediately above rather than recomputed, so the counters and the per-key
+        // `served_by` this call returns cannot disagree. Remote is recorded by the
+        // remote pass itself, which is the only place that knows a peer answered.
+        let dram = out.iter().filter(|o| o.served_by == ServedBy::Dram).count() as u64;
+        let ssd = out.iter().filter(|o| o.served_by == ServedBy::Ssd).count() as u64;
+        self.tier_counters.record_local_hits(dram, ssd);
+        out
+    }
+
+    fn lookup_async(
+        &self,
+        key: CacheKey,
+        ipc_handle: IpcHandle,
+    ) -> Result<GpuStream, DispatcherError> {
+        self.ensure_initialized()?;
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        let result = dm.lookup(key);
+
+        let gpu = self
+            .gpu_services
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
+
+        let null_stream = GpuStream(std::ptr::null_mut());
+
+        // Make this block's GPU device current and use its warm stream — a
+        // stream on another GPU fails cudaMemcpyAsync under multi-GPU.
+        let device = set_batch_device(&*gpu, ipc_handle.address);
+        let warm_raw = device_streams_for(&*gpu, device).map_or(0, |s| s.warm);
+
+        match result {
+            Ok(lookup_result) => {
+                use interfaces::LookupResult;
+                match lookup_result {
+                    LookupResult::NotExist => Err(DispatcherError::KeyNotFound(key)),
+                    LookupResult::MismatchSize => {
+                        let _ = dm.release_read(key);
+                        Err(DispatcherError::InvalidParameter(
+                            "size mismatch on lookup".into(),
+                        ))
+                    }
+                    LookupResult::MemoryTier { pointer, size } => {
+                        // Integrity: verify the slot CRC-32 before the H2D copy.
+                        #[cfg(feature = "integrity-check")]
+                        {
+                            if let Err(e) =
+                                Self::verify_slot_crc(dm.get_checksum(key), key, pointer, size)
+                            {
+                                let _ = dm.release_read(key);
+                                return Err(e);
+                            }
+                        }
+                        // Synchronous serve via the shared, device-correct helper.
+                        let r = self.serve_memory_tier_to_gpu(
+                            &gpu,
+                            pointer,
+                            size,
+                            std::slice::from_ref(&ipc_handle),
+                            warm_raw,
+                            true,
+                        );
+                        let _ = dm.release_read(key);
+                        mt.touch(key);
+                        if r.is_ok() {
+                            self.tier_counters.record_promotion_to_gpu();
+                        }
+                        r.map(|()| null_stream)
+                    }
+                    LookupResult::BlockDevice { offset } => {
+                        // Hold the lookup's read pin across the whole promotion: it is
+                        // what stops a concurrent remove or SSD eviction deleting the
+                        // entry, or freeing the fresh slot, while the SSD read and the
+                        // in-place promotion are still running.
+                        let r = match self.promote_and_serve(
+                            key,
+                            offset,
+                            &ipc_handle,
+                            &gpu,
+                            &dm,
+                            &mt,
+                            device,
+                        ) {
+                            // A concurrent cold lookup of this key won the mt.insert
+                            // race: a hit, not a failure — serve it warm once that
+                            // promotion lands, as batch_lookup's recovery pass does.
+                            Err(DispatcherError::AlreadyExists(_)) => self
+                                .serve_concurrently_promoted(
+                                    &dm,
+                                    &gpu,
+                                    key,
+                                    std::slice::from_ref(&ipc_handle),
+                                    warm_raw,
+                                ),
+                            r => r,
+                        };
+                        let _ = dm.release_read(key);
+                        r?;
+                        self.tier_counters.record_promotion_to_gpu();
+                        Ok(null_stream)
+                    }
+                }
+            }
+            Err(_) => Err(DispatcherError::KeyNotFound(key)),
+        }
+    }
+
+    fn check(&self, key: CacheKey) -> Result<bool, DispatcherError> {
+        self.ensure_initialized()?;
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        // A `dm.lookup` that returns Err means *timeout* waiting for a
+        // transient write_ref (a concurrent store-commit / promote) to clear,
+        // NOT a missing key: the entry exists, in memory-tier or block-device
+        // state, while its writer holds it. Collapsing that Err into
+        // `Ok(false)` would answer "not cached" for a key that has a cache
+        // entry, sending the caller to re-populate a live key. Retry the
+        // lookup a few times so a writer holding write_ref past a single 2 s
+        // wait clears before we give up — the same condition `batch_lookup`
+        // retries (FR-039 step 1).
+        const LOOKUP_RETRIES: u32 = 5;
+        let lookup = {
+            let mut lk = dm.lookup(key);
+            let mut retries = 0u32;
+            while matches!(lk, Err(_)) && retries < LOOKUP_RETRIES {
+                retries += 1;
+                lk = dm.lookup(key);
+            }
+            lk
+        };
+        match lookup {
+            Ok(result) => {
+                use interfaces::LookupResult;
+                let exists = !matches!(result, LookupResult::NotExist);
+                if exists {
+                    let _ = dm.release_read(key);
+                }
+                Ok(exists)
+            }
+            // Every retry timed out behind a writer (or the read count
+            // overflowed): the key's presence could not be determined. That
+            // is a wait to report, never an absent key.
+            Err(interfaces::DispatchMapError::Timeout(k)) => Err(DispatcherError::Timeout(
+                format!("timeout waiting on key: {k}"),
+            )),
+            Err(other) => Err(DispatcherError::IoError(other.to_string())),
+        }
+    }
+
+    fn remove(&self, key: CacheKey) -> Result<(), DispatcherError> {
+        self.ensure_initialized()?;
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        // Lookup the entry to determine its location (waits for any active writer).
+        // Only a found entry carries this lookup's read reference: `NotExist`
+        // (and `MismatchSize`, which the map never answers from `lookup`)
+        // acquires none, so none may be released either — a blind release
+        // there would decrement a reference held by another caller, e.g. the
+        // write-through pin a concurrent populate leaves on the entry it
+        // registers in the window between this lookup and the release.
+        // The memory-tier state this call's pre-pass flips away, to restore if
+        // the removal below is refused: a refused remove (`KeyNotFound`)
+        // frees nothing and changes nothing, so the entry must still be
+        // MemoryTier, with its memory-tier slot and its ssd_offset.
+        let mut flipped_memory_tier: Option<(*mut u8, u32)> = None;
+        let block_offset = match dm.lookup(key) {
+            Ok(LookupResult::BlockDevice { offset }) => {
+                let _ = dm.release_read(key);
+                Some(offset)
+            }
+            Ok(LookupResult::MemoryTier { pointer, size }) => {
+                // A resident entry may already carry its write-through SSD
+                // copy (`ssd_offset`), which this lookup result does not
+                // expose. Flip the entry to its block-device state — the
+                // transition that records that offset — and look it up once
+                // more to learn which extent to free. Hold this lookup's read
+                // reference across the flip: the memory-tier evictor's
+                // demotion (`try_evict_to_block`) refuses a pinned entry, so
+                // the state cannot change underneath us. `InvalidState` means
+                // no SSD copy exists yet (write-through not landed): nothing
+                // to free — a pending job's extent is freed by the takeover
+                // below or by the job itself.
+                let converted = dm.convert_memory_tier_to_block(key).is_ok();
+                let _ = dm.release_read(key);
+                if converted {
+                    match dm.lookup(key) {
+                        Ok(LookupResult::BlockDevice { offset }) => {
+                            let _ = dm.release_read(key);
+                            // This call flipped the entry away: remember how
+                            // to put it back if the removal is refused.
+                            flipped_memory_tier = Some((pointer, size));
+                            Some(offset)
+                        }
+                        // The entry vanished (a concurrent remove won the
+                        // race) or was re-promoted in place (its extent stays
+                        // the live entry's): the map removal below settles
+                        // the outcome either way.
+                        Ok(LookupResult::MemoryTier { .. }) => {
+                            let _ = dm.release_read(key);
+                            None
+                        }
+                        // NotExist takes no read reference: nothing to release.
+                        Ok(_) => None,
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                }
+            }
+            // NotExist / MismatchSize: this lookup took no read reference, so
+            // there is none of this caller's to release.
+            Ok(_) => None,
+            Err(_) => return Err(DispatcherError::KeyNotFound(key)),
+        };
+
+        // Remove from dispatch-map first (prevents new lookups from obtaining
+        // the memory-tier pointer while we free it).
+        let job_frees_slot = match dm.remove(key) {
+            Ok(()) => false,
+            // FR-018: the pin of a pending write-through does not hold remove up;
+            // remove takes it over instead of waiting for the job.
+            Err(interfaces::DispatchMapError::ActiveReferences(_)) => {
+                match self.write_through_pins.remove_entry(&*dm, key) {
+                    Some(job_frees_slot) => job_frees_slot,
+                    // A reader, a client pin or a concurrent lookup holds the
+                    // entry: the remove is refused. `KeyNotFound` promises that
+                    // nothing was freed and nothing changed, so put the entry back
+                    // the way this call found it — still MemoryTier, with its
+                    // memory-tier slot and its ssd_offset (the in-place promote
+                    // is the convert's inverse and keeps every reference) — and a
+                    // later lookup is served from DRAM again. Once the hold is
+                    // released, a later remove succeeds and frees both.
+                    None => {
+                        if let Some((pointer, size)) = flipped_memory_tier {
+                            let _ = dm.promote_block_to_memory_tier(key, pointer, size);
+                        }
+                        return Err(DispatcherError::KeyNotFound(key));
+                    }
+                }
+            }
+            Err(_) => return Err(DispatcherError::KeyNotFound(key)),
+        };
+
+        // Now safe to free the DRAM slot — no new readers can find this entry.
+        // A write-through still reading it frees it when done.
+        if let (Ok(mt), false) = (self.memory_tier.get(), job_frees_slot) {
+            let _ = mt.remove(key);
+        }
+
+        if let Some(loc) = block_offset {
+            let drives = self.data_drives.read();
+            if let Some((drive, raw)) = select_drive(&drives, loc) {
+                let _ = drive.extent_mgr.remove_extent(raw);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Ingest a new cache entry from GPU memory.
+    ///
+    /// Flow: evict if needed → allocate memory-tier slot → cudaMemcpy D2H
+    /// from client GPU → register in dispatch-map → enqueue background
+    /// write-through to SSD.
+    fn populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError> {
+        self.ensure_initialized()?;
+        let t_total = std::time::Instant::now();
+
+        if ipc_handle.size == 0 {
+            return Err(DispatcherError::InvalidParameter(
+                "IPC handle size must be > 0".into(),
+            ));
+        }
+
+        let size: u32 = ipc_handle.size;
+
+        // Phase 1: Evict if needed and allocate memory-tier slot.
+        let t_alloc = std::time::Instant::now();
+        // Internal populate path has no client session context, and no shared
+        // batch deadline — use this call's own backpressure budget (None).
+        match self.reserve_memory(key, size, 0, None) {
+            Ok(_) => {}
+            Err(DispatcherError::AllocationFailed(_)) => {
+                // Best-effort drop: the tier is still full after the
+                // backpressure budget elapsed. Skip caching this block and
+                // report success — a later load simply misses and recomputes.
+                // Reporting an error here would trip vLLM's
+                // `assert transfer_result.success` and kill the engine, so a
+                // full cache must never be fatal to the store path.
+                if self.tier_counters.record_store_drop_on_full() == 0 {
+                    self.log_info(
+                        "store drop-on-full engaged: memory tier full after backpressure \
+                         budget; dropping store (not cached, load will recompute)",
+                    );
+                }
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        }
+        let alloc_us = t_alloc.elapsed().as_micros() as f64;
+
+        // Phase 2: Async DMA copy from GPU into the reserved slot, then sync.
+        // Until Phase 3 registers it, the slot has no dispatch-map entry, so the
+        // evictor can never reclaim it: every failure here must release it, or
+        // the DRAM leaks and a retry of this key fails with AlreadyExists.
+        let t_d2h = std::time::Instant::now();
+        let gpu = match self.gpu_services.get() {
+            Ok(g) => g,
+            Err(_) => {
+                let _ = self.release_memory(key);
+                return Err(DispatcherError::NotInitialized(
+                    "gpu_services not bound".into(),
+                ));
+            }
+        };
+        // D2H source is on the GPU (ipc_handle.address); make that device current
+        // and use its dedicated store stream so D2H doesn't serialize with H2D
+        // loads on the warm stream (PCIe full-duplex).
+        let device = set_batch_device(&*gpu, ipc_handle.address);
+        let store_raw = device_streams_for(&*gpu, device).map_or(0, |s| s.store);
+        let stream = GpuStream(store_raw as *mut std::ffi::c_void);
+        if let Err(e) =
+            self.copy_gpu_to_memory_async(key, std::slice::from_ref(&ipc_handle), stream)
+        {
+            let _ = self.release_memory(key);
+            return Err(e);
+        }
+        if let Err(e) = gpu.stream_synchronize(stream) {
+            let _ = self.release_memory(key);
+            return Err(DispatcherError::IoError(format!(
+                "stream_synchronize failed: {e}"
+            )));
+        }
+        let d2h_us = t_d2h.elapsed().as_micros() as f64;
+
+        // Phase 3: Register in dispatch-map and enqueue SSD write-through.
+        self.copy_gpu_to_memory_completed(key, size)?;
+
+        if let Some(ref m) = *self.pipeline_metrics.read() {
+            m.record_populate_alloc(alloc_us);
+            m.record_populate_gpu_d2h(d2h_us);
+            m.record_populate_total(t_total.elapsed().as_micros() as f64);
+        }
+
+        Ok(())
+    }
+
+    /// Batch populate: issue all D2H copies asynchronously on a dedicated store
+    /// stream, synchronize once, then register all entries in the dispatch-map.
+    fn batch_populate(
+        &self,
+        entries: &[(CacheKey, IpcHandle)],
+    ) -> Vec<Result<(), DispatcherError>> {
+        if entries.is_empty() {
+            return Vec::new();
+        }
+
+        if let Err(e) = self.ensure_initialized() {
+            return entries.iter().map(|_| Err(e.clone())).collect();
+        }
+
+        let gpu = match self.gpu_services.get() {
+            Ok(g) => g,
+            Err(_) => {
+                let e = DispatcherError::NotInitialized("gpu_services not bound".into());
+                return entries.iter().map(|_| Err(e.clone())).collect();
+            }
+        };
+
+        let t_total = std::time::Instant::now();
+        let mut results: Vec<Option<Result<(), DispatcherError>>> = vec![None; entries.len()];
+
+        // Resolve batch device and pick the dedicated store stream up front.
+        // All entries in one RPC come from a single rank → a single device.
+        let batch_device = entries
+            .iter()
+            .flat_map(|(_, h)| std::iter::once(h.address))
+            .find(|a| !a.is_null())
+            .map_or(-1, |addr| set_batch_device(&*gpu, addr));
+        let store_raw = device_streams_for(&*gpu, batch_device).map_or(0, |s| s.store);
+        let store_stream = GpuStream(store_raw as *mut std::ffi::c_void);
+
+        // Interleaved reserve + DMA: for each key, reserve a slot and immediately
+        // issue the async D2H copy. This pipelines memory-tier allocation with GPU
+        // DMA — early keys' transfers overlap with later keys' allocation.
+        let mut submitted: Vec<(usize, CacheKey, u32)> = Vec::with_capacity(entries.len());
+        for (i, (key, ipc_handle)) in entries.iter().enumerate() {
+            if ipc_handle.size == 0 {
+                results[i] = Some(Err(DispatcherError::InvalidParameter(
+                    "IPC handle size must be > 0".into(),
+                )));
+                continue;
+            }
+            match self.reserve_memory(*key, ipc_handle.size, 0, None) {
+                Ok(_) => {
+                    // Slot reserved — immediately issue async D2H copy.
+                    match self.copy_gpu_to_memory_async(
+                        *key,
+                        std::slice::from_ref(ipc_handle),
+                        store_stream,
+                    ) {
+                        Ok(()) => submitted.push((i, *key, ipc_handle.size)),
+                        Err(e) => {
+                            let _ = self.release_memory(*key);
+                            results[i] = Some(Err(e));
+                        }
+                    }
+                }
+                Err(DispatcherError::AllocationFailed(_)) => {
+                    // Best-effort drop (see `populate`): tier still full after
+                    // the backpressure budget. Skip this key and report success
+                    // so a full cache is never fatal to vLLM's store path.
+                    if self.tier_counters.record_store_drop_on_full() == 0 {
+                        self.log_info(
+                            "store drop-on-full engaged: memory tier full after backpressure \
+                             budget; dropping store (not cached, load will recompute)",
+                        );
+                    }
+                    results[i] = Some(Ok(()));
+                }
+                Err(e) => {
+                    results[i] = Some(Err(e));
+                }
+            }
+        }
+
+        if submitted.is_empty() {
+            return results.into_iter().map(|r| r.unwrap()).collect();
+        }
+
+        // Phase 4: ONE stream_synchronize for the entire batch.
+        // This guarantees all D2H copies have landed before any registration.
+        if let Err(e) = gpu.stream_synchronize(store_stream) {
+            // Sync failed — none of these entries can be safely registered.
+            for &(i, key, _) in &submitted {
+                let _ = self.release_memory(key);
+                results[i] = Some(Err(DispatcherError::IoError(format!(
+                    "batch store stream_synchronize failed: {e}"
+                ))));
+            }
+            return results.into_iter().map(|r| r.unwrap()).collect();
+        }
+
+        // Phase 5: Register all entries in dispatch-map and enqueue write-through.
+        for &(i, key, size) in &submitted {
+            results[i] = Some(self.copy_gpu_to_memory_completed(key, size));
+        }
+
+        if let Some(ref m) = *self.pipeline_metrics.read() {
+            let elapsed = t_total.elapsed().as_micros() as f64;
+            m.record_populate_total(elapsed);
+        }
+
+        results.into_iter().map(|r| r.unwrap()).collect()
+    }
+
+    fn reserve_memory(
+        &self,
+        key: CacheKey,
+        size: u32,
+        session_id: u64,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<*mut u8, DispatcherError> {
+        self.ensure_initialized()?;
+
+        // Per-call reserve logging is opt-in: it is noisy under load and only
+        // useful for session-id observability. Enable by setting
+        // CERTUS_LOG_RESERVE to a truthy value (1/true/yes/on). Read once.
+        fn reserve_logging_enabled() -> bool {
+            static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            *ENABLED.get_or_init(|| {
+                std::env::var("CERTUS_LOG_RESERVE")
+                    .map(|v| matches!(v.trim(), "1" | "true" | "TRUE" | "yes" | "on"))
+                    .unwrap_or(false)
+            })
+        }
+        if reserve_logging_enabled() {
+            self.log_info(&format!(
+                "reserve_memory: key={key} size={size} session_id={session_id}"
+            ));
+        }
+
+        if size == 0 {
+            return Err(DispatcherError::InvalidParameter("size must be > 0".into()));
+        }
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
+
+        // Bounded store backpressure. Under a sustained async offload burst the
+        // memory tier can hit genuine 100% utilization: the oldest entries are
+        // *transiently* un-evictable (pinned by an in-flight load, or not yet
+        // written through by the bg_writer), so `evict_and_insert` surfaces
+        // `AllocationFailed`. The saturation is momentary — the background
+        // `MemoryTierEvictor` demotes ~512 slabs / 200 ms tick and in-flight
+        // write-throughs land within ~1-2 s — so we retry the allocation for a
+        // bounded budget instead of failing the store. Failing is fatal here:
+        // the shmq worker replies STATUS_ERROR and vLLM's offloading connector
+        // does `assert transfer_result.success` -> EngineDeadError. Retrying
+        // also applies natural backpressure to the synchronous vLLM store,
+        // throttling the producer rather than killing the engine. Deadlock-free:
+        // the threads we wait on (evictor, bg_writer, other workers' loads) are
+        // all independent of this store worker. `budget = 0` restores the
+        // original fail-fast behavior.
+        //
+        // `deadline` selects whose clock bounds the retry:
+        //   * None      — this call's own `store_backpressure_ms` budget, measured
+        //                 from now (legacy per-call behavior).
+        //   * Some(inst) — a deadline shared across a reserve *batch*. The caller
+        //                 (shmq `op_reserve`) computes it once for the whole batch
+        //                 so total backpressure is bounded rather than paying the
+        //                 full budget per key; if `inst` is already in the past we
+        //                 make a single best-effort attempt and fail fast, so the
+        //                 client refuses caching the key and recomputes it.
+        let deadline = match deadline {
+            Some(inst) => inst,
+            None => {
+                let budget = std::time::Duration::from_millis(
+                    self.store_backpressure_ms.load(Ordering::Relaxed),
+                );
+                if budget.is_zero() {
+                    return match self.evict_and_insert(&dm, &mt, key, size, max_attempts) {
+                        Err(e @ DispatcherError::AlreadyExists(_)) => {
+                            self.tier_counters.record_store_already_resident();
+                            Err(e)
+                        }
+                        r => r,
+                    };
+                }
+                std::time::Instant::now() + budget
+            }
+        };
+
+        const POLL: std::time::Duration = std::time::Duration::from_millis(20);
+        loop {
+            match self.evict_and_insert(&dm, &mt, key, size, max_attempts) {
+                Ok(mem_ptr) => return Ok(mem_ptr),
+                Err(DispatcherError::AllocationFailed(_))
+                    if std::time::Instant::now() < deadline =>
+                {
+                    if self.tier_counters.record_store_backpressure() == 0 {
+                        // One-shot: the memory tier saturated and the store path
+                        // began backpressuring rather than failing. Runs are
+                        // otherwise silent about this path (certus-server does
+                        // not dump tier stats), so surface it once.
+                        self.log_info(
+                            "store backpressure engaged: memory tier full, retrying reserve",
+                        );
+                    }
+                    std::thread::sleep(POLL);
+                }
+                Err(e @ DispatcherError::AlreadyExists(_)) => {
+                    // Not a capacity refusal: the key is already cached. It bypasses
+                    // the backpressure retry, so it leaves no trace in either store
+                    // counter, and the shm-queue wire collapses it into the same flat
+                    // zero as a genuine pool-full. Without this counter a run can show
+                    // stores declined while eviction never failed once.
+                    self.tier_counters.record_store_already_resident();
+                    return Err(e);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    fn copy_gpu_to_memory_async(
+        &self,
+        key: CacheKey,
+        regions: &[IpcHandle],
+        stream: GpuStream,
+    ) -> Result<(), DispatcherError> {
+        self.ensure_initialized()?;
+
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        let (mem_ptr, slot_size) = mt.get(key).ok_or(DispatcherError::KeyNotFound(key))?;
+
+        // Gather the client's N GPU regions contiguously into the one reserved
+        // slot: region L lands at `slot + sum(sizes[0..L])`. A single-region
+        // block (legacy / populate) is the L==0 case. Reject a region set that
+        // overflows the slot rather than corrupt neighbouring DRAM.
+        let total: usize = regions.iter().map(|r| r.size as usize).sum();
+        if total > slot_size as usize {
+            return Err(DispatcherError::InvalidParameter(format!(
+                "regions total {total} bytes exceeds reserved slot {slot_size} for key {key}"
+            )));
+        }
+
+        let gpu = self
+            .gpu_services
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
+
+        // Null-stream callers (e.g. the shm-queue CopyToStore handler) need the
+        // copy to be complete on return — they have no stream handle to sync on.
+        // Resolve the device's `store` stream so the copy runs on a real stream,
+        // then synchronize before returning.
+        let (effective_stream, needs_sync) = if stream.0.is_null() {
+            let device = regions
+                .first()
+                .map_or(-1, |r| set_batch_device(&*gpu, r.address));
+            let store_raw = device_streams_for(&*gpu, device).map_or(0, |s| s.store);
+            (GpuStream(store_raw as *mut std::ffi::c_void), true)
+        } else {
+            (stream, false)
+        };
+
+        let map_err = |e: String| {
+            let _ = mt.remove(key);
+            DispatcherError::IoError(format!("GPU async DMA copy failed: {e}"))
+        };
+        let mut off: usize = 0;
+        for region in regions {
+            gpu.memcpy_d2h_async(
+                region.address as *const std::ffi::c_void,
+                (mem_ptr as usize + off) as *mut std::ffi::c_void,
+                region.size as usize,
+                effective_stream,
+            )
+            .map_err(map_err)?;
+            off += region.size as usize;
+        }
+        if needs_sync {
+            gpu.stream_synchronize(effective_stream).map_err(|e| {
+                DispatcherError::IoError(format!("store stream_synchronize failed: {e}"))
+            })?;
+        }
+        Ok(())
+    }
+
+    fn copy_gpu_to_memory_completed(
+        &self,
+        key: CacheKey,
+        size: u32,
+    ) -> Result<(), DispatcherError> {
+        self.ensure_initialized()?;
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        let (mem_ptr, _) = mt.get(key).ok_or(DispatcherError::KeyNotFound(key))?;
+
+        dm.create_memory_tier_entry(key, mem_ptr, size)
+            .map_err(|e| match e {
+                interfaces::DispatchMapError::AlreadyExists(k) => {
+                    // The tier holds one slot per key, so the existing entry may
+                    // be pointing at this very slot (a repeated or racing
+                    // completion). Free it only when the entry provably lives
+                    // elsewhere; if we cannot tell, keep it — a leaked slot is
+                    // recoverable, a freed live one is not.
+                    let live = match dm.lookup(key) {
+                        Ok(LookupResult::NotExist) => false,
+                        Ok(r) => {
+                            let _ = dm.release_read(key);
+                            matches!(r, LookupResult::MemoryTier { pointer, .. } if pointer == mem_ptr)
+                        }
+                        Err(_) => true,
+                    };
+                    if !live {
+                        let _ = mt.remove(key);
+                    }
+                    DispatcherError::AlreadyExists(k)
+                }
+                other => {
+                    let _ = mt.remove(key);
+                    DispatcherError::IoError(other.to_string())
+                }
+            })?;
+
+        // Integrity: compute the block's CRC-32 as soon as it has landed. The
+        // store D2H (issued on the null/default stream by copy_to_store) is
+        // async, so we synchronize it first, then hash the just-created slot
+        // while the write-ref still holds it exclusively, and record the
+        // checksum on the index entry. It travels with the entry through
+        // demote/promote and is verified before the load H2D.
+        #[cfg(feature = "integrity-check")]
+        {
+            let gpu = self
+                .gpu_services
+                .get()
+                .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
+            gpu.stream_synchronize(GpuStream(std::ptr::null_mut()))
+                .map_err(|e| {
+                    let _ = mt.remove(key);
+                    DispatcherError::IoError(format!(
+                        "integrity: stream_synchronize before hash failed: {e}"
+                    ))
+                })?;
+            // SAFETY: the entry was just created with write_ref==1 (exclusive),
+            // so no reader/writer can touch the slot; `size` bytes at `mem_ptr`
+            // are the reserved, now-populated slot.
+            let bytes = unsafe { std::slice::from_raw_parts(mem_ptr as *const u8, size as usize) };
+            let mut hasher = crc32fast::Hasher::new();
+            hasher.update(bytes);
+            let crc = hasher.finalize();
+            dm.set_checksum(key, crc).map_err(|e| {
+                let _ = mt.remove(key);
+                DispatcherError::IoError(format!("integrity: set_checksum failed: {e}"))
+            })?;
+        }
+
+        dm.downgrade_reference(key)
+            .map_err(|e| DispatcherError::IoError(e.to_string()))?;
+
+        let num_drives = {
+            let dd = self.data_drives.read();
+            dd.len().max(1)
+        };
+        // Round-robin per committing thread: one batch's keys get consecutive
+        // drives (see `next_store_drive`).
+        let device_index = Self::next_store_drive(num_drives);
+        let guard = self.bg_writer.lock().unwrap();
+        // Record the pin before its job can run, so `remove` can take it over.
+        self.write_through_pins.pin(key, || match *guard {
+            Some(ref writer) => writer
+                .enqueue(WriteJob {
+                    key,
+                    size,
+                    device_index,
+                })
+                .is_ok(),
+            None => false,
+        });
+
+        Ok(())
+    }
+
+    fn release_memory(&self, key: CacheKey) -> Result<(), DispatcherError> {
+        self.ensure_initialized()?;
+
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        // Idempotent — KeyNotFound is not an error.
+        match mt.remove(key) {
+            Ok(()) | Err(interfaces::MemoryTierError::KeyNotFound(_)) => Ok(()),
+            Err(e) => Err(DispatcherError::IoError(e.to_string())),
+        }
+    }
+
+    fn pin(&self, key: CacheKey) -> Result<(), DispatcherError> {
+        self.ensure_initialized()?;
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        dm.take_read(key).map_err(|e| match e {
+            interfaces::DispatchMapError::KeyNotFound(k) => DispatcherError::KeyNotFound(k),
+            interfaces::DispatchMapError::Timeout(k) => {
+                DispatcherError::Timeout(format!("timeout waiting on key: {k}"))
+            }
+            other => DispatcherError::IoError(other.to_string()),
+        })
+    }
+
+    fn unpin(&self, key: CacheKey) -> Result<(), DispatcherError> {
+        self.ensure_initialized()?;
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        dm.release_read(key).map_err(|e| match e {
+            interfaces::DispatchMapError::KeyNotFound(k) => DispatcherError::KeyNotFound(k),
+            interfaces::DispatchMapError::RefCountUnderflow(k) => DispatcherError::KeyNotFound(k),
+            other => DispatcherError::IoError(other.to_string()),
+        })
+    }
+
+    fn touch(&self, key: CacheKey) -> Result<(), DispatcherError> {
+        self.ensure_initialized()?;
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        dm.touch(key)
+            .map_err(|_| DispatcherError::KeyNotFound(key))?;
+
+        if let Ok(mt) = self.memory_tier.get() {
+            mt.touch(key);
+        }
+
+        Ok(())
+    }
+
+    fn promote_to_memory_tier(&self, keys: &[CacheKey]) {
+        let Ok(()) = self.ensure_initialized() else {
+            return;
+        };
+
+        let Ok(dm) = self.dispatch_map.get() else {
+            return;
+        };
+        let Ok(mt) = self.memory_tier.get() else {
+            return;
+        };
+        let logger = self.logger.get().ok();
+
+        struct ColdEntry {
+            key: CacheKey,
+            offset: u64,
+            size: u32,
+        }
+
+        let mut cold_entries: Vec<ColdEntry> = Vec::new();
+
+        for &key in keys {
+            match dm.lookup(key) {
+                Ok(LookupResult::BlockDevice { offset }) => {
+                    let _ = dm.release_read(key);
+                    if let Ok(size) = dm.entry_size(key) {
+                        cold_entries.push(ColdEntry { key, offset, size });
+                    }
+                }
+                Ok(LookupResult::MemoryTier { .. }) => {
+                    let _ = dm.release_read(key);
+                    let _ = dm.touch(key);
+                    mt.touch(key);
+                }
+                _ => {}
+            }
+        }
+
+        if cold_entries.is_empty() {
+            return;
+        }
+
+        let drives = self.data_drives.read();
+        let num_drives = drives.len();
+
+        if num_drives == 0 {
+            let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
+            for entry in &cold_entries {
+                if self
+                    .evict_for_space(&dm, &mt, entry.size, entry.key, max_attempts)
+                    .is_err()
+                {
+                    continue;
+                }
+                if let Ok(mem_ptr) = mt.insert(entry.key, entry.size) {
+                    // In-place promote (pin-safe): no remove/recreate.
+                    if dm
+                        .promote_block_to_memory_tier(entry.key, mem_ptr, entry.size)
+                        .is_ok()
+                    {
+                        self.tier_counters.record_promotion_to_memory();
+                    } else {
+                        // The promotion did not land: release the slot —
+                        // the dispatch map still points the key at the SSD.
+                        let _ = mt.remove(entry.key);
+                    }
+                }
+            }
+            return;
+        }
+
+        let chunk_size = {
+            let ring_guard = self.pipeline_ring.read();
+            ring_guard.as_ref().map_or(131072, |r| r.chunk_size)
+        };
+
+        // Group cold entries by the drive recorded in their SSD location (an
+        // invalid drive is skipped: best-effort prefetch).
+        let mut per_drive: Vec<Vec<usize>> = vec![Vec::new(); num_drives];
+        for (i, entry) in cold_entries.iter().enumerate() {
+            let (drive_idx, _) = decode_loc(entry.offset);
+            if let Some(v) = per_drive.get_mut(drive_idx) {
+                v.push(i);
+            }
+        }
+
+        let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
+
+        std::thread::scope(|s| {
+            for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
+                if entry_indices.is_empty() {
+                    continue;
+                }
+
+                let drive = &drives[drive_idx];
+                let channel_pool = &drive.channel_pool;
+                let block_dev = Arc::clone(&drive.block_dev_iface);
+                let dm = &dm;
+                let mt = &mt;
+                let cold = &cold_entries;
+                let logger = &logger;
+
+                s.spawn(move || {
+                    // Exclusive channel for this prefetch thread. This runs
+                    // concurrently with batch_lookup on the same drive, so it
+                    // must not share one SPSC channel (see ChannelPool).
+                    let chan_lease = match channel_pool.checkout() {
+                        Ok(l) => l,
+                        Err(_) => return,
+                    };
+                    let channels = chan_lease.channels();
+                    for &ci in entry_indices {
+                        let entry = &cold[ci];
+                        let block_size = block_dev.block_size() as u64;
+                        let start_lba = decode_loc(entry.offset).1 / block_size;
+
+                        if self
+                            .evict_for_space(dm, mt, entry.size, entry.key, max_attempts)
+                            .is_err()
+                        {
+                            continue;
+                        }
+
+                        let mem_ptr = match mt.insert(entry.key, entry.size) {
+                            Ok(ptr) => ptr,
+                            Err(_) => continue,
+                        };
+
+                        // SAFETY: mem_ptr is a valid SPDK-registered memory-tier slot.
+                        let result = unsafe {
+                            pipeline::pipelined_ssd_to_dram_only(
+                                &*block_dev,
+                                channels,
+                                mem_ptr,
+                                start_lba,
+                                entry.size as usize,
+                                chunk_size,
+                                16,
+                            )
+                        };
+
+                        if let Err(e) = result {
+                            let _ = mt.remove(entry.key);
+                            if let Some(ref log) = logger {
+                                log.debug(&format!(
+                                    "promote_to_memory_tier: SSD read failed for key {}: {e}",
+                                    entry.key
+                                ));
+                            }
+                            continue;
+                        }
+
+                        // In-place, pin-safe promote (no remove/recreate).
+                        if dm
+                            .promote_block_to_memory_tier(entry.key, mem_ptr, entry.size)
+                            .is_ok()
+                        {
+                            self.tier_counters.record_promotion_to_memory();
+                        } else {
+                            // The promotion did not land: release the slot —
+                            // the dispatch map still points the key at the
+                            // SSD (the read-failure exit above does the same).
+                            let _ = mt.remove(entry.key);
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    fn clear_memory_tier(&self) -> Result<usize, DispatcherError> {
+        self.ensure_initialized()?;
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        // A pinned entry (a lookup or the write-through holds a reference) can be
+        // neither demoted nor removed, and its slot must NOT be freed: the entry
+        // still points at it and the pin holder may be copying from it. Such an
+        // entry keeps its slot and is retried until the pin drops. The wait is
+        // bounded so a pin that is never released cannot hang the call: at the
+        // deadline the still-pinned entries stay resident and the call fails with
+        // `Timeout`, so `Ok(count)` always means the memory tier was emptied.
+        let timeout = std::time::Duration::from_secs(5);
+        let start = std::time::Instant::now();
+        let mut count = 0;
+        let mut pinned = 0;
+        loop {
+            // Widen the window past the entries left pinned on the last pass, so
+            // they cannot hide the clearable ones behind them.
+            let candidates = mt.oldest_keys(64 + pinned);
+            if candidates.is_empty() {
+                break;
+            }
+            let mut cleared = 0;
+            pinned = 0;
+            for key in candidates {
+                let done = match dm.try_evict_to_block(key) {
+                    Ok(()) => true,
+                    Err(interfaces::DispatchMapError::ActiveReferences(_)) => false,
+                    // Entry not evictable (no SSD copy) — force remove. The entry
+                    // goes first: a pin taken since the demotion attempt refuses
+                    // the remove, and the slot is then kept for the retry.
+                    Err(_) => !matches!(
+                        dm.remove(key),
+                        Err(interfaces::DispatchMapError::ActiveReferences(_))
+                    ),
+                };
+                if done {
+                    let _ = mt.remove(key);
+                    count += 1;
+                    cleared += 1;
+                } else {
+                    pinned += 1;
+                }
+            }
+            if cleared == 0 {
+                if start.elapsed() >= timeout {
+                    return Err(DispatcherError::Timeout(format!(
+                        "clear_memory_tier: {pinned} pinned entries still resident \
+                         after clearing {count}"
+                    )));
+                }
+                std::thread::sleep(std::time::Duration::from_micros(50));
+            }
+        }
+        Ok(count)
+    }
+
+    fn clear_all(&self) -> Result<interfaces::ClearAll, DispatcherError> {
+        self.ensure_initialized()?;
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        // Two sources of keys cover every entry: the memory tier lists what is in
+        // DRAM (with or without an SSD copy), the drives' extent managers what is
+        // on SSD. An entry is in at least one.
+        let listing = |mt: &dyn IMemoryTier| -> (Vec<CacheKey>, Vec<(usize, CacheKey, u64)>) {
+            let mut keys: Vec<CacheKey> = mt.oldest_keys(usize::MAX);
+            let mut extents = Vec::new();
+            for (d, drive) in self.data_drives.read().iter().enumerate() {
+                drive.extent_mgr.for_each_extent(&mut |e| {
+                    keys.push(e.key);
+                    extents.push((d, e.key, e.offset));
+                });
+            }
+            keys.sort_unstable();
+            keys.dedup();
+            (keys, extents)
+        };
+
+        let timeout = std::time::Duration::from_secs(5);
+        let start = std::time::Instant::now();
+        let mut removed = 0u64;
+        loop {
+            let (keys, extents) = listing(&*mt);
+            let mut gone = std::collections::HashSet::new();
+            for key in keys {
+                // Err is a pin (retried below) or an entry gone since the
+                // listing (an eviction, another remove): the re-listing tells.
+                if self.remove(key).is_ok() {
+                    removed += 1;
+                    gone.insert(key);
+                    // `remove` itself reports nothing: a client's cache view
+                    // has to hear that the entry is gone.
+                    self.emit_eviction(key, EvictionReason::Removed);
+                }
+            }
+            // `remove` frees the extent of an SSD-only entry, but not the SSD copy
+            // of one still in DRAM (its lookup reports no offset). Free those here,
+            // from the listing: the entry is gone from the map, so nothing can
+            // reach the extent any more.
+            let drives = self.data_drives.read();
+            for (d, key, offset) in extents {
+                if gone.contains(&key) {
+                    let _ = drives[d].extent_mgr.remove_extent(offset);
+                }
+            }
+            drop(drives);
+            let left = listing(&*mt).0.len() as u64;
+            if left == 0 || start.elapsed() >= timeout {
+                return Ok(interfaces::ClearAll {
+                    removed,
+                    still_pinned: left,
+                });
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    fn flush_to_ssd(&self) -> Result<usize, DispatcherError> {
+        self.ensure_initialized()?;
+
+        // Block until the background writer has processed all enqueued jobs.
+        if let Some(ref writer) = *self.bg_writer.lock().unwrap() {
+            writer.flush();
+        }
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        // An empty queue is not a persisted tier: a write-through that failed
+        // left its entry resident with no SSD copy, and `clear_memory_tier`
+        // would then drop the only copy. Report it instead of `Ok`.
+        let failed = self
+            .write_through_pins
+            .failed_writes(|key| mt.contains(key));
+        if failed > 0 {
+            return Err(DispatcherError::IoError(format!(
+                "flush_to_ssd: {failed} memory-tier entries have no SSD copy: \
+                 their write-through to the block device failed"
+            )));
+        }
+
+        // The entries that now have a valid SSD offset.
+        Ok(mt
+            .oldest_keys(usize::MAX)
+            .into_iter()
+            .filter(|&key| dm.is_evictable(key))
+            .count())
+    }
+
+    fn schedule_write_through(
+        &self,
+        key: CacheKey,
+        size: u32,
+    ) -> Result<(), interfaces::DispatcherError> {
+        self.ensure_initialized()?;
+
+        let num_drives = {
+            let dd = self.data_drives.read();
+            dd.len().max(1)
+        };
+        // Same placement the store path uses: round-robin per committing thread.
+        // The chosen drive is recorded in the entry's SSD location by write-through.
+        let guard = self.bg_writer.lock().unwrap();
+        if let Some(ref writer) = *guard {
+            let _ = writer.enqueue(WriteJob {
+                key,
+                size,
+                device_index: Self::next_store_drive(num_drives),
+            });
+        }
+        Ok(())
+    }
+
+    fn read_write_stats(&self) -> interfaces::ReadWriteStats {
+        // Aggregate per-direction counters across every data drive. Each drive's
+        // block device tracks its own SSD read/write bytes+ops (zeroed unless
+        // built with the telemetry feature); sum for the dispatcher-wide total.
+        let mut agg = interfaces::ReadWriteStats::default();
+        for drive in self.data_drives.read().iter() {
+            // merge_from sums every counter and both size histograms.
+            agg.merge_from(&drive.block_dev_iface.read_write_stats());
+        }
+        agg
+    }
+
+    fn tier_event_stats(&self) -> interfaces::TierEventStats {
+        let mut stats = self.tier_counters.snapshot();
+
+        // Sample the eviction window rather than the whole tier. `evict_one_clean`
+        // scans the oldest keys, and an entry that cannot be evicted ages to the oldest
+        // end and stays there -- so stuck entries CONCENTRATE here and a tier-wide
+        // average would dilute the very effect this measures.
+        //
+        // Walked at snapshot time rather than tracked incrementally because the
+        // transitions happen in several components, including one that publishes
+        // straight into the dispatch map without going through this dispatcher at all.
+        // Counting transitions here would miss exactly those and report a persisted
+        // fraction that is too high. The walk costs one `is_evictable` per sampled key
+        // and runs only when a scraper or the periodic log line asks.
+        const SAMPLE: usize = 64;
+        if let (Ok(dm), Ok(mt)) = (self.dispatch_map.get(), self.memory_tier.get()) {
+            let keys = mt.oldest_keys(SAMPLE);
+            stats.oldest_sampled = keys.len() as u64;
+            stats.oldest_persisted = keys.iter().filter(|k| dm.is_evictable(**k)).count() as u64;
+        }
+
+        stats
+    }
+
+    fn read_to_bounce(
+        &self,
+        key: CacheKey,
+        offset: u64,
+        len: u32,
+    ) -> Result<interfaces::BounceBuffer, interfaces::BounceError> {
+        use interfaces::BounceError;
+        self.ensure_initialized()
+            .map_err(|e| BounceError::NotInitialized(e.to_string()))?;
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| BounceError::NotInitialized("memory_tier not bound".into()))?;
+        // `offset` is the entry's SSD location, which records the drive the
+        // store chose (`encode_loc`): read that drive at the raw offset, as
+        // the cold path does -- reading another drive's offset reads someone
+        // else's data. Its handles are cloned out so the drive list is not held
+        // across a read with no timeout: shutdown's write lock would wait on
+        // the drive.
+        let (dev, pool, offset) = {
+            let drives = self.data_drives.read();
+            if drives.is_empty() {
+                return Err(BounceError::NeverFits("no data drives".into()));
+            }
+            let Some((drive, raw)) = select_drive(&drives, offset) else {
+                return Err(BounceError::Io(format!(
+                    "key {key}: SSD location {offset:#x} names drive {} of {}",
+                    decode_loc(offset).0,
+                    drives.len()
+                )));
+            };
+            (
+                Arc::clone(&drive.block_dev_iface),
+                Arc::clone(&drive.channel_pool),
+                raw,
+            )
+        };
+        // The read is rounded up to whole blocks and the buffer to whole pages,
+        // so a block that does not divide a page reads past the buffer's end.
+        let block_size = u64::from(dev.block_size());
+        if block_size == 0 || 4096 % block_size != 0 {
+            return Err(BounceError::NeverFits(format!(
+                "drive block size {block_size} does not divide the reserve's 4 KiB pages"
+            )));
+        }
+        let buf = mt.bounce_alloc(len)?;
+        let chunk_size = (dev.max_transfer_size() as usize).max(4096);
+        let read = pool
+            .checkout()
+            .map_err(|e| pipeline::BounceReadError::Settled(e.to_string()))
+            .and_then(|channels| {
+                // SAFETY: the buffer is `len` bytes rounded up to 4 KiB of the
+                // memory tier's DMA-capable pool (bounce_alloc refuses
+                // otherwise), held by nobody else until it is freed; the
+                // caller's pin keeps the extent at `offset` from being reused.
+                unsafe {
+                    pipeline::read_into_bounce(
+                        &*dev,
+                        channels.channels(),
+                        buf.ptr,
+                        offset / block_size,
+                        len as usize,
+                        chunk_size,
+                        16,
+                    )
+                }
+            });
+        match read {
+            Ok(()) => Ok(buf),
+            Err(pipeline::BounceReadError::Settled(e)) => {
+                mt.bounce_free(buf);
+                Err(BounceError::Io(format!(
+                    "key {key} at offset {offset}: {e}"
+                )))
+            }
+            Err(pipeline::BounceReadError::Unsettled(e)) => {
+                // Leaked, never freed: the drive may still be writing it, and a
+                // freed buf is handed to the next entry. The reserve shrinks
+                // by it for the life of the process, which is loud enough.
+                self.log_error(&format!(
+                    "dispatcher: read_to_bounce key {key}: {e}; leaking its {len}-byte \
+                     bounce buffer, since the drive may still write it"
+                ));
+                Err(BounceError::Io(format!(
+                    "key {key} at offset {offset}: {e}"
+                )))
+            }
+        }
+    }
+
+    fn release_bounce(&self, buf: interfaces::BounceBuffer) {
+        if let Ok(mt) = self.memory_tier.get() {
+            mt.bounce_free(buf);
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "repair_test_cold_pin.rs"]
+mod repair_test_cold_pin;
+
+#[cfg(test)]
+#[path = "repair_test_clear_mt_pinned.rs"]
+mod repair_test_clear_mt_pinned;
+
+#[cfg(test)]
+#[path = "repair_test_flush_failed_write.rs"]
+mod repair_test_flush_failed_write;
+
+#[cfg(test)]
+#[path = "repair_test_clear_all.rs"]
+mod repair_test_clear_all;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use component_core::query_interface;
+    use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
+    use std::thread;
+
+    use interfaces::{
+        CacheKey, DispatchMapError, DmaBuffer, GpuDeviceInfo, GpuDmaBuffer, GpuIpcHandle,
+        GpuStream, IMemoryTier, LookupConfig, LookupResult, MemoryTierError,
+        MemoryTierTelemetrySnapshot, RemoteLookupError,
+    };
+
+    // -----------------------------------------------------------------------
+    // Test infrastructure
+    // -----------------------------------------------------------------------
+
+    // --- MockMemoryTier ---
+
+    struct MockMtSlot {
+        offset: usize,
+        size: u32,
+    }
+
+    struct MockMemoryTier {
+        inner: Mutex<MockMtInner>,
+    }
+
+    struct MockMtInner {
+        pool: Vec<u8>,
+        slots: HashMap<CacheKey, MockMtSlot>,
+        used: usize,
+        capacity: usize,
+        fail_insert: bool,
+        /// A bounce reserve for `read_to_bounce`, if the test gives one:
+        /// fixed-size buffers, so a test can exhaust it exactly.
+        bounce: Option<MockBounce>,
+    }
+
+    struct MockBounce {
+        mem: Vec<u8>,
+        buffer_bytes: usize,
+        free: Vec<usize>,
+    }
+
+    impl MockMemoryTier {
+        fn new(capacity: usize) -> Self {
+            Self {
+                inner: Mutex::new(MockMtInner {
+                    pool: vec![0u8; capacity],
+                    slots: HashMap::new(),
+                    used: 0,
+                    capacity,
+                    fail_insert: false,
+                    bounce: None,
+                }),
+            }
+        }
+
+        /// A tier with `buffers` bounce buffers of `buffer_bytes` each.
+        fn with_bounce(capacity: usize, buffers: usize, buffer_bytes: usize) -> Self {
+            let mt = Self::new(capacity);
+            mt.inner.lock().unwrap().bounce = Some(MockBounce {
+                mem: vec![0u8; buffers * buffer_bytes],
+                buffer_bytes,
+                free: (0..buffers).rev().collect(),
+            });
+            mt
+        }
+
+        fn bounce_free_count(&self) -> usize {
+            self.inner
+                .lock()
+                .unwrap()
+                .bounce
+                .as_ref()
+                .map_or(0, |b| b.free.len())
+        }
+
+        fn with_fail_insert(capacity: usize) -> Self {
+            Self {
+                inner: Mutex::new(MockMtInner {
+                    pool: vec![0u8; capacity],
+                    slots: HashMap::new(),
+                    used: 0,
+                    capacity,
+                    fail_insert: true,
+                    bounce: None,
+                }),
+            }
+        }
+    }
+
+    impl IMemoryTier for MockMemoryTier {
+        fn initialize(
+            &self,
+            _pool_size: usize,
+            _numa_node: Option<i32>,
+        ) -> Result<(), MemoryTierError> {
+            Ok(())
+        }
+
+        fn insert(&self, key: CacheKey, size: u32) -> Result<*mut u8, MemoryTierError> {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.fail_insert {
+                return Err(MemoryTierError::PoolFull);
+            }
+            if inner.slots.contains_key(&key) {
+                return Err(MemoryTierError::AlreadyExists(key));
+            }
+            let aligned = (size as usize).next_multiple_of(4096);
+            if inner.used + aligned > inner.capacity {
+                return Err(MemoryTierError::PoolFull);
+            }
+            let offset = inner.used;
+            inner.used += aligned;
+            inner.slots.insert(key, MockMtSlot { offset, size });
+            let ptr = unsafe { inner.pool.as_mut_ptr().add(offset) };
+            Ok(ptr)
+        }
+
+        fn get(&self, key: CacheKey) -> Option<(*mut u8, u32)> {
+            let inner = self.inner.lock().unwrap();
+            inner.slots.get(&key).map(|slot| {
+                let ptr = unsafe { (inner.pool.as_ptr() as *mut u8).add(slot.offset) };
+                (ptr, slot.size)
+            })
+        }
+
+        fn peek(&self, key: CacheKey) -> Option<(*mut u8, u32)> {
+            self.get(key)
+        }
+
+        fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
+            let inner = self.inner.lock().unwrap();
+            inner.slots.keys().take(n).copied().collect()
+        }
+
+        fn evict_next(&self) -> Option<CacheKey> {
+            let mut inner = self.inner.lock().unwrap();
+            let key = inner.slots.keys().next().copied()?;
+            let slot = inner.slots.remove(&key).unwrap();
+            let aligned = (slot.size as usize).next_multiple_of(4096);
+            inner.used = inner.used.saturating_sub(aligned);
+            Some(key)
+        }
+
+        fn evict_next_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
+            self.evict_next()
+        }
+
+        fn remove(&self, key: CacheKey) -> Result<(), MemoryTierError> {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.slots.remove(&key) {
+                Some(slot) => {
+                    let aligned = (slot.size as usize).next_multiple_of(4096);
+                    inner.used = inner.used.saturating_sub(aligned);
+                    Ok(())
+                }
+                None => Err(MemoryTierError::KeyNotFound(key)),
+            }
+        }
+
+        fn touch(&self, _key: CacheKey) {}
+        fn batch_touch(&self, _keys: &[CacheKey]) {}
+
+        fn contains(&self, key: CacheKey) -> bool {
+            self.inner.lock().unwrap().slots.contains_key(&key)
+        }
+
+        fn capacity(&self) -> usize {
+            self.inner.lock().unwrap().capacity
+        }
+
+        fn used(&self) -> usize {
+            self.inner.lock().unwrap().used
+        }
+
+        fn pool_info(&self) -> Option<(*mut u8, usize)> {
+            let inner = self.inner.lock().unwrap();
+            Some((inner.pool.as_ptr() as *mut u8, inner.capacity))
+        }
+
+        fn clear(&self) -> Result<usize, MemoryTierError> {
+            let mut inner = self.inner.lock().unwrap();
+            let count = inner.slots.len();
+            inner.slots.clear();
+            inner.used = 0;
+            Ok(count)
+        }
+
+        fn is_dma_capable(&self) -> bool {
+            false
+        }
+
+        fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot {
+            MemoryTierTelemetrySnapshot::default()
+        }
+        // A test double with no bounce reserve.
+        fn set_bounce_reserve(&self, _: usize) -> Result<(), interfaces::MemoryTierError> {
+            Ok(())
+        }
+        fn bounce_alloc(
+            &self,
+            len: u32,
+        ) -> Result<interfaces::BounceBuffer, interfaces::BounceError> {
+            let mut inner = self.inner.lock().unwrap();
+            let Some(b) = inner.bounce.as_mut() else {
+                return Err(interfaces::BounceError::NeverFits(
+                    "no bounce reserve".into(),
+                ));
+            };
+            if len as usize > b.buffer_bytes {
+                return Err(interfaces::BounceError::NeverFits(
+                    "larger than a buffer".into(),
+                ));
+            }
+            let i = b.free.pop().ok_or(interfaces::BounceError::NoSpace)?;
+            let ptr = b.mem[i * b.buffer_bytes..].as_mut_ptr();
+            Ok(interfaces::BounceBuffer { ptr, len })
+        }
+        fn bounce_free(&self, buf: interfaces::BounceBuffer) {
+            let mut inner = self.inner.lock().unwrap();
+            let b = inner.bounce.as_mut().expect("a buffer implies a reserve");
+            let i = (buf.ptr as usize - b.mem.as_ptr() as usize) / b.buffer_bytes;
+            assert!(!b.free.contains(&i), "bounce buffer freed twice");
+            b.free.push(i);
+        }
+        fn bounce_usage(&self) -> (usize, usize) {
+            let inner = self.inner.lock().unwrap();
+            inner.bounce.as_ref().map_or((0, 0), |b| {
+                (b.mem.len(), b.mem.len() - b.free.len() * b.buffer_bytes)
+            })
+        }
+    }
+
+    // --- MockDispatchMap ---
+
+    enum MockEntryLocation {
+        MemoryTier {
+            pointer: *mut u8,
+            size: u32,
+            ssd_offset: Option<u64>,
+        },
+        BlockDevice {
+            offset: u64,
+        },
+    }
+
+    // SAFETY: pointers in MemoryTier refer to MockMemoryTier pool (test-only).
+    unsafe impl Send for MockEntryLocation {}
+    unsafe impl Sync for MockEntryLocation {}
+
+    struct MockEntry {
+        location: MockEntryLocation,
+        write_ref: bool,
+        read_refs: u32,
+    }
+
+    struct MockDmInner {
+        entries: HashMap<CacheKey, MockEntry>,
+        mismatch_keys: HashSet<CacheKey>,
+        // Keys that should flip BlockDevice -> MemoryTier the *next* time they
+        // are looked up, simulating a concurrent promotion winner finishing its
+        // SSD->DRAM read between our classification and recovery. Pointer stored
+        // as usize to keep MockDmInner Send without an unsafe impl.
+        flip_on_next_lookup: HashMap<CacheKey, (usize, u32)>,
+        #[cfg(feature = "integrity-check")]
+        checksums: HashMap<CacheKey, u32>,
+    }
+
+    struct MockDispatchMap {
+        inner: Mutex<MockDmInner>,
+    }
+
+    impl MockDispatchMap {
+        fn new() -> Self {
+            Self {
+                inner: Mutex::new(MockDmInner {
+                    entries: HashMap::new(),
+                    mismatch_keys: HashSet::new(),
+                    flip_on_next_lookup: HashMap::new(),
+                    #[cfg(feature = "integrity-check")]
+                    checksums: HashMap::new(),
+                }),
+            }
+        }
+
+        fn entry_count(&self) -> usize {
+            self.inner.lock().unwrap().entries.len()
+        }
+
+        fn set_mismatch_key(&self, key: CacheKey) {
+            self.inner.lock().unwrap().mismatch_keys.insert(key);
+        }
+
+        /// Outstanding read pins across every entry — what a pin probe samples at
+        /// each GPU call to prove a pin was held at that instant.
+        fn total_read_refs(&self) -> u32 {
+            self.inner
+                .lock()
+                .unwrap()
+                .entries
+                .values()
+                .map(|e| e.read_refs)
+                .sum()
+        }
+
+        /// Whether `key` currently resolves to a resident memory-tier slot — false
+        /// while it is still classified BlockDevice, true once a promote landed.
+        fn is_memory_resident(&self, key: CacheKey) -> bool {
+            matches!(
+                self.inner.lock().unwrap().entries.get(&key),
+                Some(MockEntry {
+                    location: MockEntryLocation::MemoryTier { pointer, .. },
+                    ..
+                }) if !pointer.is_null()
+            )
+        }
+
+        /// Arm a one-shot flip: the next `lookup(key)` still reports the current
+        /// (BlockDevice) classification, but installs a MemoryTier pointer so the
+        /// *following* lookup observes MemoryTier — mimicking the racing lookup
+        /// that won the `mt.insert` and finished promoting.
+        fn flip_to_memory_tier_on_next_lookup(&self, key: CacheKey, pointer: *mut u8, size: u32) {
+            self.inner
+                .lock()
+                .unwrap()
+                .flip_on_next_lookup
+                .insert(key, (pointer as usize, size));
+        }
+
+        fn convert_entry_to_block(&self, key: CacheKey, offset: u64) {
+            let mut inner = self.inner.lock().unwrap();
+            if let Some(entry) = inner.entries.get_mut(&key) {
+                entry.location = MockEntryLocation::MemoryTier {
+                    pointer: std::ptr::null_mut(),
+                    size: 0,
+                    ssd_offset: Some(offset),
+                };
+            }
+        }
+    }
+
+    impl IDispatchMap for MockDispatchMap {
+        fn initialize(&self) -> Result<(), DispatchMapError> {
+            Ok(())
+        }
+
+        fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.mismatch_keys.contains(&key) {
+                return Ok(LookupResult::MismatchSize);
+            }
+            let result = match inner.entries.get(&key) {
+                None => return Ok(LookupResult::NotExist),
+                Some(entry) => match &entry.location {
+                    MockEntryLocation::MemoryTier {
+                        pointer,
+                        size,
+                        ssd_offset,
+                    } => match ssd_offset {
+                        Some(offset) if pointer.is_null() => {
+                            LookupResult::BlockDevice { offset: *offset }
+                        }
+                        _ => LookupResult::MemoryTier {
+                            pointer: *pointer,
+                            size: *size,
+                        },
+                    },
+                    MockEntryLocation::BlockDevice { offset } => {
+                        LookupResult::BlockDevice { offset: *offset }
+                    }
+                },
+            };
+            // The real dispatch map increments read_ref *before* it inspects the
+            // location, so MemoryTier and BlockDevice answers both come back pinned
+            // while NotExist and MismatchSize return earlier, unpinned. Model that
+            // faithfully: whether a pin outlives an async H2D copy depends on it.
+            if matches!(
+                result,
+                LookupResult::MemoryTier { .. } | LookupResult::BlockDevice { .. }
+            ) {
+                if let Some(entry) = inner.entries.get_mut(&key) {
+                    entry.read_refs += 1;
+                }
+            }
+            // One-shot promotion race simulation: after classifying this key as
+            // cold, install a MemoryTier pointer so the recovery lookup sees it.
+            if matches!(result, LookupResult::BlockDevice { .. }) {
+                if let Some((ptr, size)) = inner.flip_on_next_lookup.remove(&key) {
+                    if let Some(entry) = inner.entries.get_mut(&key) {
+                        entry.location = MockEntryLocation::MemoryTier {
+                            pointer: ptr as *mut u8,
+                            size,
+                            ssd_offset: Some(0),
+                        };
+                    }
+                }
+            }
+            Ok(result)
+        }
+
+        fn convert_to_storage(&self, key: CacheKey, offset: u64) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.entries.get_mut(&key) {
+                None => Err(DispatchMapError::KeyNotFound(key)),
+                Some(entry) => {
+                    match &mut entry.location {
+                        MockEntryLocation::MemoryTier { ssd_offset, .. } => {
+                            *ssd_offset = Some(offset);
+                        }
+                        MockEntryLocation::BlockDevice { .. } => {}
+                    }
+                    // The real map consumes the read ref that `downgrade_reference`
+                    // installed at populate time, pairing the two.
+                    if entry.read_refs > 0 {
+                        entry.read_refs -= 1;
+                    }
+                    Ok(())
+                }
+            }
+        }
+
+        fn take_read(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.entries.get_mut(&key) {
+                None => Err(DispatchMapError::KeyNotFound(key)),
+                Some(entry) => {
+                    entry.read_refs += 1;
+                    Ok(())
+                }
+            }
+        }
+
+        fn take_write(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.entries.get_mut(&key) {
+                None => Err(DispatchMapError::KeyNotFound(key)),
+                Some(entry) => {
+                    if entry.write_ref {
+                        return Err(DispatchMapError::ActiveReferences(key));
+                    }
+                    entry.write_ref = true;
+                    Ok(())
+                }
+            }
+        }
+
+        fn release_read(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.entries.get_mut(&key) {
+                None => Err(DispatchMapError::KeyNotFound(key)),
+                Some(entry) => {
+                    entry.read_refs = entry.read_refs.saturating_sub(1);
+                    Ok(())
+                }
+            }
+        }
+
+        fn release_write(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.entries.get_mut(&key) {
+                None => Err(DispatchMapError::KeyNotFound(key)),
+                Some(entry) => {
+                    entry.write_ref = false;
+                    Ok(())
+                }
+            }
+        }
+
+        fn downgrade_reference(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.entries.get_mut(&key) {
+                None => Err(DispatchMapError::NoWriteReference(key)),
+                Some(entry) => {
+                    entry.write_ref = false;
+                    entry.read_refs += 1;
+                    Ok(())
+                }
+            }
+        }
+
+        fn remove(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.entries.get(&key) {
+                None => Err(DispatchMapError::KeyNotFound(key)),
+                Some(entry) => {
+                    if entry.read_refs > 0 || entry.write_ref {
+                        return Err(DispatchMapError::ActiveReferences(key));
+                    }
+                    inner.entries.remove(&key);
+                    Ok(())
+                }
+            }
+        }
+
+        fn touch(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+            let inner = self.inner.lock().unwrap();
+            if inner.entries.contains_key(&key) {
+                Ok(())
+            } else {
+                Err(DispatchMapError::KeyNotFound(key))
+            }
+        }
+
+        fn entry_size(&self, key: CacheKey) -> Result<u32, DispatchMapError> {
+            let inner = self.inner.lock().unwrap();
+            if inner.entries.contains_key(&key) {
+                Ok(4096)
+            } else {
+                Err(DispatchMapError::KeyNotFound(key))
+            }
+        }
+
+        fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
+            let inner = self.inner.lock().unwrap();
+            inner.entries.keys().copied().take(n).collect()
+        }
+
+        fn create_memory_tier_entry(
+            &self,
+            key: CacheKey,
+            pointer: *mut u8,
+            size: u32,
+        ) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.entries.contains_key(&key) {
+                return Err(DispatchMapError::AlreadyExists(key));
+            }
+            inner.entries.insert(
+                key,
+                MockEntry {
+                    location: MockEntryLocation::MemoryTier {
+                        pointer,
+                        size,
+                        ssd_offset: None,
+                    },
+                    write_ref: true,
+                    read_refs: 0,
+                },
+            );
+            Ok(())
+        }
+
+        fn convert_memory_tier_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.entries.get_mut(&key) {
+                None => Err(DispatchMapError::KeyNotFound(key)),
+                Some(entry) => match &entry.location {
+                    MockEntryLocation::MemoryTier {
+                        ssd_offset: Some(offset),
+                        ..
+                    } => {
+                        let off = *offset;
+                        entry.location = MockEntryLocation::MemoryTier {
+                            pointer: std::ptr::null_mut(),
+                            size: 0,
+                            ssd_offset: Some(off),
+                        };
+                        Ok(())
+                    }
+                    _ => Err(DispatchMapError::InvalidState("no ssd_offset set".into())),
+                },
+            }
+        }
+
+        fn promote_block_to_memory_tier(
+            &self,
+            key: CacheKey,
+            pointer: *mut u8,
+            size: u32,
+        ) -> Result<(), DispatchMapError> {
+            if size == 0 {
+                return Err(DispatchMapError::InvalidSize);
+            }
+            let mut inner = self.inner.lock().unwrap();
+            match inner.entries.get_mut(&key) {
+                None => Err(DispatchMapError::KeyNotFound(key)),
+                Some(entry) => {
+                    // Mock only models a MemoryTier location; flip pointer/size
+                    // in place, preserving refs (no remove/recreate).
+                    entry.location = MockEntryLocation::MemoryTier {
+                        pointer,
+                        size,
+                        ssd_offset: Some(0),
+                    };
+                    Ok(())
+                }
+            }
+        }
+
+        fn is_evictable(&self, key: CacheKey) -> bool {
+            let inner = self.inner.lock().unwrap();
+            match inner.entries.get(&key) {
+                Some(entry) => matches!(
+                    entry.location,
+                    MockEntryLocation::MemoryTier {
+                        ssd_offset: Some(_),
+                        ..
+                    }
+                ),
+                None => false,
+            }
+        }
+
+        fn try_evict_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            let entry = inner
+                .entries
+                .get_mut(&key)
+                .ok_or(DispatchMapError::KeyNotFound(key))?;
+            // Mirror the real dispatch-map: a pinned entry (read/write ref held
+            // by an in-flight load or write-back) is not evictable.
+            if entry.read_refs > 0 || entry.write_ref {
+                return Err(DispatchMapError::ActiveReferences(key));
+            }
+            match &entry.location {
+                MockEntryLocation::MemoryTier {
+                    ssd_offset: Some(offset),
+                    ..
+                } => {
+                    let offset = *offset;
+                    entry.location = MockEntryLocation::BlockDevice { offset };
+                    Ok(())
+                }
+                _ => Err(DispatchMapError::InvalidState("not evictable".into())),
+            }
+        }
+
+        fn recover_extent(
+            &self,
+            key: CacheKey,
+            offset: u64,
+            _size_blocks: u32,
+        ) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.entries.contains_key(&key) {
+                return Err(DispatchMapError::AlreadyExists(key));
+            }
+            inner.entries.insert(
+                key,
+                MockEntry {
+                    location: MockEntryLocation::MemoryTier {
+                        pointer: std::ptr::null_mut(),
+                        size: 0,
+                        ssd_offset: Some(offset),
+                    },
+                    write_ref: false,
+                    read_refs: 0,
+                },
+            );
+            Ok(())
+        }
+
+        #[cfg(feature = "integrity-check")]
+        fn set_checksum(&self, key: CacheKey, checksum: u32) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            if !inner.entries.contains_key(&key) {
+                return Err(DispatchMapError::KeyNotFound(key));
+            }
+            inner.checksums.insert(key, checksum);
+            Ok(())
+        }
+
+        #[cfg(feature = "integrity-check")]
+        fn get_checksum(&self, key: CacheKey) -> Option<u32> {
+            self.inner
+                .lock()
+                .unwrap()
+                .checksums
+                .get(&key)
+                .copied()
+                .filter(|&c| c != 0)
+        }
+    }
+
+    struct MockLogger;
+
+    impl ILogger for MockLogger {
+        fn error(&self, _msg: &str) {}
+        fn warn(&self, _msg: &str) {}
+        fn info(&self, _msg: &str) {}
+        fn debug(&self, _msg: &str) {}
+    }
+
+    /// A GPU call the pin probe watches.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum GpuEvent {
+        SubmitH2d,
+        Sync,
+    }
+
+    /// Records the dispatch-map's total read-pin count at each GPU call.
+    ///
+    /// This is what makes the pin-lifetime invariant testable: a pin must still be
+    /// held when a copy is *submitted* and when the batched sync runs, because that
+    /// pin is the only thing keeping the memory-tier evictor off the DRAM slot the
+    /// DMA is reading. The event order also pins down the batching shape — one sync
+    /// per batch rather than one per key.
+    struct PinProbe {
+        dm: Arc<MockDispatchMap>,
+        events: Mutex<Vec<(GpuEvent, u32)>>,
+        submissions: AtomicUsize,
+        /// 1-based index of the submission to fail; 0 fails none.
+        fail_submit_on: usize,
+        fail_sync: bool,
+        /// Report every pointer as belonging to no GPU, so the dispatcher resolves
+        /// no per-device streams and takes the synchronous fallback copy.
+        no_device: bool,
+        /// Key whose memory-tier residency is sampled at each `Sync`, to order a
+        /// cold promotion against the warm stream sync.
+        watch: Option<CacheKey>,
+        resident_at_sync: Mutex<Vec<bool>>,
+    }
+
+    impl PinProbe {
+        fn new(dm: Arc<MockDispatchMap>) -> Self {
+            Self {
+                dm,
+                events: Mutex::new(Vec::new()),
+                submissions: AtomicUsize::new(0),
+                fail_submit_on: 0,
+                fail_sync: false,
+                no_device: false,
+                watch: None,
+                resident_at_sync: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn watching(dm: Arc<MockDispatchMap>, key: CacheKey) -> Self {
+            Self {
+                watch: Some(key),
+                ..Self::new(dm)
+            }
+        }
+
+        fn failing_submit_on(dm: Arc<MockDispatchMap>, nth: usize) -> Self {
+            Self {
+                fail_submit_on: nth,
+                ..Self::new(dm)
+            }
+        }
+
+        fn failing_sync(dm: Arc<MockDispatchMap>) -> Self {
+            Self {
+                fail_sync: true,
+                ..Self::new(dm)
+            }
+        }
+
+        fn without_gpu_device(dm: Arc<MockDispatchMap>) -> Self {
+            Self {
+                no_device: true,
+                ..Self::new(dm)
+            }
+        }
+
+        fn record(&self, event: GpuEvent) {
+            let pins = self.dm.total_read_refs();
+            self.events.lock().unwrap().push((event, pins));
+            if let (GpuEvent::Sync, Some(key)) = (event, self.watch) {
+                let resident = self.dm.is_memory_resident(key);
+                self.resident_at_sync.lock().unwrap().push(resident);
+            }
+        }
+
+        fn resident_at_sync(&self) -> Vec<bool> {
+            self.resident_at_sync.lock().unwrap().clone()
+        }
+
+        fn events(&self) -> Vec<(GpuEvent, u32)> {
+            self.events.lock().unwrap().clone()
+        }
+
+        fn count(&self, event: GpuEvent) -> usize {
+            self.events().iter().filter(|(e, _)| *e == event).count()
+        }
+    }
+
+    #[derive(Default)]
+    struct MockGpuServices {
+        probe: Option<Arc<PinProbe>>,
+    }
+
+    impl MockGpuServices {
+        fn with_probe(probe: Arc<PinProbe>) -> Self {
+            Self { probe: Some(probe) }
+        }
+    }
+
+    impl IGpuServices for MockGpuServices {
+        fn initialize(&self) -> Result<(), String> {
+            Ok(())
+        }
+        fn shutdown(&self) -> Result<(), String> {
+            Ok(())
+        }
+        fn get_devices(&self) -> Result<Vec<GpuDeviceInfo>, String> {
+            Ok(vec![])
+        }
+        fn deserialize_ipc_handle(&self, _base64_payload: &str) -> Result<GpuIpcHandle, String> {
+            Err("mock: not implemented".into())
+        }
+        fn verify_memory(&self, _handle: &GpuIpcHandle) -> Result<(), String> {
+            Ok(())
+        }
+        fn pin_memory(&self, _handle: &GpuIpcHandle) -> Result<(), String> {
+            Ok(())
+        }
+        fn unpin_memory(&self, _handle: &GpuIpcHandle) -> Result<(), String> {
+            Ok(())
+        }
+        fn create_dma_buffer(&self, _handle: GpuIpcHandle) -> Result<GpuDmaBuffer, String> {
+            Err("mock: not implemented".into())
+        }
+        fn dma_copy_to_host(
+            &self,
+            src: *const std::ffi::c_void,
+            dst: &DmaBuffer,
+            size: usize,
+        ) -> Result<(), String> {
+            // SAFETY: src is a valid host pointer (from IpcHandle) and dst is a valid DmaBuffer.
+            unsafe {
+                std::ptr::copy_nonoverlapping(src as *const u8, dst.as_ptr() as *mut u8, size);
+            }
+            Ok(())
+        }
+        fn dma_copy_to_device(
+            &self,
+            src: &DmaBuffer,
+            dst: *mut std::ffi::c_void,
+            size: usize,
+        ) -> Result<(), String> {
+            // SAFETY: src is a valid DmaBuffer and dst is a valid host pointer (from IpcHandle).
+            unsafe {
+                std::ptr::copy_nonoverlapping(src.as_ptr() as *const u8, dst as *mut u8, size);
+            }
+            Ok(())
+        }
+        fn prepare_memory_for_spdk(
+            &self,
+            _base64_payload: &str,
+            _device_index: Option<u32>,
+        ) -> Result<DmaBuffer, String> {
+            Err("mock: not implemented".into())
+        }
+        fn create_stream(&self) -> Result<GpuStream, String> {
+            Ok(GpuStream(0x1 as *mut std::ffi::c_void))
+        }
+        fn set_device(&self, _device: i32) -> Result<(), String> {
+            Ok(())
+        }
+        fn device_of_ptr(&self, _ptr: *const std::ffi::c_void) -> Result<i32, String> {
+            if self.probe.as_ref().is_some_and(|p| p.no_device) {
+                return Ok(-1);
+            }
+            Ok(0)
+        }
+        fn stream_query(&self, _stream: GpuStream) -> Result<bool, String> {
+            Ok(true)
+        }
+        fn destroy_stream(&self, _stream: GpuStream) -> Result<(), String> {
+            Ok(())
+        }
+        fn stream_synchronize(&self, _stream: GpuStream) -> Result<(), String> {
+            if let Some(ref p) = self.probe {
+                p.record(GpuEvent::Sync);
+                if p.fail_sync {
+                    return Err("mock: injected stream_synchronize failure".into());
+                }
+            }
+            Ok(())
+        }
+        fn dma_copy_to_device_async(
+            &self,
+            src: &DmaBuffer,
+            dst: *mut std::ffi::c_void,
+            size: usize,
+            _stream: GpuStream,
+        ) -> Result<(), String> {
+            // SAFETY: In tests, both src and dst are valid host pointers.
+            unsafe {
+                std::ptr::copy_nonoverlapping(src.as_ptr() as *const u8, dst as *mut u8, size);
+            }
+            Ok(())
+        }
+        fn memcpy_h2d_async(
+            &self,
+            src: *const std::ffi::c_void,
+            dst: *mut std::ffi::c_void,
+            size: usize,
+            _stream: GpuStream,
+        ) -> Result<(), String> {
+            if let Some(ref p) = self.probe {
+                p.record(GpuEvent::SubmitH2d);
+                let nth = p.submissions.fetch_add(1, Ordering::Relaxed) + 1;
+                if p.fail_submit_on == nth {
+                    return Err("mock: injected H2D submission failure".into());
+                }
+            }
+            unsafe {
+                std::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, size);
+            }
+            Ok(())
+        }
+        fn memcpy_h2d_batch_async(
+            &self,
+            srcs: &[*const std::ffi::c_void],
+            dsts: &[*mut std::ffi::c_void],
+            sizes: &[usize],
+            stream: GpuStream,
+        ) -> Result<(), String> {
+            for ((&src, &dst), &size) in srcs.iter().zip(dsts).zip(sizes) {
+                self.memcpy_h2d_async(src, dst, size, stream)?;
+            }
+            Ok(())
+        }
+        fn dma_copy_to_host_async(
+            &self,
+            src: *const std::ffi::c_void,
+            dst: &DmaBuffer,
+            size: usize,
+            _stream: GpuStream,
+        ) -> Result<(), String> {
+            unsafe {
+                std::ptr::copy_nonoverlapping(src as *const u8, dst.as_ptr() as *mut u8, size);
+            }
+            Ok(())
+        }
+        fn memcpy_d2h_async(
+            &self,
+            src: *const std::ffi::c_void,
+            dst: *mut std::ffi::c_void,
+            size: usize,
+            _stream: GpuStream,
+        ) -> Result<(), String> {
+            unsafe {
+                std::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, size);
+            }
+            Ok(())
+        }
+        fn allocate_pinned_dma_buffer(&self, size: usize) -> Result<DmaBuffer, String> {
+            DmaBuffer::new(size, 4096, None).map_err(|e| e.to_string())
+        }
+        fn register_host_memory(
+            &self,
+            _ptr: *mut std::ffi::c_void,
+            _size: usize,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+        fn unregister_host_memory(
+            &self,
+            _ptr: *mut std::ffi::c_void,
+            _size: usize,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    fn setup_initialized() -> (Arc<DispatcherComponent>, Arc<MockDispatchMap>) {
+        let dm = Arc::new(MockDispatchMap::new());
+        let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
+        let gpu: Arc<dyn IGpuServices + Send + Sync> = Arc::new(MockGpuServices::default());
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+        c.dispatch_map
+            .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
+            .unwrap();
+        c.logger.connect(logger).unwrap();
+        c.gpu_services.connect(gpu).unwrap();
+        c.memory_tier.connect(mt).unwrap();
+
+        let d = query_interface!(c, IDispatcher).unwrap();
+        d.initialize(DispatcherConfig {
+            data_pci_addrs: vec!["0000:02:00.0".to_string()],
+            ..Default::default()
+        })
+        .unwrap();
+
+        (c, dm)
+    }
+
+    fn make_handle(buf: &mut [u8]) -> IpcHandle {
+        IpcHandle {
+            address: buf.as_mut_ptr(),
+            size: buf.len() as u32,
+        }
+    }
+
+    // --- MockRemoteLookup ---
+
+    /// A remote peer holding a known set of keys.
+    ///
+    /// On a hit it does what the real component's publish-on-success path does: makes
+    /// the value resident in the local memory tier, registers a MemoryTier entry, and
+    /// releases the write ref — so the key is published **unpinned** and the
+    /// dispatcher's delivery has to take its own read pin. Each slot is filled with a
+    /// per-key byte pattern so a test can prove the right bytes reached the caller.
+    struct MockRemoteLookup {
+        dm: Arc<MockDispatchMap>,
+        mt: Arc<MockMemoryTier>,
+        held: HashSet<CacheKey>,
+    }
+
+    impl MockRemoteLookup {
+        fn new(dm: Arc<MockDispatchMap>, mt: Arc<MockMemoryTier>, held: &[CacheKey]) -> Self {
+            Self {
+                dm,
+                mt,
+                held: held.iter().copied().collect(),
+            }
+        }
+
+        /// The byte a remotely-fetched `key`'s slot is filled with.
+        fn fill_byte(key: CacheKey) -> u8 {
+            (key as u8).wrapping_add(0xA0)
+        }
+    }
+
+    impl IRemoteLookup for MockRemoteLookup {
+        fn initialize(&self, _config: LookupConfig) -> Result<(), RemoteLookupError> {
+            Ok(())
+        }
+
+        fn batch_lookup(&self, entries: &[(CacheKey, u32)]) -> Vec<Result<(), RemoteLookupError>> {
+            entries
+                .iter()
+                .map(|&(key, size)| {
+                    if !self.held.contains(&key) {
+                        return Err(RemoteLookupError::NotFound);
+                    }
+                    let ptr = self
+                        .mt
+                        .insert(key, size)
+                        .map_err(|e| RemoteLookupError::TransportError(e.to_string()))?;
+                    // SAFETY: `insert` returned a slot of at least `size` bytes.
+                    unsafe {
+                        std::ptr::write_bytes(ptr, Self::fill_byte(key), size as usize);
+                    }
+                    self.dm
+                        .create_memory_tier_entry(key, ptr, size)
+                        .map_err(|e| RemoteLookupError::TransportError(e.to_string()))?;
+                    // The real actor releases the write ref before marking the
+                    // operation satisfied, so the key is published unpinned.
+                    self.dm
+                        .release_write(key)
+                        .map_err(|e| RemoteLookupError::TransportError(e.to_string()))?;
+                    Ok(())
+                })
+                .collect()
+        }
+
+        fn join_cluster(&self, _endpoint: &str) -> Result<(), RemoteLookupError> {
+            Ok(())
+        }
+
+        fn leave_cluster(&self) -> Result<(), RemoteLookupError> {
+            Ok(())
+        }
+
+        fn serve_stats(&self) -> interfaces::RemoteServeStats {
+            // This mock is a lookup stub, never a responder, so it serves no peer.
+            interfaces::RemoteServeStats::default()
+        }
+    }
+
+    struct RemoteFixture {
+        component: Arc<DispatcherComponent>,
+        dm: Arc<MockDispatchMap>,
+        mt: Arc<MockMemoryTier>,
+        probe: Arc<PinProbe>,
+    }
+
+    impl RemoteFixture {
+        /// Make `key` resident and registered as a warm entry, bypassing `populate`.
+        ///
+        /// `populate` enqueues a background write whose `convert_to_storage` releases
+        /// the populate-time read pin at an arbitrary later moment, which would race
+        /// any assertion about pin counts. Installing the entry directly — the same
+        /// insert/register/release-write sequence the remote peer uses — keeps the
+        /// accounting deterministic.
+        fn install_warm_key(&self, key: CacheKey, fill: u8, size: u32) {
+            let ptr = self.mt.insert(key, size).expect("mock tier insert");
+            // SAFETY: `insert` returned a slot of at least `size` bytes.
+            unsafe {
+                std::ptr::write_bytes(ptr, fill, size as usize);
+            }
+            self.dm.create_memory_tier_entry(key, ptr, size).unwrap();
+            self.dm.release_write(key).unwrap();
+        }
+    }
+
+    /// Like [`setup_initialized`], but with the `remote_lookup` receptacle connected
+    /// to a peer holding `held`, and a pin probe watching the GPU mock.
+    ///
+    /// `make_probe` is handed the dispatch map so a test can pick a failure-injecting
+    /// probe. The receptacle is connected *before* `initialize()`, which calls
+    /// `join_cluster` on it.
+    fn setup_initialized_with_remote(
+        held: &[CacheKey],
+        make_probe: impl FnOnce(Arc<MockDispatchMap>) -> PinProbe,
+    ) -> RemoteFixture {
+        let dm = Arc::new(MockDispatchMap::new());
+        let mt = Arc::new(MockMemoryTier::new(1024 * 1024));
+        let probe = Arc::new(make_probe(Arc::clone(&dm)));
+        let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
+        let gpu: Arc<dyn IGpuServices + Send + Sync> =
+            Arc::new(MockGpuServices::with_probe(Arc::clone(&probe)));
+        let rl: Arc<dyn IRemoteLookup + Send + Sync> = Arc::new(MockRemoteLookup::new(
+            Arc::clone(&dm),
+            Arc::clone(&mt),
+            held,
+        ));
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+        c.dispatch_map
+            .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
+            .unwrap();
+        c.logger.connect(logger).unwrap();
+        c.gpu_services.connect(gpu).unwrap();
+        c.memory_tier
+            .connect(Arc::clone(&mt) as Arc<dyn IMemoryTier + Send + Sync>)
+            .unwrap();
+        c.remote_lookup.connect(rl).unwrap();
+
+        let d = query_interface!(c, IDispatcher).unwrap();
+        d.initialize(DispatcherConfig {
+            data_pci_addrs: vec!["0000:02:00.0".to_string()],
+            ..Default::default()
+        })
+        .unwrap();
+
+        RemoteFixture {
+            component: c,
+            dm,
+            mt,
+            probe,
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Pre-initialization tests (existing)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn component_creation() {
+        let _c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+    }
+
+    #[test]
+    fn query_idispatcher() {
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+        let d = query_interface!(c, IDispatcher);
+        assert!(d.is_some());
+    }
+
+    #[test]
+    fn initialize_without_receptacles_fails() {
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let config = DispatcherConfig {
+            data_pci_addrs: vec!["0000:02:00.0".to_string()],
+            ..Default::default()
+        };
+        let err = d.initialize(config);
+        assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
+    }
+
+    #[test]
+    fn initialize_with_empty_pci_addrs_fails() {
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let config = DispatcherConfig {
+            data_pci_addrs: vec![],
+            ..Default::default()
+        };
+        // This will fail with NotInitialized since dispatch_map isn't bound
+        let err = d.initialize(config);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn lookup_before_initialize_fails() {
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let mut buf = vec![0u8; 4096];
+        let handle = IpcHandle {
+            address: buf.as_mut_ptr(),
+            size: 4096,
+        };
+        let err = d.lookup(42, handle);
+        assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
+    }
+
+    #[test]
+    fn check_before_initialize_fails() {
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let err = d.check(42);
+        assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
+    }
+
+    #[test]
+    fn remove_before_initialize_fails() {
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let err = d.remove(42);
+        assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
+    }
+
+    #[test]
+    fn populate_before_initialize_fails() {
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let mut buf = vec![0u8; 4096];
+        let handle = IpcHandle {
+            address: buf.as_mut_ptr(),
+            size: 4096,
+        };
+        let err = d.populate(42, handle);
+        assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
+    }
+
+    #[test]
+    fn populate_with_zero_size_fails() {
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+        let d = query_interface!(c, IDispatcher).unwrap();
+        // Even though not initialized, zero-size check comes after init check.
+        // This test verifies the parameter validation exists in the code path.
+        let mut buf = vec![0u8; 0];
+        let handle = IpcHandle {
+            address: buf.as_mut_ptr(),
+            size: 0,
+        };
+        let err = d.populate(42, handle);
+        // Will fail with NotInitialized since that check comes first
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn shutdown_without_initialize_succeeds() {
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+        let d = query_interface!(c, IDispatcher).unwrap();
+        assert!(d.shutdown().is_ok());
+    }
+
+    #[test]
+    fn double_shutdown_succeeds() {
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+        let d = query_interface!(c, IDispatcher).unwrap();
+        assert!(d.shutdown().is_ok());
+        assert!(d.shutdown().is_ok());
+    }
+
+    #[test]
+    fn concurrent_pre_init_calls_from_multiple_threads() {
+        let c = Arc::new(DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        ));
+
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let comp = Arc::clone(&c);
+                thread::spawn(move || {
+                    let d = query_interface!(comp, IDispatcher).unwrap();
+                    assert!(matches!(
+                        d.check(1),
+                        Err(DispatcherError::NotInitialized(_))
+                    ));
+                    assert!(matches!(
+                        d.remove(1),
+                        Err(DispatcherError::NotInitialized(_))
+                    ));
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Initialized dispatcher tests (with mock dispatch map)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn initialize_with_dispatch_map_succeeds() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        assert!(d.shutdown().is_ok());
+    }
+
+    #[test]
+    fn initialize_empty_addrs_with_dispatch_map() {
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+        c.dispatch_map.connect(dm).unwrap();
+        c.memory_tier.connect(mt).unwrap();
+
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let config = DispatcherConfig {
+            data_pci_addrs: vec![],
+            ..Default::default()
+        };
+        let err = d.initialize(config);
+        assert!(matches!(err, Err(DispatcherError::InvalidParameter(_))));
+    }
+
+    #[test]
+    fn initialize_multiple_pci_addrs() {
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
+        let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+        c.dispatch_map.connect(dm).unwrap();
+        c.logger.connect(logger).unwrap();
+        c.memory_tier.connect(mt).unwrap();
+
+        let d = query_interface!(c, IDispatcher).unwrap();
+        d.initialize(DispatcherConfig {
+            data_pci_addrs: vec![
+                "0000:02:00.0".to_string(),
+                "0000:03:00.0".to_string(),
+                "0000:04:00.0".to_string(),
+            ],
+            ..Default::default()
+        })
+        .unwrap();
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn populate_succeeds_after_init() {
+        let (c, dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let mut buf = vec![0u8; 4096];
+        assert!(d.populate(1, make_handle(&mut buf)).is_ok());
+        assert_eq!(dm.entry_count(), 1);
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn populate_zero_size_returns_invalid_parameter_after_init() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let mut buf = vec![0u8; 0];
+        let handle = IpcHandle {
+            address: buf.as_mut_ptr(),
+            size: 0,
+        };
+        let err = d.populate(1, handle);
+        assert!(matches!(err, Err(DispatcherError::InvalidParameter(_))));
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn populate_duplicate_key_returns_already_exists() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let mut buf1 = vec![0u8; 4096];
+        d.populate(1, make_handle(&mut buf1)).unwrap();
+
+        let mut buf2 = vec![0u8; 4096];
+        let err = d.populate(1, make_handle(&mut buf2));
+        assert!(matches!(err, Err(DispatcherError::AlreadyExists(1))));
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn populate_drops_best_effort_on_allocation_failure() {
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
+        let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
+        let gpu: Arc<dyn IGpuServices + Send + Sync> = Arc::new(MockGpuServices::default());
+        let mt: Arc<dyn IMemoryTier + Send + Sync> =
+            Arc::new(MockMemoryTier::with_fail_insert(1024 * 1024));
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+        c.dispatch_map.connect(dm).unwrap();
+        c.logger.connect(logger).unwrap();
+        c.gpu_services.connect(gpu).unwrap();
+        c.memory_tier.connect(mt).unwrap();
+
+        let d = query_interface!(c, IDispatcher).unwrap();
+        // Budget 0 = fail fast (no backpressure wait); the full tier then
+        // triggers the best-effort drop rather than surfacing AllocationFailed.
+        d.initialize(DispatcherConfig {
+            data_pci_addrs: vec!["0000:02:00.0".to_string()],
+            store_backpressure_ms: 0,
+            ..Default::default()
+        })
+        .unwrap();
+
+        // A store against a full tier is dropped best-effort: populate reports
+        // success (so vLLM's transfer assert never fires), the key is not
+        // cached, and the drop is recorded.
+        let mut buf = vec![0u8; 4096];
+        d.populate(1, make_handle(&mut buf))
+            .expect("full-tier store must drop, not fail");
+        assert!(!d.check(1).unwrap(), "dropped store must not be cached");
+        assert!(
+            d.tier_event_stats().store_drops_on_full > 0,
+            "expected store_drops_on_full to be recorded"
+        );
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn populate_non_block_aligned_size() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let mut buf = vec![0u8; 5000];
+        let handle = IpcHandle {
+            address: buf.as_mut_ptr(),
+            size: 5000,
+        };
+        assert!(d.populate(1, handle).is_ok());
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn populate_enqueues_many_writes() {
+        let (c, dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+
+        for i in 0..100 {
+            let mut buf = vec![0u8; 4096];
+            d.populate(i, make_handle(&mut buf)).unwrap();
+        }
+        assert_eq!(dm.entry_count(), 100);
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn lookup_memory_tier_hit() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+
+        let mut buf = vec![0xABu8; 4096];
+        d.populate(1, make_handle(&mut buf)).unwrap();
+
+        let mut buf2 = vec![0u8; 4096];
+        assert!(d.lookup(1, make_handle(&mut buf2)).is_ok());
+        // Verify GPU received the data (mock copies bytes directly).
+        assert_eq!(buf2[0], 0xAB);
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn lookup_block_device_promote_without_hardware() {
+        let (c, dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+
+        let mut buf = vec![0u8; 4096];
+        d.populate(1, make_handle(&mut buf)).unwrap();
+
+        // Simulate eviction: remove from memory-tier and convert dispatch-map to BlockDevice.
+        let mt = c.memory_tier.get().unwrap();
+        let _ = mt.remove(1);
+        dm.convert_entry_to_block(1, 0x1000);
+
+        // Without hardware, promote_and_serve enters the no-drives path
+        // which copies zeros to GPU and re-registers the entry.
+        let mut buf2 = vec![0u8; 4096];
+        let result = d.lookup(1, make_handle(&mut buf2));
+        assert!(
+            result.is_ok(),
+            "promote without hardware should succeed, got: {result:?}"
+        );
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn lookup_key_not_found() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let mut buf = vec![0u8; 4096];
+        let err = d.lookup(999, make_handle(&mut buf));
+        assert!(matches!(err, Err(DispatcherError::KeyNotFound(999))));
+        d.shutdown().unwrap();
+    }
+
+    /// Regression: a `batch_lookup` whose promotion lost the `mt.insert` race to
+    /// a concurrent lookup (the other TP rank) must recover and serve the block
+    /// warm rather than failing the load with AlreadyExists (`error_code=3`).
+    #[test]
+    fn batch_lookup_recovers_from_concurrent_promotion_race() {
+        let (c, dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+
+        // Populate key 1 — dispatch-map = MemoryTier, and the memory-tier slot
+        // holds 0xCD. This slot stands in for the "winner's" resident promotion.
+        let mut buf = vec![0xCDu8; 4096];
+        d.populate(1, make_handle(&mut buf)).unwrap();
+        let mt = c.memory_tier.get().unwrap();
+        let (mem_ptr, size) = mt.peek(1).expect("key 1 should be resident");
+
+        // Reproduce the divergence the race produces:
+        //  - classify key 1 as cold (BlockDevice) so batch_lookup tries to promote,
+        //  - leave the memory-tier slot in place so mt.insert() -> AlreadyExists,
+        //  - arm a one-shot flip so the *recovery* lookup observes MemoryTier
+        //    (the concurrent winner having finished promoting).
+        dm.convert_entry_to_block(1, 0x1000);
+        dm.flip_to_memory_tier_on_next_lookup(1, mem_ptr, size);
+
+        let mut out = vec![0u8; 4096];
+        let results = d.batch_lookup(&[(1, vec![make_handle(&mut out)])]);
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].result.is_ok(),
+            "concurrent-promotion loser should be served warm, got: {:?}",
+            results[0]
+        );
+        assert_eq!(out[0], 0xCD, "recovered block must carry the resident data");
+
+        d.shutdown().unwrap();
+    }
+
+    // -----------------------------------------------------------------------
+    // Remote-lookup delivery: batching shape and read-pin lifetime
+    // -----------------------------------------------------------------------
+
+    /// Build `batch_lookup` input for `keys`, each with one 4 KiB destination
+    /// region, plus the backing buffers so the caller can inspect the bytes.
+    fn remote_batch(keys: &[CacheKey]) -> (Vec<Vec<u8>>, Vec<(CacheKey, Vec<IpcHandle>)>) {
+        let mut bufs: Vec<Vec<u8>> = keys.iter().map(|_| vec![0u8; 4096]).collect();
+        let entries = keys
+            .iter()
+            .zip(bufs.iter_mut())
+            .map(|(&k, buf)| (k, vec![make_handle(buf)]))
+            .collect();
+        (bufs, entries)
+    }
+
+    /// The load-bearing invariant: a read pin must still be held when the copy is
+    /// *submitted* and when the batched sync runs, because that pin is the only
+    /// thing keeping the memory-tier evictor off the DRAM slot the DMA is reading.
+    ///
+    /// Also pins down the batching shape. On a per-key-synchronize implementation
+    /// the event sequence is `[Submit, Sync, Submit, Sync]` with one pin held at
+    /// each sync; here it must be both submissions first, then a single sync, with
+    /// both pins still outstanding at that point.
+    #[test]
+    fn remote_delivery_holds_pin_until_after_batched_sync() {
+        let fx = setup_initialized_with_remote(&[1, 2], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (bufs, entries) = remote_batch(&[1, 2]);
+        let results = d.batch_lookup(&entries);
+        assert!(
+            results.iter().all(|r| r.result.is_ok()),
+            "both remote keys should be delivered, got: {results:?}"
+        );
+
+        assert_eq!(
+            fx.probe.events(),
+            vec![
+                (GpuEvent::SubmitH2d, 1),
+                (GpuEvent::SubmitH2d, 2),
+                (GpuEvent::Sync, 2),
+            ],
+            "each copy must be submitted with its own pin held (pins accumulate as \
+             the batch is walked), then ONE sync with both pins still outstanding"
+        );
+
+        // Bytes actually arrived, and every pin is released once the call returns.
+        assert_eq!(bufs[0][0], MockRemoteLookup::fill_byte(1));
+        assert_eq!(bufs[1][0], MockRemoteLookup::fill_byte(2));
+        assert_eq!(fx.dm.total_read_refs(), 0, "pins must not leak");
+
+        d.shutdown().unwrap();
+    }
+
+    /// The perf-shape lock: sync cost must amortize over the batch, not scale with
+    /// it. One `stream_synchronize` for eight keys, not eight.
+    #[test]
+    fn remote_delivery_issues_one_sync_per_batch() {
+        let keys: Vec<CacheKey> = (1..=8).collect();
+        let fx = setup_initialized_with_remote(&keys, PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&keys);
+        let results = d.batch_lookup(&entries);
+        assert!(results.iter().all(|r| r.result.is_ok()), "got: {results:?}");
+
+        assert_eq!(fx.probe.count(GpuEvent::SubmitH2d), 8);
+        assert_eq!(
+            fx.probe.count(GpuEvent::Sync),
+            1,
+            "one sync per batch, not per key"
+        );
+        assert_eq!(fx.dm.total_read_refs(), 0);
+
+        d.shutdown().unwrap();
+    }
+
+    /// A key the peer does not hold must fail on its own without disturbing its
+    /// neighbours, and must not leave a pin behind.
+    #[test]
+    fn remote_delivery_isolates_per_key_failure() {
+        let fx = setup_initialized_with_remote(&[1, 3], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (bufs, entries) = remote_batch(&[1, 2, 3]);
+        let results = d.batch_lookup(&entries);
+
+        assert!(results[0].result.is_ok(), "key 1: {:?}", results[0]);
+        assert!(results[1].result.is_err(), "key 2 is not held remotely");
+        assert!(results[2].result.is_ok(), "key 3: {:?}", results[2]);
+
+        assert_eq!(bufs[0][0], MockRemoteLookup::fill_byte(1));
+        assert_eq!(bufs[2][0], MockRemoteLookup::fill_byte(3));
+        assert_eq!(fx.probe.count(GpuEvent::Sync), 1);
+        assert_eq!(fx.dm.total_read_refs(), 0);
+
+        d.shutdown().unwrap();
+    }
+
+    /// The adopt-then-fail path: the pin is taken before submission, so a failed
+    /// submission must still release it, and the batch must carry on.
+    #[test]
+    fn remote_delivery_releases_pin_when_submission_fails() {
+        let fx = setup_initialized_with_remote(&[1, 2, 3], |dm| PinProbe::failing_submit_on(dm, 2));
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[1, 2, 3]);
+        let results = d.batch_lookup(&entries);
+
+        assert!(results[0].result.is_ok(), "key 1: {:?}", results[0]);
+        assert!(
+            results[1].result.is_err(),
+            "key 2's submission was made to fail"
+        );
+        assert!(results[2].result.is_ok(), "key 3: {:?}", results[2]);
+
+        assert_eq!(fx.probe.count(GpuEvent::SubmitH2d), 3);
+        assert_eq!(fx.probe.count(GpuEvent::Sync), 1);
+        assert_eq!(
+            fx.dm.total_read_refs(),
+            0,
+            "the failed key's pin must be released too"
+        );
+
+        d.shutdown().unwrap();
+    }
+
+    /// A failed batched sync means the destination buffers may not hold the data,
+    /// so every key that was submitted has to be reported as an error rather than
+    /// a hit.
+    #[test]
+    fn remote_delivery_reports_sync_failure_per_key() {
+        let fx = setup_initialized_with_remote(&[1, 2], PinProbe::failing_sync);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[1, 2]);
+        let results = d.batch_lookup(&entries);
+
+        assert!(
+            results.iter().all(|r| r.result.is_err()),
+            "a failed sync must not be reported as a hit, got: {results:?}"
+        );
+        assert_eq!(fx.dm.total_read_refs(), 0);
+
+        d.shutdown().unwrap();
+    }
+
+    /// Without a warm stream the helper falls back to the synchronous `DmaBuffer`
+    /// copy, which has already completed on return. Results and pin release must be
+    /// unchanged. Reaching that branch needs `device_of_ptr` to disown the pointers,
+    /// since it otherwise resolves any address to device 0.
+    #[test]
+    fn remote_delivery_falls_back_without_warm_stream() {
+        let fx = setup_initialized_with_remote(&[1, 2], PinProbe::without_gpu_device);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (bufs, entries) = remote_batch(&[1, 2]);
+        let results = d.batch_lookup(&entries);
+
+        assert!(results.iter().all(|r| r.result.is_ok()), "got: {results:?}");
+        assert_eq!(bufs[0][0], MockRemoteLookup::fill_byte(1));
+        assert_eq!(bufs[1][0], MockRemoteLookup::fill_byte(2));
+        assert_eq!(
+            fx.probe.count(GpuEvent::SubmitH2d),
+            0,
+            "the fallback path uses the synchronous copy, not memcpy_h2d_async"
+        );
+        assert_eq!(
+            fx.probe.count(GpuEvent::Sync),
+            0,
+            "nothing to synchronize without a warm stream"
+        );
+        assert_eq!(fx.dm.total_read_refs(), 0);
+
+        d.shutdown().unwrap();
+    }
+
+    /// A key no node holds is a MISS, and must not be relabelled an I/O error.
+    ///
+    /// This is the defect behind `certus_lookup_misses_total` reading 0 on the cluster
+    /// (spec 002 `research.md` R2). A local miss becomes `KeyNotFound`, is forwarded to
+    /// remote lookup, comes back `RemoteLookupError::NotFound` because no peer holds it —
+    /// and the dispatcher then overwrote that with `DispatcherError::IoError`. The
+    /// transport host counts only `KeyNotFound` as a miss and drops every other error, so
+    /// the miss vanished from the server's accounting entirely.
+    ///
+    /// Two things were wrong with that, and the second is worse than the first: the count
+    /// was lost, and a key that simply is not cached anywhere was reported as an I/O
+    /// failure — so any consumer reasoning about error rates saw transport failures that
+    /// never happened.
+    ///
+    /// `IRemoteLookup` already distinguishes the two cases
+    /// (`RemoteLookupError::{NotFound, TransportError}`), so nothing new has to be
+    /// measured; the dispatcher only has to stop collapsing them.
+    ///
+    /// The peer here holds nothing, which is what a peer-less or peer-missing cluster
+    /// looks like from this side — and note it is *not* discriminated by whether peers
+    /// exist: the `full-remote` profile wires remote lookup either way, so a solo RDMA
+    /// group takes this same path. That is why the cluster measurement read zero in both
+    /// T107 / FR-027: the three invariants `contracts/idispatcher.md` states.
+    ///
+    /// **`served_by.is_hit()` if and only if `result.is_ok()`** is the load-bearing one,
+    /// and it is what makes the "unmarked tier" design safe: a serving path that forgets
+    /// to record its tier yields `Error` on an `Ok` result, which fails here rather than
+    /// reporting a plausible `Dram` that nobody would question. Without this test that
+    /// design is worse than a default, not better.
+    ///
+    /// Also checks length-and-order and `Miss` ⇔ `KeyNotFound`, over a batch that mixes a
+    /// remote hit, a remote miss and a not-found key, so the assertions run against more
+    /// than one taxonomy value.
+    #[test]
+    fn every_outcome_obeys_the_interface_invariants() {
+        let fx = setup_initialized_with_remote(&[1, 3], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[1, 2, 3]);
+        let results = d.batch_lookup(&entries);
+
+        // 1. Length and order.
+        assert_eq!(
+            results.len(),
+            entries.len(),
+            "one outcome per requested entry, in order"
+        );
+
+        // 2. Hit agreement, per key. Stated as an iff, because either direction failing
+        //    is a different defect: a hit with an error means we reported data we did not
+        //    deliver, and an error with a hit means we hid a delivery.
+        for (i, o) in results.iter().enumerate() {
+            assert_eq!(
+                o.served_by.is_hit(),
+                o.result.is_ok(),
+                "entry {i}: served_by {:?} disagrees with result {:?}",
+                o.served_by,
+                o.result
+            );
+        }
+
+        // 3. Miss ⇔ KeyNotFound, after the remote attempt has been made.
+        for (i, o) in results.iter().enumerate() {
+            assert_eq!(
+                o.served_by == ServedBy::Miss,
+                matches!(o.result, Err(DispatcherError::KeyNotFound(_))),
+                "entry {i}: Miss must mean KeyNotFound and nothing else, got {:?} / {:?}",
+                o.served_by,
+                o.result
+            );
+        }
+
+        // And the batch was not vacuous: a peer held 1 and 3, nobody held 2, so the
+        // outcomes must not be uniform. A test where every entry has the same outcome
+        // would satisfy all three invariants while exercising one path (FR-028).
+        let distinct: std::collections::BTreeSet<_> = results
+            .iter()
+            .map(|o| format!("{:?}", o.served_by))
+            .collect();
+        assert!(
+            distinct.len() > 1,
+            "fixture produced one outcome for every key, so the invariants above are \
+             untested against variation: {distinct:?}"
+        );
+    }
+
+    /// The route partition: dram + ssd + remote equals the served count.
+    ///
+    /// Checkable without knowing anything about the workload, which is why SC-017 states
+    /// it — a hit *rate* needs a reference to argue about, a partition does not.
+    #[test]
+    fn the_route_counters_partition_the_served_keys() {
+        let fx = setup_initialized_with_remote(&[1, 3], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[1, 2, 3]);
+        let results = d.batch_lookup(&entries);
+        let served = results.iter().filter(|o| o.result.is_ok()).count() as u64;
+
+        let t = d.tier_event_stats();
+        assert_eq!(
+            t.lookup_hits_dram + t.lookup_hits_ssd + t.remote_lookup_hits,
+            served,
+            "route counters must partition the served keys, not merely correlate with \
+             them: dram {} + ssd {} + remote {} != served {served}",
+            t.lookup_hits_dram,
+            t.lookup_hits_ssd,
+            t.remote_lookup_hits
+        );
+    }
+
+    /// arms and could not isolate this, and why the check lives here instead.
+    #[test]
+    fn a_key_no_peer_holds_is_a_miss_not_an_io_error() {
+        let fx = setup_initialized_with_remote(&[], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[7]);
+        let results = d.batch_lookup(&entries);
+
+        assert!(
+            matches!(results[0].result, Err(DispatcherError::KeyNotFound(7))),
+            "a key absent locally AND absent from every peer is a miss; got {:?}. \
+             Reporting it as IoError is what makes it uncountable by the transport host, \
+             which counts only KeyNotFound as a miss",
+            results[0]
+        );
+
+        d.shutdown().unwrap();
+    }
+
+    /// The remote counters must count REMOTE service only.
+    ///
+    /// The failure this guards is the one that would look most plausible: wiring the
+    /// tally to the general served-key path. `remote_lookup_hits` would then track
+    /// `promotions_to_gpu` closely, move whenever traffic moved, and read as a
+    /// healthy instrument while saying nothing about peers at all — which is exactly
+    /// the confusion this feature exists to end. So the assertion is not "the counter
+    /// increments" but "it stays at zero when no peer was involved".
+    #[test]
+    fn remote_counters_ignore_a_purely_local_hit() {
+        let fx = setup_initialized_with_remote(&[], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        // Resident locally, so these never reach remote lookup.
+        fx.install_warm_key(1, 0x11, 4096);
+        fx.install_warm_key(2, 0x22, 4096);
+
+        let (_bufs, entries) = remote_batch(&[1, 2]);
+        let results = d.batch_lookup(&entries);
+        assert!(results.iter().all(|r| r.result.is_ok()), "got: {results:?}");
+
+        let st = d.tier_event_stats();
+        assert_eq!(
+            (st.remote_lookup_hits, st.remote_lookup_misses),
+            (0, 0),
+            "two local hits must leave the remote counters untouched; got hits={} \
+             misses={}. A counter that moves on local traffic would track the overall \
+             hit rate and look plausible while measuring nothing about peers",
+            st.remote_lookup_hits,
+            st.remote_lookup_misses
+        );
+        // And the served keys were counted somewhere, so this is not a dead path.
+        assert_eq!(
+            st.promotions_to_gpu, 2,
+            "both local hits should still be counted"
+        );
+
+        d.shutdown().unwrap();
+    }
+
+    /// A peer that serves is a remote hit; a peer that does not is a remote miss.
+    ///
+    /// Asserted in one batch so the two cannot be satisfied by a counter that simply
+    /// tallies batch size — a bug that would pass either assertion alone.
+    #[test]
+    fn remote_counters_split_peer_hits_from_peer_misses() {
+        // The peer holds 1 and 3, not 2.
+        let fx = setup_initialized_with_remote(&[1, 3], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[1, 2, 3]);
+        let results = d.batch_lookup(&entries);
+
+        assert!(results[0].result.is_ok(), "peer holds 1: {:?}", results[0]);
+        assert!(
+            matches!(results[1].result, Err(DispatcherError::KeyNotFound(2))),
+            "no peer holds 2, so it is a miss: {:?}",
+            results[1]
+        );
+        assert!(results[2].result.is_ok(), "peer holds 3: {:?}", results[2]);
+
+        let st = d.tier_event_stats();
+        assert_eq!(
+            (st.remote_lookup_hits, st.remote_lookup_misses),
+            (2, 1),
+            "two keys served by the peer and one held by nobody; got hits={} misses={}",
+            st.remote_lookup_hits,
+            st.remote_lookup_misses
+        );
+
+        d.shutdown().unwrap();
+    }
+
+    /// A genuine transport failure must still be an error, so the fix above cannot be
+    /// "call everything a miss".
+    ///
+    /// Without this, mapping the remote result to `KeyNotFound` unconditionally would pass
+    /// the test above while making a broken fabric indistinguishable from a cold cache —
+    /// which would corrupt the hit rate in the opposite direction and hide a real fault.
+    #[test]
+    fn a_remote_transport_failure_is_still_an_error() {
+        // The peer "holds" the key, so the mock proceeds past its NotFound branch and
+        // fails inside delivery instead — a TransportError rather than a miss.
+        let fx = setup_initialized_with_remote(&[8], PinProbe::failing_sync);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[8]);
+        let results = d.batch_lookup(&entries);
+
+        assert!(
+            results[0].result.is_err(),
+            "a failing transfer must not report success; got {:?}",
+            results[0]
+        );
+        assert!(
+            !matches!(results[0].result, Err(DispatcherError::KeyNotFound(_))),
+            "a transport/delivery failure is NOT a miss — counting it as one would hide a \
+             broken fabric inside the hit rate; got {:?}",
+            results[0]
+        );
+
+        d.shutdown().unwrap();
+    }
+
+    /// The same invariant on the local warm path: its copies are also submitted
+    /// async and synchronized once, so its pins must survive the sync too.
+    #[test]
+    fn warm_hit_holds_pin_until_batched_sync() {
+        let fx = setup_initialized_with_remote(&[], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        // Resident locally, so both keys are warm hits and never reach remote lookup.
+        fx.install_warm_key(1, 0x11, 4096);
+        fx.install_warm_key(2, 0x22, 4096);
+        assert_eq!(fx.dm.total_read_refs(), 0);
+
+        let (bufs, entries) = remote_batch(&[1, 2]);
+        let results = d.batch_lookup(&entries);
+        assert!(results.iter().all(|r| r.result.is_ok()), "got: {results:?}");
+
+        assert_eq!(
+            fx.probe.events(),
+            vec![
+                (GpuEvent::SubmitH2d, 1),
+                (GpuEvent::SubmitH2d, 2),
+                (GpuEvent::Sync, 2),
+            ],
+            "each warm copy is submitted with its own pin held, and both pins must \
+             still be outstanding at the single batched sync"
+        );
+        assert_eq!(bufs[0][0], 0x11);
+        assert_eq!(bufs[1][0], 0x22);
+        assert_eq!(fx.dm.total_read_refs(), 0);
+
+        d.shutdown().unwrap();
+    }
+
+    /// In a mixed batch the warm stream sync is deferred past the cold block, so
+    /// the queued warm copies drain while the cold entries are processed. The
+    /// mock has no data drives, so the cold key takes the inline evict/insert/
+    /// promote branch rather than scatter-gather; the ordering is the same.
+    #[test]
+    fn mixed_batch_defers_warm_sync_past_cold_block() {
+        let fx = setup_initialized_with_remote(&[], |dm| PinProbe::watching(dm, 3));
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        fx.install_warm_key(1, 0x11, 4096);
+        fx.install_warm_key(2, 0x22, 4096);
+        // Key 3 is cold: registered, but demoted to BlockDevice with no tier slot.
+        fx.install_warm_key(3, 0x33, 4096);
+        fx.mt.remove(3).unwrap();
+        fx.dm.convert_entry_to_block(3, 0x1000);
+        assert!(!fx.dm.is_memory_resident(3));
+        assert_eq!(fx.dm.total_read_refs(), 0);
+
+        let (bufs, entries) = remote_batch(&[1, 2, 3]);
+        let results = d.batch_lookup(&entries);
+        assert!(results.iter().all(|r| r.result.is_ok()), "got: {results:?}");
+        assert_eq!(bufs[0][0], 0x11);
+        assert_eq!(bufs[1][0], 0x22);
+
+        assert_eq!(
+            fx.probe.events(),
+            vec![
+                (GpuEvent::SubmitH2d, 1),
+                (GpuEvent::SubmitH2d, 2),
+                (GpuEvent::Sync, 2),
+            ],
+            "both warm pins must still be outstanding at the single deferred sync"
+        );
+        assert_eq!(
+            fx.probe.resident_at_sync(),
+            vec![true],
+            "the cold key must already be promoted when the warm stream sync runs"
+        );
+        assert_eq!(fx.dm.total_read_refs(), 0);
+
+        d.shutdown().unwrap();
+    }
+
+    /// Each piece of a multi-region block lands at its own address: a warm serve
+    /// scatters slot bytes `sum(sizes[0..L])..` to region L (one copy per region),
+    /// and a store gathers region L back to the same slot offset.
+    #[test]
+    fn multi_region_warm_serve_and_store_place_each_piece() {
+        let fx = setup_initialized_with_remote(&[], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        const PIECES: usize = 4;
+        const PIECE: usize = 1024;
+        let slot = fx.mt.insert(1, (PIECES * PIECE) as u32).unwrap();
+        // SAFETY: `insert` returned a slot of at least PIECES * PIECE bytes.
+        unsafe {
+            for i in 0..PIECES * PIECE {
+                *slot.add(i) = (i / PIECE) as u8 + 0x10;
+            }
+        }
+        fx.dm
+            .create_memory_tier_entry(1, slot, (PIECES * PIECE) as u32)
+            .unwrap();
+        fx.dm.release_write(1).unwrap();
+
+        let mut pieces: Vec<Vec<u8>> = (0..PIECES).map(|_| vec![0u8; PIECE]).collect();
+        let handles: Vec<IpcHandle> = pieces.iter_mut().map(|b| make_handle(b)).collect();
+        let results = d.batch_lookup(&[(1, handles)]);
+        assert!(results[0].result.is_ok(), "got: {results:?}");
+        for (l, piece) in pieces.iter().enumerate() {
+            assert!(piece.iter().all(|&b| b == l as u8 + 0x10), "warm piece {l}");
+        }
+        assert_eq!(fx.probe.count(GpuEvent::SubmitH2d), PIECES);
+
+        let mut src: Vec<Vec<u8>> = (0..PIECES).map(|l| vec![0xA0 + l as u8; PIECE]).collect();
+        let handles: Vec<IpcHandle> = src.iter_mut().map(|b| make_handle(b)).collect();
+        let dst = fx.mt.insert(2, (PIECES * PIECE) as u32).unwrap();
+        d.copy_gpu_to_memory_async(2, &handles, GpuStream(0x1 as *mut std::ffi::c_void))
+            .unwrap();
+        // SAFETY: `insert` returned a slot of at least PIECES * PIECE bytes.
+        let gathered = unsafe { std::slice::from_raw_parts(dst, PIECES * PIECE) };
+        for l in 0..PIECES {
+            assert!(
+                gathered[l * PIECE..(l + 1) * PIECE]
+                    .iter()
+                    .all(|&b| b == 0xA0 + l as u8),
+                "stored piece {l}"
+            );
+        }
+
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn lookup_mismatch_size_returns_invalid_parameter() {
+        let (c, dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+
+        let mut buf = vec![0u8; 4096];
+        d.populate(1, make_handle(&mut buf)).unwrap();
+
+        dm.set_mismatch_key(1);
+
+        let mut buf2 = vec![0u8; 4096];
+        let err = d.lookup(1, make_handle(&mut buf2));
+        assert!(matches!(err, Err(DispatcherError::InvalidParameter(_))));
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn check_existing_returns_true() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let mut buf = vec![0u8; 4096];
+        d.populate(1, make_handle(&mut buf)).unwrap();
+        assert!(d.check(1).unwrap());
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn check_nonexistent_returns_false() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        assert!(!d.check(999).unwrap());
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn remove_existing_succeeds() {
+        let (c, dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let mut buf = vec![0u8; 4096];
+        d.populate(1, make_handle(&mut buf)).unwrap();
+        assert_eq!(dm.entry_count(), 1);
+        // Removing after the write-through has landed (`remove` no longer needs to
+        // wait for it — see repair_test_remove_no_wait for the pending case).
+        d.flush_to_ssd().unwrap();
+        assert!(d.remove(1).is_ok());
+        assert_eq!(dm.entry_count(), 0);
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn remove_nonexistent_returns_key_not_found() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let err = d.remove(999);
+        assert!(matches!(err, Err(DispatcherError::KeyNotFound(999))));
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn full_lifecycle_populate_check_remove() {
+        let (c, dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+
+        let mut buf = vec![0u8; 8192];
+        d.populate(42, make_handle(&mut buf)).unwrap();
+        assert_eq!(dm.entry_count(), 1);
+
+        assert!(d.check(42).unwrap());
+        assert!(!d.check(99).unwrap());
+
+        // Let the write-through release the populate-time read-pin before removing.
+        d.flush_to_ssd().unwrap();
+        assert!(d.remove(42).is_ok());
+        assert_eq!(dm.entry_count(), 0);
+
+        assert!(!d.check(42).unwrap());
+
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn operations_after_shutdown_fail() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        d.shutdown().unwrap();
+
+        let mut buf = vec![0u8; 4096];
+        assert!(matches!(
+            d.populate(1, make_handle(&mut buf)),
+            Err(DispatcherError::NotInitialized(_))
+        ));
+        assert!(matches!(
+            d.check(1),
+            Err(DispatcherError::NotInitialized(_))
+        ));
+        let mut buf2 = vec![0u8; 4096];
+        assert!(matches!(
+            d.lookup(1, make_handle(&mut buf2)),
+            Err(DispatcherError::NotInitialized(_))
+        ));
+        assert!(matches!(
+            d.remove(1),
+            Err(DispatcherError::NotInitialized(_))
+        ));
+    }
+
+    #[test]
+    fn reinitialize_after_shutdown() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        d.shutdown().unwrap();
+
+        d.initialize(DispatcherConfig {
+            data_pci_addrs: vec!["0000:02:00.0".to_string()],
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert!(!d.check(1).unwrap());
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn concurrent_checks_on_initialized_dispatcher() {
+        let (c, _dm) = setup_initialized();
+
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                let comp = Arc::clone(&c);
+                thread::spawn(move || {
+                    let d = query_interface!(comp, IDispatcher).unwrap();
+                    for k in 0..10 {
+                        let result = d.check(i * 100 + k);
+                        assert!(result.is_ok());
+                        assert!(!result.unwrap());
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let d = query_interface!(c, IDispatcher).unwrap();
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn concurrent_populate_different_keys() {
+        let (c, dm) = setup_initialized();
+
+        let handles: Vec<_> = (0..4)
+            .map(|t| {
+                let comp = Arc::clone(&c);
+                thread::spawn(move || {
+                    let d = query_interface!(comp, IDispatcher).unwrap();
+                    for i in 0..5 {
+                        let key = t * 100 + i;
+                        let mut buf = vec![0u8; 4096];
+                        d.populate(key, make_handle(&mut buf)).unwrap();
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        assert_eq!(dm.entry_count(), 20);
+
+        let d = query_interface!(c, IDispatcher).unwrap();
+        d.shutdown().unwrap();
+    }
+
+    // -----------------------------------------------------------------------
+    // Eviction tests (memory-tier pool pressure)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn evict_for_space_evicts_when_pool_full() {
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
+        // Small pool: 16 KiB total (can hold 4 × 4 KiB entries).
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(16384));
+
+        // Insert 4 entries into the memory-tier directly.
+        for key in 0..4u64 {
+            mt.insert(key, 4096).unwrap();
+            dm.create_memory_tier_entry(key, std::ptr::null_mut(), 4096)
+                .unwrap();
+            dm.release_write(key).unwrap();
+            // Set ssd_offset so convert_memory_tier_to_block can succeed.
+            dm.convert_to_storage(key, key * 4096).unwrap();
+        }
+
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+
+        // Pool is now full (16384 used). Trying to add 4096 more should evict.
+        c.evict_for_space(&dm, &mt, 4096, 100, 512).unwrap();
+
+        // At least one entry was evicted from memory-tier.
+        assert!(mt.used() + 4096 <= mt.capacity());
+    }
+
+    #[test]
+    fn evict_for_space_noop_when_space_available() {
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
+
+        // Insert one 4 KiB entry.
+        mt.insert(0, 4096).unwrap();
+        dm.create_memory_tier_entry(0, std::ptr::null_mut(), 4096)
+            .unwrap();
+        dm.release_write(0).unwrap();
+
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+
+        // Plenty of space, no eviction needed.
+        c.evict_for_space(&dm, &mt, 4096, 100, 512).unwrap();
+
+        assert!(mt.contains(0), "entry should not be evicted");
+    }
+
+    /// Regression test for the Check→Pin eviction race
+    /// ([[project_dispatcher_check_pin_eviction_race]]).
+    ///
+    /// A content-addressed key that a connector has Checked resident and is
+    /// about to Pin+Load must never be *silently dropped* from the dispatch
+    /// map by the evictor. The dangerous window is a resident memory-tier entry
+    /// whose write-through has not completed (`ssd_offset == None`) and that is
+    /// not yet pinned (`read_ref == 0`) — the just-Checked-but-not-yet-Pinned
+    /// state.
+    ///
+    /// Such a victim cannot be *demoted* (there is nothing on SSD to fall back
+    /// to). The buggy `evolve-dispatcher` `evict_one_clean` handled that by
+    /// `dm.remove`-ing it, which *succeeds* for an unpinned entry and turns the
+    /// key into `NotExist`. The racing load then misses, is forwarded to
+    /// remote-lookup, and on a single node returns a hard `IoError` — which the
+    /// vLLM connector asserts on (`transfer_result.success`), killing the
+    /// engine with `EngineDeadError`.
+    ///
+    /// The fix skips an unpersisted victim rather than removing it. This test
+    /// locks in the invariant that makes the crash impossible: eviction under
+    /// pressure against an all-unpersisted, all-unpinned tier frees nothing,
+    /// surfaces `AllocationFailed` (caller then serves uncached), and —
+    /// critically — leaves *every* key still resolvable, never `NotExist`.
+    ///
+    /// Reverting the fix (restoring the `dm.remove` fallback) fails this test:
+    /// `evict_for_space` returns `Ok`, `entry_count` drops, and the dropped
+    /// keys resolve to `NotExist`.
+    #[test]
+    fn evict_never_drops_unpersisted_unpinned_victim() {
+        let dm_concrete = Arc::new(MockDispatchMap::new());
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = dm_concrete.clone();
+        // Pool holds exactly 4 × 4 KiB entries; we fill it completely.
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(16384));
+
+        const N: u64 = 4;
+        for key in 0..N {
+            mt.insert(key, 4096).unwrap();
+            dm.create_memory_tier_entry(key, std::ptr::null_mut(), 4096)
+                .unwrap();
+            // Release the write pin installed by create_memory_tier_entry so the
+            // entry is fully unpinned (read_ref == 0, write_ref == false): a
+            // resident, checkable key. Deliberately do NOT convert_to_storage —
+            // leaving ssd_offset == None means the entry is unpersisted and
+            // cannot be demoted to BlockDevice, only removed or skipped.
+            dm.release_write(key).unwrap();
+        }
+
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+
+        // Pool is full (16384 used). Asking for one more slot forces eviction,
+        // but no candidate is demotable and none may be dropped.
+        let res = c.evict_for_space(&dm, &mt, 4096, 100, 512);
+        assert!(
+            matches!(res, Err(DispatcherError::AllocationFailed(_))),
+            "expected AllocationFailed when the whole tier is unpersisted, got {res:?}",
+        );
+
+        // The invariant that prevents the crash: nothing was silently dropped.
+        assert_eq!(
+            dm_concrete.entry_count(),
+            N as usize,
+            "an unpersisted, unpinned victim was removed → key becomes NotExist → fatal remote-forward",
+        );
+        for key in 0..N {
+            assert!(
+                !matches!(dm.lookup(key), Ok(LookupResult::NotExist)),
+                "key {key} resolved to NotExist after eviction — Check→Pin race regression",
+            );
+        }
+    }
+
+    /// A reserve refused because the key is ALREADY CACHED must be counted apart from
+    /// one refused for want of space, because they mean opposite things and the wire
+    /// cannot tell them apart.
+    ///
+    /// `op_reserve` reports every reserve error as the same flat zero, and the
+    /// already-resident path returns from `reserve_memory` immediately — bypassing
+    /// the backpressure retry, so it bumps neither `store_backpressure_events` nor
+    /// `store_drops_on_full`. The observable consequence, measured on four instances:
+    /// 7.28% of stores "declined" while `eviction_scans_exhausted` was 0, i.e. eviction
+    /// never once failed to free space. Without this counter that number has no
+    /// explanation available to an operator.
+    ///
+    /// Both directions are asserted. A test that only checked the already-resident
+    /// counter would still pass if someone also bumped it on a genuine pool-full, which
+    /// would re-merge exactly the two cases this separates.
+    #[test]
+    fn a_reserve_refused_as_already_cached_is_counted_apart_from_one_refused_for_space() {
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
+        // Room for 4 x 4 KiB, so the first insert cannot fail for space.
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(16384));
+        let counters = Arc::new(TierEventCounters::default());
+        let c = DispatcherComponent::new(
+            AtomicBool::new(true),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::clone(&counters),
+            Arc::new(WriteThroughPins::default()),
+        );
+        c.dispatch_map.connect(Arc::clone(&dm)).unwrap();
+        c.memory_tier.connect(Arc::clone(&mt)).unwrap();
+
+        // First reserve succeeds and leaves the key resident.
+        c.reserve_memory(7, 4096, 0, None)
+            .expect("the first insert has room and must succeed");
+        assert_eq!(
+            counters.snapshot().store_already_resident,
+            0,
+            "a successful reserve must not be counted as already-resident",
+        );
+
+        // Second reserve of the SAME key: the tier still has room, so this can only
+        // fail because the key is already there.
+        let res = c.reserve_memory(7, 4096, 0, None);
+        assert!(
+            matches!(res, Err(DispatcherError::AlreadyExists(7))),
+            "a repeat reserve of a resident key must report AlreadyExists, got {res:?}",
+        );
+
+        let s = counters.snapshot();
+        assert_eq!(
+            s.store_already_resident, 1,
+            "the already-resident refusal must be counted: {s:?}",
+        );
+        assert_eq!(
+            (s.store_backpressure_events, s.store_drops_on_full),
+            (0, 0),
+            "an already-resident refusal is NOT capacity pressure and must leave both \
+             store counters untouched — conflating them is what made a benign 7.28% \
+             look like a defect: {s:?}",
+        );
+        assert_eq!(
+            s.eviction_scans_exhausted, 0,
+            "eviction was never asked to free anything here: {s:?}",
+        );
+    }
+
+    /// A failed clean eviction must say WHICH of its two causes applied, because they
+    /// mean opposite things: a held read pin implicates a reader (an in-flight load, or
+    /// a peer being served over RDMA), while a missing `ssd_offset` means write-through
+    /// has not landed and will self-correct.
+    ///
+    /// This is the test the counters exist for. The store-decline investigation turned
+    /// on exactly this distinction, and before these counters the call site tested
+    /// `try_evict_to_block(..).is_ok()` and discarded the variant — so a run could show
+    /// 72% of stores declined with no way to say whether readers or the writeback lag
+    /// caused it.
+    ///
+    /// Both directions are asserted, which is what makes the test resistant to the
+    /// obvious regression: collapsing the `match` back to `is_err()` and bumping a
+    /// single counter passes one assertion and fails the other, whichever counter is
+    /// chosen. A test asserting only "the pin counter rose" would survive that.
+    #[test]
+    fn a_blocked_eviction_distinguishes_a_held_pin_from_unlanded_writeback() {
+        /// Builds a 4-entry full tier and returns the counters after one failed
+        /// `evict_for_space`. `pin` chooses the cause: pinned entries if true,
+        /// unpersisted ones if false.
+        fn scenario(pin: bool) -> interfaces::TierEventStats {
+            let dm_concrete = Arc::new(MockDispatchMap::new());
+            let dm: Arc<dyn IDispatchMap + Send + Sync> = dm_concrete.clone();
+            let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(16384));
+
+            const N: u64 = 4;
+            for key in 0..N {
+                mt.insert(key, 4096).unwrap();
+                dm.create_memory_tier_entry(key, std::ptr::null_mut(), 4096)
+                    .unwrap();
+                dm.release_write(key).unwrap();
+                if pin {
+                    // Persisted, so the ONLY thing preventing demotion is the pin.
+                    dm.convert_to_storage(key, 0).unwrap();
+                    dm.create_memory_tier_entry(key, std::ptr::null_mut(), 4096)
+                        .ok();
+                    // Take a read pin and keep it: this is the responder-holding-a-
+                    // PinnedBatch shape, reduced to its essentials.
+                    let _ = dm.lookup(key);
+                }
+                // When !pin, ssd_offset stays None: unpersisted, unpinned.
+            }
+
+            let counters = Arc::new(TierEventCounters::default());
+            let c = DispatcherComponent::new(
+                AtomicBool::new(false),
+                Mutex::new(None),
+                Mutex::new(None),
+                Mutex::new(None),
+                RwLock::new(Vec::new()),
+                RwLock::new(None),
+                AtomicU64::new(0),
+                Mutex::new(None),
+                Mutex::new(None),
+                AtomicUsize::new(2048),
+                AtomicU64::new(0),
+                RwLock::new(None),
+                Arc::new(Mutex::new(None)),
+                Arc::new(AtomicU64::new(0)),
+                Arc::clone(&counters),
+                Arc::new(WriteThroughPins::default()),
+            );
+            let res = c.evict_for_space(&dm, &mt, 4096, 100, 512);
+            assert!(
+                matches!(res, Err(DispatcherError::AllocationFailed(_))),
+                "the tier is full and nothing is evictable, so this must fail: {res:?}",
+            );
+            counters.snapshot()
+        }
+
+        let pinned = scenario(true);
+        let unpersisted = scenario(false);
+
+        assert!(
+            pinned.evictions_blocked_by_pin > 0,
+            "a pinned candidate must be counted as pin-blocked, got {pinned:?}",
+        );
+        assert_eq!(
+            pinned.evictions_blocked_unpersisted, 0,
+            "a persisted-but-pinned candidate must NOT be attributed to writeback lag: {pinned:?}",
+        );
+
+        assert!(
+            unpersisted.evictions_blocked_unpersisted > 0,
+            "an unpersisted candidate must be counted as writeback-blocked, got {unpersisted:?}",
+        );
+        assert_eq!(
+            unpersisted.evictions_blocked_by_pin, 0,
+            "an unpinned candidate must NOT be attributed to a reader: {unpersisted:?}",
+        );
+
+        // Both are the event that becomes a declined store, so both must record it.
+        assert!(
+            pinned.eviction_scans_exhausted > 0 && unpersisted.eviction_scans_exhausted > 0,
+            "a scan that freed nothing is what `reserve_memory` retries against, and must \
+             be counted whichever cause blocked it: pinned={pinned:?} unpersisted={unpersisted:?}",
+        );
+    }
+
+    /// Companion to [`evict_never_drops_unpersisted_unpinned_victim`]: the fix
+    /// must skip the racy unpersisted victim yet still make progress by
+    /// demoting a *persisted* neighbour, so eviction is not deadlocked.
+    ///
+    /// Mixed tier: three unpersisted, unpinned entries (each a just-Checked key
+    /// in the race window) plus one persisted, unpinned entry. The widening
+    /// scan in `evict_for_space` must reach the persisted entry, demote it to
+    /// BlockDevice (freeing the slot while keeping the key resolvable), and
+    /// leave the three racy keys untouched and still resolvable.
+    #[test]
+    fn evict_skips_unpersisted_victims_and_demotes_persisted_one() {
+        let dm_concrete = Arc::new(MockDispatchMap::new());
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = dm_concrete.clone();
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(16384));
+
+        // Keys 0..3 unpersisted (no ssd_offset); key 3 persisted (demotable).
+        const N: u64 = 4;
+        const PERSISTED: u64 = 3;
+        for key in 0..N {
+            mt.insert(key, 4096).unwrap();
+            dm.create_memory_tier_entry(key, std::ptr::null_mut(), 4096)
+                .unwrap();
+            dm.release_write(key).unwrap();
+            if key == PERSISTED {
+                // Complete write-through: gives it an ssd_offset so it can be
+                // demoted (MemoryTier → BlockDevice) instead of dropped.
+                dm.convert_to_storage(key, key * 4096).unwrap();
+            }
+        }
+
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+
+        // One demotion frees exactly one slot, which is enough.
+        c.evict_for_space(&dm, &mt, 4096, 100, 512)
+            .expect("demoting the persisted neighbour should free space");
+
+        assert!(
+            mt.used() + 4096 <= mt.capacity(),
+            "a slot should have been freed by demotion",
+        );
+        // No entry was dropped from the dispatch map (demotion keeps the key).
+        assert_eq!(
+            dm_concrete.entry_count(),
+            N as usize,
+            "no key should be removed"
+        );
+        // The persisted neighbour was demoted and is now resolvable on SSD.
+        assert!(
+            matches!(dm.lookup(PERSISTED), Ok(LookupResult::BlockDevice { .. })),
+            "persisted victim should be demoted to BlockDevice, still resolvable",
+        );
+        // The three racy unpersisted keys survive, still resolvable (not dropped).
+        for key in 0..N {
+            if key == PERSISTED {
+                continue;
+            }
+            assert!(
+                !matches!(dm.lookup(key), Ok(LookupResult::NotExist)),
+                "unpersisted key {key} must survive eviction of its neighbour",
+            );
+        }
+    }
+
+    #[test]
+    fn populate_triggers_eviction_on_full_pool() {
+        let dm = Arc::new(MockDispatchMap::new());
+        let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
+        let gpu: Arc<dyn IGpuServices + Send + Sync> = Arc::new(MockGpuServices::default());
+        // Pool can hold exactly 2 × 4 KiB entries.
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(8192));
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+        c.dispatch_map
+            .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
+            .unwrap();
+        c.logger.connect(logger).unwrap();
+        c.gpu_services.connect(gpu).unwrap();
+        c.memory_tier.connect(mt).unwrap();
+
+        let d = query_interface!(c, IDispatcher).unwrap();
+        d.initialize(DispatcherConfig {
+            data_pci_addrs: vec!["0000:02:00.0".to_string()],
+            ..Default::default()
+        })
+        .unwrap();
+
+        // Fill the pool with 2 entries.
+        let mut buf = vec![0u8; 4096];
+        d.populate(1, make_handle(&mut buf)).unwrap();
+        let mut buf2 = vec![0u8; 4096];
+        d.populate(2, make_handle(&mut buf2)).unwrap();
+
+        // Simulate completed write-through so the two entries are cleanly
+        // evictable: persisted to SSD (has an offset) and the write-back's
+        // read-pin (from downgrade_reference during populate) released.
+        // Eviction must only reclaim entries that are neither read- nor
+        // write-pinned — freeing an in-flight slot corrupts the concurrent
+        // load/write-back — so without this the pool is legitimately stuck.
+        dm.convert_to_storage(1, 0x1000).unwrap();
+        dm.convert_to_storage(2, 0x2000).unwrap();
+
+        // Third populate should now trigger eviction of one entry and succeed.
+        let mut buf3 = vec![0u8; 4096];
+        d.populate(3, make_handle(&mut buf3)).unwrap();
+
+        // Total entries in dispatch-map: at most 3 (one demoted to block, not removed).
+        assert!(dm.entry_count() <= 3);
+
+        d.shutdown().unwrap();
+    }
+
+    /// Regression: eviction under memory pressure must never free the DRAM slot
+    /// of a pinned entry. The old blind-eviction fallback freed the victim before
+    /// checking the pin, leaving the dispatch-map pointing at reclaimed DRAM and
+    /// corrupting a concurrent load (observed as cudaMemcpyAsync H2D
+    /// "invalid argument" / key-not-found and an engine crash under TP).
+    #[test]
+    fn eviction_never_frees_pinned_slot() {
+        let dm = Arc::new(MockDispatchMap::new());
+        let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
+        let gpu: Arc<dyn IGpuServices + Send + Sync> = Arc::new(MockGpuServices::default());
+        // Pool holds exactly one 4 KiB entry, so the next insert must evict.
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(4096));
+        let mt_probe = Arc::clone(&mt);
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            AtomicU64::new(0),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(TierEventCounters::default()),
+            Arc::new(WriteThroughPins::default()),
+        );
+        c.dispatch_map
+            .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
+            .unwrap();
+        c.logger.connect(logger).unwrap();
+        c.gpu_services.connect(gpu).unwrap();
+        c.memory_tier.connect(mt).unwrap();
+
+        let d = query_interface!(c, IDispatcher).unwrap();
+        // Budget 0 = fail fast, so the full-tier store takes the best-effort
+        // drop path immediately instead of backpressuring.
+        d.initialize(DispatcherConfig {
+            data_pci_addrs: vec!["0000:02:00.0".to_string()],
+            store_backpressure_ms: 0,
+            ..Default::default()
+        })
+        .unwrap();
+
+        // Resident, fully persisted key 1 — normally the perfect eviction
+        // victim (write-back complete: persisted and its read-pin released).
+        let mut buf = vec![0u8; 4096];
+        d.populate(1, make_handle(&mut buf)).unwrap();
+        // Let the write-through complete: it persists the entry and releases the
+        // populate-time read-pin. Doing this by hand instead would race the
+        // background writer doing the same thing, leaving the entry unpinned.
+        d.flush_to_ssd().unwrap();
+        // ...but pin it, as an in-flight load would (prepare_load -> Pin).
+        dm.take_read(1).unwrap();
+
+        // Populating key 2 needs the only slot, held by pinned key 1. Eviction
+        // must refuse to free the pinned slot; the store is then dropped
+        // best-effort (reports success, not cached) rather than failing.
+        let mut buf2 = vec![0u8; 4096];
+        d.populate(2, make_handle(&mut buf2))
+            .expect("full-of-pinned store must drop, not fail");
+        assert!(
+            d.tier_event_stats().store_drops_on_full > 0,
+            "expected store_drops_on_full to be recorded"
+        );
+        assert!(!d.check(2).unwrap(), "dropped store must not be cached");
+
+        // The critical invariant: key 1's slot was NOT reclaimed.
+        assert!(
+            mt_probe.peek(1).is_some(),
+            "pinned entry's DRAM slot must survive eviction pressure"
+        );
+        assert!(matches!(dm.lookup(1), Ok(LookupResult::MemoryTier { .. })));
+
+        d.shutdown().unwrap();
+    }
+
+    // Note: StagingPool allocates SPDK-registered DMA buffers, which require an
+    // initialized SPDK environment, so it isn't unit-testable in the no-hardware
+    // CI env — it's exercised by the kv-offload hardware bench. Its checkout/RAII
+    // logic is a plain free-list + condvar (see pipeline::StagingPool).
+
+    // -----------------------------------------------------------------------
+    // Background SSD Evictor tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn evictor_get_evictable_offset_block_device() {
+        let dm = Arc::new(MockDispatchMap::new());
+        let dm_iface: Arc<dyn IDispatchMap + Send + Sync> = Arc::clone(&dm) as _;
+
+        // Insert an entry that looks like BlockDevice (null pointer + ssd_offset).
+        dm.inner.lock().unwrap().entries.insert(
+            1,
+            MockEntry {
+                location: MockEntryLocation::MemoryTier {
+                    pointer: std::ptr::null_mut(),
+                    size: 4096,
+                    ssd_offset: Some(8192),
+                },
+                write_ref: false,
+                read_refs: 0,
+            },
+        );
+
+        let offset = crate::background::BackgroundEvictor::get_evictable_offset(&dm_iface, 1);
+        assert_eq!(offset, Some(8192));
+    }
+
+    #[test]
+    fn evictor_get_evictable_offset_skips_memory_tier() {
+        let dm = Arc::new(MockDispatchMap::new());
+        let dm_iface: Arc<dyn IDispatchMap + Send + Sync> = Arc::clone(&dm) as _;
+
+        // Insert a MemoryTier entry (non-null pointer = still hot in DRAM).
+        let mut buf = vec![0u8; 4096];
+        dm.inner.lock().unwrap().entries.insert(
+            2,
+            MockEntry {
+                location: MockEntryLocation::MemoryTier {
+                    pointer: buf.as_mut_ptr(),
+                    size: 4096,
+                    ssd_offset: Some(16384),
+                },
+                write_ref: false,
+                read_refs: 0,
+            },
+        );
+
+        let offset = crate::background::BackgroundEvictor::get_evictable_offset(&dm_iface, 2);
+        assert_eq!(offset, None, "memory-tier entries should not be evictable");
+        std::mem::forget(buf);
+    }
+
+    #[test]
+    fn evictor_get_evictable_offset_skips_nonexistent() {
+        let dm = Arc::new(MockDispatchMap::new());
+        let dm_iface: Arc<dyn IDispatchMap + Send + Sync> = Arc::clone(&dm) as _;
+
+        let offset = crate::background::BackgroundEvictor::get_evictable_offset(&dm_iface, 99);
+        assert_eq!(offset, None);
+    }
+
+    #[test]
+    fn evictor_full_eviction_cycle() {
+        let dm = Arc::new(MockDispatchMap::new());
+        let dm_iface: Arc<dyn IDispatchMap + Send + Sync> = Arc::clone(&dm) as _;
+        let mt = Arc::new(MockMemoryTier::new(1024 * 1024));
+        let mt_iface: Arc<dyn IMemoryTier + Send + Sync> = Arc::clone(&mt) as _;
+
+        // Insert 10 entries all in BlockDevice state (null pointer + ssd_offset).
+        for key in 0..10u64 {
+            dm.inner.lock().unwrap().entries.insert(
+                key,
+                MockEntry {
+                    location: MockEntryLocation::MemoryTier {
+                        pointer: std::ptr::null_mut(),
+                        size: 4096,
+                        ssd_offset: Some(key * 4096),
+                    },
+                    write_ref: false,
+                    read_refs: 0,
+                },
+            );
+        }
+
+        assert_eq!(dm.entry_count(), 10);
+
+        // Simulate evictor logic: get oldest keys, filter, remove.
+        let candidates = dm_iface.oldest_keys(5);
+        assert_eq!(candidates.len(), 5);
+
+        for key in &candidates {
+            let offset =
+                crate::background::BackgroundEvictor::get_evictable_offset(&dm_iface, *key);
+            assert!(offset.is_some(), "key {key} should be evictable");
+
+            let _ = mt_iface.remove(*key);
+            dm_iface.remove(*key).unwrap();
+        }
+
+        assert_eq!(
+            dm.entry_count(),
+            5,
+            "5 entries should remain after evicting 5"
+        );
+    }
+
+    #[test]
+    fn evictor_skips_entries_with_active_references() {
+        let dm = Arc::new(MockDispatchMap::new());
+        let dm_iface: Arc<dyn IDispatchMap + Send + Sync> = Arc::clone(&dm) as _;
+
+        // Insert a BlockDevice entry.
+        dm.inner.lock().unwrap().entries.insert(
+            1,
+            MockEntry {
+                location: MockEntryLocation::MemoryTier {
+                    pointer: std::ptr::null_mut(),
+                    size: 4096,
+                    ssd_offset: Some(4096),
+                },
+                write_ref: false,
+                read_refs: 0,
+            },
+        );
+
+        // One read reference, simulating a concurrent reader. get_evictable_offset
+        // is self-balancing: its own `lookup` pins and its `release_read` unpins.
+        dm_iface.take_read(1).unwrap();
+
+        // get_evictable_offset sees BlockDevice and returns Some(offset),
+        // releasing the pin its own lookup took.
+        let offset = crate::background::BackgroundEvictor::get_evictable_offset(&dm_iface, 1);
+        assert_eq!(offset, Some(4096));
+
+        // Remove fails because one read ref remains (the concurrent reader).
+        let remove_result = dm_iface.remove(1);
+        assert!(
+            remove_result.is_err(),
+            "remove should fail with active references"
+        );
+
+        // Entry still exists.
+        assert!(dm.inner.lock().unwrap().entries.contains_key(&1));
+
+        // Release the concurrent reader's ref and retry.
+        dm_iface.release_read(1).unwrap();
+        dm_iface.remove(1).unwrap();
+        assert!(!dm.inner.lock().unwrap().entries.contains_key(&1));
+    }
+
+    #[test]
+    fn evictor_start_and_shutdown() {
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
+
+        let mut evictor = crate::background::BackgroundEvictor::start(
+            dm,
+            mt,
+            vec![],
+            crate::background::EvictorConfig {
+                threshold: 0.9,
+                low_watermark: 0.8,
+                batch_size: 10,
+                interval: std::time::Duration::from_millis(50),
+            },
+            None,
+            Arc::new(Mutex::new(None)),
+            Arc::new(crate::TierEventCounters::default()),
+        );
+
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        evictor.shutdown();
+    }
+
+    /// Extent manager that is always full and records every `remove_extent`.
+    #[derive(Default)]
+    struct RecordingExtentMgr {
+        removed: Mutex<Vec<u64>>,
+    }
+
+    impl IExtentManager for RecordingExtentMgr {
+        fn format(
+            &self,
+            _: interfaces::FormatParams,
+        ) -> Result<(), interfaces::ExtentManagerError> {
+            Ok(())
+        }
+        fn initialize(&self) -> Result<(), interfaces::ExtentManagerError> {
+            Ok(())
+        }
+        fn reserve_extent(
+            &self,
+            _: interfaces::ExtentKey,
+            _: u32,
+        ) -> Result<interfaces::WriteHandle, interfaces::ExtentManagerError> {
+            Err(interfaces::ExtentManagerError::OutOfSpace)
+        }
+        fn get_extents(&self) -> Vec<interfaces::Extent> {
+            Vec::new()
+        }
+        fn for_each_extent(&self, _: &mut dyn FnMut(&interfaces::Extent)) {}
+        fn remove_extent(&self, offset: u64) -> Result<(), interfaces::ExtentManagerError> {
+            self.removed.lock().unwrap().push(offset);
+            Ok(())
+        }
+        fn checkpoint(&self) -> Result<(), interfaces::ExtentManagerError> {
+            Ok(())
+        }
+        fn get_instance_id(&self) -> Result<u64, interfaces::ExtentManagerError> {
+            Ok(0)
+        }
+        fn set_checkpoint_interval(&self, _: Option<std::time::Duration>) {}
+        fn used_bytes(&self) -> u64 {
+            100
+        }
+        fn capacity_bytes(&self) -> u64 {
+            100
+        }
+        fn set_metadata_base_lba(&self, _: u64) {}
+        fn set_data_base_lba(&self, _: u64) {}
+        fn data_base_lba(&self) -> u64 {
+            0
+        }
+    }
+
+    /// Run the SSD evictor over one BlockDevice entry at `loc` with two
+    /// extent managers; return the offsets each one was asked to free.
+    fn run_ssd_evictor_on(loc: u64) -> (Vec<u64>, Vec<u64>) {
+        let dm = Arc::new(MockDispatchMap::new());
+        dm.inner.lock().unwrap().entries.insert(
+            1,
+            MockEntry {
+                location: MockEntryLocation::MemoryTier {
+                    pointer: std::ptr::null_mut(),
+                    size: 4096,
+                    ssd_offset: Some(loc),
+                },
+                write_ref: false,
+                read_refs: 0,
+            },
+        );
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
+        let ems = [
+            Arc::new(RecordingExtentMgr::default()),
+            Arc::new(RecordingExtentMgr::default()),
+        ];
+        let mut evictor = crate::background::BackgroundEvictor::start(
+            Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>,
+            mt,
+            ems.iter()
+                .map(|e| Arc::clone(e) as Arc<dyn IExtentManager + Send + Sync>)
+                .collect(),
+            crate::background::EvictorConfig {
+                threshold: 0.5,
+                low_watermark: 0.1,
+                batch_size: 4,
+                interval: std::time::Duration::from_millis(5),
+            },
+            None,
+            Arc::new(Mutex::new(None)),
+            Arc::new(crate::TierEventCounters::default()),
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while dm.entry_count() > 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        evictor.shutdown();
+        assert_eq!(dm.entry_count(), 0, "the evictor never removed the entry");
+        let removed = |i: usize| ems[i].removed.lock().unwrap().clone();
+        (removed(0), removed(1))
+    }
+
+    #[test]
+    fn ssd_evictor_frees_on_recorded_drive() {
+        let (d0, d1) = run_ssd_evictor_on(crate::encode_loc(1, 0x4000));
+        assert!(d0.is_empty(), "drive 0 freed {d0:?}");
+        assert_eq!(d1, vec![0x4000]);
+    }
+
+    #[test]
+    fn ssd_evictor_skips_invalid_drive() {
+        let (d0, d1) = run_ssd_evictor_on(crate::encode_loc(7, 0x4000));
+        assert!(d0.is_empty() && d1.is_empty(), "freed {d0:?} / {d1:?}");
+    }
+
+    // -----------------------------------------------------------------------
+    // promote_to_memory_tier tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn promote_block_device_entry_to_memory_tier() {
+        let (c, dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+
+        let mut buf = vec![0u8; 4096];
+        d.populate(1, make_handle(&mut buf)).unwrap();
+
+        // Simulate eviction: entry becomes BlockDevice.
+        let mt = c.memory_tier.get().unwrap();
+        let _ = mt.remove(1);
+        dm.convert_entry_to_block(1, 0x1000);
+
+        // Verify it's in BlockDevice state.
+        let result = dm.lookup(1).unwrap();
+        assert!(matches!(result, LookupResult::BlockDevice { .. }));
+        let _ = dm.release_read(1);
+
+        // Promote without hardware — enters the no-drives path.
+        d.promote_to_memory_tier(&[1]);
+
+        // After promote, entry should be in MemoryTier state.
+        let result = dm.lookup(1).unwrap();
+        assert!(
+            matches!(result, LookupResult::MemoryTier { .. }),
+            "expected MemoryTier after promote, got: {result:?}"
+        );
+        let _ = dm.release_read(1);
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn promote_already_in_memory_tier_is_noop() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+
+        let mut buf = vec![0u8; 4096];
+        d.populate(1, make_handle(&mut buf)).unwrap();
+
+        // Entry is already in MemoryTier (via populate → staging → memory-tier).
+        // promote_to_memory_tier should just refresh timestamp without error.
+        d.promote_to_memory_tier(&[1]);
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn promote_nonexistent_key_is_silent() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+
+        // Should not panic on missing keys.
+        d.promote_to_memory_tier(&[999, 1000, 1001]);
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn promote_mixed_batch() {
+        let (c, dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+
+        // Key 1: populate then evict to BlockDevice
+        let mut buf1 = vec![0u8; 4096];
+        d.populate(1, make_handle(&mut buf1)).unwrap();
+        let mt = c.memory_tier.get().unwrap();
+        let _ = mt.remove(1);
+        dm.convert_entry_to_block(1, 0x1000);
+
+        // Key 2: stays in MemoryTier
+        let mut buf2 = vec![0u8; 4096];
+        d.populate(2, make_handle(&mut buf2)).unwrap();
+
+        // Key 3: does not exist
+        // Promote all three — should not panic.
+        d.promote_to_memory_tier(&[1, 2, 3]);
+
+        // Key 1 should now be in MemoryTier.
+        let result = dm.lookup(1).unwrap();
+        assert!(
+            matches!(result, LookupResult::MemoryTier { .. }),
+            "key 1 should be MemoryTier after promote, got: {result:?}"
+        );
+        let _ = dm.release_read(1);
+
+        // Key 2 should still be in MemoryTier (untouched).
+        let result = dm.lookup(2).unwrap();
+        assert!(matches!(result, LookupResult::MemoryTier { .. }));
+        let _ = dm.release_read(2);
+
+        d.shutdown().unwrap();
+    }
+
+    // -----------------------------------------------------------------------
+    // Store-time drive placement tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ssd_location_round_trips_and_drive_zero_is_identity() {
+        for &(drive, offset) in &[(0usize, 0u64), (1, 0x4000), (3, (1 << 42) - 4096), (255, 7)] {
+            assert_eq!(
+                crate::decode_loc(crate::encode_loc(drive, offset)),
+                (drive, offset)
+            );
+        }
+        for &offset in &[0u64, 4096, 0x1234_5000] {
+            assert_eq!(crate::encode_loc(0, offset), offset);
+            assert_eq!(crate::decode_loc(offset), (0, offset));
+        }
+    }
+
+    fn store_drive_counts(num_drives: usize, calls: usize) -> Vec<usize> {
+        let mut counts = vec![0usize; num_drives];
+        for _ in 0..calls {
+            counts[DispatcherComponent::next_store_drive(num_drives)] += 1;
+        }
+        counts
+    }
+
+    #[test]
+    fn next_store_drive_balances_consecutive_calls() {
+        assert_eq!(store_drive_counts(4, 16), vec![4, 4, 4, 4]);
+        assert_eq!(store_drive_counts(2, 16), vec![8, 8]);
+        assert_eq!(store_drive_counts(1, 16), vec![16]);
+        for _ in 0..16 {
+            assert_eq!(DispatcherComponent::next_store_drive(1), 0);
+        }
+    }
+
+    #[test]
+    fn next_store_drive_balances_each_thread() {
+        let handles: Vec<_> = (0..2)
+            .map(|_| thread::spawn(|| store_drive_counts(4, 16)))
+            .collect();
+        for h in handles {
+            assert_eq!(h.join().unwrap(), vec![4, 4, 4, 4]);
+        }
+    }
+
+    #[test]
+    fn select_drive_uses_recorded_drive() {
+        let drives = ["d0", "d1", "d2"];
+        assert_eq!(
+            crate::select_drive(&drives, crate::encode_loc(1, 0x4000)),
+            Some((&"d1", 0x4000))
+        );
+        assert_eq!(crate::select_drive(&drives, 0x8000), Some((&"d0", 0x8000)));
+        assert_eq!(
+            crate::select_drive(&drives, crate::encode_loc(3, 0x4000)),
+            None
+        );
+    }
+
+    // --- read_to_bounce (certus-transfer-endpoint T038) ---------------------
+
+    /// A drive over an in-memory disk. Reads can be held (each waits until
+    /// released) or failed — a failing read is never held, so it can complete
+    /// while its siblings are still out — and every read records its LBA.
+    #[derive(Default)]
+    struct BounceDisk {
+        state: Arc<DiskState>,
+        max_transfer: u32,
+        block: u32,
+    }
+
+    #[derive(Default)]
+    struct DiskState {
+        bytes: Mutex<Vec<u8>>,
+        lbas: Mutex<Vec<u64>>,
+        hold: Mutex<bool>,
+        released: std::sync::Condvar,
+        fail_lba: Mutex<Option<u64>>,
+        /// Clients ever connected.
+        clients: AtomicUsize,
+        /// Reads currently being served, and the most at once.
+        in_flight: AtomicUsize,
+        peak: AtomicUsize,
+    }
+
+    impl BounceDisk {
+        fn new(bytes: Vec<u8>, max_transfer: u32) -> Arc<Self> {
+            Arc::new(Self {
+                state: Arc::new(DiskState {
+                    bytes: Mutex::new(bytes),
+                    ..Default::default()
+                }),
+                max_transfer,
+                block: 4096,
+            })
+        }
+    }
+
+    impl std::ops::Deref for BounceDisk {
+        type Target = DiskState;
+        fn deref(&self) -> &DiskState {
+            &self.state
+        }
+    }
+
+    impl DiskState {
+        fn release(&self) {
+            *self.hold.lock().unwrap() = false;
+            self.released.notify_all();
+        }
+    }
+
+    impl IBlockDevice for BounceDisk {
+        fn connect_client(&self) -> Result<ClientChannels, interfaces::NvmeBlockError> {
+            use component_core::channel::spsc::SpscChannel;
+            let cmd = SpscChannel::<interfaces::Command>::new(64);
+            let (cmd_tx, cmd_rx) = (cmd.sender().unwrap(), cmd.receiver().unwrap());
+            let done = SpscChannel::<Completion>::new(64);
+            let (done_tx, done_rx) = (done.sender().unwrap(), done.receiver().unwrap());
+            let disk = Arc::clone(&self.state);
+            disk.clients.fetch_add(1, Ordering::SeqCst);
+            thread::spawn(move || {
+                while let Ok(c) = cmd_rx.recv() {
+                    let interfaces::Command::ReadAsync { lba, buf, tag, .. } = c else {
+                        panic!("BounceDisk serves only ReadAsync");
+                    };
+                    disk.lbas.lock().unwrap().push(lba);
+                    let now = disk.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                    disk.peak.fetch_max(now, Ordering::SeqCst);
+                    let fails = *disk.fail_lba.lock().unwrap() == Some(lba);
+                    let mut held = disk.hold.lock().unwrap();
+                    while *held && !fails {
+                        held = disk.released.wait(held).unwrap();
+                    }
+                    drop(held);
+                    let result = if *disk.fail_lba.lock().unwrap() == Some(lba) {
+                        Err(interfaces::NvmeBlockError::Aborted("injected".into()))
+                    } else {
+                        let mut b = buf.lock().unwrap();
+                        let dst = b.as_mut_slice();
+                        let at = lba as usize * 4096;
+                        dst.copy_from_slice(&disk.bytes.lock().unwrap()[at..at + dst.len()]);
+                        Ok(())
+                    };
+                    disk.in_flight.fetch_sub(1, Ordering::SeqCst);
+                    let _ = done_tx.send(Completion::ReadDone {
+                        handle: interfaces::OpHandle(tag),
+                        tag,
+                        result,
+                    });
+                }
+            });
+            Ok(ClientChannels {
+                command_tx: cmd_tx,
+                completion_rx: done_rx,
+            })
+        }
+        fn sector_size(&self, _: u32) -> Result<u32, interfaces::NvmeBlockError> {
+            Ok(4096)
+        }
+        fn num_sectors(&self, _: u32) -> Result<u64, interfaces::NvmeBlockError> {
+            Ok(self.bytes.lock().unwrap().len() as u64 / 4096)
+        }
+        fn max_queue_depth(&self) -> u32 {
+            64
+        }
+        fn num_io_queues(&self) -> u32 {
+            1
+        }
+        fn max_transfer_size(&self) -> u32 {
+            self.max_transfer
+        }
+        fn block_size(&self) -> u32 {
+            self.block
+        }
+        fn numa_node(&self) -> i32 {
+            -1
+        }
+        fn nvme_version(&self) -> String {
+            "bounce-disk".into()
+        }
+        fn telemetry(&self) -> Result<interfaces::TelemetrySnapshot, interfaces::NvmeBlockError> {
+            Err(interfaces::NvmeBlockError::NotSupported("mock".into()))
+        }
+        fn read_write_stats(&self) -> interfaces::ReadWriteStats {
+            interfaces::ReadWriteStats::default()
+        }
+    }
+
+    /// A disk of `blocks` pages, page `i` filled with byte `tag + i`.
+    fn pattern_disk(blocks: usize, tag: u8, max_transfer: u32) -> Arc<BounceDisk> {
+        let mut bytes = vec![0u8; blocks * 4096];
+        for (i, page) in bytes.chunks_mut(4096).enumerate() {
+            page.fill(tag.wrapping_add(i as u8));
+        }
+        BounceDisk::new(bytes, max_transfer)
+    }
+
+    /// An initialized dispatcher whose data drives are `disks`, in order, and
+    /// whose memory tier has `buffers` bounce buffers of `buffer_bytes`.
+    fn bounce_dispatcher(
+        disks: &[Arc<BounceDisk>],
+        buffers: usize,
+        buffer_bytes: usize,
+    ) -> (Arc<DispatcherComponent>, Arc<MockMemoryTier>) {
+        let (c, _) = setup_initialized();
+        let mt = Arc::new(MockMemoryTier::with_bounce(
+            1024 * 1024,
+            buffers,
+            buffer_bytes,
+        ));
+        c.memory_tier.disconnect().ok();
+        c.memory_tier
+            .connect(Arc::clone(&mt) as Arc<dyn IMemoryTier + Send + Sync>)
+            .unwrap();
+        let drives = disks
+            .iter()
+            .map(|d| {
+                let em = extent_manager::ExtentManager::new_inner();
+                let iface = Arc::clone(d) as Arc<dyn IBlockDevice + Send + Sync>;
+                DataDrive {
+                    _block_dev: Arc::clone(&em) as Arc<dyn component_core::IUnknown + Send + Sync>,
+                    block_dev_admin: None,
+                    block_dev_iface: Arc::clone(&iface),
+                    _extent_mgr_component: Arc::clone(&em)
+                        as Arc<dyn component_core::IUnknown + Send + Sync>,
+                    extent_mgr: em as Arc<dyn IExtentManager + Send + Sync>,
+                    channel_pool: Arc::new(ChannelPool::new(iface)),
+                }
+            })
+            .collect();
+        *c.data_drives.write() = drives;
+        (c, mt)
+    }
+
+    /// The drive is the one the entry's SSD location records (`encode_loc`), as
+    /// on the cold path: two drives, one key, each location read from its own
+    /// drive at its own LBA, into a buffer.
+    #[test]
+    fn read_to_bounce_reads_the_drive_the_location_records() {
+        let disks = [
+            pattern_disk(16, 0x10, 1 << 20),
+            pattern_disk(16, 0x80, 1 << 20),
+        ];
+        let (c, mt) = bounce_dispatcher(&disks, 4, 16384);
+        let d = query_interface!(c, IDispatcher).unwrap();
+        // The same key on either drive: the drive is the location's, chosen at
+        // store time, never derived from the key.
+        for drive in 0..2 {
+            let key = 7;
+            let buf = d
+                .read_to_bounce(key, crate::encode_loc(drive, 3 * 4096), 4096)
+                .unwrap();
+            // SAFETY: the buffer is ours until released.
+            let got = unsafe { std::slice::from_raw_parts(buf.ptr, 4096) };
+            let want = [0x10u8, 0x80][drive] + 3;
+            assert!(got.iter().all(|&b| b == want), "drive {drive}, page 3");
+            assert_eq!(*disks[drive].lbas.lock().unwrap(), [3]);
+            d.release_bounce(buf);
+        }
+        assert_eq!(mt.bounce_free_count(), 4, "every buffer returned");
+        assert_eq!(mt.used(), 0, "serving promotes nothing into the cache");
+    }
+
+    /// A location whose drive index is past the drive list is an error, never a
+    /// read of some other drive at that offset.
+    #[test]
+    fn a_location_naming_a_missing_drive_is_an_error_and_reads_nothing() {
+        let disks = [pattern_disk(16, 0x10, 1 << 20)];
+        let (c, mt) = bounce_dispatcher(&disks, 4, 16384);
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let err = d
+            .read_to_bounce(7, crate::encode_loc(3, 4096), 4096)
+            .unwrap_err();
+        assert!(matches!(err, interfaces::BounceError::Io(_)), "{err:?}");
+        assert!(disks[0].lbas.lock().unwrap().is_empty(), "no drive read");
+        assert_eq!(mt.bounce_free_count(), 4, "no buffer taken");
+    }
+
+    /// An entry larger than the drive's maximum transfer is read in segments,
+    /// at consecutive LBAs, into one buffer; a length short of a page is read
+    /// as a whole page.
+    #[test]
+    fn read_to_bounce_segments_by_the_maximum_transfer() {
+        let disks = [pattern_disk(16, 0, 8192)];
+        let (c, _mt) = bounce_dispatcher(&disks, 1, 16384);
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let buf = d.read_to_bounce(1, 4 * 4096, 3 * 4096 + 100).unwrap();
+        assert_eq!(buf.len, 3 * 4096 + 100);
+        let mut lbas = disks[0].lbas.lock().unwrap().clone();
+        lbas.sort();
+        assert_eq!(lbas, [4, 6], "two segments of at most 8 KiB, four pages");
+        // SAFETY: the buffer is ours until released.
+        let got = unsafe { std::slice::from_raw_parts(buf.ptr, 4 * 4096) };
+        for (i, page) in got.chunks(4096).enumerate() {
+            assert!(page.iter().all(|&b| b == 4 + i as u8), "page {i}");
+        }
+        d.release_bounce(buf);
+    }
+
+    /// A failed read frees its buffer and reports Io; nothing is promoted and
+    /// the cache is untouched.
+    #[test]
+    fn a_failed_read_returns_its_buffer() {
+        let disks = [pattern_disk(16, 0, 4096)];
+        let (c, mt) = bounce_dispatcher(&disks, 1, 16384);
+        *disks[0].fail_lba.lock().unwrap() = Some(2);
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let r = d.read_to_bounce(1, 4096, 3 * 4096);
+        assert!(matches!(r, Err(interfaces::BounceError::Io(_))), "{r:?}");
+        assert_eq!(mt.bounce_free_count(), 1, "the buffer came back");
+        assert_eq!(
+            disks[0].in_flight.load(Ordering::SeqCst),
+            0,
+            "nothing left reading"
+        );
+        assert_eq!(mt.used(), 0, "never promoted");
+    }
+
+    /// A failure does not return while other segments are still reading into
+    /// the buffer: segment 0 fails at once, the other three are held, and the
+    /// call waits for them before it frees the buffer.
+    #[test]
+    fn a_failed_read_waits_for_its_siblings_before_freeing() {
+        let disks = [pattern_disk(16, 0, 4096)];
+        let (c, mt) = bounce_dispatcher(&disks, 1, 16384);
+        *disks[0].fail_lba.lock().unwrap() = Some(0);
+        *disks[0].hold.lock().unwrap() = true;
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let d2 = Arc::clone(&d);
+        thread::spawn(move || tx.send(d2.read_to_bounce(1, 0, 4 * 4096)).unwrap());
+        let t0 = std::time::Instant::now();
+        // The failed segment has completed and a sibling is being read.
+        while disks[0].lbas.lock().unwrap().len() < 2
+            || disks[0].in_flight.load(Ordering::SeqCst) == 0
+        {
+            assert!(t0.elapsed() < std::time::Duration::from_secs(5));
+            thread::yield_now();
+        }
+        assert!(
+            rx.recv_timeout(std::time::Duration::from_millis(100))
+                .is_err(),
+            "returned with reads outstanding"
+        );
+        assert_eq!(mt.bounce_free_count(), 0, "the buffer is still the read's");
+        disks[0].release();
+        let r = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        assert!(matches!(r, Err(interfaces::BounceError::Io(_))));
+        assert_eq!(mt.bounce_free_count(), 1);
+    }
+
+    /// Exhaustion is NoSpace and transient; oversize is NeverFits; both pass
+    /// through from the memory tier, and neither touches a drive.
+    #[test]
+    fn reserve_errors_pass_through_without_reading() {
+        let disks = [pattern_disk(16, 0, 4096)];
+        let (c, _mt) = bounce_dispatcher(&disks, 1, 8192);
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let held = d.read_to_bounce(1, 0, 8192).unwrap();
+        let n = disks[0].lbas.lock().unwrap().len();
+        assert_eq!(
+            d.read_to_bounce(2, 0, 4096),
+            Err(interfaces::BounceError::NoSpace)
+        );
+        assert!(matches!(
+            d.read_to_bounce(2, 0, 8193),
+            Err(interfaces::BounceError::NeverFits(_))
+        ));
+        assert_eq!(disks[0].lbas.lock().unwrap().len(), n, "no read was issued");
+        d.release_bounce(held);
+        assert!(d.read_to_bounce(2, 0, 4096).is_ok(), "room again");
+    }
+
+    /// A read in progress does not hold up shutdown: the drive list is not
+    /// held across the device read, so shutdown's write lock is not stuck
+    /// behind a drive that never answers.
+    #[test]
+    fn a_hung_read_does_not_block_shutdown() {
+        let disks = [pattern_disk(16, 0, 4096)];
+        let (c, _mt) = bounce_dispatcher(&disks, 1, 8192);
+        *disks[0].hold.lock().unwrap() = true;
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let d2 = Arc::clone(&d);
+        let reader = thread::spawn(move || d2.read_to_bounce(1, 0, 4096));
+        let t0 = std::time::Instant::now();
+        while disks[0].in_flight.load(Ordering::SeqCst) == 0 {
+            assert!(t0.elapsed() < std::time::Duration::from_secs(5));
+            thread::yield_now();
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        thread::spawn(move || tx.send(d.shutdown()).unwrap());
+        let r = rx.recv_timeout(std::time::Duration::from_secs(5));
+        disks[0].release();
+        assert!(
+            matches!(r, Ok(Ok(()))),
+            "shutdown waited on the read: {r:?}"
+        );
+        let _ = reader.join().unwrap();
+    }
+
+    /// A drive whose blocks are larger than the reserve's 4 KiB pages would
+    /// read past the end of a buffer rounded to a page, so it is refused,
+    /// before any buffer is taken or read issued.
+    #[test]
+    fn a_block_larger_than_a_page_never_fits() {
+        let disk = Arc::new(BounceDisk {
+            state: Arc::clone(&pattern_disk(16, 0, 1 << 20).state),
+            max_transfer: 1 << 20,
+            block: 8192,
+        });
+        let (c, mt) = bounce_dispatcher(std::slice::from_ref(&disk), 1, 16384);
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let r = d.read_to_bounce(1, 0, 4096);
+        assert!(
+            matches!(r, Err(interfaces::BounceError::NeverFits(_))),
+            "{r:?}"
+        );
+        assert!(disk.lbas.lock().unwrap().is_empty(), "no read was issued");
+        assert_eq!(mt.bounce_free_count(), 1, "no buffer was taken");
+    }
+
+    /// No drives, no reserve, not initialized: never a buffer.
+    #[test]
+    fn read_to_bounce_refuses_what_it_cannot_serve() {
+        let (c, _) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        assert!(matches!(
+            d.read_to_bounce(1, 0, 4096),
+            Err(interfaces::BounceError::NeverFits(_))
+        ));
+        let (c, _) = bounce_dispatcher(&[pattern_disk(4, 0, 4096)], 1, 4096);
+        c.initialized.store(false, Ordering::Release);
+        let d = query_interface!(c, IDispatcher).unwrap();
+        assert!(matches!(
+            d.read_to_bounce(1, 0, 4096),
+            Err(interfaces::BounceError::NotInitialized(_))
+        ));
+    }
+
+    /// Reads use the drive's channel pool: concurrent callers each get their
+    /// own channel, so one never takes another's completion, and channels are
+    /// reused rather than connected per read.
+    #[test]
+    fn concurrent_reads_do_not_steal_completions() {
+        let disks = [pattern_disk(64, 0, 4096)];
+        let (c, mt) = bounce_dispatcher(&disks, 8, 8192);
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let handles: Vec<_> = (0..8u64)
+            .map(|i| {
+                let d = Arc::clone(&d);
+                thread::spawn(move || {
+                    for _ in 0..20 {
+                        let buf = d.read_to_bounce(1, i * 2 * 4096, 8192).unwrap();
+                        // SAFETY: the buffer is ours until released.
+                        let got = unsafe { std::slice::from_raw_parts(buf.ptr, 8192) };
+                        assert!(got[..4096].iter().all(|&b| b == (2 * i) as u8));
+                        assert!(got[4096..].iter().all(|&b| b == (2 * i + 1) as u8));
+                        d.release_bounce(buf);
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(mt.bounce_free_count(), 8);
+        let clients = disks[0].clients.load(Ordering::SeqCst);
+        assert!(
+            (1..=8).contains(&clients),
+            "{clients} channels for 8 readers x 20 reads: pooled, not per read"
+        );
+    }
+
+    /// The bounce read's timeout must never fire: the actor would forget a read
+    /// the drive may still be writing into a buffer.
+    #[test]
+    fn the_bounce_read_timeout_cannot_fire_or_overflow() {
+        const _: () = assert!(pipeline::BOUNCE_READ_TIMEOUT_MS >= 30 * 24 * 3600 * 1000);
+        // The actor computes start + ms * ticks_per_ms in u64; a 10 GHz TSC
+        // must not overflow it.
+        assert!(pipeline::BOUNCE_READ_TIMEOUT_MS
+            .checked_mul(10_000_000)
+            .is_some());
+    }
+}
+
+#[cfg(test)]
+#[path = "repair_test_served_by.rs"]
+mod repair_test_served_by;
+
+#[cfg(test)]
+#[path = "repair_test_copy_completed.rs"]
+mod repair_test_copy_completed;
+
+#[cfg(test)]
+#[path = "repair_test_populate_slot.rs"]
+mod repair_test_populate_slot;
+
+#[cfg(test)]
+#[path = "repair_test_remove_no_wait.rs"]
+mod repair_test_remove_no_wait;
+
+#[cfg(test)]
+#[path = "repair_test_store_already_resident.rs"]
+mod repair_test_store_already_resident;
+
+#[cfg(test)]
+#[path = "repair_test_eviction_window_tinylfu.rs"]
+mod repair_test_eviction_window_tinylfu;
+
+#[cfg(test)]
+#[path = "repair_test_remove_frees_ssd_extent.rs"]
+mod repair_test_remove_frees_ssd_extent;
+
+#[cfg(test)]
+#[path = "repair_test_remove_refused_leaves_entry_unchanged.rs"]
+mod repair_test_remove_refused_leaves_entry_unchanged;
+
+#[cfg(test)]
+#[path = "repair_test_warm_copy_stops_at_zero_region.rs"]
+mod repair_test_warm_copy_stops_at_zero_region;
+
+#[cfg(test)]
+#[path = "repair_test_sync_failure_error.rs"]
+mod repair_test_sync_failure_error;
+
+#[cfg(test)]
+#[path = "repair_test_duplicate_check_after_eviction.rs"]
+mod repair_test_duplicate_check_after_eviction;
+
+#[cfg(test)]
+#[path = "repair_test_check_present_map_timeout.rs"]
+mod repair_test_check_present_map_timeout;

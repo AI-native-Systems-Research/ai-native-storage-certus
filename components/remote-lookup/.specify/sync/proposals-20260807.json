@@ -1,0 +1,63 @@
+{
+  "generated": "2026-08-07",
+  "based_on": "drift-report 2026-08-07",
+  "component": "remote-lookup",
+  "branch": "sync/spec-drift-sweep-20260807",
+  "note": "Sweep proposals kept separate from the historical proposals.json (2026-06-22, 001-only).",
+  "proposals": [
+    {
+      "id": "rl-2026-08-07-1",
+      "requirement": "002 FR-001 (doc-drift)",
+      "direction": "ALIGN",
+      "severity": "medium",
+      "confidence": "HIGH",
+      "approved": true,
+      "status": "APPLIED",
+      "spec_says": "spec 002 is Synced; protocol implemented",
+      "code_did": "src/lib.rs module + batch_lookup docstrings claimed protocol unbuilt / all-NotFound",
+      "resolution": "Rewrite both docstrings in place to describe shipped KEY_QUERY->RDMA behavior; clarify Ok(()) and uninitialized-NotFound semantics",
+      "files": ["src/lib.rs:1-8", "src/lib.rs:249-253"],
+      "note": "Doc-only code correction; cargo build clean; doctest unaffected."
+    },
+    {
+      "id": "rl-2026-08-07-2",
+      "requirement": "002 FR-018",
+      "direction": "ALIGN",
+      "severity": "low",
+      "confidence": "HIGH",
+      "approved": true,
+      "status": "QUEUED_NOT_DRAFTED",
+      "spec_says": "Unknown message types MUST be logged and ignored",
+      "code_did": "WireMessage::Unknown => {} drops silently, no log emitted (src/actor.rs:330)",
+      "resolution": "Emit logger.debug/warn on the Unknown arm before dropping",
+      "files": ["src/actor.rs:330"],
+      "note": "Low-severity ALIGN; queued per sweep pacing (only HIGH bugs drafted)."
+    },
+    {
+      "id": "rl-2026-08-07-3",
+      "requirement": "002 FR-030..FR-034 (new)",
+      "direction": "BACKFILL",
+      "severity": "low",
+      "confidence": "HIGH",
+      "approved": true,
+      "status": "APPLIED",
+      "spec_says": "(five behaviors unspecced)",
+      "code_did": "caller_wait/background-continue; connection_teardown_timeout+tick_orphans; orphan-reuse guard; extra LookupConfig fields (actor_cpu/discovery/node_endpoint); integrity-check feature",
+      "resolution": "Add FR-030..FR-034 documenting each; all mesh-tested / load-bearing",
+      "files": ["specs/002-remote-lookup-rdma/spec.md"]
+    },
+    {
+      "id": "rl-2026-08-07-4",
+      "requirement": "001-remote-lookup-placeholder (all)",
+      "direction": "NO_ACTION",
+      "severity": "n/a",
+      "confidence": "HIGH",
+      "approved": true,
+      "status": "NO_ACTION",
+      "spec_says": "placeholder FRs",
+      "code_did": "superseded by 002; divergences are the documented, intentional supersession",
+      "resolution": "No code action; leave as-is (already superseded 2026-07-22)",
+      "files": []
+    }
+  ]
+}

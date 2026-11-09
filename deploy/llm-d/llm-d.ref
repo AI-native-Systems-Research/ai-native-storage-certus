@@ -1,0 +1,9 @@
+# Pinned llm-d revision that deploy/llm-d/a30 is known to apply cleanly against.
+#
+# install.sh fetches and checks this out, so upstream changes to llm-d's base
+# manifests can only reach us through an explicit, reviewable bump of this file
+# -- not silently on the next deploy. When bumping, re-run install.sh: the
+# `kubectl kustomize` step is where a base restructuring will surface.
+#
+# First non-comment line is used. Override ad hoc with LLMD_REF=<ref>.
+4cd4ed40996eb3cfeb357bb034754c6a81cb2fdc

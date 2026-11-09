@@ -1,0 +1,72 @@
+[package]
+name = "certus-server-yaml"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+interfaces = { workspace = true, features = ["spdk"] }
+component-framework.workspace = true
+component-core.workspace = true
+dispatcher = { workspace = true, default-features = false }
+dispatcher-p2p = { workspace = true, default-features = false, optional = true }
+dispatch-map.workspace = true
+eviction-policy-lru.workspace = true
+eviction-policy-session-lists.workspace = true
+eviction-policy-optimized.workspace = true
+memory-tier = { workspace = true, features = ["spdk", "telemetry"] }
+block-device-spdk-nvme = { workspace = true, optional = true }
+block-device-filesys = { workspace = true, optional = true }
+block-device-kernel = { workspace = true, optional = true }
+extent-manager.workspace = true
+spdk-env = { workspace = true, optional = true }
+gpu-services = { workspace = true, features = ["gpu"] }
+logger.workspace = true
+remote-lookup.workspace = true
+remote-lookup-rdma-initiator = { workspace = true, optional = true }
+remote-lookup-rdma-responder = { workspace = true, optional = true }
+certus-transfer-endpoint = { workspace = true, optional = true }
+zyre = { workspace = true, optional = true }
+shm-queue.workspace = true
+shmq-dispatcher.workspace = true
+
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive", "env"] }
+libc = "0.2"
+crossbeam-channel = "0.5"
+
+# OpenTelemetry (optional, enabled via --features otel)
+opentelemetry = { version = "0.27", optional = true }
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio", "metrics"], optional = true }
+opentelemetry-otlp = { version = "0.27", default-features = false, features = ["metrics", "http-proto", "reqwest-client"], optional = true }
+
+[features]
+default = ["spdk"]
+spdk = ["spdk-mem", "dep:block-device-spdk-nvme", "dispatcher/spdk-backend"]
+spdk-mem = ["dep:spdk-env"]
+filesys = ["dep:block-device-filesys", "spdk-mem"]
+kernel = ["dep:block-device-kernel", "spdk-mem"]
+p2p-native = ["dep:dispatcher-p2p", "spdk", "gpu-services/p2p", "dispatcher-p2p/spdk-backend"]
+# Enables the RDMA transports: the remote-lookup stack (full-remote profile) and
+# the transfer endpoint (full-transfer profile). The initiator/responder crates
+# build in stub mode here; add their own `rdma` features for real hardware
+# RDMA. The transfer endpoint is always built over verbs here: its mock must
+# never serve a real node. zyre pulls the native zyre libraries.
+rdma = [
+    "dep:remote-lookup-rdma-initiator",
+    "dep:remote-lookup-rdma-responder",
+    "dep:zyre",
+    "dep:certus-transfer-endpoint",
+    "certus-transfer-endpoint/rdma",
+    "certus-transfer-endpoint/spdk",
+]
+otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp"]
+rw-telemetry = ["dispatcher/rw-telemetry"]
+
+[build-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_norway = "0.9"
+
+[lints]
+workspace = true

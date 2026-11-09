@@ -1,0 +1,120 @@
+//! Hello World actor component.
+//!
+//! Provides a greeter actor that receives [`GreetRequest`] messages and prints
+//! hello messages.
+//!
+//! # Quick start
+//!
+//! ```
+//! use example_helloworld::{GreetRequest, GreeterHandler};
+//! use component_framework::actor::Actor;
+//!
+//! let greeter = Actor::simple(GreeterHandler::new());
+//! let greeter_handle = greeter.activate().unwrap();
+//!
+//! greeter_handle.send(GreetRequest { name: "World".into() }).unwrap();
+//! greeter_handle.deactivate().unwrap();
+//! ```
+
+use component_framework::actor::ActorHandler;
+use component_framework::{define_component, define_interface};
+use interfaces::ILogger;
+use std::sync::Arc;
+
+// Define an interface for the greeter component.
+define_interface! {
+    pub IGreeter {
+        fn greeting_prefix(&self) -> &str;
+    }
+}
+
+// Define the component.
+define_component! {
+    pub HelloWorldComponent {
+        version: "0.1.0",
+        provides: [IGreeter],
+        receptacles: {
+            logger: ILogger,
+        },
+    }
+}
+
+impl IGreeter for HelloWorldComponent {
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "keeps the impl signature identical to the IGreeter trait's `-> &str`"
+    )]
+    fn greeting_prefix(&self) -> &str {
+        "Hello"
+    }
+}
+
+/// Message sent to the greeter actor.
+#[derive(Debug)]
+pub struct GreetRequest {
+    pub name: String,
+}
+
+/// Actor handler that prints greetings and logs via `ILogger`.
+pub struct GreeterHandler {
+    count: u32,
+    logger: Option<Arc<dyn ILogger + Send + Sync>>,
+}
+
+impl std::fmt::Debug for GreeterHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GreeterHandler")
+            .field("count", &self.count)
+            .field("has_logger", &self.logger.is_some())
+            .finish()
+    }
+}
+
+impl GreeterHandler {
+    /// Create a handler without a logger.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            count: 0,
+            logger: None,
+        }
+    }
+
+    /// Create a handler with an `ILogger` for structured logging.
+    pub fn with_logger(logger: Arc<dyn ILogger + Send + Sync>) -> Self {
+        Self {
+            count: 0,
+            logger: Some(logger),
+        }
+    }
+}
+
+impl Default for GreeterHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ActorHandler<GreetRequest> for GreeterHandler {
+    fn on_start(&mut self) {
+        if let Some(log) = &self.logger {
+            log.info("greeter actor started");
+        }
+        eprintln!("[greeter] Greeter actor started");
+    }
+
+    fn handle(&mut self, msg: GreetRequest) {
+        self.count += 1;
+        if let Some(log) = &self.logger {
+            log.info(&format!("[{}] greeting {}", self.count, msg.name));
+        }
+        println!("  [{}] Hello, {}!", self.count, msg.name);
+    }
+
+    fn on_stop(&mut self) {
+        if let Some(log) = &self.logger {
+            log.info(&format!("greeter stopped after {} greetings", self.count));
+        }
+        eprintln!("[greeter] Greeter stopped after {} greetings", self.count);
+    }
+}

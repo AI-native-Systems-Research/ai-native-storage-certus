@@ -1,0 +1,47 @@
+# Tasks
+
+## Review Backfilled Spec
+
+- [ ] Review generated user stories for accuracy
+- [ ] Verify requirements match intended behavior
+- [ ] Add any missing requirements (e.g., GPU registration flow)
+- [ ] Confirm formal verification properties (P1-P10) are still current
+- [ ] Mark spec status as "Draft" or "Approved"
+
+## Validate Test Coverage
+
+- [x] Confirm all 22 unit tests in lib.rs (10 of them for the bounce reserve) and the 1 regression test in `repair_test_insert_track_failure.rs` pass (`cargo test -p memory-tier`)
+- [x] Confirm all 9 allocator tests pass
+- [ ] Identify and document any untested error paths
+- [~] (superseded 2026-08-20: no shards / no Creusot artifacts) Verify Creusot verification conditions still discharge
+
+## Address Test Gaps
+
+- [ ] Add multi-threaded concurrency test (16 threads, mixed insert/get/evict)
+- [ ] Add stress test for allocator fragmentation (random size allocation/deallocation)
+- [ ] Add test for batch_touch with mixed present/absent keys
+- [ ] Add test for oldest_keys ordering correctness
+- [~] (superseded 2026-08-20: no shards / no Creusot artifacts) Add test for evict_next_for_key targeting correct shard
+
+## Add Benchmarks
+
+- [ ] Create Criterion benchmark for single-threaded insert throughput
+- [ ] Create Criterion benchmark for single-threaded get throughput (cache hit)
+- [ ] Create Criterion benchmark for concurrent insert/get (16 threads)
+- [ ] Create Criterion benchmark for eviction under full-pool steady state
+- [ ] Add benchmark results to README.md
+
+## Documentation
+
+- [ ] Verify README.md matches current source layout (lru.rs removed, eviction delegated)
+- [~] (superseded 2026-08-20: no shards / no Creusot artifacts) Add architecture diagram showing shard layout and pointer arithmetic
+- [ ] Document SPDK vs mmap allocation path differences
+- [ ] Document NUMA binding behavior and fallback
+
+## Future Enhancements (Backlog)
+
+- [~] (superseded 2026-08-20: no shards / no Creusot artifacts) Evaluate configurable shard count based on hardware thread count
+- [ ] Design write-through pinning (NotEvictable usage)
+- [ ] Add structured metrics (hit rate, eviction rate, fragmentation)
+- [ ] Investigate buddy allocator for mixed-size workload support
+- [ ] Implement CUDA host registration via pool_info() at the integration layer

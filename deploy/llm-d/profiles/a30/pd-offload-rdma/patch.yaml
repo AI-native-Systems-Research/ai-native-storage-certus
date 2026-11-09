@@ -1,0 +1,158 @@
+# Both roles: pd-certus-rdma's RDMA wiring (the `roce` network, an RDMA device,
+# NIXL on GPU buffers over verbs) and its engine flags, with vLLM's CPU tier and
+# P2P pull where pd-certus-rdma has certus. pd-certus-rdma builds its
+# --kv-transfer-config in the certus entrypoint; there is no entrypoint here,
+# so the whole arg vector is spelled out, and must be kept in step with
+# ../pd-certus-rdma/patch.yaml and what ../certus/entrypoint-certus.sh adds.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pd-disaggregation-nvidia-gpu-vllm-prefill
+spec:
+  template:
+    metadata:
+      annotations:
+        # A second interface, net1, on the RoCE port, as in ../pd-certus-rdma.
+        k8s.v1.cni.cncf.io/networks: roce
+    spec:
+      # The connector image lives in the site registry, as in ../pd-certus.
+      imagePullSecrets:
+        - name: artifactory-creds
+      containers:
+        - name: modelserver
+          # Lists without a merge key are replaced whole. NIXL as in
+          # ../pd-certus-rdma; beside it, as the certus entrypoint composes it,
+          # an OffloadingConnector -- here TieringOffloadingSpec: a CPU tier
+          # the size of certus's memory tier (--memory-tier-size 8G less its
+          # 32 MiB bounce reserve) with a P2P secondary tier a peer pulls
+          # from, as llm-d's guides/p2p-kv-cache-sharing P/D variant. Prefill keeps vLLM's
+          # default offload_prompt_only, as certus does on prefill.
+          # --no-async-scheduling, --disable-hybrid-kv-cache-manager and the
+          # KV events are what the certus entrypoint adds; the same here, so
+          # the engines differ only in the tier.
+          args:
+            - "Qwen/Qwen3-8B"
+            - "--disable-access-log-for-endpoints=/health,/metrics,/v1/models"
+            - "--tensor-parallel-size=1"
+            - "--gpu-memory-utilization=0.90"
+            # The GPU KV cache pd-certus-rdma gets from 0.90 on an A30: 37,184
+            # tokens of Qwen3-8B. Left to 0.90, this tier's extra non-torch GPU
+            # memory shrinks it to 29,936 tokens, which would give this arm a
+            # fifth less GPU cache; vLLM reports up to 5.86 GiB still fits.
+            - "--kv-cache-memory-bytes=5483003904"
+            - "--max-model-len=24576"
+            - "--no-async-scheduling"
+            - "--disable-hybrid-kv-cache-manager"
+            - "--kv-transfer-config"
+            - '{"kv_connector":"MultiConnector","kv_role":"kv_producer","kv_connector_extra_config":{"connectors":[{"kv_connector":"NixlConnector","kv_role":"kv_producer","kv_buffer_device":"cuda","kv_connector_extra_config":{"backends":["UCX"]}},{"kv_connector":"OffloadingConnector","kv_role":"kv_both","kv_connector_extra_config":{"spec_name":"TieringOffloadingSpec","cpu_bytes_to_use":8556380160,"self_describing_kv_events":true,"secondary_tiers":[{"type":"p2p","host":"$(POD_IP)","port":7777}]}}]}}'
+            - "--kv-events-config"
+            - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5556","topic":"kv@$(POD_IP):8000@Qwen/Qwen3-8B"}'
+          env:
+            # Before the args that name it: $(POD_IP) is expanded from here.
+            - name: POD_IP
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+            # The P2P tier's control socket binds the pod IP, as NIXL's side
+            # channel does (base sets VLLM_NIXL_SIDE_CHANNEL_HOST).
+            - name: VLLM_P2P_SIDE_CHANNEL_HOST
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+            # No PYTHONHASHSEED. llm-d's P2P guide pins it fleet-wide, but on
+            # vLLM 0.30 with sha256 block hashes an unset seed is already the
+            # same everywhere (vLLM's fixed "vllm-none-hash"), and setting one
+            # changed vLLM's hashes so the router's prefix index matched no
+            # pull source on any turn. Unset, as pd-certus-rdma runs: verified
+            # end to end (every follow-up turn pulled).
+            # pd pins UCX to TCP; let it choose RC verbs on the RDMA device,
+            # as in ../pd-certus-rdma. The P2P tier's data moves through NIXL
+            # too, so it rides the same device.
+            - name: UCX_TLS
+              $patch: delete
+            - name: UCX_NET_DEVICES
+              value: mlx5_0:1
+          securityContext:
+            capabilities:
+              # Registering GPU and host memory with the NIC pins it.
+              add: [IPC_LOCK]
+          resources:
+            limits:
+              rdma/rdma_shared_device_a: 1
+            requests:
+              rdma/rdma_shared_device_a: 1
+      volumes:
+        # The CPU tier is an mmap of /dev/shm: 8 GiB of tier plus what vLLM
+        # keeps there already (base gives 20Gi). Within the pod's 96Gi limit.
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 28Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pd-disaggregation-nvidia-gpu-vllm-decode
+spec:
+  template:
+    metadata:
+      annotations:
+        k8s.v1.cni.cncf.io/networks: roce
+    spec:
+      imagePullSecrets:
+        - name: artifactory-creds
+      initContainers:
+        # llm-d's routing sidecar, as in ../pd-certus: base's arg vector plus
+        # --enable-p2p-pull, which turns the EPP's source choice into
+        # kv_transfer_params.remote_kv_source on the prefill hop. Its
+        # --p2p-connector-port default, 7777, is the P2P tier's port above.
+        - name: routing-proxy
+          args:
+            - --port=8000
+            - --kv-connector=nixlv2
+            - --zap-log-level=1
+            - --secure-proxy=false
+            - --enable-p2p-pull
+      containers:
+        - name: modelserver
+          # Decode stores what it generates (offload_prompt_only false), as
+          # certus does on decode (CERTUS_OFFLOAD_PROMPT_ONLY=false): the
+          # answer is the next turn's prefix, which prefill pulls from here.
+          # The load-failure policy is lifted to the outer config, as the
+          # certus entrypoint does: the scheduler reads only the outer one.
+          args:
+            - "Qwen/Qwen3-8B"
+            - "--disable-access-log-for-endpoints=/health,/metrics,/v1/models"
+            - "--tensor-parallel-size=1"
+            - "--gpu-memory-utilization=0.90"
+            # The GPU KV cache pd-certus-rdma gets from 0.90 on an A30: 37,184
+            # tokens of Qwen3-8B. Left to 0.90, this tier's extra non-torch GPU
+            # memory shrinks it to 29,936 tokens, which would give this arm a
+            # fifth less GPU cache; vLLM reports up to 5.86 GiB still fits.
+            - "--kv-cache-memory-bytes=5483003904"
+            - "--max-model-len=24576"
+            - "--no-async-scheduling"
+            - "--disable-hybrid-kv-cache-manager"
+            - "--kv-transfer-config"
+            - '{"kv_connector":"MultiConnector","kv_role":"kv_consumer","kv_load_failure_policy":"fail","kv_connector_extra_config":{"connectors":[{"kv_connector":"NixlConnector","kv_role":"kv_consumer","kv_buffer_device":"cuda","kv_load_failure_policy":"fail","kv_connector_extra_config":{"backends":["UCX"]}},{"kv_connector":"OffloadingConnector","kv_role":"kv_both","kv_connector_extra_config":{"spec_name":"TieringOffloadingSpec","cpu_bytes_to_use":8556380160,"offload_prompt_only":false,"self_describing_kv_events":true,"secondary_tiers":[{"type":"p2p","host":"$(POD_IP)","port":7777}]}}]}}'
+            - "--kv-events-config"
+            - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5556","topic":"kv@$(POD_IP):8000@Qwen/Qwen3-8B"}'
+            - "--port=8200"
+          env:
+            - name: POD_IP
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+            - name: VLLM_P2P_SIDE_CHANNEL_HOST
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+            - name: UCX_TLS
+              $patch: delete
+            - name: UCX_NET_DEVICES
+              value: mlx5_0:1
+          securityContext:
+            capabilities:
+              add: [IPC_LOCK]
+          resources:
+            limits:
+              rdma/rdma_shared_device_a: 1
+            requests:
+              rdma/rdma_shared_device_a: 1
+      volumes:
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 28Gi

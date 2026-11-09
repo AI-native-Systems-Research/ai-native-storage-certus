@@ -1,0 +1,25 @@
+{
+  "generated": "2026-10-05",
+  "project": "spdk-env",
+  "spec": "002-spdk-env-vfio-init",
+  "branch": "fix/poller-cpu-placement-logging",
+  "mode": "interactive",
+  "summary": {
+    "proposals": 1,
+    "approved": 1
+  },
+  "proposals": [
+    {
+      "id": 1,
+      "requirement": "FR-022 (new)",
+      "direction": "BACKFILL",
+      "current_spec": "(unspecced)",
+      "current_code": "init_spdk_env saves the caller's affinity (sched_getaffinity) before spdk_env_init and restores it (sched_setaffinity) after, undoing DPDK EAL's main-lcore pin so later-spawned threads do not inherit CPU 0. Best-effort.",
+      "location": "components/spdk-env/src/env.rs:91-102, 115-139",
+      "proposed": "FR-022 added; Last Synced header added.",
+      "confidence": "HIGH",
+      "approved": true,
+      "approved_by": "user (interactive, 2026-10-05)"
+    }
+  ]
+}

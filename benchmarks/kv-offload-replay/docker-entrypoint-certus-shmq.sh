@@ -1,0 +1,1 @@
+../../certus-shmq-connector/docker-entrypoint.sh

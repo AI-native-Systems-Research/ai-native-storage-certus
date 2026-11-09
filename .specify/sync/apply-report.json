@@ -1,0 +1,106 @@
+{
+  "applied": "2026-06-11T00:00:00Z",
+  "status": "SUCCESS",
+  "summary": {
+    "total_proposals": 3,
+    "approved": 3,
+    "applied": 3,
+    "failed": 0,
+    "backfill": 3,
+    "align": 0,
+    "new_spec": 0,
+    "specs_updated": 2,
+    "specs_created": 0,
+    "implementation_tasks_generated": 0,
+    "lines_added": 130,
+    "project_coverage_before": 0.956,
+    "project_coverage_after": 1.0
+  },
+  "changes": [
+    {
+      "type": "SPEC_UPDATE",
+      "spec": "001-rdma-network-test",
+      "file": "tools/rdma-test/specs/001-rdma-network-test/spec.md",
+      "requirement": "FR-007",
+      "section": "Implementation Details",
+      "action": "ADDED",
+      "lines_added": 35,
+      "backup_path": ".specify/sync/backups/001-rdma-network-test_spec.md.bak",
+      "proposal_id": 1
+    },
+    {
+      "type": "SPEC_UPDATE",
+      "spec": "001-grpc-dispatcher-server",
+      "file": "apps/certus-server/specs/001-grpc-dispatcher-server/spec.md",
+      "requirement": "FR-010",
+      "section": "Implementation Details",
+      "action": "ADDED",
+      "lines_added": 45,
+      "backup_path": ".specify/sync/backups/001-grpc-dispatcher-server_spec.md.bak",
+      "proposal_id": 2
+    },
+    {
+      "type": "SPEC_UPDATE",
+      "spec": "001-grpc-dispatcher-server",
+      "file": "apps/certus-server/specs/001-grpc-dispatcher-server/spec.md",
+      "requirement": "FR-014",
+      "section": "Implementation Details",
+      "action": "ADDED",
+      "lines_added": 50,
+      "backup_path": ".specify/sync/backups/001-grpc-dispatcher-server_spec.md.bak",
+      "proposal_id": 3
+    }
+  ],
+  "coverage": {
+    "before": {
+      "rdma_network_test": 0.923,
+      "grpc_dispatcher_server": 0.895,
+      "overall": 0.956
+    },
+    "after": {
+      "rdma_network_test": 1.0,
+      "grpc_dispatcher_server": 1.0,
+      "overall": 1.0
+    },
+    "components_at_100_percent": 9,
+    "components_with_gaps": 0
+  },
+  "artifacts": {
+    "backups": [
+      ".specify/sync/backups/001-rdma-network-test_spec.md.bak",
+      ".specify/sync/backups/001-grpc-dispatcher-server_spec.md.bak"
+    ],
+    "reports": [
+      ".specify/sync/proposals.md",
+      ".specify/sync/proposals.json",
+      ".specify/sync/apply-report.md",
+      ".specify/sync/apply-report.json"
+    ]
+  },
+  "next_steps": [
+    {
+      "step": 1,
+      "action": "REVIEW",
+      "description": "Inspect updated spec files to confirm changes are correct",
+      "files": [
+        "tools/rdma-test/specs/001-rdma-network-test/spec.md",
+        "apps/certus-server/specs/001-grpc-dispatcher-server/spec.md"
+      ]
+    },
+    {
+      "step": 2,
+      "action": "COMMIT",
+      "description": "Commit spec updates to git",
+      "commands": [
+        "git add tools/rdma-test/specs/001-rdma-network-test/spec.md",
+        "git add apps/certus-server/specs/001-grpc-dispatcher-server/spec.md",
+        "git commit -m \"docs(specs): backfill implementation details for RDMA and gRPC dispatcher\""
+      ]
+    },
+    {
+      "step": 3,
+      "action": "MONITOR",
+      "description": "Re-run spec-drift analysis quarterly to catch new gaps early"
+    }
+  ]
+}

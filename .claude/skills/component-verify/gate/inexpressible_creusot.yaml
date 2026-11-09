@@ -1,0 +1,128 @@
+# inexpressible_creusot.yaml — the curated allowlist of constructs that Creusot's
+# specification language (Pearlite) GENUINELY CANNOT STATE, grounded in the tool's own
+# definition. This is the ONLY route by which a property may earn a `tool-boundary`
+# verdict WITHOUT defeating the full lever battery — so it is tiny, global (identical
+# across all 22 components), and fail-closed.
+#
+# ── WHAT MAKES A CONSTRUCT "INEXPRESSIBLE" — THE AUTHORITY ──────────────────────────────
+# A citable FACT about the tool: either the logical MODEL a type is given in creusot-std
+# (its View/DeepModel), or a documented limitation in the Creusot guide. NOT an error
+# message. Expressibility is a fixed property of the tool and its version — it is decided
+# by the tool's definition, never discovered ad-hoc by an agent.
+#   * `authority.source` cites the file+lines that establish the fact.
+#   * `authority.fact` states it; `authority.implication` says what IS vs IS NOT stateable.
+# The reproduced probe and its error `confirmation_signatures` are a CONFIRMATION-ONLY
+# sanity check ("does the tool still behave as its model predicts on this version?"). They
+# never decide a verdict on their own and may be version-fragile.
+#
+# ── INEXPRESSIBLE vs HARD-TO-PROVE (keep these apart) ───────────────────────────────────
+#   inexpressible (HERE) — the spec language cannot even STATE the property (no model).
+#   hard-to-prove        — a perfectly stateable goal the solver won't discharge. This is
+#                          the common, tricky case and it goes to the LEVER BATTERY
+#                          (prover portfolio / budget / tactics / ghost mirror / trusted).
+#                          A bare goal ✘ is hard-to-prove, NEVER inexpressible.
+# And OPPOSITE to known_defeats.yaml (beatable walls: boundary REJECTED, apply a lever).
+# A signature here MUST NOT appear in known_defeats; scorer_creusot asserts this at startup
+# and refuses to run on a collision.
+#
+# ── HOW A PROPERTY EARNS IT (enforced by scorer_creusot, never by agent prose) ──────────
+#   1. the property points at an ACTIVE construct id below (curated globally — an agent may
+#      only REFERENCE an entry, never invent one);
+#   2. the agent writes verify_<id>__expressibility_probe stating the REAL property, built
+#      as its OWN compilation unit (a translate error/ICE aborts the whole crate, so the
+#      probe cannot share lib.rs with real proofs);
+#   3. the scorer builds the probe in isolation and confirms the model fact:
+#        - probe PROVES ................. the content WAS stateable+true -> scored proved
+#                                         (the inexpressibility claim was wrong; no penalty);
+#        - fails, matching this entry's
+#          confirmation_signatures ...... model fact confirmed -> EARNED tool-boundary
+#                                         (fidelity: not-expressible), covered_by recorded;
+#        - bare goal ✘ / unregistered ... hard-to-prove -> lever battery -> UNRESOLVED if
+#                                         exhausted (fail-closed);
+#   4. the refuter (Role 2.6) independently tries to EXPRESS+prove it; success -> UNRESOLVED.
+#   No probe on disk -> UNRESOLVED. "Inexpressible" costs MORE work than an ordinary
+#   attempt, never less.
+
+version: 1
+tool: creusot
+
+# Fallback build environment for the isolated confirmation probe. The scorer PREFERS the
+# creusot-std patch path parsed from the component's own Cargo.toml (so the probe builds
+# against the identical toolchain the real proofs use); these are used only when that parse
+# fails. Paths are CHECKOUT-RELATIVE, resolved against the repo root (the nearest ancestor of
+# the component holding .git) — never absolute machine paths, so this registry is portable to
+# any colleague's clone. Add a candidate if a checkout vendors creusot-std elsewhere; to point
+# at a one-off location without editing this file, export $CREUSOT_STD_PATH.
+probe_env:
+  creusot_std_candidates:
+    - "tools/creusot/creusot/creusot-std"
+
+constructs:
+  - id: IX-CREUSOT-STRING-CONTENT
+    active: true
+    construct: "the concrete CONTENT of a String/&str — which characters/bytes it holds"
+    authority:
+      source: "creusot-std/src/std/string.rs:5-41 (creusot nightly-2026-04-21)"
+      fact: >
+        Creusot models both str and String as an OPAQUE Seq<char>: `impl View for str` and
+        `impl View for String` set `type ViewTy = Seq<char>` with an opaque view
+        (`#[logic(opaque)] fn view(self) { dead }`). The view EXISTS — so `s@` type-checks
+        and has type Seq<char> — but its CONTENTS are undefined: there is no axiom relating
+        any string to a concrete sequence of characters, and no logic model for char/string
+        literals at all. The extern_specs provided cover only length (str/String::len),
+        structure (split_at, deref, to_owned/clone) and byte-length relations.
+      implication: >
+        EXPRESSIBLE: a string's length; structural relations (split_at, deref); and relations
+        BETWEEN string views (e.g. s@ == t@, concatenation via split_at). NOT EXPRESSIBLE:
+        any predicate on concrete content — contains a substring/tag, equals a literal such
+        as "ERROR", ends in '\n', excludes an ESC byte — and anything built by format! (no
+        model for constructing text). These are outside the model BY DESIGN, not merely hard
+        for the solver. (Confirmed by counter-example: a purely structural `s@ == t@` PROVES.)
+    instances:
+      - "format!/core::fmt-built String content (line contains the tag/msg, ends in '\\n', no ESC byte)"
+      - "value-equality of a str against a string literal (e.g. level.as_str() == \"ERROR\")"
+    covered_by: kani            # Kani checks the concrete bytes (bounded)
+
+    # ---- CONFIRMATION-ONLY (does NOT decide the verdict; the `authority` above does) ----
+    # The probe is SCORER-OWNED and generic: it states the construct's content property over
+    # plain std strings, independent of any component (the construct is a GLOBAL tool fact, so
+    # one probe confirms it for every property that cites the construct). The scorer builds
+    # `probe_lib_rs` verbatim in an ISOLATED throwaway crate (a translate error/ICE aborts the
+    # whole crate, so it can never share lib.rs with real proofs) and memoises the outcome per
+    # run. An agent can only REFERENCE this construct (creusot.claims_inexpressible: <id>); it
+    # cannot author or edit the probe, so the confirmation cannot be gamed.
+    probe_lib_rs: |
+      #![cfg_attr(creusot, allow(unused))]
+      #![allow(dead_code)]
+      use creusot_std::prelude::*;
+      // Concrete-CONTENT claim over format!-built text; TYPECHECKS (Seq<char> == Seq<char>),
+      // so translation of the format! body runs and Creusot aborts on the byte-literal.
+      #[ensures(result@ == msg@)]
+      pub fn probe_format_content(tag: String, msg: String) -> String {
+          format!("{} {}", tag, msg)
+      }
+    # exact validated output 2026-09-21 (fixture ~/creusot_calib_probe, this toolchain):
+    #   error: Unsupported constant value: Scalar(alloc1) of type &'{erased} [u8; 5_usize]
+    canonical_probe_note: >
+      Illustrative alternates (NOT built): proof_assert!(line@.contains(...)) needs a substring
+      predicate Seq<char> has no method for; the str-literal form proof_assert!(x@ == "ERROR"@)
+      trips the ICE. The format! form above is the stable, typechecking reproducer, so it is the
+      one the scorer builds.
+    confirmation_signatures:    # SANITY-CHECK ONLY — never a decider; version-fragile; re.I
+      - "Unsupported constant value: Scalar.*\\[u8;"     # format! form (PROBE)  -> translate error
+      - "internal compiler error: Unsupported literal"   # str-literal view form -> translation ICE
+    confirmed_on:
+      toolchain: "creusot-rustc nightly-2026-04-21 (rustc 1.97.0-nightly 66da6cae1)"
+      date: "2026-09-21"
+      fixture: "~/creusot_calib_probe"
+      counter_evidence: "str PARAMETER view `s@ == t@` PROVED — structural relations ARE expressible; only CONTENT is not"
+
+# DELIBERATELY EXCLUDED (so the hatch cannot swallow properties real levers reach):
+#   * HashMap / Vec / BTreeMap / std containers -> BEATABLE via FMap mirror
+#     (known_defeats KD-STD-CONTAINER-NO-SPECS). Hard-to-prove, not inexpressible.
+#   * raw ptr / Arc / Rc / dyn / trait object / FFI -> BEATABLE via trusted u64 handle
+#     (known_defeats KD-RAWPTR-ARC-OPAQUE). Hard-to-prove, not inexpressible.
+#   * thread interleaving (e.g. LOG-CONCURRENT) -> NOT an expressibility question; it is a
+#     concurrency obligation. DELEGATE to a concurrency model (Loom).
+#   * string LENGTH / structure (split_at, deref, s@==t@) -> EXPRESSIBLE (has extern_specs);
+#     never route these here.

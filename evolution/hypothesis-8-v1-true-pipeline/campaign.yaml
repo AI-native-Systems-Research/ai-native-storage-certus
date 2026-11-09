@@ -1,0 +1,40 @@
+research_question: >
+  Dispatcher v1 with true overlapped pipelining (NVMe reads overlapped with
+  GPU copies using async streams) is faster than direct P2P DMA for 4 MiB
+  lookups (32x128 KiB chunks) through certus-server.
+
+run_id: h8-v1-true-pipeline
+
+max_iterations: 2
+
+target_system:
+  name: "Certus Storage Engine — Dispatcher v1 true pipelining vs P2P"
+  description: >
+    AI-native KV-cache storage system. Dispatcher v1 at components/dispatcher/v1/
+    claims to be pipelined (ring of 4 DMA buffers, per-chunk ReadSync + GPU copy)
+    but is actually sequential — no overlap between NVMe read and GPU copy stages.
+    Fix v1 to truly overlap reads and copies, then compare against P2P direct DMA.
+    CONSTRAINTS:
+    - Do NOT use or modify gpu-p2p-server.
+    - Do NOT create standalone benchmark binaries.
+    - All benchmarks MUST run through certus-server (apps/certus-server/) with --dispatcher-version v1.
+    - Implementation changes go in components/dispatcher/v1/.
+    - Use --bench-iterations 1 for fair first-hit comparison.
+    - Restart the server between each condition (fresh process, fresh populate cycle).
+  observable_metrics:
+    - "end-to-end lookup latency (ms) for a single 4 MiB key"
+    - "sustained lookup throughput (MB/s) over N sequential lookups"
+  controllable_knobs:
+    - "dispatcher implementation: sequential per-chunk (existing v1) | true overlapped pipeline (to implement)"
+    - "comparison: P2P direct DMA"
+    - "value size (4 MiB)"
+    - "chunk size (128 KiB, NVMe MDTS limited)"
+  repo_path: /home/nara/certus/ai-native-storage-certus
+
+models:
+  design: "claude-opus-4-6"
+  execute_analyze: "claude-sonnet-4-6"
+
+prompts:
+  methodology_layer: "prompts/methodology"
+  domain_adapter_layer: null

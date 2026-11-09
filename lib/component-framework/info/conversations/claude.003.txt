@@ -1,0 +1,972 @@
+ ▐▛███▜▌   Claude Code v2.1.81
+▝▜█████▛▘  Sonnet 4.6 · API Usage Billing
+  ▘▘ ▝▝    ~/ains4storage-explore/speckit/component-framework
+
+✻ Conversation compacted (ctrl+o for history)
+
+  ⎿  Referenced file crates/component-core/src/channel/mpsc.rs
+  ⎿  Read crates/component-framework/tests/binding_enforcement.rs (167 lines)
+  ⎿  Read crates/component-core/src/channel/spsc.rs (483 lines)
+  ⎿  Read crates/component-core/src/lib.rs (39 lines)
+  ⎿  Read crates/component-core/src/channel/mod.rs (466 lines)
+  ⎿  Plan file referenced (~/.claude/plans/lexical-meandering-codd.md)
+  ⎿  Skills restored (speckit.sync.analyze, speckit.implement, speckit.tasks, 
+     speckit.plan, speckit.clarify, speckit.specify)
+
+● Bash(mkdir -p /home/dwaddington/ains4storage-explore/speckit/component-framewo
+      rk/.specify/sync)
+  ⎿  Done
+
+● Write(.specify/sync/drift-report.md)
+  ⎿  Wrote 138 lines to .specify/sync/drift-report.md
+       1 # Spec Drift Report
+       2 
+       3 Generated: 2026-03-31
+       4 Project: component-framework
+       5 
+       6 ## Summary
+       7 
+       8 | Category | Count |
+       9 |----------|-------|
+      10 | Specs Analyzed | 3 |
+     … +128 lines (ctrl+o to expand)
+
+● Write(.specify/sync/drift-report.json)
+  ⎿  Wrote 99 lines to .specify/sync/drift-report.json
+       1 {
+       2   "generated": "2026-03-31T00:00:00Z",
+       3   "project": "component-framework",
+       4   "summary": {
+       5     "specs_analyzed": 3,
+       6     "requirements_checked": 65,
+       7     "aligned": 56,
+       8     "drifted": 7,
+       9     "not_implemented": 2,
+      10     "unspecced_features": 0
+     … +89 lines (ctrl+o to expand)
+
+● Drift report written to:
+  - .specify/sync/drift-report.md
+  - .specify/sync/drift-report.json
+
+  Summary: 3 specs analyzed, 65 requirements checked — 86% aligned, 11% drifted,
+   3% not implemented.
+
+  Key findings:
+  - 2 unimplemented: Actor doesn't implement IUnknown (FR-002, FR-005 in spec
+  003) — actors can't participate in query/bind
+  - Moderate drift: MPSC uses Mutex internally instead of lock-free queue
+  (FR-010)
+  - Minor drifts: no compile_fail doc tests for macros, no explicit release() on
+   ComponentRef, dead NotActive variant, missing registry integration tests for
+  actors/channels
+
+  Top recommendation: Implement IUnknown for Actor/ActorHandle so actors are
+  full component-model citizens.
+
+✻ Baked for 6m 25s
+
+❯ fix the two unimplemented requirements - Actor should implement IUnknown      
+
+  Searched for 3 patterns, read 6 files (ctrl+o to expand)
+
+● Now I have a clear picture. The design:
+
+  1. Actor creates an MpscChannel at construction (not activation) so ISender is
+   always available via IUnknown
+  2. Actor implements IUnknown providing ISender<M> — other components can query
+   to send messages to the actor
+  3. ActorHandle uses MpscSender instead of Sender
+  4. Shutdown flag (AtomicBool) ensures clean deactivation even when IUnknown
+  senders keep the channel alive
+
+● First, I need to add a close() method to MpscChannel so the actor can
+  force-close its channel during deactivation (when IUnknown senders keep
+  sender_count > 0).
+
+● Update(crates/component-core/src/channel/mpsc.rs)
+  ⎿  Added 15 lines
+      225          Self::new(1024)
+      226      }
+      227  
+      228 +    /// Force-close the channel, causing the receiver to see [
+          +`ChannelError::Closed`]                                       
+      229 +    /// after draining any remaining messages.                
+      230 +    ///                                                       
+      231 +    /// This is used by actor deactivation to ensure the recei
+          +ver thread exits                                              
+      232 +    /// even when other senders (e.g., from IUnknown queries) 
+          +are still alive.                                              
+      233 +    pub(crate) fn close(&self) {                              
+      234 +        self.state.queue.sender_alive.store(false, Ordering::R
+          +elease);                                                      
+      235 +        // Wake the receiver so it can see the closed signal  
+      236 +        if let Ok(guard) = self.state.receiver_thread.lock() {
+      237 +            if let Some(ref t) = *guard {                     
+      238 +                t.unpark();                                   
+      239 +            }                                                 
+      240 +        }                                                     
+      241 +    }                                                         
+      242 +                                                              
+      243      /// Get a sender endpoint. Can be called multiple times (m
+           ulti-producer).
+      244      ///
+      245      /// Each call creates an independent sender. When all send
+           ers are dropped,
+
+● Now rewrite actor.rs with IUnknown implementation:
+
+  Read 1 file (ctrl+o to expand)
+
+● Now I'll write the full updated actor.rs:
+
+● Write(crates/component-core/src/actor.rs)  ⎿  Added 238 lines, removed 23 lines
+       1  //! Actor components — thread-owning components with message-lo
+          op semantics.
+       2  //!
+       3  //! An actor owns a dedicated OS thread and processes messages 
+          of type `M`
+       4 -//! sequentially. Actors integrate with the component framework
+         -'s interface                                                   
+       5 -//! and receptacle model.                                      
+       4 +//! sequentially. Actors are first-class components implementin
+         +g [`IUnknown`],                                                
+       5 +//! providing [`ISender<M>`](crate::channel::ISender) as their 
+         +interface so                                                   
+       6 +//! other components can send messages to them via the standard
+         + component model.                                              
+       7  
+       7 -use std::any::Any;                                             
+       8 +use std::any::{Any, TypeId};                                   
+       9  use std::fmt;
+      10  use std::sync::atomic::{AtomicU8, Ordering};
+      10 -use std::sync::Arc;                                            
+      11 +use std::sync::{Arc, Mutex, OnceLock};                         
+      12  use std::thread::{self, JoinHandle};
+      13  
+      13 -use crate::channel::{ChannelError, Sender, SpscChannel};       
+      14 +use crate::channel::mpsc::{MpscChannel, MpscSender};           
+      15 +use crate::channel::{ChannelError, ISender, Receiver};         
+      16 +use crate::error::RegistryError;                               
+      17 +use crate::interface::{InterfaceInfo, ReceptacleInfo};         
+      18 +use crate::iunknown::IUnknown;                                 
+      19  
+      20  /// Error type for actor operations.
+      21  ///
+     ...
+      113  /// handle.deactivate().unwrap();
+      114  /// ```
+      115  pub struct ActorHandle<M: Send + 'static> {
+      111 -    sender: Option<Sender<M>>,                                
+      116 +    sender: Option<MpscSender<M>>,                            
+      117      thread: Option<JoinHandle<()>>,
+      118      state: Arc<AtomicU8>,
+      119 +    /// Reference to the actor's channel for force-close on de
+          +activation.                                                   
+      120 +    channel: Arc<MpscChannel<M>>,                             
+      121  }
+      122  
+      123  impl<M: Send + 'static> fmt::Debug for ActorHandle<M> {
+     ...
+      200      /// assert!(!actor.is_active());
+      201      /// ```
+      202      pub fn deactivate(mut self) -> Result<(), ActorError> {
+      196 -        // Drop the sender to close the channel, which unblock
+          -s the receiver                                                
+      203 +        // Drop the sender                                    
+      204          self.sender.take();
+      205 +        // Force-close the channel so the receiver thread exit
+          +s even when                                                   
+      206 +        // other senders (from IUnknown queries) are still ali
+          +ve.                                                           
+      207 +        self.channel.close();                                 
+      208  
+      209          if let Some(thread) = self.thread.take() {
+      210              thread.join().map_err(|_| ActorError::ShutdownTime
+           out)?;
+     ...
+      219      fn drop(&mut self) {
+      220          // Drop the sender to signal shutdown
+      221          self.sender.take();
+      222 +        // Force-close the channel                            
+      223 +        self.channel.close();                                 
+      224  
+      225          // Best-effort join
+      226          if let Some(thread) = self.thread.take() {
+     ...
+      233  
+      234  /// An actor component that owns a thread and processes messag
+           es sequentially.
+      235  ///
+      236 +/// The actor is a first-class component implementing [`IUnkno
+          +wn`]. It provides                                             
+      237 +/// [`ISender<M>`](crate::channel::ISender) as its interface, 
+          +allowing other                                                
+      238 +/// components to query for a sender and send messages through
+          + the standard                                                 
+      239 +/// component model.                                          
+      240 +///                                                           
+      241  /// The actor is created in an idle state. Call [`activate`](A
+           ctor::activate) to
+      242  /// spawn its thread and start the message loop. The returned 
+           [`ActorHandle`]
+      243  /// is used to send messages and eventually deactivate the act
+           or.
+     ...
+      276  /// handle.deactivate().unwrap();
+      277  /// assert_eq!(*sum.lock().unwrap(), 55);
+      278  /// ```
+      279 +///                                                           
+      280 +/// Actors implement [`IUnknown`] and can be queried for [`ISe
+          +nder<M>`](crate::channel::ISender):                           
+      281 +///                                                           
+      282 +/// ```                                                       
+      283 +/// use component_core::actor::{Actor, ActorHandler};         
+      284 +/// use component_core::channel::ISender;                     
+      285 +/// use component_core::iunknown::{IUnknown, query};          
+      286 +/// use std::sync::{Arc, Mutex};                              
+      287 +///                                                           
+      288 +/// struct Logger {                                           
+      289 +///     log: Arc<Mutex<Vec<String>>>,                         
+      290 +/// }                                                         
+      291 +///                                                           
+      292 +/// impl ActorHandler<String> for Logger {                    
+      293 +///     fn handle(&mut self, msg: String) {                   
+      294 +///         self.log.lock().unwrap().push(msg);               
+      295 +///     }                                                     
+      296 +/// }                                                         
+      297 +///                                                           
+      298 +/// let log = Arc::new(Mutex::new(Vec::new()));               
+      299 +/// let actor = Actor::new(Logger { log: log.clone() }, |_| {}
+          +);                                                            
+      300 +///                                                           
+      301 +/// // Query ISender<String> via IUnknown                     
+      302 +/// let sender: Arc<dyn ISender<String> + Send + Sync> =      
+      303 +///     query::<dyn ISender<String> + Send + Sync>(&actor).unw
+          +rap();                                                        
+      304 +///                                                           
+      305 +/// let handle = actor.activate().unwrap();                   
+      306 +/// sender.send("hello".into()).unwrap();                     
+      307 +/// handle.deactivate().unwrap();                             
+      308 +///                                                           
+      309 +/// assert_eq!(*log.lock().unwrap(), vec!["hello".to_string()]
+          +);                                                            
+      310 +/// ```                                                       
+      311  pub struct Actor<M, H>
+      312  where
+      313      M: Send + 'static,
+      314      H: ActorHandler<M>,
+      315  {
+      267 -    handler: std::sync::Mutex<Option<H>>,                     
+      316 +    handler: Mutex<Option<H>>,                                
+      317      error_callback: Arc<dyn Fn(Box<dyn Any + Send>) + Send + S
+           ync>,
+      269 -    capacity: usize,                                          
+      318      state: Arc<AtomicU8>,
+      271 -    _marker: std::marker::PhantomData<M>,                     
+      319 +    /// MPSC channel for inbound messages — created at constru
+          +ction time                                                    
+      320 +    /// so ISender<M> is available via IUnknown before activat
+          +ion.                                                          
+      321 +    channel: Arc<MpscChannel<M>>,                             
+      322 +    /// Receiver stored until activate() takes it.            
+      323 +    receiver: Mutex<Option<Receiver<M>>>,                     
+      324 +    /// Lazily created sender interface for IUnknown queries. 
+      325 +    sender_iface: OnceLock<Box<dyn Any + Send + Sync>>,       
+      326 +    /// Cached interface metadata for introspection.          
+      327 +    interface_info: Vec<InterfaceInfo>,                       
+      328  }
+      329  
+      330  impl<M, H> Actor<M, H>
+     ...
+      354          handler: H,
+      355          error_callback: impl Fn(Box<dyn Any + Send>) + Send + 
+           Sync + 'static,
+      356      ) -> Self {
+      301 -        Self {                                                
+      302 -            handler: std::sync::Mutex::new(Some(handler)),    
+      303 -            error_callback: Arc::new(error_callback),         
+      304 -            capacity: 1024,                                   
+      305 -            state: Arc::new(AtomicU8::new(STATE_IDLE)),       
+      306 -            _marker: std::marker::PhantomData,                
+      307 -        }                                                     
+      357 +        Self::build(handler, 1024, error_callback)            
+      358      }
+      359  
+      360      /// Create a new actor with custom channel capacity.
+     ...
+      378          capacity: usize,
+      379          error_callback: impl Fn(Box<dyn Any + Send>) + Send + 
+           Sync + 'static,
+      380      ) -> Self {
+      381 +        Self::build(handler, capacity, error_callback)        
+      382 +    }                                                         
+      383 +                                                              
+      384 +    fn build(                                                 
+      385 +        handler: H,                                           
+      386 +        capacity: usize,                                      
+      387 +        error_callback: impl Fn(Box<dyn Any + Send>) + Send + 
+          +Sync + 'static,                                               
+      388 +    ) -> Self {                                               
+      389 +        let channel = MpscChannel::<M>::new(capacity);        
+      390 +        let receiver = channel.receiver().expect("first receiv
+          +er on new channel");                                          
+      391 +                                                              
+      392 +        let interface_info = vec![InterfaceInfo {             
+      393 +            type_id: TypeId::of::<Arc<dyn ISender<M> + Send + 
+          +Sync>>(),                                                     
+      394 +            name: "ISender",                                  
+      395 +        }];                                                   
+      396 +                                                              
+      397          Self {
+      332 -            handler: std::sync::Mutex::new(Some(handler)),    
+      398 +            handler: Mutex::new(Some(handler)),               
+      399              error_callback: Arc::new(error_callback),
+      334 -            capacity,                                         
+      400              state: Arc::new(AtomicU8::new(STATE_IDLE)),
+      336 -            _marker: std::marker::PhantomData,                
+      401 +            channel: Arc::new(channel),                       
+      402 +            receiver: Mutex::new(Some(receiver)),             
+      403 +            sender_iface: OnceLock::new(),                    
+      404 +            interface_info,                                   
+      405          }
+      406      }
+      407  
+     ...
+      447              return Err(ActorError::AlreadyActive);
+      448          }
+      449  
+      382 -        let channel = SpscChannel::<M>::new(self.capacity);   
+      383 -        let sender = channel.sender().expect("first sender on 
+          -new channel");                                                
+      384 -        let receiver = channel.receiver().expect("first receiv
+          -er on new channel");                                          
+      450 +        let sender = self.channel.sender().expect("MPSC sender
+          + creation");                                                  
+      451 +        let receiver = self                                   
+      452 +            .receiver                                         
+      453 +            .lock()                                           
+      454 +            .unwrap()                                         
+      455 +            .take()                                           
+      456 +            .expect("receiver already taken — actor activated 
+          +twice without reset");                                        
+      457  
+      458          let mut handler = self
+      459              .handler
+     ...
+      490              sender: Some(sender),
+      491              thread: Some(thread),
+      492              state: Arc::clone(&self.state),
+      493 +            channel: Arc::clone(&self.channel),               
+      494          })
+      495      }
+      496  
+     ...
+      514      }
+      515  }
+      516  
+      517 +impl<M, H> IUnknown for Actor<M, H>                           
+      518 +where                                                         
+      519 +    M: Send + 'static,                                        
+      520 +    H: ActorHandler<M>,                                       
+      521 +{                                                             
+      522 +    /// Query for the [`ISender<M>`](crate::channel::ISender) 
+          +interface.                                                    
+      523 +    ///                                                       
+      524 +    /// Returns a sender that can be used to send messages to 
+          +this actor.                                                   
+      525 +    /// Multiple queries succeed (MPSC channel allows multiple
+          + senders).                                                    
+      526 +    fn query_interface_raw(&self, id: TypeId) -> Option<&(dyn 
+          +Any + Send + Sync)> {                                         
+      527 +        if id == TypeId::of::<Arc<dyn ISender<M> + Send + Sync
+          +>>() {                                                        
+      528 +            let stored = self.sender_iface.get_or_init(|| {   
+      529 +                let sender = self.channel.sender().expect("MPS
+          +C sender creation");                                          
+      530 +                let arc: Arc<dyn ISender<M> + Send + Sync> = A
+          +rc::new(sender);                                              
+      531 +                Box::new(arc)                                 
+      532 +            });                                               
+      533 +            Some(&**stored)                                   
+      534 +        } else {                                              
+      535 +            None                                              
+      536 +        }                                                     
+      537 +    }                                                         
+      538 +                                                              
+      539 +    fn version(&self) -> &str {                               
+      540 +        "1.0.0"                                               
+      541 +    }                                                         
+      542 +                                                              
+      543 +    fn provided_interfaces(&self) -> &[InterfaceInfo] {       
+      544 +        &self.interface_info                                  
+      545 +    }                                                         
+      546 +                                                              
+      547 +    fn receptacles(&self) -> &[ReceptacleInfo] {              
+      548 +        &[]                                                   
+      549 +    }                                                         
+      550 +                                                              
+      551 +    fn connect_receptacle_raw(                                
+      552 +        &self,                                                
+      553 +        _receptacle_name: &str,                               
+      554 +        _provider: &dyn IUnknown,                             
+      555 +    ) -> Result<(), RegistryError> {                          
+      556 +        Err(RegistryError::BindingFailed {                    
+      557 +            detail: "actor has no receptacles".into(),        
+      558 +        })                                                    
+      559 +    }                                                         
+      560 +}                                                             
+      561 +                                                              
+      562  #[cfg(test)]
+      563  mod tests {
+      564      use super::*;
+      565 +    use crate::iunknown::query;                               
+      566      use std::sync::{Arc, Mutex};
+      567  
+      568      struct CountHandler {
+     ...
+      771              "actor shutdown timed out"
+      772          );
+      773      }
+      774 +                                                              
+      775 +    #[test]                                                   
+      776 +    fn iunknown_query_isender() {                             
+      777 +        let log = Arc::new(Mutex::new(Vec::new()));           
+      778 +                                                              
+      779 +        struct LogHandler {                                   
+      780 +            log: Arc<Mutex<Vec<u32>>>,                        
+      781 +        }                                                     
+      782 +        impl ActorHandler<u32> for LogHandler {               
+      783 +            fn handle(&mut self, msg: u32) {                  
+      784 +                self.log.lock().unwrap().push(msg);           
+      785 +            }                                                 
+      786 +        }                                                     
+      787 +                                                              
+      788 +        let actor = Actor::new(LogHandler { log: log.clone() }
+          +, |_| {});                                                    
+      789 +                                                              
+      790 +        // Query ISender before activation                    
+      791 +        let sender: Arc<dyn ISender<u32> + Send + Sync> =     
+      792 +            query::<dyn ISender<u32> + Send + Sync>(&actor).un
+          +wrap();                                                       
+      793 +                                                              
+      794 +        let handle = actor.activate().unwrap();               
+      795 +        sender.send(10).unwrap();                             
+      796 +        sender.send(20).unwrap();                             
+      797 +        handle.deactivate().unwrap();                         
+      798 +                                                              
+      799 +        assert_eq!(*log.lock().unwrap(), vec![10, 20]);       
+      800 +    }                                                         
+      801 +                                                              
+      802 +    #[test]                                                   
+      803 +    fn iunknown_isender_and_handle_coexist() {                
+      804 +        let log = Arc::new(Mutex::new(Vec::new()));           
+      805 +                                                              
+      806 +        struct LogHandler {                                   
+      807 +            log: Arc<Mutex<Vec<u32>>>,                        
+      808 +        }                                                     
+      809 +        impl ActorHandler<u32> for LogHandler {               
+      810 +            fn handle(&mut self, msg: u32) {                  
+      811 +                self.log.lock().unwrap().push(msg);           
+      812 +            }                                                 
+      813 +        }                                                     
+      814 +                                                              
+      815 +        let actor = Actor::new(LogHandler { log: log.clone() }
+          +, |_| {});                                                    
+      816 +                                                              
+      817 +        let sender: Arc<dyn ISender<u32> + Send + Sync> =     
+      818 +            query::<dyn ISender<u32> + Send + Sync>(&actor).un
+          +wrap();                                                       
+      819 +                                                              
+      820 +        let handle = actor.activate().unwrap();               
+      821 +                                                              
+      822 +        // Both paths can send messages                       
+      823 +        handle.send(1).unwrap();                              
+      824 +        sender.send(2).unwrap();                              
+      825 +        handle.send(3).unwrap();                              
+      826 +                                                              
+      827 +        handle.deactivate().unwrap();                         
+      828 +                                                              
+      829 +        let log = log.lock().unwrap();                        
+      830 +        assert_eq!(log.len(), 3);                             
+      831 +        assert!(log.contains(&1));                            
+      832 +        assert!(log.contains(&2));                            
+      833 +        assert!(log.contains(&3));                            
+      834 +    }                                                         
+      835 +                                                              
+      836 +    #[test]                                                   
+      837 +    fn iunknown_provided_interfaces() {                       
+      838 +        struct Noop;                                          
+      839 +        impl ActorHandler<u32> for Noop {                     
+      840 +            fn handle(&mut self, _msg: u32) {}                
+      841 +        }                                                     
+      842 +                                                              
+      843 +        let actor = Actor::new(Noop, |_| {});                 
+      844 +        let ifaces = actor.provided_interfaces();             
+      845 +        assert_eq!(ifaces.len(), 1);                          
+      846 +        assert_eq!(ifaces[0].name, "ISender");                
+      847 +    }                                                         
+      848 +                                                              
+      849 +    #[test]                                                   
+      850 +    fn iunknown_version() {                                   
+      851 +        struct Noop;                                          
+      852 +        impl ActorHandler<u32> for Noop {                     
+      853 +            fn handle(&mut self, _msg: u32) {}                
+      854 +        }                                                     
+      855 +                                                              
+      856 +        let actor = Actor::new(Noop, |_| {});                 
+      857 +        assert_eq!(actor.version(), "1.0.0");                 
+      858 +    }                                                         
+      859 +                                                              
+      860 +    #[test]                                                   
+      861 +    fn iunknown_no_receptacles() {                            
+      862 +        struct Noop;                                          
+      863 +        impl ActorHandler<u32> for Noop {                     
+      864 +            fn handle(&mut self, _msg: u32) {}                
+      865 +        }                                                     
+      866 +                                                              
+      867 +        let actor = Actor::new(Noop, |_| {});                 
+      868 +        assert!(actor.receptacles().is_empty());              
+      869 +    }                                                         
+      870  }
+
+● Now let's build and test to see if it compiles:
+
+● Bash(cargo test -p component-core --lib actor 2>&1 | tail -30)
+  ⎿  Running in the background (↓ to manage)
+  ⎿  (timeout 2m)
+
+● Task Output boum1sija
+  ⎿  (No output)
+
+● The test is hanging — the close() method sets sender_alive = false but recv()
+  also checks sender_count == 0, which isn't true when IUnknown senders exist. I
+   need to add a force_closed flag.
+
+● Stop Task
+  ⎿  cargo test -p component-core --lib actor 2>&1 | tail -30 · stopped
+
+● Add force_closed to ChannelState and update recv()/try_recv():
+
+● Update(crates/component-core/src/channel/mod.rs)
+  ⎿  Added 3 lines
+      130      pub(crate) sender_count: AtomicUsize,
+      131      pub(crate) receiver_thread: std::sync::Mutex<Option<Thread
+           >>,
+      132      pub(crate) sender_thread: std::sync::Mutex<Option<Thread>>
+           ,
+      133 +    /// Force-close flag set by actor deactivation to ensure t
+          +he receiver                                                   
+      134 +    /// exits even when other senders (from IUnknown queries) 
+          +are still alive.                                              
+      135 +    pub(crate) force_closed: AtomicBool,                      
+      136  }
+      137  
+      138  /// Sender endpoint for typed message passing.
+
+● Now update recv() to check force_closed:
+
+● Update(crates/component-core/src/channel/mod.rs)
+  ⎿  Added 7 lines, removed 5 lines
+      353                  return Ok(value);
+      354              }
+      355  
+      356 -            // Queue is empty — check if senders are gone     
+      357 -            if !self.state.queue.sender_alive.load(Ordering::A
+          -cquire)                                                       
+      358 -                && self.state.sender_count.load(Ordering::Acqu
+          -ire) == 0                                                     
+      359 -            {                                                 
+      356 +            // Queue is empty — check if channel is closed    
+      357 +            let naturally_closed = !self.state.queue.sender_al
+          +ive.load(Ordering::Acquire)                                   
+      358 +                && self.state.sender_count.load(Ordering::Acqu
+          +ire) == 0;                                                    
+      359 +            let force_closed = self.state.force_closed.load(Or
+          +dering::Acquire);                                             
+      360 +                                                              
+      361 +            if naturally_closed || force_closed {             
+      362                  // Double-check: try one more pop in case a va
+           lue was pushed
+      361 -                // between our pop() and the sender_alive chec
+          -k                                                             
+      363 +                // between our pop() and the closed check     
+      364                  if let Some(value) = self.state.queue.pop() {
+      365                      return Ok(value);
+      366                  }
+
+● Update try_recv() similarly:
+
+● Update(crates/component-core/src/channel/mod.rs)
+  ⎿  Added 9 lines, removed 5 lines
+      406                  }
+      407              }
+      408              Ok(value)
+      409 -        } else if !self.state.queue.sender_alive.load(Ordering
+          -::Acquire)                                                    
+      410 -            && self.state.sender_count.load(Ordering::Acquire)
+          - == 0                                                         
+      411 -        {                                                     
+      412 -            Err(ChannelError::Closed)                         
+      409          } else {
+      414 -            Err(ChannelError::Empty)                          
+      410 +            let naturally_closed = !self.state.queue.sender_al
+          +ive.load(Ordering::Acquire)                                   
+      411 +                && self.state.sender_count.load(Ordering::Acqu
+          +ire) == 0;                                                    
+      412 +            let force_closed = self.state.force_closed.load(Or
+          +dering::Acquire);                                             
+      413 +                                                              
+      414 +            if naturally_closed || force_closed {             
+      415 +                Err(ChannelError::Closed)                     
+      416 +            } else {                                          
+      417 +                Err(ChannelError::Empty)                      
+      418 +            }                                                 
+      419          }
+      420      }
+      421  }
+
+● Now update SpscChannel::new() and MpscChannel::new() to initialize
+  force_closed:
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(crates/component-core/src/channel/spsc.rs)
+  ⎿  Added 1 line
+      81              sender_count: std::sync::atomic::AtomicUsize::new(0
+          ),
+      82              receiver_thread: std::sync::Mutex::new(None),
+      83              sender_thread: std::sync::Mutex::new(None),
+      84 +            force_closed: std::sync::atomic::AtomicBool::new(fa
+         +lse),                                                          
+      85          });
+      86  
+      87          let interface_info = vec![
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● Update(crates/component-core/src/channel/mpsc.rs)
+  ⎿  Added 1 line
+      189              sender_count: std::sync::atomic::AtomicUsize::new(
+           0),
+      190              receiver_thread: std::sync::Mutex::new(None),
+      191              sender_thread: std::sync::Mutex::new(None),
+      192 +            force_closed: std::sync::atomic::AtomicBool::new(f
+          +alse),                                                        
+      193          });
+      194  
+      195          let interface_info = vec![
+
+● Now update the close() method on MpscChannel to also set force_closed:
+
+● Update(crates/component-core/src/channel/mpsc.rs)
+  ⎿  Added 1 line, removed 1 line
+      232      /// This is used by actor deactivation to ensure the recei
+           ver thread exits
+      233      /// even when other senders (e.g., from IUnknown queries) 
+           are still alive.
+      234      pub(crate) fn close(&self) {
+      235 -        self.state.queue.sender_alive.store(false, Ordering::R
+          -elease);                                                      
+      235 +        self.state.force_closed.store(true, Ordering::Release)
+          +;                                                             
+      236          // Wake the receiver so it can see the closed signal
+      237          if let Ok(guard) = self.state.receiver_thread.lock() {
+      238              if let Some(ref t) = *guard {
+
+● Now let's test again:
+
+● Bash(cargo test -p component-core --lib actor 2>&1 | tail -30)
+  ⎿     Compiling component-core v0.1.0 (/home/dwaddington/ains4storage-exp
+     lore/speckit/component-framework/crates/component-core)
+         Finished `test` profile [unoptimized + debuginfo] target(s) in 0.8
+     … +16 lines (ctrl+o to expand)
+
+● All 16 actor tests pass including 4 new IUnknown tests. Now run all tests:
+
+● Bash(cargo test --all 2>&1 | tail -40)
+  ⎿  test crates/component-core/src/actor.rs - actor::Actor<M,H>::is_active
+      (line 501) ... ok
+     test crates/component-core/src/registry.rs - registry::ComponentRegist
+     … +34 lines (ctrl+o to expand)
+
+● Let me see the full count:
+
+● Bash(cargo test --all 2>&1 | grep "^test result:")
+  ⎿  test result: ok. 94 passed; 0 failed; 0 ignored; 0 measured; 0 filtere
+     d out; finished in 0.13s
+     test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered
+     … +22 lines (ctrl+o to expand)
+
+● All 224 tests pass (up from 218). Let me mark task 20 done and move to
+  integration tests.
+● Now add integration tests. Let me check the existing actor integration test
+  files:
+
+  Read 1 file (ctrl+o to expand)
+
+● Now add IUnknown integration tests to this file:
+
+● Update(crates/component-framework/tests/actor.rs)
+  ⎿  Added 3 lines, removed 1 line
+      1 -//! Integration tests for actor lifecycle.                      
+      1 +//! Integration tests for actor lifecycle and IUnknown component
+        + model.                                                         
+      2  
+      3  use component_framework::actor::{Actor, ActorError, ActorHandler
+         };
+      4 +use component_framework::channel::ISender;                      
+      5 +use component_framework::iunknown::{query, IUnknown};           
+      6  use std::sync::{Arc, Mutex};
+      7  use std::thread;
+      8  
+
+● Update(crates/component-framework/tests/actor.rs)
+  ⎿  Added 118 lines
+      149      handle.deactivate().unwrap();
+      150      assert_eq!(ACTIVE_COUNT.load(Ordering::Relaxed), 0);
+      151  }
+      152 +                                                              
+      153 +// --- IUnknown integration tests ---                         
+      154 +                                                              
+      155 +#[test]                                                       
+      156 +fn actor_iunknown_query_isender() {                           
+      157 +    let log = Arc::new(Mutex::new(Vec::new()));               
+      158 +                                                              
+      159 +    struct LogHandler {                                       
+      160 +        log: Arc<Mutex<Vec<u32>>>,                            
+      161 +    }                                                         
+      162 +    impl ActorHandler<u32> for LogHandler {                   
+      163 +        fn handle(&mut self, msg: u32) {                      
+      164 +            self.log.lock().unwrap().push(msg);               
+      165 +        }                                                     
+      166 +    }                                                         
+      167 +                                                              
+      168 +    let actor = Actor::new(LogHandler { log: log.clone() }, |_
+          +| {});                                                        
+      169 +                                                              
+      170 +    // Query ISender<u32> via IUnknown before activation      
+      171 +    let sender: Arc<dyn ISender<u32> + Send + Sync> =         
+      172 +        query::<dyn ISender<u32> + Send + Sync>(&actor).unwrap
+          +();                                                           
+      173 +                                                              
+      174 +    let handle = actor.activate().unwrap();                   
+      175 +    sender.send(100).unwrap();                                
+      176 +    sender.send(200).unwrap();                                
+      177 +    handle.deactivate().unwrap();                             
+      178 +                                                              
+      179 +    assert_eq!(*log.lock().unwrap(), vec![100, 200]);         
+      180 +}                                                             
+      181 +                                                              
+      182 +#[test]                                                       
+      183 +fn actor_iunknown_isender_and_handle_coexist() {              
+      184 +    let log = Arc::new(Mutex::new(Vec::new()));               
+      185 +                                                              
+      186 +    struct LogHandler {                                       
+      187 +        log: Arc<Mutex<Vec<u32>>>,                            
+      188 +    }                                                         
+      189 +    impl ActorHandler<u32> for LogHandler {                   
+      190 +        fn handle(&mut self, msg: u32) {                      
+      191 +            self.log.lock().unwrap().push(msg);               
+      192 +        }                                                     
+      193 +    }                                                         
+      194 +                                                              
+      195 +    let actor = Actor::new(LogHandler { log: log.clone() }, |_
+          +| {});                                                        
+      196 +    let sender: Arc<dyn ISender<u32> + Send + Sync> =         
+      197 +        query::<dyn ISender<u32> + Send + Sync>(&actor).unwrap
+          +();                                                           
+      198 +                                                              
+      199 +    let handle = actor.activate().unwrap();                   
+      200 +                                                              
+      201 +    // Send via handle and ISender concurrently               
+      202 +    handle.send(1).unwrap();                                  
+      203 +    sender.send(2).unwrap();                                  
+      204 +    handle.send(3).unwrap();                                  
+      205 +    sender.send(4).unwrap();                                  
+      206 +                                                              
+      207 +    handle.deactivate().unwrap();                             
+      208 +                                                              
+      209 +    let log = log.lock().unwrap();                            
+      210 +    assert_eq!(log.len(), 4);                                 
+      211 +    // All messages received (order depends on scheduling)    
+      212 +    assert!(log.contains(&1));                                
+      213 +    assert!(log.contains(&2));                                
+      214 +    assert!(log.contains(&3));                                
+      215 +    assert!(log.contains(&4));                                
+      216 +}                                                             
+      217 +                                                              
+      218 +#[test]                                                       
+      219 +fn actor_iunknown_introspection() {                           
+      220 +    struct Noop;                                              
+      221 +    impl ActorHandler<u32> for Noop {                         
+      222 +        fn handle(&mut self, _: u32) {}                       
+      223 +    }                                                         
+      224 +                                                              
+      225 +    let actor = Actor::new(Noop, |_| {});                     
+      226 +                                                              
+      227 +    assert_eq!(actor.version(), "1.0.0");                     
+      228 +    assert_eq!(actor.provided_interfaces().len(), 1);         
+      229 +    assert_eq!(actor.provided_interfaces()[0].name, "ISender")
+          +;                                                             
+      230 +    assert!(actor.receptacles().is_empty());                  
+      231 +}                                                             
+      232 +                                                              
+      233 +#[test]                                                       
+      234 +fn actor_iunknown_isender_from_different_threads() {          
+      235 +    let log = Arc::new(Mutex::new(Vec::new()));               
+      236 +                                                              
+      237 +    struct LogHandler {                                       
+      238 +        log: Arc<Mutex<Vec<u32>>>,                            
+      239 +    }                                                         
+      240 +    impl ActorHandler<u32> for LogHandler {                   
+      241 +        fn handle(&mut self, msg: u32) {                      
+      242 +            self.log.lock().unwrap().push(msg);               
+      243 +        }                                                     
+      244 +    }                                                         
+      245 +                                                              
+      246 +    let actor = Actor::new(LogHandler { log: log.clone() }, |_
+          +| {});                                                        
+      247 +    let sender: Arc<dyn ISender<u32> + Send + Sync> =         
+      248 +        query::<dyn ISender<u32> + Send + Sync>(&actor).unwrap
+          +();                                                           
+      249 +                                                              
+      250 +    let handle = actor.activate().unwrap();                   
+      251 +                                                              
+      252 +    // Send from multiple threads using the IUnknown-queried s
+          +ender                                                         
+      253 +    let sender2 = Arc::clone(&sender);                        
+      254 +    let t1 = thread::spawn(move || {                          
+      255 +        for i in 0..50 {                                      
+      256 +            sender2.send(i).unwrap();                         
+      257 +        }                                                     
+      258 +    });                                                       
+      259 +                                                              
+      260 +    for i in 50..100 {                                        
+      261 +        handle.send(i).unwrap();                              
+      262 +    }                                                         
+      263 +                                                              
+      264 +    t1.join().unwrap();                                       
+      265 +    handle.deactivate().unwrap();                             
+      266 +                                                              
+      267 +    let log = log.lock().unwrap();                            
+      268 +    assert_eq!(log.len(), 100);                               
+      269 +}                                                             
+
+● Bash(cargo test -p component-framework --test actor 2>&1 | tail -20)
+  ⎿     Compiling component-framework v0.1.0 (/home/dwaddington/ains4storag
+     e-explore/speckit/component-framework/crates/component-framework)
+         Finished `test` profile [unoptimized + debuginfo] target(s) in 0.5
+     … +15 lines (ctrl+o to expand)
+
+● All 8 integration tests pass. Now let me mark task 21 done and run the CI
+  gate.
+
+● Bash(cargo fmt --check 2>&1)
+  ⎿  (No output)
+
+● Bash(cargo clippy -- -D warnings 2>&1 | tail -20)
+  ⎿     Compiling component-core v0.1.0 (/home/dwaddington/ains4storage-exp
+     lore/speckit/component-framework/crates/component-core)
+         Checking component-macros v0.1.0 (/home/dwaddington/ains4storage-e
+     … +5 lines (ctrl+o to expand)
+
+● Bash(cargo test --all 2>&1 | grep "^test result:")
+  ⎿  test result: ok. 94 passed; 0 failed; 0 ignored; 0 measured; 0 filtere
+     d out; finished in 0.12s
+     test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered
+     … +22 lines (ctrl+o to expand)
+
+● Bash(cargo doc --no-deps 2>&1 | tail -5)
+  ⎿  warning: `component-core` (lib doc) generated 1 warning
+      Documenting component-framework v0.1.0 (/home/dwaddington/ains4storag
+     e-explore/speckit/component-framework/crates/component-framework)
+     … +4 lines (ctrl+o to expand)
+
+● There's a doc warning. Let me check:
+
+● Bash(cargo doc --no-deps 2>&1 | grep "warning:")
+  ⎿  warning: unclosed HTML tag `M`
+     warning: `component-core` (lib doc) generated 1 warning
+
+● Bash(cargo doc --no-deps 2>&1 | grep -B2 "unclosed HTML")
+  ⎿  warning: unclosed HTML tag `M`
+
+● Bash(RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p component-core 2>&1 |
+      head -30)
+  ⎿   Documenting component-core v0.1.0 (/home/dwaddington/ains4storage-exp
+     lore/speckit/component-framework/crates/component-core)
+     error: unclosed HTML tag `M`
+     … +16 lines (ctrl+o to expand)
+
+● Update(crates/component-core/src/actor.rs)
+  ⎿  Added 1 line, removed 1 line
+      317      error_callback: Arc<dyn Fn(Box<dyn Any + Send>) + Send + S
+           ync>,
+      318      state: Arc<AtomicU8>,
+      319      /// MPSC channel for inbound messages — created at constru
+           ction time
+      320 -    /// so ISender<M> is available via IUnknown before activat
+          -ion.                                                          
+      320 +    /// so `ISender<M>` is available via IUnknown before activ
+          +ation.                                                        
+      321      channel: Arc<MpscChannel<M>>,
+      322      /// Receiver stored until activate() takes it.
+      323      receiver: Mutex<Option<Receiver<M>>>,
+
+● Bash(cargo doc --no-deps 2>&1 | grep "warning:")
+  ⎿  No matches found
+
+● All CI gate checks pass:
+  - cargo fmt --check — clean
+  - cargo clippy -- -D warnings — clean
+  - cargo test --all — 228 tests, all passing (up from 218)
+  - cargo doc --no-deps — warning-free
+
+● Summary of changes:
+
+  FR-002 (Actor implements IUnknown) and FR-005 (Actor discoverable via
+  introspection) — both fixed.
+
+  Key design decisions:
+  - Actor creates an MpscChannel at construction time (not activation), so
+  ISender<M> is queryable via IUnknown before and after activation
+  - ActorHandle now uses MpscSender<M> internally, allowing IUnknown-queried
+  senders and handle senders to coexist (multi-producer)
+  - Added force_closed flag to ChannelState so actor deactivation can
+  force-close the channel even when IUnknown senders keep sender_count > 0
+  - Actor reports ISender as its provided interface, version "1.0.0", empty
+  receptacles
+
+  Files modified:
+
+  ┌─────────────────┬────────────────────────────────────────────────────────┐
+  │      File       │                         Change                         │
+  ├─────────────────┼────────────────────────────────────────────────────────┤
+  │ channel/mod.rs  │ Added force_closed: AtomicBool to ChannelState;        │
+  │                 │ recv()/try_recv() check it                             │
+  ├─────────────────┼────────────────────────────────────────────────────────┤
+  │ channel/mpsc.rs │ Added close() method; initialized force_closed         │
+  ├─────────────────┼────────────────────────────────────────────────────────┤
+  │ channel/spsc.rs │ Initialized force_closed                               │
+  ├─────────────────┼────────────────────────────────────────────────────────┤
+  │ actor.rs        │ Rewrote to use MpscChannel, implement IUnknown, 4 new  │
+  │                 │ unit tests                                             │
+  ├─────────────────┼────────────────────────────────────────────────────────┤
+  │ tests/actor.rs  │ 4 new integration tests (query, coexistence,           │
+  │                 │ introspection, multi-thread)                           │
+  └─────────────────┴────────────────────────────────────────────────────────┘
+
+  Test count: 218 → 228 (+10 tests)
+✻ Crunched for 20m 7s
+
+❯ /cost                                                                         
+  ⎿  Total cost:            $60.75
+     Total duration (API):  2h 27m 55s
+     Total duration (wall): 4h 17m 58s
+     Total code changes:    12572 lines added, 1038 lines removed
+     Usage by model:
+          claude-opus-4-6:  53.5k input, 326.6k output, 62.1m cache read, 3.1m 
+     cache write ($58.99)
+        claude-sonnet-4-6:  36.0k input, 21.9k output, 1.9m cache read, 201.7k 
+     cache write ($1.76)

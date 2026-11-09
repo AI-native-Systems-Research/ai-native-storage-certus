@@ -1,0 +1,37 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Prefill/decode disaggregation with vLLM's own CPU offload tier and its P2P
+# pull in place of certus: the comparison arm for pd-certus-rdma. llm-d's
+# guides/p2p-kv-cache-sharing ("P/D variant: P2P over NIXL disaggregation") is
+# the recipe; everything that is not the offload tier is pd-certus-rdma's, so
+# a measured difference is the tier and its fetch, not the setup around them:
+#
+#   same          image (the connector image, so the same vLLM build), engine
+#                 flags, model, context window, NIXL GPU->GPU over RDMA, KV
+#                 events, router values (install.sh takes pd-certus's
+#                 router-values.yaml), the render service, replica placement
+#   different     MultiConnector[NixlConnector, OffloadingConnector(
+#                 TieringOffloadingSpec, CPU tier + P2P secondary tier)] in
+#                 place of [NixlConnector, OffloadingConnector(certus)]
+#
+# The CPU tier's size matches certus's memory tier per GPU (30 GiB, the
+# certus-server --memory-tier-size). It lives in the pod's /dev/shm, which is
+# sized above it. Run it with certus stopped on these nodes, so certus's
+# polling threads do not share the CPUs.
+resources:
+  - ../pd
+  # install.sh copies it in from ../pd-certus: the EPP's tokenizer, which the
+  # precise prefix producer needs whichever tier publishes the events.
+  - render.yaml
+
+patches:
+  - path: patch.yaml
+
+# As in ../pd-certus (same placeholder, rewritten by install.sh from
+# CERTUS_REGISTRY/CERTUS_REPO): the image both arms run. Keep the tag in step
+# with ../pd-certus/kustomization.yaml.
+images:
+  - name: docker.io/vllm/vllm-openai
+    newName: REGISTRY/REPO/llm-d-vllm-certus
+    newTag: vllm0.30.0-04548e47

@@ -1,0 +1,12 @@
+---
+# Prerequisites for certus-server deployment.
+# Apply once per cluster after installing:
+#   1. NVIDIA GPU driver on all GPU nodes
+#   2. NVIDIA Container Toolkit (nvidia-ctk runtime configure --runtime=containerd)
+#   3. NVIDIA Network Operator (for RDMA device plugin + NFD)
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: nvidia
+handler: nvidia

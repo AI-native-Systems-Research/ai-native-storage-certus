@@ -1,0 +1,86 @@
+# Both roles: the `roce` network, an RDMA device, NIXL on GPU buffers over
+# verbs. Everything else is pd-certus's (which is pd's plus certus).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pd-disaggregation-nvidia-gpu-vllm-prefill
+spec:
+  template:
+    metadata:
+      annotations:
+        # A second interface, net1, on the RoCE port (macvlan, own GID).
+        k8s.v1.cni.cncf.io/networks: roce
+    spec:
+      containers:
+        - name: modelserver
+          # Lists without a merge key are replaced whole: pd's arg vector, with
+          # the NIXL config switched to GPU buffers (kv_buffer_device: cuda),
+          # which UCX moves by GPUDirect RDMA (nvidia-peermem on the hosts).
+          args:
+            - "Qwen/Qwen3-8B"
+            - "--disable-access-log-for-endpoints=/health,/metrics,/v1/models"
+            - "--tensor-parallel-size=1"
+            - "--gpu-memory-utilization=0.90"
+            - "--max-model-len=24576"
+            - "--kv-transfer-config"
+            - '{"kv_connector":"NixlConnector","kv_role":"kv_producer","kv_buffer_device":"cuda","kv_connector_extra_config":{"backends":["UCX"]}}'
+          env:
+            # pd pins UCX to TCP; let it choose RC verbs on the RDMA device.
+            - name: UCX_TLS
+              $patch: delete
+            # The pod's RDMA device is mlx5_0, port 1 (the RoCE port; mlx5_1 is
+            # down). Pinned so UCX does not pick the flannel interface's TCP.
+            - name: UCX_NET_DEVICES
+              value: mlx5_0:1
+          securityContext:
+            capabilities:
+              # Registering GPU and host memory with the NIC pins it.
+              add: [IPC_LOCK]
+          resources:
+            limits:
+              rdma/rdma_shared_device_a: 1
+            requests:
+              rdma/rdma_shared_device_a: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pd-disaggregation-nvidia-gpu-vllm-decode
+spec:
+  template:
+    metadata:
+      annotations:
+        # A second interface, net1, on the RoCE port (macvlan, own GID).
+        k8s.v1.cni.cncf.io/networks: roce
+    spec:
+      containers:
+        - name: modelserver
+          # Lists without a merge key are replaced whole: pd's arg vector, with
+          # the NIXL config switched to GPU buffers (kv_buffer_device: cuda),
+          # which UCX moves by GPUDirect RDMA (nvidia-peermem on the hosts).
+          args:
+            - "Qwen/Qwen3-8B"
+            - "--disable-access-log-for-endpoints=/health,/metrics,/v1/models"
+            - "--tensor-parallel-size=1"
+            - "--gpu-memory-utilization=0.90"
+            - "--max-model-len=24576"
+            - "--kv-transfer-config"
+            - '{"kv_connector":"NixlConnector","kv_role":"kv_consumer","kv_buffer_device":"cuda","kv_load_failure_policy":"fail","kv_connector_extra_config":{"backends":["UCX"]}}'
+            - "--port=8200"
+          env:
+            # pd pins UCX to TCP; let it choose RC verbs on the RDMA device.
+            - name: UCX_TLS
+              $patch: delete
+            # The pod's RDMA device is mlx5_0, port 1 (the RoCE port; mlx5_1 is
+            # down). Pinned so UCX does not pick the flannel interface's TCP.
+            - name: UCX_NET_DEVICES
+              value: mlx5_0:1
+          securityContext:
+            capabilities:
+              # Registering GPU and host memory with the NIC pins it.
+              add: [IPC_LOCK]
+          resources:
+            limits:
+              rdma/rdma_shared_device_a: 1
+            requests:
+              rdma/rdma_shared_device_a: 1

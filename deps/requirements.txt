@@ -1,0 +1,7 @@
+meson
+pyelftools
+patchelf
+uv
+ninja
+torch
+

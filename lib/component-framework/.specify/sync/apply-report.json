@@ -1,0 +1,72 @@
+{
+  "applied_at": "2026-04-10T12:00:00Z",
+  "based_on": "proposals from 2026-04-10T12:00:00Z",
+  "summary": {
+    "drift_proposals_applied": 0,
+    "recommendations_applied": 2,
+    "specs_updated": 6,
+    "new_specs_created": 0,
+    "tasks_generated": 0
+  },
+  "changes": [
+    {
+      "recommendation": "REC-001",
+      "type": "status_update",
+      "spec": "001-com-component-framework",
+      "before": "Draft",
+      "after": "Complete"
+    },
+    {
+      "recommendation": "REC-001",
+      "type": "status_update",
+      "spec": "002-registry-refcount-binding",
+      "before": "Draft",
+      "after": "Complete"
+    },
+    {
+      "recommendation": "REC-001",
+      "type": "status_update",
+      "spec": "003-actor-channels",
+      "before": "Draft",
+      "after": "Complete"
+    },
+    {
+      "recommendation": "REC-001",
+      "type": "status_update",
+      "spec": "004-channel-benchmarks",
+      "before": "Draft",
+      "after": "Complete"
+    },
+    {
+      "recommendation": "REC-001",
+      "type": "status_update",
+      "spec": "005-numa-aware-actors",
+      "before": "Draft",
+      "after": "Complete"
+    },
+    {
+      "recommendation": "REC-001",
+      "type": "status_update",
+      "spec": "006-log-handler",
+      "before": "Backfilled",
+      "after": "Complete"
+    },
+    {
+      "recommendation": "REC-002",
+      "type": "section_removed",
+      "spec": "006-log-handler",
+      "section": "Backfill Notice"
+    }
+  ],
+  "backups": {
+    "directory": ".specify/sync/backups/2026-04-10/",
+    "files": [
+      "001-spec.md",
+      "002-spec.md",
+      "003-spec.md",
+      "004-spec.md",
+      "005-spec.md",
+      "006-spec.md"
+    ]
+  }
+}

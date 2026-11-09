@@ -1,0 +1,149 @@
+WARNING 07-28 20:15:04 [argparse_utils.py:257] With `vllm serve`, you should provide the model as a positional argument or in a config file instead of via the `--model` option. The `--model` option will be removed in a future version.
+(APIServer pid=1) INFO 07-28 20:15:04 [utils.py:299] 
+(APIServer pid=1) INFO 07-28 20:15:04 [utils.py:299]        █     █     █▄   ▄█
+(APIServer pid=1) INFO 07-28 20:15:04 [utils.py:299]  ▄▄ ▄█ █     █     █ ▀▄▀ █  version 0.20.0
+(APIServer pid=1) INFO 07-28 20:15:04 [utils.py:299]   █▄█▀ █     █     █     █  model   Qwen/Qwen2.5-7B-Instruct
+(APIServer pid=1) INFO 07-28 20:15:04 [utils.py:299]    ▀▀  ▀▀▀▀▀ ▀▀▀▀▀ ▀     ▀
+(APIServer pid=1) INFO 07-28 20:15:04 [utils.py:299] 
+(APIServer pid=1) INFO 07-28 20:15:04 [utils.py:233] non-default args: {'model_tag': 'Qwen/Qwen2.5-7B-Instruct', 'model': 'Qwen/Qwen2.5-7B-Instruct', 'dtype': 'bfloat16', 'max_model_len': 32768, 'enforce_eager': True, 'gpu_memory_utilization': 0.9, 'enable_prefix_caching': True, 'kv_transfer_config': KVTransferConfig(kv_connector='OffloadingConnector', engine_id='2cf0e232-3b05-4030-92d2-889c8a895e85', kv_buffer_device='cuda', kv_buffer_size=1000000000.0, kv_role='kv_both', kv_rank=None, kv_parallel_size=1, kv_ip='127.0.0.1', kv_port=14579, kv_connector_extra_config={'spec_name': 'CertusGrpcOffloadingSpec', 'spec_module_path': 'certus_grpc_connector.spec', 'server': 'localhost:50051', 'slab_size_bytes': 2097152}, kv_connector_module_path=None, enable_permute_local_kv=False, kv_load_failure_policy='fail'), 'enable_log_requests': True}
+(APIServer pid=1) INFO 07-28 20:15:04 [arg_utils.py:718] HF_HUB_OFFLINE is True, replace model_id [Qwen/Qwen2.5-7B-Instruct] to model_path [/root/.cache/huggingface/hub/models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c702b33eeacc393d103063234e8bc28]
+(APIServer pid=1) INFO 07-28 20:15:17 [nixl_utils.py:20] Setting UCX_RCACHE_MAX_UNRELEASED to '1024' to avoid a rare memory leak in UCX when using NIXL.
+(APIServer pid=1) INFO 07-28 20:15:17 [nixl_utils.py:32] NIXL is available
+(APIServer pid=1) INFO 07-28 20:15:17 [model.py:555] Resolved architecture: Qwen2ForCausalLM
+(APIServer pid=1) INFO 07-28 20:15:17 [model.py:1680] Using max model len 32768
+(APIServer pid=1) INFO 07-28 20:15:17 [vllm.py:840] Asynchronous scheduling is enabled.
+(APIServer pid=1) WARNING 07-28 20:15:17 [vllm.py:896] Enforce eager set, disabling torch.compile and CUDAGraphs. This is equivalent to setting -cc.mode=none -cc.cudagraph_mode=none
+(APIServer pid=1) WARNING 07-28 20:15:17 [vllm.py:914] Inductor compilation was disabled by user settings, optimizations settings that are only active during inductor compilation will be ignored.
+(APIServer pid=1) INFO 07-28 20:15:17 [kernel.py:205] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['vllm_c', 'native'])
+(APIServer pid=1) INFO 07-28 20:15:17 [vllm.py:1089] Cudagraph is disabled under eager mode
+(APIServer pid=1) WARNING 07-28 20:15:17 [vllm.py:1293] Turning off hybrid kv cache manager because `--kv-transfer-config` is set. This will reduce the performance of vLLM on LLMs with sliding window attention or Mamba attention. If you are a developer of kv connector, please consider supporting hybrid kv cache manager for your connector by making sure your connector is a subclass of `SupportsHMA` defined in kv_connector/v1/base.py and use --no-disable-hybrid-kv-cache-manager to start vLLM.
+(APIServer pid=1) INFO 07-28 20:15:17 [compilation.py:303] Enabled custom fusions: norm_quant, act_quant
+(EngineCore pid=310) INFO 07-28 20:15:25 [core.py:109] Initializing a V1 LLM engine (v0.20.0) with config: model='/root/.cache/huggingface/hub/models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c702b33eeacc393d103063234e8bc28', speculative_config=None, tokenizer='/root/.cache/huggingface/hub/models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c702b33eeacc393d103063234e8bc28', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=False, dtype=torch.bfloat16, max_seq_len=32768, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, decode_context_parallel_size=1, dcp_comm_backend=ag_rs, disable_custom_all_reduce=False, quantization=None, quantization_config=None, enforce_eager=True, enable_return_routed_experts=False, kv_cache_dtype=auto, device_config=cuda, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None, kv_cache_metrics=False, kv_cache_metrics_sample=0.01, cudagraph_metrics=False, enable_layerwise_nvtx_tracing=False, enable_mfu_metrics=False, enable_mm_processor_stats=False, enable_logging_iteration_details=False), seed=0, served_model_name=/root/.cache/huggingface/hub/models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c702b33eeacc393d103063234e8bc28, enable_prefix_caching=True, enable_chunked_prefill=True, pooler_config=None, compilation_config={'mode': <CompilationMode.NONE: 0>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'inductor', 'custom_ops': ['all'], 'ir_enable_torch_wrap': False, 'splitting_ops': [], 'compile_mm_encoder': False, 'cudagraph_mm_encoder': False, 'encoder_cudagraph_token_budgets': [], 'encoder_cudagraph_max_vision_items_per_batch': 0, 'encoder_cudagraph_max_frames_per_batch': None, 'compile_sizes': [], 'compile_ranges_endpoints': [2048], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'size_asserts': False, 'alignment_asserts': False, 'scalar_asserts': False, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.NONE: 0>, 'cudagraph_num_of_warmups': 0, 'cudagraph_capture_sizes': [], 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {'fuse_norm_quant': True, 'fuse_act_quant': True, 'fuse_attn_quant': False, 'enable_sp': False, 'fuse_gemm_comms': False, 'fuse_allreduce_rms': False}, 'max_cudagraph_capture_size': 0, 'dynamic_shapes_config': {'type': <DynamicShapesType.BACKED: 'backed'>, 'evaluate_guards': False, 'assume_32_bit_indexing': False}, 'local_cache_dir': None, 'fast_moe_cold_start': False, 'static_all_moe_layers': []}, kernel_config=KernelConfig(ir_op_priority=IrOpPriorityConfig(rms_norm=['vllm_c', 'native']), enable_flashinfer_autotune=True, moe_backend='auto')
+(EngineCore pid=310) INFO 07-28 20:15:27 [nixl_utils.py:32] NIXL is available
+(EngineCore pid=310) INFO 07-28 20:15:27 [parallel_state.py:1402] world_size=1 rank=0 local_rank=0 distributed_init_method=tcp://192.168.0.65:45865 backend=nccl
+(EngineCore pid=310) INFO 07-28 20:15:27 [parallel_state.py:1715] rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 0, EP rank N/A, EPLB rank N/A
+(EngineCore pid=310) INFO 07-28 20:15:28 [gpu_model_runner.py:4777] Starting to load model /root/.cache/huggingface/hub/models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c702b33eeacc393d103063234e8bc28...
+(EngineCore pid=310) INFO 07-28 20:15:30 [cuda.py:368] Using FLASH_ATTN attention backend out of potential backends: ['FLASH_ATTN', 'FLASHINFER', 'TRITON_ATTN', 'FLEX_ATTENTION'].
+(EngineCore pid=310) INFO 07-28 20:15:30 [flash_attn.py:646] Using FlashAttention version 2
+(EngineCore pid=310) INFO 07-28 20:15:30 [weight_utils.py:904] Filesystem type for checkpoints: XFS. Checkpoint size: 14.19 GiB. Available RAM: 8.99 GiB.
+(EngineCore pid=310) INFO 07-28 20:15:30 [weight_utils.py:934] Auto-prefetch is disabled because the filesystem (XFS) is not a recognized network FS (NFS/Lustre) and the checkpoint size (14.19 GiB) exceeds 90% of available RAM (8.99 GiB).
+(EngineCore pid=310) Loading safetensors checkpoint shards:   0% Completed | 0/4 [00:00<?, ?it/s]
+(EngineCore pid=310) Loading safetensors checkpoint shards:  25% Completed | 1/4 [00:05<00:15,  5.13s/it]
+(EngineCore pid=310) Loading safetensors checkpoint shards:  50% Completed | 2/4 [00:10<00:10,  5.25s/it]
+(EngineCore pid=310) Loading safetensors checkpoint shards:  75% Completed | 3/4 [00:16<00:05,  5.57s/it]
+(EngineCore pid=310) Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:21<00:00,  5.35s/it]
+(EngineCore pid=310) Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:21<00:00,  5.36s/it]
+(EngineCore pid=310) 
+(EngineCore pid=310) INFO 07-28 20:15:51 [default_loader.py:384] Loading weights took 21.75 seconds
+(EngineCore pid=310) INFO 07-28 20:15:52 [gpu_model_runner.py:4879] Model loading took 14.25 GiB memory and 22.987747 seconds
+(EngineCore pid=310) INFO 07-28 20:16:05 [gpu_worker.py:440] Available KV cache memory: 6.35 GiB
+(EngineCore pid=310) INFO 07-28 20:16:05 [kv_cache_utils.py:1711] GPU KV cache size: 118,816 tokens
+(EngineCore pid=310) INFO 07-28 20:16:05 [kv_cache_utils.py:1716] Maximum concurrency for 32,768 tokens per request: 3.63x
+(EngineCore pid=310) INFO 07-28 20:16:05 [factory.py:64] Creating v1 connector with name: OffloadingConnector and engine_id: 2cf0e232-3b05-4030-92d2-889c8a895e85
+(EngineCore pid=310) WARNING 07-28 20:16:05 [base.py:189] Initializing KVConnectorBase_V1. This API is experimental and subject to change in the future as we iterate the design.
+(EngineCore pid=310) INFO 07-28 20:16:05 [factory.py:51] Creating offloading spec with name: CertusGrpcOffloadingSpec
+(EngineCore pid=310) WARNING 07-28 20:16:05 [spec.py:75] Initializing OffloadingSpec. This API is experimental and subject to change in the future as we iterate the design.
+(EngineCore pid=310) [certus-grpc] per-block Reserve size from KV-cache config: page_size_bytes=32768 * num_layers=28 * block_size_factor=1 = 917504 bytes
+(EngineCore pid=310) INFO 07-28 20:16:05 [utils.py:44] Connectors do not specify a kv cache layout, defaulting to NHD.
+(EngineCore pid=310) INFO 07-28 20:16:05 [kv_connector_model_runner_mixin.py:262] Allocating a cross layer KV cache of shape (7426, 28, 2, 16, 4, 128)
+(EngineCore pid=310) [certus-grpc] KV base=0x7fdcf8000000 stride=917504 block_bytes=917504 slab_size_bytes=2097152 device=0 base_delta=0
+(EngineCore pid=310) INFO 07-28 20:16:05 [core.py:306] init engine (profile, create kv cache, warmup model) took 12.43 s
+(EngineCore pid=310) INFO 07-28 20:16:06 [factory.py:64] Creating v1 connector with name: OffloadingConnector and engine_id: 2cf0e232-3b05-4030-92d2-889c8a895e85
+(EngineCore pid=310) WARNING 07-28 20:16:06 [base.py:189] Initializing KVConnectorBase_V1. This API is experimental and subject to change in the future as we iterate the design.
+(EngineCore pid=310) INFO 07-28 20:16:06 [factory.py:51] Creating offloading spec with name: CertusGrpcOffloadingSpec
+(EngineCore pid=310) WARNING 07-28 20:16:06 [spec.py:75] Initializing OffloadingSpec. This API is experimental and subject to change in the future as we iterate the design.
+(EngineCore pid=310) [certus-grpc] per-block Reserve size from KV-cache config: page_size_bytes=32768 * num_layers=28 * block_size_factor=1 = 917504 bytes
+(EngineCore pid=310) INFO 07-28 20:16:06 [vllm.py:840] Asynchronous scheduling is enabled.
+(EngineCore pid=310) WARNING 07-28 20:16:06 [vllm.py:896] Enforce eager set, disabling torch.compile and CUDAGraphs. This is equivalent to setting -cc.mode=none -cc.cudagraph_mode=none
+(EngineCore pid=310) WARNING 07-28 20:16:06 [vllm.py:914] Inductor compilation was disabled by user settings, optimizations settings that are only active during inductor compilation will be ignored.
+(EngineCore pid=310) INFO 07-28 20:16:06 [kernel.py:205] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['vllm_c', 'native'])
+(EngineCore pid=310) INFO 07-28 20:16:06 [vllm.py:1089] Cudagraph is disabled under eager mode
+(EngineCore pid=310) INFO 07-28 20:16:06 [compilation.py:303] Enabled custom fusions: norm_quant, act_quant
+(APIServer pid=1) INFO 07-28 20:16:06 [api_server.py:598] Supported tasks: ['generate']
+(APIServer pid=1) INFO 07-28 20:16:06 [logger.py:28] `--enable-log-requests` is set but the minimum log level is higher than DEBUG. Only limited information will be logged to minimize overhead. To view more details, set `VLLM_LOGGING_LEVEL=DEBUG`.
+(APIServer pid=1) WARNING 07-28 20:16:06 [model.py:1437] Default vLLM sampling parameters have been overridden by the model's `generation_config.json`: `{'repetition_penalty': 1.05, 'temperature': 0.7, 'top_k': 20, 'top_p': 0.8}`. If this is not intended, please relaunch vLLM instance with `--generation-config vllm`.
+(APIServer pid=1) INFO 07-28 20:16:07 [hf.py:314] Detected the chat template content format to be 'string'. You can set `--chat-template-content-format` to override this.
+(APIServer pid=1) INFO 07-28 20:16:07 [api_server.py:602] Starting vLLM server on http://0.0.0.0:8000
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:37] Available routes are:
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /openapi.json, Methods: GET, HEAD
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /docs, Methods: GET, HEAD
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /docs/oauth2-redirect, Methods: GET, HEAD
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /redoc, Methods: GET, HEAD
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /tokenize, Methods: POST
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /detokenize, Methods: POST
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /load, Methods: GET
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /version, Methods: GET
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /health, Methods: GET
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /metrics, Methods: GET
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /v1/models, Methods: GET
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /ping, Methods: GET
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /ping, Methods: POST
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /invocations, Methods: POST
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /v1/chat/completions, Methods: POST
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /v1/chat/completions/batch, Methods: POST
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /v1/responses, Methods: POST
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /v1/responses/{response_id}, Methods: GET
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /v1/responses/{response_id}/cancel, Methods: POST
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /v1/completions, Methods: POST
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /v1/messages, Methods: POST
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /v1/messages/count_tokens, Methods: POST
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /inference/v1/generate, Methods: POST
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /scale_elastic_ep, Methods: POST
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /is_scaling_elastic_ep, Methods: POST
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /generative_scoring, Methods: POST
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /v1/chat/completions/render, Methods: POST
+(APIServer pid=1) INFO 07-28 20:16:07 [launcher.py:46] Route: /v1/completions/render, Methods: POST
+(APIServer pid=1) INFO:     Started server process [1]
+(APIServer pid=1) INFO:     Waiting for application startup.
+(APIServer pid=1) INFO:     Application startup complete.
+(APIServer pid=1) INFO:     127.0.0.1:37640 - "GET /v1/models HTTP/1.1" 200 OK
+(APIServer pid=1) INFO 07-28 20:16:12 [logger.py:63] Received request cmpl-8f322fca7a765fc4-0: params: SamplingParams(n=1, presence_penalty=0.0, frequency_penalty=0.0, repetition_penalty=1.05, temperature=0.0, top_p=1.0, top_k=0, min_p=0.0, seed=None, stop=[], stop_token_ids=[], bad_words=[], thinking_token_budget=None, include_stop_str_in_output=False, ignore_eos=False, max_tokens=1, min_tokens=0, logprobs=None, prompt_logprobs=None, skip_special_tokens=True, spaces_between_special_tokens=True, structured_outputs=None, extra_args=None), lora_request: None.
+(APIServer pid=1) INFO:     127.0.0.1:37650 - "POST /v1/completions HTTP/1.1" 200 OK
+(APIServer pid=1) INFO 07-28 20:16:12 [async_llm.py:412] Added request cmpl-8f322fca7a765fc4-0-8d5d3e0b.
+(APIServer pid=1) INFO 07-28 20:16:13 [logger.py:63] Received request cmpl-b8c0c8a599cb8418-0: params: SamplingParams(n=1, presence_penalty=0.0, frequency_penalty=0.0, repetition_penalty=1.05, temperature=0.0, top_p=1.0, top_k=0, min_p=0.0, seed=None, stop=[], stop_token_ids=[], bad_words=[], thinking_token_budget=None, include_stop_str_in_output=False, ignore_eos=False, max_tokens=1, min_tokens=0, logprobs=None, prompt_logprobs=None, skip_special_tokens=True, spaces_between_special_tokens=True, structured_outputs=None, extra_args=None), lora_request: None.
+(APIServer pid=1) INFO:     127.0.0.1:37650 - "POST /v1/completions HTTP/1.1" 200 OK
+(APIServer pid=1) INFO 07-28 20:16:13 [async_llm.py:412] Added request cmpl-b8c0c8a599cb8418-0-ab8c98ec.
+(APIServer pid=1) INFO 07-28 20:16:13 [logger.py:63] Received request cmpl-a051fae3d443f215-0: params: SamplingParams(n=1, presence_penalty=0.0, frequency_penalty=0.0, repetition_penalty=1.05, temperature=0.0, top_p=1.0, top_k=0, min_p=0.0, seed=None, stop=[], stop_token_ids=[], bad_words=[], thinking_token_budget=None, include_stop_str_in_output=False, ignore_eos=False, max_tokens=1, min_tokens=0, logprobs=None, prompt_logprobs=None, skip_special_tokens=True, spaces_between_special_tokens=True, structured_outputs=None, extra_args=None), lora_request: None.
+(APIServer pid=1) INFO:     127.0.0.1:37650 - "POST /v1/completions HTTP/1.1" 200 OK
+(APIServer pid=1) INFO 07-28 20:16:13 [async_llm.py:412] Added request cmpl-a051fae3d443f215-0-8bd7ff2c.
+(APIServer pid=1) INFO 07-28 20:16:13 [logger.py:63] Received request cmpl-849d1a37e1a91053-0: params: SamplingParams(n=1, presence_penalty=0.0, frequency_penalty=0.0, repetition_penalty=1.05, temperature=0.0, top_p=1.0, top_k=0, min_p=0.0, seed=None, stop=[], stop_token_ids=[], bad_words=[], thinking_token_budget=None, include_stop_str_in_output=False, ignore_eos=False, max_tokens=1, min_tokens=0, logprobs=None, prompt_logprobs=None, skip_special_tokens=True, spaces_between_special_tokens=True, structured_outputs=None, extra_args=None), lora_request: None.
+(APIServer pid=1) INFO:     127.0.0.1:37650 - "POST /v1/completions HTTP/1.1" 200 OK
+(APIServer pid=1) INFO 07-28 20:16:13 [async_llm.py:412] Added request cmpl-849d1a37e1a91053-0-8203b794.
+(APIServer pid=1) INFO 07-28 20:16:13 [logger.py:63] Received request cmpl-b47985ee1cdbc3c3-0: params: SamplingParams(n=1, presence_penalty=0.0, frequency_penalty=0.0, repetition_penalty=1.05, temperature=0.0, top_p=1.0, top_k=0, min_p=0.0, seed=None, stop=[], stop_token_ids=[], bad_words=[], thinking_token_budget=None, include_stop_str_in_output=False, ignore_eos=False, max_tokens=1, min_tokens=0, logprobs=None, prompt_logprobs=None, skip_special_tokens=True, spaces_between_special_tokens=True, structured_outputs=None, extra_args=None), lora_request: None.
+(APIServer pid=1) INFO:     127.0.0.1:37650 - "POST /v1/completions HTTP/1.1" 200 OK
+(APIServer pid=1) INFO 07-28 20:16:13 [async_llm.py:412] Added request cmpl-b47985ee1cdbc3c3-0-bc63ac23.
+(APIServer pid=1) INFO 07-28 20:16:13 [logger.py:63] Received request cmpl-babe07d5d03b43eb-0: params: SamplingParams(n=1, presence_penalty=0.0, frequency_penalty=0.0, repetition_penalty=1.05, temperature=0.0, top_p=1.0, top_k=0, min_p=0.0, seed=None, stop=[], stop_token_ids=[], bad_words=[], thinking_token_budget=None, include_stop_str_in_output=False, ignore_eos=False, max_tokens=1, min_tokens=0, logprobs=None, prompt_logprobs=None, skip_special_tokens=True, spaces_between_special_tokens=True, structured_outputs=None, extra_args=None), lora_request: None.
+(APIServer pid=1) INFO:     127.0.0.1:37650 - "POST /v1/completions HTTP/1.1" 200 OK
+(APIServer pid=1) INFO 07-28 20:16:13 [async_llm.py:412] Added request cmpl-babe07d5d03b43eb-0-aac58d51.
+(APIServer pid=1) INFO 07-28 20:16:15 [logger.py:63] Received request cmpl-bc6086156bcede8a-0: params: SamplingParams(n=1, presence_penalty=0.0, frequency_penalty=0.0, repetition_penalty=1.05, temperature=0.0, top_p=1.0, top_k=0, min_p=0.0, seed=None, stop=[], stop_token_ids=[], bad_words=[], thinking_token_budget=None, include_stop_str_in_output=False, ignore_eos=False, max_tokens=1, min_tokens=0, logprobs=None, prompt_logprobs=None, skip_special_tokens=True, spaces_between_special_tokens=True, structured_outputs=None, extra_args=None), lora_request: None.
+(APIServer pid=1) INFO:     127.0.0.1:37650 - "POST /v1/completions HTTP/1.1" 200 OK
+(APIServer pid=1) INFO 07-28 20:16:15 [async_llm.py:412] Added request cmpl-bc6086156bcede8a-0-a87ba44b.
+(APIServer pid=1) INFO 07-28 20:16:17 [logger.py:63] Received request cmpl-ad386f76ee8f12fb-0: params: SamplingParams(n=1, presence_penalty=0.0, frequency_penalty=0.0, repetition_penalty=1.05, temperature=0.0, top_p=1.0, top_k=0, min_p=0.0, seed=None, stop=[], stop_token_ids=[], bad_words=[], thinking_token_budget=None, include_stop_str_in_output=False, ignore_eos=False, max_tokens=1, min_tokens=0, logprobs=None, prompt_logprobs=None, skip_special_tokens=True, spaces_between_special_tokens=True, structured_outputs=None, extra_args=None), lora_request: None.
+(APIServer pid=1) INFO:     127.0.0.1:37650 - "POST /v1/completions HTTP/1.1" 200 OK
+(APIServer pid=1) INFO 07-28 20:16:17 [async_llm.py:412] Added request cmpl-ad386f76ee8f12fb-0-83e03c23.
+(APIServer pid=1) INFO 07-28 20:16:18 [loggers.py:271] Engine 000: Avg prompt throughput: 2140.1 tokens/s, Avg generation throughput: 0.6 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 8.4%, Prefix cache hit rate: 0.0%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 07-28 20:16:18 [metrics.py:103] KV Transfer metrics: GPU_to_Certus_total_bytes=1783627776, GPU_to_Certus_total_time=1.3170397780340863
+(APIServer pid=1) INFO 07-28 20:16:18 [logger.py:63] Received request cmpl-b095ceed1b7ecebf-0: params: SamplingParams(n=1, presence_penalty=0.0, frequency_penalty=0.0, repetition_penalty=1.05, temperature=0.0, top_p=1.0, top_k=0, min_p=0.0, seed=None, stop=[], stop_token_ids=[], bad_words=[], thinking_token_budget=None, include_stop_str_in_output=False, ignore_eos=False, max_tokens=1, min_tokens=0, logprobs=None, prompt_logprobs=None, skip_special_tokens=True, spaces_between_special_tokens=True, structured_outputs=None, extra_args=None), lora_request: None.
+(APIServer pid=1) INFO:     127.0.0.1:37650 - "POST /v1/completions HTTP/1.1" 200 OK
+(APIServer pid=1) INFO 07-28 20:16:18 [async_llm.py:412] Added request cmpl-b095ceed1b7ecebf-0-aff2dbb1.
+(APIServer pid=1) INFO 07-28 20:16:19 [logger.py:63] Received request cmpl-8b872660cbce0dfa-0: params: SamplingParams(n=1, presence_penalty=0.0, frequency_penalty=0.0, repetition_penalty=1.05, temperature=0.0, top_p=1.0, top_k=0, min_p=0.0, seed=None, stop=[], stop_token_ids=[], bad_words=[], thinking_token_budget=None, include_stop_str_in_output=False, ignore_eos=False, max_tokens=1, min_tokens=0, logprobs=None, prompt_logprobs=None, skip_special_tokens=True, spaces_between_special_tokens=True, structured_outputs=None, extra_args=None), lora_request: None.
+(APIServer pid=1) INFO:     127.0.0.1:37650 - "POST /v1/completions HTTP/1.1" 200 OK
+(APIServer pid=1) INFO 07-28 20:16:19 [async_llm.py:412] Added request cmpl-8b872660cbce0dfa-0-967ec72b.
+(APIServer pid=1) INFO 07-28 20:16:21 [logger.py:63] Received request cmpl-af6f606a6f77d743-0: params: SamplingParams(n=1, presence_penalty=0.0, frequency_penalty=0.0, repetition_penalty=1.05, temperature=0.0, top_p=1.0, top_k=0, min_p=0.0, seed=None, stop=[], stop_token_ids=[], bad_words=[], thinking_token_budget=None, include_stop_str_in_output=False, ignore_eos=False, max_tokens=1, min_tokens=0, logprobs=None, prompt_logprobs=None, skip_special_tokens=True, spaces_between_special_tokens=True, structured_outputs=None, extra_args=None), lora_request: None.
+(APIServer pid=1) INFO:     127.0.0.1:37650 - "POST /v1/completions HTTP/1.1" 200 OK
+(APIServer pid=1) INFO 07-28 20:16:21 [async_llm.py:412] Added request cmpl-af6f606a6f77d743-0-b5a51ae9.
+(APIServer pid=1) INFO 07-28 20:16:22 [logger.py:63] Received request cmpl-97e6cdda45730773-0: params: SamplingParams(n=1, presence_penalty=0.0, frequency_penalty=0.0, repetition_penalty=1.05, temperature=0.0, top_p=1.0, top_k=0, min_p=0.0, seed=None, stop=[], stop_token_ids=[], bad_words=[], thinking_token_budget=None, include_stop_str_in_output=False, ignore_eos=False, max_tokens=1, min_tokens=0, logprobs=None, prompt_logprobs=None, skip_special_tokens=True, spaces_between_special_tokens=True, structured_outputs=None, extra_args=None), lora_request: None.
+(APIServer pid=1) INFO:     127.0.0.1:37650 - "POST /v1/completions HTTP/1.1" 200 OK
+(APIServer pid=1) INFO 07-28 20:16:22 [async_llm.py:412] Added request cmpl-97e6cdda45730773-0-b90f8844.
+(APIServer pid=1) INFO 07-28 20:16:22 [logger.py:63] Received request cmpl-a413def5b2797982-0: params: SamplingParams(n=1, presence_penalty=0.0, frequency_penalty=0.0, repetition_penalty=1.05, temperature=0.0, top_p=1.0, top_k=0, min_p=0.0, seed=None, stop=[], stop_token_ids=[], bad_words=[], thinking_token_budget=None, include_stop_str_in_output=False, ignore_eos=False, max_tokens=1, min_tokens=0, logprobs=None, prompt_logprobs=None, skip_special_tokens=True, spaces_between_special_tokens=True, structured_outputs=None, extra_args=None), lora_request: None.
+(APIServer pid=1) INFO:     127.0.0.1:37650 - "POST /v1/completions HTTP/1.1" 200 OK
+(APIServer pid=1) INFO 07-28 20:16:22 [async_llm.py:412] Added request cmpl-a413def5b2797982-0-b8d4c7a2.
+(APIServer pid=1) INFO 07-28 20:16:22 [logger.py:63] Received request cmpl-b318010bdeef59ae-0: params: SamplingParams(n=1, presence_penalty=0.0, frequency_penalty=0.0, repetition_penalty=1.05, temperature=0.0, top_p=1.0, top_k=0, min_p=0.0, seed=None, stop=[], stop_token_ids=[], bad_words=[], thinking_token_budget=None, include_stop_str_in_output=False, ignore_eos=False, max_tokens=1, min_tokens=0, logprobs=None, prompt_logprobs=None, skip_special_tokens=True, spaces_between_special_tokens=True, structured_outputs=None, extra_args=None), lora_request: None.
+(APIServer pid=1) INFO:     127.0.0.1:37650 - "POST /v1/completions HTTP/1.1" 200 OK
+(APIServer pid=1) INFO 07-28 20:16:22 [async_llm.py:412] Added request cmpl-b318010bdeef59ae-0-8235de57.
+(APIServer pid=1) INFO 07-28 20:16:22 [logger.py:63] Received request cmpl-80ceadd7f57da2f8-0: params: SamplingParams(n=1, presence_penalty=0.0, frequency_penalty=0.0, repetition_penalty=1.05, temperature=0.0, top_p=1.0, top_k=0, min_p=0.0, seed=None, stop=[], stop_token_ids=[], bad_words=[], thinking_token_budget=None, include_stop_str_in_output=False, ignore_eos=False, max_tokens=1, min_tokens=0, logprobs=None, prompt_logprobs=None, skip_special_tokens=True, spaces_between_special_tokens=True, structured_outputs=None, extra_args=None), lora_request: None.
+(APIServer pid=1) INFO:     127.0.0.1:37650 - "POST /v1/completions HTTP/1.1" 200 OK
+(APIServer pid=1) INFO 07-28 20:16:22 [async_llm.py:412] Added request cmpl-80ceadd7f57da2f8-0-a4446bdf.
+(APIServer pid=1) INFO 07-28 20:16:28 [loggers.py:271] Engine 000: Avg prompt throughput: 3000.7 tokens/s, Avg generation throughput: 0.8 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 47.6%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 07-28 20:16:28 [metrics.py:103] KV Transfer metrics: GPU_to_Certus_total_bytes=1367998464, GPU_to_Certus_total_time=1.0923706489847973
+(APIServer pid=1) INFO:     127.0.0.1:57600 - "GET /metrics HTTP/1.1" 200 OK

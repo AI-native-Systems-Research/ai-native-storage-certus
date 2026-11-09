@@ -1,0 +1,51 @@
+{
+  "applied": "2026-10-20T22:58:11Z",
+  "sync_date": "2026-10-14",
+  "project": "dispatcher",
+  "branch": "fix/dispatcher-remove-clear-mt",
+  "head": "cccfb328e",
+  "base": "af221dd82",
+  "mode": "batch",
+  "approved_by": "Cornel Constantinescu, 2026-10-20 (\"let's finish the PR\")",
+  "backup": ".specify/sync/backups/20261020T225811Z/",
+  "backed_up_files": [
+    "specs/001-dispatcher-cache-interface/spec.md",
+    "specs/001-dispatcher-cache-interface/contracts/errors.md",
+    "specs/001-dispatcher-cache-interface/contracts/idispatcher.md"
+  ],
+  "applied_proposals": [
+    {"id": "B-1", "type": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "FR-018", "edits": 1},
+    {"id": "B-2", "type": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "edge case: remove", "edits": 1},
+    {"id": "B-3", "type": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "FR-038", "edits": 1},
+    {"id": "B-4", "type": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "Assumptions: background writer read reference", "edits": 1},
+    {"id": "B-5", "type": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/contracts/errors.md", "requirement": "Timeout + KeyNotFound rows", "edits": 2},
+    {"id": "B-6", "type": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/contracts/idispatcher.md", "requirement": "remove doc comment + postcondition", "edits": 2}
+  ],
+  "metadata_edits": [
+    {"spec": "001", "change": "Last Synced 2026-10-14 header added (branch fix/dispatcher-remove-clear-mt)"}
+  ],
+  "align_tasks": {
+    "file": ".specify/sync/align-tasks.md",
+    "ids": ["A-1", "A-2", "A-3", "A-4"],
+    "approval_notes": {
+      "A-1": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR",
+      "A-2": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR",
+      "A-3": "record as an ALIGN task with the open decision; recommendation (a): clear_memory_tier skips a reservation that is not completed, like a pinned entry; no code change in this PR",
+      "A-4": "approved as an ALIGN task only: record in align-tasks.md, no code change in this PR"
+    }
+  },
+  "closed_in_align_tasks": [
+    {"id": "A-03", "reason": "code fixed by cccfb328e; spec by B-3"},
+    {"id": "N-04", "reason": "specified by B-2, B-5, B-6"}
+  ],
+  "open_items": [],
+  "carried_over_open": ["A-01", "A-02", "A-04", "A-05", "A-06", "A-07", "A-08", "N-01"],
+  "not_applied": [
+    {"what": "B-3 companion_code_edit components/interfaces/src/idispatcher.rs:802-806", "reason": "outside specs/**; not part of the BACKFILL"}
+  ],
+  "new_specs_created": [],
+  "supersede_applied": [],
+  "source_files_modified": [],
+  "frontmatter_touched": false,
+  "drift_status_after_apply": "open (4 new ALIGN tasks incl. A-3 decision + 6 carried-over tasks + 2 carried-over decisions)"
+}

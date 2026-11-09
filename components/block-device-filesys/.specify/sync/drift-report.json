@@ -1,0 +1,68 @@
+{
+  "generated": "pending",
+  "project": "block-device-filesys",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 28,
+    "aligned": 27,
+    "drifted": 1,
+    "not_implemented": 0,
+    "unspecced_features": 1
+  },
+  "specs": [
+    {
+      "id": "001-block-device-filesys",
+      "title": "Block Device Filesys Component",
+      "aligned": [
+        "FR-001",
+        "FR-002",
+        "FR-003",
+        "FR-004",
+        "FR-005",
+        "FR-006",
+        "FR-007",
+        "FR-008",
+        "FR-009",
+        "FR-010",
+        "FR-011",
+        "FR-012",
+        "FR-013",
+        "FR-014",
+        "FR-016",
+        "FR-017",
+        "FR-018",
+        "FR-019",
+        "FR-020",
+        "FR-021",
+        "FR-022",
+        "SC-001",
+        "SC-002",
+        "SC-003",
+        "SC-004",
+        "SC-005",
+        "SC-006"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-015",
+          "spec_text": "The create() constructor and DeviceConfig::new have runnable doc examples.",
+          "actual": "DeviceConfig::new has a runnable ``` example (config.rs:42-57); create()'s doc example is a ```ignore block, so it is not compiled or run by cargo test.",
+          "location": "src/lib.rs:77",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "Internal config setters set_file_path/set_block_size/set_num_blocks (pub(crate), #[allow(dead_code)])",
+      "location": "src/lib.rs",
+      "lines": "95-109",
+      "suggested_spec": "Not public API; either remove as dead code or note as reserved config mutators. Out of scope for functional requirements."
+    }
+  ],
+  "conflicts": [],
+  "inputs_sha256": "bfbe03f2523896e81c52c42c505eea310f81ceada3ba0b2e3591ce5fa50c8416",
+  "git_commit": "72c7182b"
+}

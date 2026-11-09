@@ -1,0 +1,1 @@
+cmd_/home/dwaddington/certus/kernel/modules/gdrcopy/src/gdrdrv/Module.symvers := sed 's/ko$$/o/' /home/dwaddington/certus/kernel/modules/gdrcopy/src/gdrdrv/modules.order | scripts/mod/modpost -m -a  -o /home/dwaddington/certus/kernel/modules/gdrcopy/src/gdrdrv/Module.symvers -e -i Module.symvers   -T -

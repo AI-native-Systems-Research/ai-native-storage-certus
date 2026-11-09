@@ -1,0 +1,275 @@
+{
+  "generated": "2026-10-22T01:03:54Z",
+  "based_on": "drift-report.json 2026-10-22T01:03:54Z",
+  "project": "certus-transfer-endpoint",
+  "restamp_warning": "P05, P13, P15, P19 (and P07/P10/P11/P12 if they touch interface docs) change components/interfaces/src/itransfer_endpoint.rs; the spec-sync digest folds interfaces into every component, so re-stamp everything, last.",
+  "summary": {
+    "backfill": 18,
+    "align": 2,
+    "human_decision": 6,
+    "new_specs": 0,
+    "remove_from_spec": 0
+  },
+  "proposals": [
+    {
+      "id": "P01",
+      "requirement": "FR-006",
+      "direction": "BACKFILL",
+      "severity": "moderate",
+      "confidence": "HIGH",
+      "summary": "Request carries per-entry (key, addr, size, rkey), not base address + slot index; fix TransferContext/RemoteRegion entities",
+      "details": "see proposals.md P01",
+      "approved": false
+    },
+    {
+      "id": "P02",
+      "requirement": "FR-014",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "summary": "Send credits count every send-queue request (writes and message sends), clamped to device grant",
+      "details": "see proposals.md P02",
+      "approved": false
+    },
+    {
+      "id": "P03",
+      "requirement": "FR-016/INV-10",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "confidence": "MEDIUM",
+      "summary": "Deadline runs from message-credit take + outbox enqueue, not literally the post",
+      "details": "see proposals.md P03",
+      "approved": false
+    },
+    {
+      "id": "P04",
+      "requirement": "FR-020",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "summary": "remote-lookup logic unmodified; only its test doubles gained T083 bounce methods",
+      "details": "see proposals.md P04",
+      "approved": false
+    },
+    {
+      "id": "P05",
+      "requirement": "FR-024/INV-13",
+      "direction": "HUMAN_DECISION",
+      "severity": "moderate",
+      "confidence": "MEDIUM",
+      "summary": "Over-quota/before-hello OP_FETCH, bad/duplicate OP_HELLO, OP_ERROR for non-fetch tear down instead of being answered: backfill exception (recommended) or answer",
+      "details": "see proposals.md P05",
+      "approved": false
+    },
+    {
+      "id": "P06",
+      "requirement": "FR-025",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "summary": "Chunk to min(peer max_entries, local encodable); zero max_entries fails the connection",
+      "details": "see proposals.md P06",
+      "approved": false
+    },
+    {
+      "id": "P07",
+      "requirement": "FR-026",
+      "direction": "ALIGN",
+      "severity": "moderate",
+      "confidence": "HIGH",
+      "summary": "CODE DEFECT: requests_outstanding_outbound / requests_in_service_inbound never written, always 0; compute from Session at snapshot",
+      "details": "see proposals.md P07",
+      "approved": false
+    },
+    {
+      "id": "P08",
+      "requirement": "SC-002",
+      "direction": "BACKFILL",
+      "severity": "moderate",
+      "confidence": "MEDIUM",
+      "summary": "Legacy loopback scenario reproduced here; running remote-lookup's test layer against this endpoint is cutover (T065)",
+      "details": "see proposals.md P08",
+      "approved": false
+    },
+    {
+      "id": "P09",
+      "requirement": "SC-008",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "summary": "FFI defined once in this crate; duplication ends at T066",
+      "details": "see proposals.md P09",
+      "approved": false
+    },
+    {
+      "id": "P10",
+      "requirement": "CT-1",
+      "direction": "HUMAN_DECISION",
+      "severity": "moderate",
+      "confidence": "MEDIUM",
+      "summary": "IncompatiblePeer never produced; recommend ALIGN: fail waiting fetches with IncompatiblePeer naming both ranges",
+      "details": "see proposals.md P10",
+      "approved": false
+    },
+    {
+      "id": "P11",
+      "requirement": "CT-2",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "summary": "fetch does not return NotInitialized for missing landing region; fix interface doc",
+      "details": "see proposals.md P11",
+      "approved": false
+    },
+    {
+      "id": "P12",
+      "requirement": "CT-3",
+      "direction": "HUMAN_DECISION",
+      "severity": "major",
+      "confidence": "MEDIUM",
+      "summary": "No public way to land a fetch into the destination's own memory-tier pool (rkey hidden, overlap refused): add pool handle API or respecify landing regions as outside the pool",
+      "details": "see proposals.md P12",
+      "approved": false
+    },
+    {
+      "id": "P13",
+      "requirement": "CT-4",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "summary": "Contract bounce_alloc/bounce_free signatures take/return BounceLease",
+      "details": "see proposals.md P13",
+      "approved": false
+    },
+    {
+      "id": "P14",
+      "requirement": "CT-5",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "summary": "stats() returns zeros before initialize, not NotInitialized",
+      "details": "see proposals.md P14",
+      "approved": false
+    },
+    {
+      "id": "P15",
+      "requirement": "CT-6",
+      "direction": "HUMAN_DECISION",
+      "severity": "moderate",
+      "confidence": "MEDIUM",
+      "summary": "protocol_faults counts only received OP_ERROR; bad-reply teardowns count nothing; recommend ALIGN: count protocol teardowns",
+      "details": "see proposals.md P15",
+      "approved": false
+    },
+    {
+      "id": "P16",
+      "requirement": "WP-1",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "summary": "Frozen kinds must carry version 0 (non-zero refused), not ignored; include OP_HELLO_REPLY",
+      "details": "see proposals.md P16",
+      "approved": false
+    },
+    {
+      "id": "P17",
+      "requirement": "WP-2",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "summary": "Max OP_FETCH_REPLY is 368 bytes (padded), not 364",
+      "details": "see proposals.md P17",
+      "approved": false
+    },
+    {
+      "id": "P18",
+      "requirement": "WP-3",
+      "direction": "HUMAN_DECISION",
+      "severity": "moderate",
+      "confidence": "MEDIUM",
+      "summary": "Receives posted at Up, after establishment; first OP_HELLO may RNR-stall, relies on infinite RNR retry: post earlier or respecify",
+      "details": "see proposals.md P18",
+      "approved": false
+    },
+    {
+      "id": "P19",
+      "requirement": "WP-4",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "summary": "Address is host:port compared as written, not ip:port",
+      "details": "see proposals.md P19",
+      "approved": false
+    },
+    {
+      "id": "P20",
+      "requirement": "SPEC-1",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "summary": "OP_ERROR carries highest protocol version, not per kind",
+      "details": "see proposals.md P20",
+      "approved": false
+    },
+    {
+      "id": "P21",
+      "requirement": "TK-1",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "summary": "T031 text: context tables live in endpoint.rs; no TransferContext struct",
+      "details": "see proposals.md P21",
+      "approved": false
+    },
+    {
+      "id": "P22",
+      "requirement": "DOC-1",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "summary": "CLAUDE.md Current state: all methods implemented; verbs transport done",
+      "details": "see proposals.md P22",
+      "approved": false
+    },
+    {
+      "id": "P23",
+      "requirement": "DOC-2",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "summary": "plan.md Next Step: 83 tasks, Phases 1-10 done",
+      "details": "see proposals.md P23",
+      "approved": false
+    },
+    {
+      "id": "P24",
+      "requirement": "SRC-1",
+      "direction": "ALIGN",
+      "severity": "minor",
+      "confidence": "HIGH",
+      "summary": "Stale source comments (until T037-T040, unfilled counters, slice-C dead_code allows)",
+      "details": "see proposals.md P24",
+      "approved": false
+    },
+    {
+      "id": "P25",
+      "requirement": "SRC-2",
+      "direction": "HUMAN_DECISION",
+      "severity": "minor",
+      "confidence": "LOW",
+      "summary": "Outside-pool memory-tier pointer reported Miss; Principle XI favours Failed",
+      "details": "see proposals.md P25",
+      "approved": false
+    },
+    {
+      "id": "P26",
+      "requirement": "UNSPECCED",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "confidence": "MEDIUM",
+      "summary": "Backfill abort-on-panic, push-on-endpoint-thread refusal, newer-wins/Draining/NameMismatch, private_data format, landing-region validation, shutdown leak, stale-NoSpace guard, reply strictness, telemetry extras",
+      "details": "see proposals.md P26",
+      "approved": false
+    }
+  ]
+}
