@@ -1,0 +1,169 @@
+[workspace]
+# Paths to sub-projects
+members = [
+    "lib/component-framework/crates/component-core",
+    "lib/component-framework/crates/component-macros",
+    "lib/component-framework/crates/component-framework",
+    "lib/component-framework/examples",
+    "components/example-helloworld",
+    "lib/spdk-sys",
+    "components/interfaces",
+    "components/spdk-env",
+    "apps/helloworld-mainline",
+    "apps/iops-benchmark",
+    "apps/iops-benchmark-md",
+    "apps/nvme-ns-manager",
+    "apps/nvme-bar1-bench",
+    "apps/extent-benchmark",
+    "components/block-device-spdk-nvme",
+    "components/block-device-filesys",
+    "components/block-device-kernel",
+    "components/disk-partition-manager",
+    "components/extent-manager",
+    "components/extended-metadata-store",
+    "components/logger",
+    "components/dispatch-map",
+    "components/memory-tier",
+    "components/dispatcher",
+    "components/dispatcher-p2p",
+    "components/gpu-services",
+    "apps/gpu-handle-test-server",
+    "apps/gpu-show",
+    "apps/gpu-bb-vs-p2p",
+    "components/example-helloworld-dylib",
+    "components/eviction-policy-lru",
+    "components/eviction-policy-session-lists",
+    "components/eviction-policy-optimized",
+    "components/remote-lookup",
+    "components/remote-lookup-rdma-initiator",
+    "components/remote-lookup-rdma-responder",
+    "components/certus-transfer-endpoint",
+    "apps/dynamic-loading-example",
+    "apps/certus-server-yaml",
+    "apps/remote-lookup-bench",
+    "apps/eviction-replay-benchmark",
+    "components/zyre",
+    "lib/shm-queue",
+    "lib/shmq-dispatcher",
+    "apps/certus-server",
+    "apps/workload-generator/crates/workload-model",
+    "apps/workload-generator/crates/workload-trace",
+    "apps/workload-generator/crates/workload-wire",
+    "apps/workload-generator/crates/workload-gen",
+    "apps/workload-generator/crates/workload-node-agent"
+]
+
+# SPDK crates require pre-built native libraries at deps/spdk-build/.
+# They are excluded from default builds so `cargo build` succeeds without
+# SPDK deps. Build them explicitly with: cargo build -p block-device-spdk-nvme
+#
+# NOTE (002-remote-lookup-rdma): `remote-lookup` is moved OUT of default-members.
+# Its 002 rewrite consumes IDispatchMap/IDispatcher, which are
+# `#[cfg(feature = "spdk")]` in the `interfaces` crate, so remote-lookup enables
+# `interfaces/spdk` and thus transitively requires `spdk-sys`. This is a
+# deliberate short-term assumption ("SPDK is always enabled"); the SPDK-orthogonal
+# future is to ungate those opaque-pointer trait definitions (they reference no
+# SPDK type) as was done for IMemoryTier. See
+# specs/002-remote-lookup-rdma/research.md Decision 10.
+default-members = [
+    "lib/component-framework/crates/component-core",
+    "lib/component-framework/crates/component-macros",
+    "lib/component-framework/crates/component-framework",
+    "lib/component-framework/examples",
+    "components/example-helloworld",
+    "components/example-helloworld-dylib",
+    "apps/helloworld-mainline",
+    "apps/dynamic-loading-example",
+    "components/logger",
+    "components/gpu-services",
+    "components/eviction-policy-lru",
+    "components/eviction-policy-session-lists",
+    "components/eviction-policy-optimized",
+    "apps/eviction-replay-benchmark",
+    "lib/shm-queue",
+    # certus-transfer-endpoint IS a default member, unlike
+    # remote-lookup-rdma-initiator/-responder, which are members but not default
+    # ones because they link rdma-core unconditionally. Here rdma-core sits behind
+    # the `rdma` feature and SPDK behind `spdk`, so the default build needs neither
+    # a NIC nor an NVMe device and exercises the connection-table, framing, credit
+    # and pin logic over an in-process seam. Constitution Principle VIII requires
+    # this. It is only possible because IDispatchMap and LookupResult are ungated
+    # in `interfaces` (they reference no SPDK type), so the dispatch-map receptacle
+    # does not drag in spdk-sys the way remote-lookup's does.
+    "components/certus-transfer-endpoint",
+    # Workload generator: four CUDA-free crates, all default members, so
+    # `cargo test --all` covers the simulation core, trace writing, wire framing
+    # and the generator itself with no accelerator and no server.
+    #
+    # `workload-gen` became one under FR-079: every node — including the local
+    # one — is driven through `workload-node-agent` over TCP, so the mailbox and
+    # the device buffer live in that crate and the generator links neither. Only
+    # `workload-node-agent` is a member without being a default one, like
+    # `apps/remote-lookup-bench`, because it attaches to the mailbox and links
+    # CUDA.
+    "apps/workload-generator/crates/workload-model",
+    "apps/workload-generator/crates/workload-trace",
+    "apps/workload-generator/crates/workload-wire",
+    "apps/workload-generator/crates/workload-gen"
+]
+
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.81"
+license = "MIT"
+
+# Lint levels for every member (each opts in with `[lints] workspace = true`).
+# Everything is at warn by choice: the set is visible but non-blocking until
+# the backlog is paid down. Knobs (msrv, test carve-outs) live in clippy.toml.
+# Posture is recorded in docs/agents/rust.md.
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "warn"
+missing_safety_doc = "warn"
+allow_attributes_without_reason = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+pedantic = { level = "warn", priority = -1 }
+
+[workspace.dependencies]
+component-core = { path = "lib/component-framework/crates/component-core" }
+component-macros = { path = "lib/component-framework/crates/component-macros" }
+component-framework = { path = "lib/component-framework/crates/component-framework" }
+example-helloworld = { path = "components/example-helloworld" }
+interfaces = { path = "components/interfaces" }
+spdk-sys = { path = "lib/spdk-sys" }
+spdk-env = { path = "components/spdk-env" }
+block-device-spdk-nvme = { path = "components/block-device-spdk-nvme" }
+block-device-filesys = { path = "components/block-device-filesys" }
+block-device-kernel = { path = "components/block-device-kernel" }
+logger = { path = "components/logger" }
+dispatch-map = { path = "components/dispatch-map" }
+memory-tier = { path = "components/memory-tier" }
+dispatcher = { path = "components/dispatcher", default-features = false }
+dispatcher-p2p = { path = "components/dispatcher-p2p", default-features = false }
+disk-partition-manager = { path = "components/disk-partition-manager" }
+extent-manager = { path = "components/extent-manager" }
+extended-metadata-store = { path = "components/extended-metadata-store" }
+gpu-services = { path = "components/gpu-services" }
+eviction-policy-lru = { path = "components/eviction-policy-lru" }
+eviction-policy-session-lists = { path = "components/eviction-policy-session-lists" }
+eviction-policy-optimized = { path = "components/eviction-policy-optimized" }
+remote-lookup = { path = "components/remote-lookup" }
+remote-lookup-rdma-initiator = { path = "components/remote-lookup-rdma-initiator" }
+remote-lookup-rdma-responder = { path = "components/remote-lookup-rdma-responder" }
+certus-transfer-endpoint = { path = "components/certus-transfer-endpoint" }
+zyre = { path = "components/zyre" }
+shm-queue = { path = "lib/shm-queue" }
+shmq-dispatcher = { path = "lib/shmq-dispatcher" }
+workload-model = { path = "apps/workload-generator/crates/workload-model" }
+workload-trace = { path = "apps/workload-generator/crates/workload-trace" }
+workload-wire = { path = "apps/workload-generator/crates/workload-wire" }
+libloading = "0.8"

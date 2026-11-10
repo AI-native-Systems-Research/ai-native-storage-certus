@@ -1,0 +1,72 @@
+id: kv-compression-quantization-and-repacking
+kind: atomic
+name: Quantize on Eviction to Host
+status: candidate
+parameters:
+  evicted_blocks:
+    type: integer
+    range:
+    - 1
+    - 2048
+    default: 128
+  source_bits:
+    type: integer
+    range:
+    - 16
+    - 16
+    default: 16
+  target_bits:
+    type: integer
+    range:
+    - 2
+    - 8
+    default: 4
+  block_size:
+    type: integer
+    range:
+    - 1
+    - 64
+    default: 16
+  num_layers:
+    type: integer
+    range:
+    - 24
+    - 128
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range:
+    - 256
+    - 16384
+    default: 4096
+keyspaces:
+  quantized_blocks:
+    cardinality: evicted_blocks
+    object_bytes: block_size * num_layers * kv_bytes_per_token_per_layer * target_bits
+      / source_bits
+    sharing: per_actor
+    disjoint_between_actors: true
+preconditions:
+- subject: quantized_blocks
+  state: absent_from_store
+  value: true
+phases:
+- id: quantized-eviction
+  actors:
+    count: 1
+    arrival: burst
+    concurrency: 1
+  operations:
+  - op: store
+    keys: quantized_blocks
+    order: sequential
+    repeat: evicted_blocks
+measure:
+- phase: quantized-eviction
+  operation: store
+  metrics:
+  - throughput_MBps
+  - latency_p99_ms
+expected_io:
+  stores: evicted_blocks
+  loads: '0'

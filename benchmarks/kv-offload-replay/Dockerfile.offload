@@ -1,0 +1,149 @@
+# Unified vLLM workload-driver image for the KV-offload replay benchmark.
+#
+# ONE image + ONE driver (run_multiturn_offloading.py) drives three self-contained
+# backends, selected at run time by environment (this replaces the former
+# Dockerfile.nooffload / Dockerfile.cpu-offload / Dockerfile.cputier trio):
+#
+#   NoOffload    -e OFFLOAD_MODE=none
+#                GPU-only baseline: no kv_transfer_config, evicted KV recomputed.
+#   CPUOffload   (default; OFFLOAD_MODE unset, SECONDARY_TIER empty)
+#                vLLM OffloadingConnector + CPUOffloadingSpec -> pinned host RAM.
+#   Tiered-CPU-FS -e SECONDARY_TIER=fs  (or -e DISK_DIR=/path)
+#                OffloadingConnector + TieringOffloadingSpec: CPU primary (host RAM
+#                via /dev/shm) + "fs" disk secondary (FileSystemTierManager).
+#
+# All three are self-contained: a single vLLM process, NO separate server, NO
+# gRPC, NO CUDA IPC (so no --ipc=host, no CERTUS_SERVER). They run the same
+# 450-conversation / 12-turn ShareGPT workload for head-to-head comparison. The
+# two Tracing* connector modules are baked in too, so TRACE_OFFLOAD=1 works.
+#
+# Build (context = repo root — needs benchmarks/kv-offload-replay/ + the dataset):
+#   podman build -f benchmarks/kv-offload-replay/Dockerfile.offload -t certus-offload .
+#
+# Run examples (GPU required for all three):
+#   # NoOffload baseline
+#   podman run --rm --device nvidia.com/gpu=all -e OFFLOAD_MODE=none \
+#       -v $HOME/.cache/huggingface:/root/.cache/huggingface certus-offload
+#   # CPUOffload (pinned host RAM; CPU_BYTES < free RAM)
+#   podman run --rm --device nvidia.com/gpu=all -e CPU_BYTES=17179869184 \
+#       -v $HOME/.cache/huggingface:/root/.cache/huggingface certus-offload
+#   # Tiered CPU+FS (CPU tier is a /dev/shm mmap -> --shm-size >= CPU_BYTES; bind
+#   # a host dir for the fs tier so it hits real disk)
+#   podman run --rm --device nvidia.com/gpu=all --shm-size 36g \
+#       -e SECONDARY_TIER=fs -e CPU_BYTES=34359738368 \
+#       -e FS_ROOT_DIR=/mnt/fs-tier/kv-tier \
+#       -v /mnt/certus1/hf-cache:/root/.cache/huggingface:z \
+#       -v /mnt/certus1/kv-fs-tier:/mnt/fs-tier:z certus-offload
+#   # docker equivalent of --device nvidia.com/gpu=all: --gpus all
+
+# Tiering (SECONDARY_TIER=fs) requires vLLM 0.26+ (the tiering.fs framework does
+# not exist earlier); NoOffload / CPUOffload work on older bases too. Default to
+# 0.26.0 so all three modes are available from one image. Override with
+#   podman build --build-arg VLLM_VERSION=<x.y.z> ...
+ARG VLLM_VERSION=0.26.0
+FROM docker.io/vllm/vllm-openai:v${VLLM_VERSION}
+ENTRYPOINT []
+
+# ── Bake in the forked tiering fix (default ON) ──────────────────────────────
+# The stock base image ships upstream vLLM 0.26.0, whose tiering plugin
+# (OffloadingConnector -> TieringOffloadingSpec) crashes at scale with a
+# _req_state KeyError -> EngineDeadError (0/10 completions @ 450 convs). Our fork
+# fix/tiering-deferred-finalize-v0.26.0 (@5e20aeb5, cut from the v0.26.0 tag) is
+# a pure-Python 3-file patch that fixes it (10/10). We COPY those vendored files
+# over the prebuilt base rather than pip-installing from git — the base already
+# has vLLM's compiled extensions, so a source rebuild would be slow and needless.
+#
+# The fix is applied BY DEFAULT so the tiered arm survives at scale out of the
+# box (a plain build, profile_all.sh, and serve_vllm.sh all get it). The patch
+# only exists for a 0.26.x base:
+#   default (patched):  VLLM_FIX_TIERING=1  — applied on 0.26.x, skipped elsewhere
+#   stock/crashing arm: podman build --build-arg VLLM_FIX_TIERING=0 ...  (opt out,
+#                       e.g. build_026.sh's head-to-head baseline)
+# On a non-0.26 base the patch does not apply and the build proceeds on stock vLLM
+# (warn + skip) rather than failing, so cross-version builds keep working.
+#
+# See benchmarks/kv-offload-replay/vllm-fix2/PROVENANCE.md for source + sync.
+ARG VLLM_FIX_TIERING=1
+# Re-declare VLLM_VERSION inside the build stage so the RUN below can read it
+# (an ARG declared before FROM is not visible after FROM; a valueless re-declare
+# inherits the pre-FROM default, or the --build-arg value when one is passed).
+ARG VLLM_VERSION
+# Stage the vendored patch unconditionally (COPY cannot be conditional); the
+# RUN below applies it only when the build-arg is on, and only onto a 0.26 base.
+COPY benchmarks/kv-offload-replay/vllm-fix2/ /tmp/vllm-fix2/
+RUN set -eux; \
+    if [ "${VLLM_FIX_TIERING}" = "1" ] && case "${VLLM_VERSION}" in 0.26*) true ;; *) false ;; esac; then \
+      D=/usr/local/lib/python3.12/dist-packages/vllm; \
+      cp /tmp/vllm-fix2/manager.py   "$D/v1/kv_offload/tiering/manager.py"; \
+      cp /tmp/vllm-fix2/scheduler.py "$D/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py"; \
+      cp /tmp/vllm-fix2/base.py      "$D/v1/kv_offload/base.py"; \
+      python3 -c "import py_compile,sys; [py_compile.compile(f, doraise=True) for f in sys.argv[1:]]" \
+        "$D/v1/kv_offload/tiering/manager.py" \
+        "$D/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py" \
+        "$D/v1/kv_offload/base.py"; \
+      echo "[Dockerfile.offload] baked tiering fix (fork fix/tiering-deferred-finalize-v0.26.0 @5e20aeb5)"; \
+    elif [ "${VLLM_FIX_TIERING}" = "1" ]; then \
+      echo "[Dockerfile.offload] WARNING: tiering fix requested but base is vLLM ${VLLM_VERSION} (fix is 0.26.x-only) — proceeding on STOCK vLLM"; \
+    else \
+      echo "[Dockerfile.offload] stock vLLM ${VLLM_VERSION} (tiering fix opted out, VLLM_FIX_TIERING=0)"; \
+    fi; \
+    rm -rf /tmp/vllm-fix2
+LABEL org.certus.vllm-fix-tiering="${VLLM_FIX_TIERING}"
+
+# GPU is REQUIRED at run time (vLLM loads the model on the GPU). WHICH GPU is a
+# run-time choice — select it on the run command, not here (do NOT bake
+# NVIDIA_VISIBLE_DEVICES into the image):
+#   docker:  --gpus all   |  --gpus '"device=0"'
+#   podman:  --device nvidia.com/gpu=all  |  --device nvidia.com/gpu=0
+# Those flags trigger the NVIDIA container runtime to inject the chosen GPU +
+# the host's libcuda.so — a HOST prerequisite (nvidia-container-toolkit / CDI).
+LABEL org.certus.gpu-required="true" \
+      org.certus.host-prereq="nvidia-container-toolkit (docker --gpus / podman CDI); Tiered mode needs --shm-size >= CPU_BYTES"
+
+WORKDIR /workspace
+
+# The unified driver + its in-process tracer modules (only imported when
+# TRACE_OFFLOAD=1: the generic connector-layer tracing_connector and the
+# manager-layer tracing_offloading_manager), plus the shared dataset (paths
+# relative to the repo-root build context). torch/numpy/vllm come from the base
+# image; no extra pip deps.
+COPY benchmarks/kv-offload-replay/run_multiturn_offloading.py /workspace/bench/
+# Shared workload modules the driver imports: run_multiturn_common (batched loop +
+# engine/telemetry setup, imported at top) and run_multiturn_async (async
+# per-conversation model, imported only on WORKLOAD_MODE=async). Both must be
+# present or the driver ModuleNotFound's.
+COPY benchmarks/kv-offload-replay/run_multiturn_common.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/run_multiturn_sync_batched.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/run_multiturn_async.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/tracing_connector.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/tracing_offloading_manager.py /workspace/bench/
+COPY data/sharegpt_12turn_450.json /workspace/data/sharegpt_12turn_450.json
+
+COPY benchmarks/kv-offload-replay/docker-entrypoint-offload.sh /usr/local/bin/offload-entrypoint
+RUN chmod +x /usr/local/bin/offload-entrypoint
+
+# Defaults match the 450x12 runbook (RUNBOOK-cpu-and-sharedstorage.md). DATASET_PATH
+# + NUM_CONVS are set explicitly so the container runs the 450x12 workload
+# regardless of the driver's baked-in default. The mode defaults to CPUOffload
+# (OFFLOAD_MODE empty, SECONDARY_TIER empty); set OFFLOAD_MODE=none for the
+# baseline or SECONDARY_TIER=fs for tiering at run time. CPU_BYTES is the pinned
+# host-RAM offload tier — must fit free RAM (Tiered also needs --shm-size >= it).
+# PYTHONPATH lets vLLM import the tracer modules by name when TRACE_OFFLOAD=1.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/workspace/bench \
+    MODEL=NousResearch/Meta-Llama-3-8B \
+    DATASET_PATH=/workspace/data/sharegpt_12turn_450.json \
+    NUM_CONVS=450 \
+    MAX_MODEL_LEN=8192 \
+    OUTPUT_TOKENS=150 \
+    MAX_NUM_SEQS=64 \
+    GPU_MEM_UTIL=0.90 \
+    CPU_BYTES=17179869184 \
+    OFFLOAD_MODE= \
+    SECONDARY_TIER= \
+    FS_ROOT_DIR=/mnt/fs-tier/kv-tier \
+    TRACE_OFFLOAD=0 \
+    HF_HUB_OFFLINE=1 \
+    WORKLOAD=/workspace/bench/run_multiturn_offloading.py
+
+ENTRYPOINT ["/usr/local/bin/offload-entrypoint"]

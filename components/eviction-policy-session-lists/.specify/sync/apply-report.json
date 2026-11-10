@@ -1,0 +1,17 @@
+{
+  "applied": "2026-10-31T04:54:40Z",
+  "backup": "backups/20261031T045440Z/",
+  "specs_updated": [
+    {
+      "spec": "specs/001-session-list-eviction/spec.md",
+      "requirement": "Observability",
+      "before": "`src/lib.rs:83-87,107-120`",
+      "after": "`src/lib.rs:83-87,149-162` (the `announced` field did not move; the announcement in `create_pool` moved by +42)",
+      "change": "citation",
+      "applied_at": "2026-10-31T04:54:40Z"
+    }
+  ],
+  "align_tasks_generated": 0,
+  "not_applied": [],
+  "source_files_changed": 0
+}

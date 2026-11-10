@@ -1,0 +1,943 @@
+//! Background write worker for memory-tier-to-SSD persistence and SSD eviction.
+
+use crossbeam_channel::{Receiver, Sender};
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
+
+use interfaces::{CacheKey, IDispatchMap, IExtentManager, ILogger, IMemoryTier, LookupResult};
+
+use crate::{EvictionEvent, EvictionReason, TierEventCounters};
+
+/// A job for the background writer to persist a memory-tier entry to SSD.
+#[derive(Debug)]
+pub struct WriteJob {
+    /// Cache key identifying the entry.
+    pub key: u64,
+    /// Size of the data in bytes.
+    pub size: u32,
+    /// Index of the data block device to write to.
+    pub device_index: usize,
+}
+
+/// Handle to the background writer thread.
+pub(crate) struct BackgroundWriter {
+    shutdown: Arc<AtomicBool>,
+    handle: Option<JoinHandle<()>>,
+    sender: Sender<WriteJob>,
+    in_flight: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl BackgroundWriter {
+    /// Start the background writer thread.
+    ///
+    /// The thread drains `WriteJob`s from the channel until the shutdown
+    /// flag is set and the channel is empty.
+    #[cfg(test)]
+    pub fn start<F>(process_job: F) -> Self
+    where
+        F: FnMut(WriteJob) + Send + 'static,
+    {
+        Self::start_named(0, process_job)
+    }
+
+    /// Start a named background writer thread (used by `ParallelBackgroundWriter`).
+    pub(crate) fn start_named<F>(drive_idx: usize, mut process_job: F) -> Self
+    where
+        F: FnMut(WriteJob) + Send + 'static,
+    {
+        let (sender, receiver): (Sender<WriteJob>, Receiver<WriteJob>) =
+            crossbeam_channel::unbounded();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_clone = Arc::clone(&shutdown);
+        let in_flight = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let in_flight_clone = Arc::clone(&in_flight);
+
+        let handle = thread::Builder::new()
+            .name(format!("dispatcher-bg-writer-{drive_idx}"))
+            .spawn(move || {
+                Self::worker_loop(
+                    &shutdown_clone,
+                    &receiver,
+                    &in_flight_clone,
+                    &mut process_job,
+                );
+            })
+            .expect("failed to spawn background writer thread");
+
+        Self {
+            shutdown,
+            handle: Some(handle),
+            sender,
+            in_flight,
+        }
+    }
+
+    /// Enqueue a write job for background processing.
+    pub(crate) fn enqueue(&self, job: WriteJob) -> Result<(), WriteJob> {
+        self.in_flight
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.sender.send(job).map_err(|e| {
+            self.in_flight
+                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            e.0
+        })
+    }
+
+    /// Return the number of jobs currently in-flight (enqueued but not yet processed).
+    pub(crate) fn in_flight(&self) -> usize {
+        self.in_flight.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Block until all jobs enqueued before this call have been processed.
+    ///
+    /// Jobs enqueued concurrently by other threads after this call begins are
+    /// not guaranteed to be complete when this returns.
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub fn flush(&self) {
+        while self.in_flight.load(std::sync::atomic::Ordering::Acquire) > 0 {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// Signal shutdown and wait for the background thread to finish.
+    ///
+    /// All jobs already in the channel are processed before the thread exits.
+    pub(crate) fn shutdown(&mut self) {
+        self.shutdown.store(true, Ordering::Release);
+        // Drop a cloned sender to help close the channel for any receivers.
+        drop(self.sender.clone());
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+
+    fn worker_loop<F>(
+        shutdown: &AtomicBool,
+        receiver: &Receiver<WriteJob>,
+        in_flight: &std::sync::atomic::AtomicUsize,
+        process_job: &mut F,
+    ) where
+        F: FnMut(WriteJob),
+    {
+        loop {
+            match receiver.recv_timeout(std::time::Duration::from_millis(50)) {
+                Ok(job) => {
+                    process_job(job);
+                    in_flight.fetch_sub(1, std::sync::atomic::Ordering::Release);
+                }
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                    if shutdown.load(Ordering::Acquire) {
+                        while let Ok(job) = receiver.try_recv() {
+                            process_job(job);
+                            in_flight.fetch_sub(1, std::sync::atomic::Ordering::Release);
+                        }
+                        return;
+                    }
+                }
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
+            }
+        }
+    }
+}
+
+impl Drop for BackgroundWriter {
+    fn drop(&mut self) {
+        if self.handle.is_some() {
+            self.shutdown();
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Parallel Background Writer (one thread per drive)
+// ---------------------------------------------------------------------------
+
+/// A pool of per-drive `BackgroundWriter` threads.
+///
+/// Routes each `WriteJob` to the writer responsible for its target drive,
+/// enabling concurrent write-through across multiple NVMe devices.
+pub struct ParallelBackgroundWriter {
+    writers: Vec<BackgroundWriter>,
+    num_drives: usize,
+}
+
+impl std::fmt::Debug for ParallelBackgroundWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ParallelBackgroundWriter")
+            .field("num_drives", &self.num_drives)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ParallelBackgroundWriter {
+    /// Start one writer thread per drive.
+    ///
+    /// `make_processor(drive_idx)` is called once per drive to produce the
+    /// job-processing closure for that drive's dedicated thread.
+    pub fn start<F>(num_drives: usize, make_processor: impl Fn(usize) -> F) -> Self
+    where
+        F: FnMut(WriteJob) + Send + 'static,
+    {
+        let writers = (0..num_drives)
+            .map(|idx| BackgroundWriter::start_named(idx, make_processor(idx)))
+            .collect();
+
+        Self {
+            writers,
+            num_drives,
+        }
+    }
+
+    /// Enqueue a write job, routing to the writer for its target drive.
+    pub fn enqueue(&self, job: WriteJob) -> Result<(), WriteJob> {
+        let idx = job.device_index % self.num_drives;
+        self.writers[idx].enqueue(job)
+    }
+
+    /// Total number of jobs in-flight across all drive writers.
+    pub fn in_flight(&self) -> usize {
+        self.writers.iter().map(|w| w.in_flight()).sum()
+    }
+
+    /// Block until all per-drive queues are drained.
+    pub fn flush(&self) {
+        loop {
+            if self.writers.iter().all(|w| w.in_flight() == 0) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// Shutdown all per-drive writer threads, draining remaining jobs.
+    pub fn shutdown(&mut self) {
+        for writer in &mut self.writers {
+            writer.shutdown();
+        }
+    }
+}
+
+impl Drop for ParallelBackgroundWriter {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Eviction event sender
+// ---------------------------------------------------------------------------
+
+/// Sending half of the bounded eviction-event channel, paired with the
+/// dispatcher's dropped-event counter. Every eviction path sends through
+/// [`EvictionSender::emit`], so an event is either queued or counted as dropped
+/// (FR-042) — never lost silently — and the send never blocks.
+#[derive(Clone, Debug)]
+pub struct EvictionSender {
+    pub tx: Sender<EvictionEvent>,
+    pub dropped: Arc<AtomicU64>,
+}
+
+impl EvictionSender {
+    pub fn emit(&self, event: EvictionEvent) {
+        if self.tx.try_send(event).is_err() {
+            self.dropped.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Write-through pins
+// ---------------------------------------------------------------------------
+
+/// Owner of the dispatch-map read pin `populate` leaves on a new entry for its
+/// background write-through (released by the job's `convert_to_storage`).
+///
+/// A read reference carries no owner, so `IDispatchMap::remove` cannot tell this
+/// pin from a live reader and refuses until the job has run. FR-018 says `remove`
+/// must not wait for that: this ledger records which keys hold such a pin so
+/// `remove` can take it over, and makes the job and `remove` agree on who
+/// releases the pin and who frees the DRAM slot the job may still be reading.
+///
+/// It also records the keys whose latest write-through failed, so that
+/// `flush_to_ssd` can report an entry left with no SSD copy.
+#[derive(Default)]
+pub struct WriteThroughPins {
+    keys: Mutex<HashMap<CacheKey, PinState>>,
+    /// Keys whose latest write-through did not land on the block device.
+    failed: Mutex<HashSet<CacheKey>>,
+}
+
+impl std::fmt::Debug for WriteThroughPins {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WriteThroughPins").finish_non_exhaustive()
+    }
+}
+
+#[derive(Default)]
+struct PinState {
+    /// The write-through pin is held.
+    pinned: bool,
+    /// The job owning the pin is queued and has not started.
+    queued: bool,
+    /// The job owning the pin is running (reading the DRAM slot).
+    running: bool,
+    /// `remove` took the entry while the job ran: the job frees the slot.
+    removed: bool,
+    /// Queued jobs whose pin `remove` already released; they are dropped.
+    stale: u32,
+}
+
+/// What a write job does, decided by [`WriteThroughPins::start`].
+pub(crate) enum JobStart {
+    /// The job owns the key's pin: write, then settle under [`WriteThroughPins::finish`].
+    Owned,
+    /// `remove` already released this job's pin and removed the entry.
+    Stale,
+    /// No pin is recorded for the key (`schedule_write_through`): run as is.
+    Untracked,
+}
+
+impl WriteThroughPins {
+    /// Record the pin `populate` just left on `key` and queue its job with
+    /// `enqueue` (true if queued). Under the lock, so the job cannot start first.
+    pub(crate) fn pin(&self, key: CacheKey, enqueue: impl FnOnce() -> bool) {
+        let mut keys = self.keys.lock().unwrap();
+        let s = keys.entry(key).or_default();
+        s.pinned = true;
+        s.queued = enqueue();
+    }
+
+    /// A write job for `key` was dequeued.
+    pub(crate) fn start(&self, key: CacheKey) -> JobStart {
+        let mut keys = self.keys.lock().unwrap();
+        let Some(s) = keys.get_mut(&key) else {
+            return JobStart::Untracked;
+        };
+        if s.stale > 0 {
+            s.stale -= 1;
+            Self::forget_if_idle(&mut keys, key);
+            return JobStart::Stale;
+        }
+        if !s.queued {
+            return JobStart::Untracked;
+        }
+        s.queued = false;
+        s.running = true;
+        JobStart::Owned
+    }
+
+    /// The owned job for `key` is done with the DRAM slot. Runs `settle` under the
+    /// lock: `settle(true)` if the job still owns the pin (it converts or releases
+    /// it), `settle(false)` if `remove` took the entry meanwhile (the job frees the
+    /// slot and the extent it wrote).
+    pub(crate) fn finish(&self, key: CacheKey, settle: impl FnOnce(bool)) {
+        let mut keys = self.keys.lock().unwrap();
+        let owned = keys.get_mut(&key).map_or(true, |s| {
+            s.running = false;
+            s.pinned = false;
+            !std::mem::take(&mut s.removed)
+        });
+        settle(owned);
+        Self::forget_if_idle(&mut keys, key);
+    }
+
+    /// `dm.remove(key)` refused with `ActiveReferences`. If the reference is the
+    /// write-through pin, take it over: release it and remove the entry without
+    /// waiting for the job (FR-018). A reader's reference still refuses.
+    ///
+    /// Returns `None` if refused, `Some(job_frees_slot)` once the entry is gone;
+    /// `job_frees_slot` is true when the job is reading the slot right now.
+    pub(crate) fn remove_entry(&self, dm: &dyn IDispatchMap, key: CacheKey) -> Option<bool> {
+        let mut keys = self.keys.lock().unwrap();
+        let Some(s) = keys.get_mut(&key).filter(|s| s.pinned) else {
+            // No pin recorded (any more): the refusing reference may have been a
+            // pin released since, so try once more.
+            return dm.remove(key).ok().map(|()| false);
+        };
+        dm.release_read(key).ok()?;
+        if dm.remove(key).is_err() {
+            // A reader holds the key too: give the pin back to the job.
+            let _ = dm.take_read(key);
+            return None;
+        }
+        s.pinned = false;
+        if std::mem::take(&mut s.queued) {
+            s.stale += 1;
+        }
+        s.removed = s.running;
+        let job_frees_slot = s.running;
+        Self::forget_if_idle(&mut keys, key);
+        Some(job_frees_slot)
+    }
+
+    /// A write-through for `key` was settled: `landed` if its data reached the
+    /// block device and the SSD offset was recorded.
+    pub(crate) fn record_write(&self, key: CacheKey, landed: bool) {
+        let mut failed = self.failed.lock().unwrap();
+        if landed {
+            failed.remove(&key);
+        } else {
+            failed.insert(key);
+        }
+    }
+
+    /// Number of keys whose latest write-through failed and that `resident`
+    /// still holds; keys no longer resident (removed since) are forgotten.
+    pub(crate) fn failed_writes(&self, resident: impl Fn(CacheKey) -> bool) -> usize {
+        let mut failed = self.failed.lock().unwrap();
+        failed.retain(|&key| resident(key));
+        failed.len()
+    }
+
+    fn forget_if_idle(keys: &mut HashMap<CacheKey, PinState>, key: CacheKey) {
+        if keys
+            .get(&key)
+            .is_some_and(|s| !s.pinned && !s.queued && !s.running && s.stale == 0)
+        {
+            keys.remove(&key);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Background SSD Evictor
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+pub struct EvictorConfig {
+    pub threshold: f64,
+    pub low_watermark: f64,
+    pub batch_size: usize,
+    pub interval: Duration,
+}
+
+pub struct BackgroundEvictor {
+    shutdown: Arc<AtomicBool>,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl std::fmt::Debug for BackgroundEvictor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BackgroundEvictor")
+            .field("running", &self.handle.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl BackgroundEvictor {
+    pub fn start(
+        dm: Arc<dyn IDispatchMap + Send + Sync>,
+        mt: Arc<dyn IMemoryTier + Send + Sync>,
+        extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>>,
+        config: EvictorConfig,
+        logger: Option<Arc<dyn ILogger + Send + Sync>>,
+        eviction_tx: Arc<Mutex<Option<EvictionSender>>>,
+        tier_counters: Arc<TierEventCounters>,
+    ) -> Self {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_clone = Arc::clone(&shutdown);
+
+        let handle = thread::Builder::new()
+            .name("dispatcher-ssd-evictor".into())
+            .spawn(move || {
+                Self::evictor_loop(
+                    &shutdown_clone,
+                    &dm,
+                    &mt,
+                    &extent_mgrs,
+                    &config,
+                    logger.as_deref(),
+                    &eviction_tx,
+                    &tier_counters,
+                );
+            })
+            .expect("failed to spawn SSD evictor thread");
+
+        Self {
+            shutdown,
+            handle: Some(handle),
+        }
+    }
+
+    pub fn shutdown(&mut self) {
+        self.shutdown.store(true, Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+
+    fn evictor_loop(
+        shutdown: &AtomicBool,
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
+        config: &EvictorConfig,
+        logger: Option<&(dyn ILogger + Send + Sync)>,
+        eviction_tx: &Mutex<Option<EvictionSender>>,
+        tier_counters: &TierEventCounters,
+    ) {
+        loop {
+            thread::sleep(config.interval);
+
+            if shutdown.load(Ordering::Acquire) {
+                return;
+            }
+
+            let (used, capacity) = Self::compute_utilization(extent_mgrs);
+            if capacity == 0 {
+                continue;
+            }
+
+            let utilization = used as f64 / capacity as f64;
+            if utilization < config.threshold {
+                continue;
+            }
+
+            if let Some(log) = logger {
+                log.info(&format!(
+                    "ssd-evictor: utilization {:.1}% exceeds threshold {:.1}%, evicting",
+                    utilization * 100.0,
+                    config.threshold * 100.0,
+                ));
+            }
+
+            let candidates = dm.oldest_keys(config.batch_size);
+            let mut evicted = 0u32;
+
+            for key in candidates {
+                if shutdown.load(Ordering::Acquire) {
+                    return;
+                }
+
+                let offset = match Self::get_evictable_offset(dm, key) {
+                    Some(o) => o,
+                    None => continue,
+                };
+
+                // Remove from dispatch-map first: it refuses a pinned entry, and
+                // a cold lookup pins the entry while it promotes it into a fresh
+                // memory-tier slot. Freeing the slot before this check released
+                // that slot from under the in-flight promotion.
+                if dm.remove(key).is_err() {
+                    continue;
+                }
+
+                // Remove from memory-tier (no-op if not present).
+                let _ = mt.remove(key);
+
+                if let Some(ref tx) = *eviction_tx.lock().unwrap() {
+                    tx.emit(EvictionEvent {
+                        key,
+                        reason: EvictionReason::Removed,
+                    });
+                }
+
+                // Free the extent on the drive recorded in its SSD location
+                // (an invalid drive frees nothing).
+                if let Some((em, raw)) = crate::select_drive(extent_mgrs, offset) {
+                    let _ = em.remove_extent(raw);
+                }
+
+                evicted += 1;
+                tier_counters.record_eviction_from_ssd();
+
+                // Re-check utilization after each removal.
+                let (used_now, _) = Self::compute_utilization(extent_mgrs);
+                let util_now = used_now as f64 / capacity as f64;
+                if util_now < config.low_watermark {
+                    break;
+                }
+            }
+
+            if let Some(log) = logger {
+                let (used_after, _) = Self::compute_utilization(extent_mgrs);
+                log.info(&format!(
+                    "ssd-evictor: evicted {evicted} extents, utilization now {:.1}%",
+                    used_after as f64 / capacity as f64 * 100.0,
+                ));
+            }
+        }
+    }
+
+    pub(crate) fn compute_utilization(
+        extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
+    ) -> (u64, u64) {
+        let mut total_used = 0u64;
+        let mut total_cap = 0u64;
+        for em in extent_mgrs {
+            total_used += em.used_bytes();
+            total_cap += em.capacity_bytes();
+        }
+        (total_used, total_cap)
+    }
+
+    pub(crate) fn get_evictable_offset(
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        key: CacheKey,
+    ) -> Option<u64> {
+        match dm.lookup(key) {
+            Ok(LookupResult::BlockDevice { offset }) => {
+                let _ = dm.release_read(key);
+                Some(offset)
+            }
+            Ok(LookupResult::MemoryTier { .. }) => {
+                // Entry is still in memory-tier; skip — it's hot.
+                let _ = dm.release_read(key);
+                None
+            }
+            // NotExist (and MismatchSize, which `lookup` never answers): the
+            // lookup took no read reference — it only pins an entry it finds —
+            // so none is released. Releasing here would drop a reference
+            // another caller holds, e.g. the write-through pin a concurrently
+            // registered entry carries.
+            Ok(_) => None,
+            Err(_) => None,
+        }
+    }
+}
+
+impl Drop for BackgroundEvictor {
+    fn drop(&mut self) {
+        if self.handle.is_some() {
+            self.shutdown();
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Background Memory-Tier Evictor (DRAM → SSD demotion)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+pub struct MemoryTierEvictorConfig {
+    pub threshold: f64,
+    pub low_watermark: f64,
+    pub batch_size: usize,
+    pub interval: Duration,
+}
+
+pub struct MemoryTierEvictor {
+    shutdown: Arc<AtomicBool>,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl std::fmt::Debug for MemoryTierEvictor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MemoryTierEvictor")
+            .field("running", &self.handle.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl MemoryTierEvictor {
+    pub fn start(
+        dm: Arc<dyn IDispatchMap + Send + Sync>,
+        mt: Arc<dyn IMemoryTier + Send + Sync>,
+        config: MemoryTierEvictorConfig,
+        logger: Option<Arc<dyn ILogger + Send + Sync>>,
+        eviction_tx: Arc<Mutex<Option<EvictionSender>>>,
+        tier_counters: Arc<TierEventCounters>,
+    ) -> Self {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_clone = Arc::clone(&shutdown);
+
+        let handle = thread::Builder::new()
+            .name("dispatcher-mt-evictor".into())
+            .spawn(move || {
+                Self::evictor_loop(
+                    &shutdown_clone,
+                    &dm,
+                    &mt,
+                    &config,
+                    logger.as_deref(),
+                    &eviction_tx,
+                    &tier_counters,
+                );
+            })
+            .expect("failed to spawn memory-tier evictor thread");
+
+        Self {
+            shutdown,
+            handle: Some(handle),
+        }
+    }
+
+    pub fn shutdown(&mut self) {
+        self.shutdown.store(true, Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+
+    fn evictor_loop(
+        shutdown: &AtomicBool,
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        config: &MemoryTierEvictorConfig,
+        logger: Option<&(dyn ILogger + Send + Sync)>,
+        eviction_tx: &Mutex<Option<EvictionSender>>,
+        tier_counters: &TierEventCounters,
+    ) {
+        let mut consecutive_dry_runs = 0u32;
+
+        loop {
+            if shutdown.load(Ordering::Acquire) {
+                return;
+            }
+
+            let used = mt.used();
+            let capacity = mt.capacity();
+            if capacity == 0 {
+                thread::sleep(config.interval);
+                continue;
+            }
+
+            let utilization = used as f64 / capacity as f64;
+            if utilization < config.threshold {
+                consecutive_dry_runs = 0;
+                thread::sleep(config.interval);
+                continue;
+            }
+
+            // Exponential aggressiveness: scale batch size as utilization approaches 1.0.
+            // At threshold → 1× batch_size; at 1.0 → 8× batch_size.
+            let headroom = 1.0 - config.threshold;
+            let pressure = if headroom > 0.0 {
+                ((utilization - config.threshold) / headroom).min(1.0)
+            } else {
+                1.0
+            };
+            let multiplier = 1.0 + 7.0 * pressure * pressure;
+            let effective_batch = ((config.batch_size as f64 * multiplier) as usize).max(1);
+
+            if let Some(log) = logger {
+                log.info(&format!(
+                    "mt-evictor: utilization {:.1}% exceeds threshold {:.1}%, \
+                     demoting (batch={effective_batch}, pressure={pressure:.2})",
+                    utilization * 100.0,
+                    config.threshold * 100.0,
+                ));
+            }
+
+            // Widen the scan when most candidates are unevictable (held by write-through).
+            let scan_size = effective_batch * (consecutive_dry_runs as usize + 1).min(4);
+            let candidates = mt.oldest_keys(scan_size);
+            let mut demoted = 0u32;
+
+            for key in candidates {
+                if shutdown.load(Ordering::Acquire) {
+                    return;
+                }
+
+                if dm.try_evict_to_block(key).is_err() {
+                    continue;
+                }
+
+                if mt.remove(key).is_err() {
+                    continue;
+                }
+
+                if let Some(ref tx) = *eviction_tx.lock().unwrap() {
+                    tx.emit(EvictionEvent {
+                        key,
+                        reason: EvictionReason::Demoted,
+                    });
+                }
+
+                demoted += 1;
+                tier_counters.record_eviction_from_memory();
+
+                let used_now = mt.used();
+                let util_now = used_now as f64 / capacity as f64;
+                if util_now < config.low_watermark {
+                    break;
+                }
+            }
+
+            if let Some(log) = logger {
+                let used_after = mt.used();
+                log.info(&format!(
+                    "mt-evictor: demoted {demoted} entries, utilization now {:.1}%",
+                    used_after as f64 / capacity as f64 * 100.0,
+                ));
+            }
+
+            if demoted == 0 {
+                // No evictable entries — back off to let write-through release refs.
+                consecutive_dry_runs = consecutive_dry_runs.saturating_add(1);
+                thread::sleep(Duration::from_millis(500));
+            } else {
+                consecutive_dry_runs = 0;
+                // Pace between successful batches so we don't starve other work.
+                thread::sleep(Duration::from_millis(200));
+            }
+        }
+    }
+}
+
+impl Drop for MemoryTierEvictor {
+    fn drop(&mut self) {
+        if self.handle.is_some() {
+            self.shutdown();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    #[test]
+    fn start_and_shutdown() {
+        let mut writer = BackgroundWriter::start(|_job| {});
+        writer.shutdown();
+    }
+
+    #[test]
+    fn processes_enqueued_jobs() {
+        let processed = Arc::new(Mutex::new(Vec::new()));
+        let processed_clone = Arc::clone(&processed);
+
+        let mut writer = BackgroundWriter::start(move |job| {
+            processed_clone.lock().unwrap().push(job.key);
+        });
+
+        writer
+            .enqueue(WriteJob {
+                key: 1,
+                size: 4096,
+                device_index: 0,
+            })
+            .unwrap();
+        writer
+            .enqueue(WriteJob {
+                key: 2,
+                size: 8192,
+                device_index: 1,
+            })
+            .unwrap();
+
+        writer.shutdown();
+
+        let keys = processed.lock().unwrap();
+        assert!(keys.contains(&1));
+        assert!(keys.contains(&2));
+    }
+
+    #[test]
+    fn drain_on_shutdown() {
+        let count = Arc::new(Mutex::new(0u32));
+        let count_clone = Arc::clone(&count);
+
+        let mut writer = BackgroundWriter::start(move |_job| {
+            *count_clone.lock().unwrap() += 1;
+        });
+
+        for i in 0..10 {
+            writer
+                .enqueue(WriteJob {
+                    key: i,
+                    size: 4096,
+                    device_index: 0,
+                })
+                .unwrap();
+        }
+
+        writer.shutdown();
+        assert_eq!(*count.lock().unwrap(), 10);
+    }
+
+    #[test]
+    fn concurrent_enqueue_from_multiple_threads() {
+        let processed = Arc::new(Mutex::new(Vec::new()));
+        let processed_clone = Arc::clone(&processed);
+
+        let mut writer = BackgroundWriter::start(move |job| {
+            processed_clone.lock().unwrap().push(job.key);
+        });
+
+        let sender = writer.sender.clone();
+        let handles: Vec<_> = (0..4)
+            .map(|t| {
+                let s = sender.clone();
+                thread::spawn(move || {
+                    for i in 0..25 {
+                        s.send(WriteJob {
+                            key: t * 100 + i,
+                            size: 4096,
+                            device_index: 0,
+                        })
+                        .unwrap();
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        writer.shutdown();
+
+        let keys = processed.lock().unwrap();
+        assert_eq!(keys.len(), 100);
+    }
+
+    #[test]
+    fn concurrent_enqueue_during_slow_processing() {
+        let count = Arc::new(Mutex::new(0u32));
+        let count_clone = Arc::clone(&count);
+
+        let mut writer = BackgroundWriter::start(move |_job| {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            *count_clone.lock().unwrap() += 1;
+        });
+
+        for i in 0..20 {
+            writer
+                .enqueue(WriteJob {
+                    key: i,
+                    size: 4096,
+                    device_index: 0,
+                })
+                .unwrap();
+        }
+
+        writer.shutdown();
+        assert_eq!(*count.lock().unwrap(), 20);
+    }
+
+    #[test]
+    fn drop_triggers_shutdown() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let flag_clone = Arc::clone(&flag);
+
+        {
+            let writer = BackgroundWriter::start(move |_job| {
+                flag_clone.store(true, Ordering::Release);
+            });
+            writer
+                .enqueue(WriteJob {
+                    key: 1,
+                    size: 4096,
+                    device_index: 0,
+                })
+                .unwrap();
+        } // drop here
+
+        assert!(flag.load(Ordering::Acquire));
+    }
+}
+
+#[cfg(test)]
+#[path = "repair_test_ssd_evictor_release.rs"]
+mod repair_test_ssd_evictor_release;
+
+#[cfg(test)]
+#[path = "repair_test_evictor_no_foreign_pin_release.rs"]
+mod repair_test_evictor_no_foreign_pin_release;

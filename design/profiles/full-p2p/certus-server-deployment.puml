@@ -1,0 +1,82 @@
+@startuml
+skinparam defaultTextAlignment center
+skinparam padding 4
+skinparam nodesep 60
+skinparam ranksep 50
+skinparam rectangle {
+    RoundCorner 15
+}
+skinparam agent {
+    RoundCorner 10
+}
+hide stereotype
+
+title Certus Server — full-p2p Profile
+
+' ============================================================
+' CLIENT
+' ============================================================
+rectangle "**Client Host**" as client_box #F5F5F5 {
+    agent "GPU Client\n(vLLM / PyTorch)" as pyclient
+    agent "GPU Memory" as client_gpu #LightGreen
+}
+
+' ============================================================
+' SERVER
+' ============================================================
+rectangle "**Server Host**" as server_box #FAFAFA {
+
+    rectangle "certus-server" as server_proc #White {
+
+        agent "Shmq Mailbox\nPopulate | Lookup | Check\nRemove | Touch | Flush" as shmq #F0F0F0
+
+        rectangle "**DispatcherP2p** <<IDispatcher>>\n(crate: dispatcher-p2p)" as dispatcher #DBEAFE {
+            rectangle "DataDrive [0..N]" as data_drive #FEF3C7 {
+                agent "BlockDeviceSpdkNvme\n<<IBlockDevice>>" as blkdev
+                agent "ExtentManager\n<<IExtentManager>>" as extmgr
+            }
+            agent "ParallelBackgroundWriter\nBackgroundEvictor | MemoryTierEvictor\nP2pColdReadPool | DramBackfillWorker\nPipelineRing (fallback)" as disp_bg #FEF9C3
+            agent "P2pRing\nGPU BAR1 staging (64 slots)\nGDRCopy + SPDK-registered" as p2p_ring #FBCFE8
+        }
+
+        agent "DispatchMap\n<<IDispatchMap>>" as dispatch_map #DBEAFE
+        agent "MemoryTier\n<<IMemoryTier>>" as memory_tier #DBEAFE
+        agent "EvictionPolicy\n<<IEvictionPolicy>>" as eviction #E5E7EB
+        agent "GpuServices\n<<IGpuServices>>\nH2D | D2H | D2D" as gpu_svc #BBF7D0
+        agent "SPDKEnv\n<<ISPDKEnv>>" as spdk_env #E5E7EB
+        agent "RemoteLookup\n<<IRemoteLookup>>\n(placeholder)" as remote_lookup #E5E7EB
+    }
+
+    agent "GPU Memory\n(server)" as server_gpu #LightGreen
+    database "NVMe SSD [0..N]" as nvme_data
+}
+
+' ============================================================
+' CONNECTIONS
+' ============================================================
+
+pyclient -down-> shmq : shmq
+client_gpu .down.> server_gpu : CUDA IPC
+
+shmq -down-> dispatcher
+
+dispatcher -down-> dispatch_map
+dispatcher -down-> memory_tier
+dispatcher -down-> gpu_svc
+dispatcher --> remote_lookup
+
+dispatch_map -down-> eviction
+memory_tier -down-> eviction
+
+disp_bg --> blkdev
+blkdev -down-> spdk_env
+extmgr --> blkdev : metadata
+
+gpu_svc -right-> server_gpu : DMA
+
+spdk_env -down-> nvme_data : VFIO
+blkdev .down.> nvme_data : NVMe I/O
+nvme_data .up.> p2p_ring : P2P DMA\n(cold read)
+p2p_ring .right.> server_gpu : D2D copy
+
+@enduml

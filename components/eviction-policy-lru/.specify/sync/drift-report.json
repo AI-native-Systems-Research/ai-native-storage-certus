@@ -1,0 +1,133 @@
+{
+  "generated": "2026-10-31T04:54:40Z",
+  "project": "eviction-policy-lru",
+  "branch": "specsync-c",
+  "base": "a0292be6",
+  "head": "0a71990e",
+  "scope": "55a4ddd4 (clippy) only; components/interfaces analysed by its own sync",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 19,
+    "aligned": 19,
+    "drifted": 0,
+    "stale_citations_backfilled": 1,
+    "not_implemented": 0,
+    "unspecced_features": 0
+  },
+  "specs": [
+    {
+      "id": "specs/001-lru-eviction-policy/spec.md",
+      "items": [
+        {
+          "id": "FR-001",
+          "status": "aligned",
+          "location": "src/lib.rs:78-93"
+        },
+        {
+          "id": "FR-002",
+          "status": "aligned",
+          "location": "src/lib.rs:95-113 (_semantics :99, push_back :111)"
+        },
+        {
+          "id": "FR-003",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-004",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-005",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-006",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-007",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-008",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "FR-009",
+          "status": "aligned",
+          "location": "src/lib.rs:102-109,136-140,147-151,161-168,177,184,195,206"
+        },
+        {
+          "id": "FR-010",
+          "status": "aligned",
+          "location": "src/lru_list.rs:75-78,126-129 (active-flag guard)"
+        },
+        {
+          "id": "FR-011",
+          "status": "aligned",
+          "location": "src/lru_list.rs:37-60 (free-list reuse in push_back)"
+        },
+        {
+          "id": "FR-012",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "NFR-001",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "NFR-002",
+          "status": "aligned",
+          "location": "src/lib.rs:23-62"
+        },
+        {
+          "id": "NFR-003",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "NFR-004",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "SC-002",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        },
+        {
+          "id": "SC-003",
+          "status": "aligned",
+          "location": "cargo clippy --all-targets -D warnings passes"
+        },
+        {
+          "id": "Key Entities PoolId/EvictionHandle",
+          "status": "aligned",
+          "location": "unchanged by 55a4ddd4"
+        }
+      ],
+      "citation_drift": [
+        {
+          "where": "FR-002",
+          "before": "`src/lib.rs:57` (`_semantics`) and `src/lib.rs:69` (`push_back`)",
+          "after": "`src/lib.rs:99` and `src/lib.rs:111`"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Lock poisoning panics (unchanged by 55a4ddd4); not stated in the spec; recorded, not proposed."
+  ],
+  "unspecced": [],
+  "conflicts": [],
+  "drift_status": "clean",
+  "previous_report": "backups/20261031T045440Z/drift-report.json.prev"
+}

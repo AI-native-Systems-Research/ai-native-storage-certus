@@ -1,0 +1,178 @@
+---
+spec_sync_component: remote-lookup-rdma-responder
+spec_sync_drift_status: clean
+spec_sync_synced_at: 2026-11-05T10:19:50Z
+spec_sync_git_commit: 32ffa627f
+spec_sync_inputs_sha256: 15f122ac89604aa4dded533b3d125a7547918504b336775fabb868b7c56506d8
+spec_sync_hash_tool: scripts/spec-sync-hash.sh
+---
+> **Re-stamp 2026-11-05 (branch `certus-host-setup`, on unstable `bb0c9b9c`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them (its previous stamp was re-verified against `git archive origin/unstable`); its digest moves because `components/interfaces` changed (`ISPDKEnv::init_with_allowed`, added for the two-process drive race; see the spdk-env and interfaces syncs of the same date). This component does not implement `ISPDKEnv`. No analysis below changes.
+
+> **Re-stamp 2026-10-29 (branch `fix/dispatcher-remove-ssd-extent`, merged with unstable `e35618b2`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (the `IDispatcher::check` doc gains an `# Errors` section, B-17 of the dispatcher sync). No analysis below changes.
+> **Re-stamp 2026-10-25 (branch `001-rdma-cache-transfer`, rebased onto unstable `a905f89b`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IDispatcher::clear_all`) and the rebase brought unstable's changes. No analysis below changes.
+
+> **Re-stamp 2026-10-23 (branch `unstable`, commit `d7a24d58` "Fix workspace build warnings" plus the spec-sync follow-up).** That commit only fixed warnings under the workspace lint posture: it added `Debug` impls, narrowed unreachable `pub` items to `pub(crate)`, wrapped `unsafe fn` bodies in explicit `unsafe {}` blocks, and the follow-up ran `rustfmt`. It also touched `components/interfaces` (a `Debug` impl for `Command`), which changes every component's digest. This component's own `src/` was in that commit. Every changed item was checked: none is part of a provided interface, none is named as public by the spec, and no behaviour changed. No spec citation into this component's source moved. All citations were re-verified by diff-mapping each base line to its new position. Status stays `clean`.
+
+> **Re-stamp 2026-10-21 (transitive, `components/interfaces` changed on branch `fix/dispatcher-remove-clear-mt`).** Only `components/interfaces` changed for this component: `IDispatcher` doc comments (`flush_to_ssd` errors, `clear_memory_tier`, `batch_lookup`) and the interfaces spec (FR-008, FR-009, FR-017, FR-018, FR-018a, FR-021, FR-023, Overview, NFR-002, Implementation Notes; text only, no type or signature changed). This component uses some of the named items (7 files), but no type, signature or behaviour of them changed. This component's last full sync below stands; no re-analysis was needed.
+
+> **Re-stamp 2026-10-14 (transitive: `components/interfaces` changed, branch `fix/cold-staging-buf-16mib`).** The spec-sync digest folds `components/interfaces/{src,specs}` into every component's hash, so the single interface change on this branch — `DispatcherConfig::cold_staging_buf_bytes` default 4 MiB → 16 MiB (commit `8e12e49f`) and the matching correction to interfaces FR-027 — invalidates every component's stamp at once; this is the design, not a defect. **No code re-analysis was performed for this component, and none was needed:** its own `src/**` and `specs/**` are unchanged on this branch, and it does not reference `cold_staging_buf_bytes` (consumed only by the dispatcher's host-DRAM cold-staging pool). Digest refreshed to the recomputed value.
+
+> **Re-stamp 2026-10-09 (transitive: `components/interfaces` changed, branch `fix/evict-blocked-by-pin`).** The only change to this component's hashed inputs is a doc-comment correction on `IDispatchMap::try_evict_to_block` in `components/interfaces/src/idispatch_map.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and its previous stamp was re-verified to match `origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
+
+> **Re-stamp 2026-10-05 (transitive: `components/interfaces` changed, branch `fix/poller-cpu-placement-logging`).** The only change to this component's hashed inputs is a doc-comment correction on `DispatcherConfig::poller_base_cpu` in `components/interfaces/src/idispatcher.rs` (no signature, type, or behaviour change). This component's own `src/**` and `specs/**` are unchanged, and it does not reference `poller_base_cpu` (verified by grep over its src/ and specs/). Its previous stamp was re-verified to match `git archive origin/unstable` before re-stamping. **No re-analysis was performed for this component**; this stamp asserts only what was checked.
+
+> **Re-stamp 2026-10-01 (transitive: `components/interfaces` changed).** The spec-sync digest
+> folds `components/interfaces/{src,specs}` into **every** component's hash, so an interface
+> change invalidates all of them at once -- which is the design, not a defect. The interface
+> change is the `served_by` attribution work: new `ServedBy` and `LookupOutcome` types, and
+> `IDispatcher::batch_lookup` widened to return `Vec<LookupOutcome>`.
+>
+> **No re-analysis was performed for this component, and the digest bump asserts only what was
+> actually checked**: the interface change is additive except for `batch_lookup`'s return type,
+> which the compiler enforces across all implementors, and this component's own `src/**` and
+> `specs/**` are unchanged. Components that implement `IDispatcher` (`dispatcher`,
+> `dispatcher-p2p`) had their specs updated substantively; this one did not need it. If a later
+> sweep finds drift here, this stamp is not evidence against it.
+
+> **Re-stamp 2026-09-15 (workspace `cargo fmt` sweep; no drift).** Commit `f9bcd965` ("Add shmq RESERVE batch shared-deadline regression test") ran `cargo fmt` across the whole workspace, reflowing this component's `src/*.rs` (multi-line ↔ single-line argument lists and struct literals, import reordering). `git diff -w` confirms no token-level logic, signature, or contract change — the only substantive addition in that commit is a regression test in `lib/shmq-dispatcher/src/translate.rs`, which is outside this component and outside the spec-sync gate's `components/` scope. The formatting moved this component's `spec_sync_inputs_sha256`, but its spec↔implementation alignment is unchanged. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.
+
+> **Re-stamp 2026-09-15 (interfaces-fold; no drift).** Branch `fix-reserve-batch-deadline` (`bec6c6ec`) added a `deadline: Option<std::time::Instant>` parameter to `IDispatcher::reserve_memory` in `components/interfaces/src/idispatcher.rs` (shared batch backpressure deadline for the shm-queue OP_RESERVE handler). `scripts/spec-sync-hash.sh` folds the whole `components/interfaces` tree into every component's hash, so this component's digest moved even though its own spec/implementation did not change. This component does not describe or call `reserve_memory`; the interface delta cannot affect its spec↔implementation alignment. Report body below stands unchanged; drift status remains `clean`. Digest recomputed over a clean tree matching CI.
+
+> **Re-stamp 2026-09-09 (merged-branch interfaces-fold; no drift).** Branch
+> `fix-dispatcher-store-backpressure` was merged into `unstable` at `3411518a`; that
+> branch adds `DispatcherConfig::store_backpressure_ms` plus two `TierEventStats`
+> counters (`store_backpressure_events`, `store_drops_on_full`) to
+> `components/interfaces/src/idispatcher.rs`. `scripts/spec-sync-hash.sh` folds
+> the whole `components/interfaces/` tree into every component's hash, so this
+> component's digest moved even though its own `src/`+`specs/` are byte-for-byte
+> unchanged and it references none of those new dispatcher symbols (verified by
+> grep across `components/` and `lib/`). The merge's conflict resolution had
+> reverted this stamp to unstable's `b220a1c8` value; the digest is recomputed
+> here at merged HEAD. Drift status remains `clean`; the report body stands
+> verbatim.
+
+# Spec-vs-Implementation Drift Report — remote-lookup-rdma-responder
+
+**Generated**: 2026-09-03 (Spec-Sync re-sweep + independent verification)
+**Spec analyzed**: `001-rdma-lookup-responder`
+**Mode**: read-only drift analysis, then **ALIGN** (code fix) for FR-010; then
+freshness stamp.
+
+This sweep re-verified **every FR/SC against the actual implementation** rather
+than re-trusting the prior artifact. The prior report marked FR-010 "Aligned ✓";
+independent verification found it was **not** aligned — an `ibv_reg_mr` failure
+returned `RemoteLookupRdmaResponderError::Bind`, but FR-010 mandates
+`Registration`. That drift is resolved this sweep (ALIGN).
+
+## Summary
+
+| Metric | Count |
+|--------|-------|
+| Specs Analyzed | 1 |
+| Requirements Checked | 24 (FR-001..FR-016 incl. FR-002a, FR-011a + SC-001..SC-006) |
+| Aligned (after this sweep) | 24 |
+| Drifted → resolved this sweep | 1 (FR-010 ALIGN) |
+| Not Implemented | 0 |
+| Unspecced (documented) | 2 (both in spec Known Limitations) |
+
+**Verification runs this sweep** (all green):
+- `cargo build -p remote-lookup-rdma-responder` — clean
+- `cargo clippy -p remote-lookup-rdma-responder --all-targets -- -D warnings` — clean
+- `cargo test -p remote-lookup-rdma-responder -- --test-threads 1` — 22 passed; 0 failed
+- `cargo clippy -p remote-lookup-rdma-responder --features rdma --all-targets -- -D warnings`
+  — clean (compiles the `#[cfg(feature = "rdma")]` FR-010 path; rdma-core present
+  in this environment)
+
+## Resolved this sweep
+
+### 001-rdma-lookup-responder / FR-010 — ALIGN (code fix)
+
+- **Severity**: minor (error-classification contract gap on the registration path).
+- **Spec**: FR-010 requires the responder to register the whole pool once via
+  `ibv_reg_mr` and, on failure, return
+  `RemoteLookupRdmaResponderError::Registration` (spec.md:346-353) — distinct from
+  the `Bind` variant used for bind / `rdma_listen` / device-resolution failures
+  (FR-002).
+- **Actual (before this sweep)**: `RealCmSeam::bind` returned `Result<_, String>`
+  and the caller mapped **every** failure — including the `ibv_reg_mr` failure — to
+  `Bind` via `.map_err(RemoteLookupRdmaResponderError::Bind)`. A registration failure
+  was therefore misreported as `Bind`, violating FR-010's contract and blurring the
+  FR-002/FR-010 diagnostic distinction.
+- **Direction — code fixed to match spec (ALIGN)**: FR-010 is an authored contract
+  that deliberately separates the two failure classes; the code collapsed them. The
+  spec states the intended behavior, so the code carried the defect. (Backfilling
+  `Bind` into FR-010 would weaken a legitimate contract to match a bug — forbidden by
+  the HARD RULE.)
+- **Fix applied**: introduced a typed `CmBindError { Bind(String), Registration(String) }`
+  in `src/rdma.rs` with `From<String>`/`From<&str>` defaulting to `Bind` (so the
+  existing bind / listen / device-resolution error sites are unchanged); the sole
+  `ibv_reg_mr` failure site now returns `CmBindError::Registration`. `bind()`'s return
+  type changed from `Result<_, String>` to `Result<_, CmBindError>`, and the caller in
+  `src/lib.rs` matches the two variants onto
+  `RemoteLookupRdmaResponderError::{Bind, Registration}`.
+- **Location (fixed)**: `src/rdma.rs` (`CmBindError`, `bind()`, `ibv_reg_mr` site);
+  `src/lib.rs` (`initialize()` caller).
+
+## Aligned ✓ (verified this sweep)
+
+Init/accept-loop (FR-001, `src/lib.rs:319-330`); bind ephemeral-port-0 + `rdma_listen`
++ `rdma_get_src_port`, `Bind` on failure, twice→`AlreadyInitialized` (FR-002,
+`src/rdma.rs:239-268`; `src/lib.rs:275-278`); bind-IP precedence (FR-002a,
+`src/lib.rs:285-290`; `src/rdma.rs:214-219`); `local_endpoint()`
+after/`NotInitialized`-before (FR-003); tri-fd epoll accept loop (FR-004,
+`src/rdma.rs:511-558`); UUID from `private_data`→`PeerId`, `ConnectionEstablished{Some}`
+(FR-005); absent/malformed `private_data`→`node:None` (FR-006); `Active→Draining→Dead`
+(FR-007); QP→ERROR before ack, best-effort destroy, idempotent (FR-008); never
+reads/copies value bytes (FR-009); **whole-pool `ibv_reg_mr` once + `local_region()` +
+dereg-before-PD-free + `Registration` on failure (FR-010 — now aligned, above)**;
+single-client control channel (FR-011); lossless event delivery via backpressure
+(FR-011a); `set_actor_cpu` pins accept thread (FR-012); `signal_stop`/`shutdown`
+idempotent teardown (FR-013); primary diagnostics via optional `ILogger`, missing
+logger never errors (FR-014 — specced contract met; see documented residual below);
+unit tests for lifecycle/error/state-machine (FR-015); telemetry behind feature, ZST
+no-op when off (FR-016); SC-001..SC-006 (`src/rdma.rs:263-268`;
+`src/connection.rs:354-418,462-481`; `benches/connection_telemetry.rs`).
+
+## Documented known-gaps (non-blocking; carried in spec Known Limitations)
+
+### FR-014 async-event instrumentation — `eprintln!` bypass
+
+- FR-014's **specced** contract (route primary diagnostics through the optional
+  `ILogger`, never error on a missing logger) **is met** (`src/lib.rs:116-120`).
+- The residual: `drain_async_events` (`src/rdma.rs:473-491`) emits device async-event
+  diagnostics via `eprintln!` rather than `ILogger`, because `RealCmSeam`
+  (`src/rdma.rs:176`) — the accept-loop thread — holds no logger handle. This path is
+  **unspecced** ("No FR mandates this diagnostic path — best-effort operator
+  instrumentation") and the `eprintln!`→`ILogger` gap is explicitly documented in the
+  spec's Known Limitations with a tracked align-task
+  (`.specify/sync/align-tasks.md`, FR-014 accept-loop diagnostics).
+- **Not blocking `clean`**: the correctness contract is satisfied; this is a
+  documented, accepted deviation on a best-effort diagnostic, not masked drift. If it
+  becomes operator-load-bearing, plumb an `ILogger` into the seam and close the
+  align-task.
+
+## Unspecced Code (documented in spec Known Limitations)
+
+1. **Device async-event instrumentation** (`src/rdma.rs`, `src/ffi.rs`,
+   `src/wrapper.c`) — best-effort operator diagnostics; documented (see FR-014
+   residual). No new spec needed.
+2. **Command-bridge thread** (`rdma-responder-cmd-bridge`, `src/rdma.rs:358-373`) —
+   internal mechanism enabling FR-004 (bridges the SPSC command inbox onto the command
+   eventfd, since the SPSC channel has no pollable fd). Behavior is implied by FR-004.
+
+## Conflicts
+None.
+
+## Recommendations
+
+1. **FR-014 (Low, cross-component doc):** the *interface* doc for
+   `set_bind_ip` in `components/interfaces/src/iremote_lookup_rdma_responder.rs:256-262`
+   states the responder "never auto-detects", which contradicts FR-002a's explicit
+   precedence rule (explicit `set_bind_ip` **else** auto-detect first active device).
+   This is an interfaces-crate doc nit, not a responder `src/`/`specs/` drift; fixing
+   it invalidates the folded input hash of **every** stamped component, so it is
+   deferred to a coordinated interfaces-doc pass + re-stamp rather than fixed here.
+2. **FR-014 async-event align-task:** route `drain_async_events` through `ILogger`
+   (requires giving `RealCmSeam` a logger handle) to close the documented gap.
+3. **Command-bridge thread:** a one-line mention in plan.md/data-model would remove the
+   only undocumented internal surprise in the FR-004 mechanism.

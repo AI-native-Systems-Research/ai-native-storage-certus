@@ -1,0 +1,324 @@
+# Feature Specification: GPUDirect Storage Cold Path
+
+**Feature Branch**: `p2p_component`
+
+**Created**: 2026-06-11
+
+**Status**: Draft
+
+**Last-Synced**: 2026-09-03 (Spec-Sync — FR-017 ALIGN: eviction drop-count now actually incremented on every live emit path; `eviction_dropped_count()` reflects reality. Prior 2026-08-20 Phase B: SC-006 reworded to match implemented graceful-init/deferred-panic behavior; FR-018..FR-023 backfilled for previously unspecced background/admin/async features.)
+
+**Input**: User description: "GPUDirect Storage cold-read path for dispatcher-p2p. NVMe DMA reads directly into GPU BAR1 staging buffers, then D2D copies to client GPU destination, eliminating host DRAM bounce."
+
+## User Scenarios & Testing *(mandatory)*
+
+### User Story 1 - Cold Lookup Completes via P2P Path (Priority: P1)
+
+A client application requests data that has been evicted from DRAM to NVMe SSD. The system reads the data from SSD directly into a GPU staging buffer, then copies it to the client's GPU destination without bouncing through host memory.
+
+**Why this priority**: This is the sole reason this component exists. Without a working P2P cold path, the component adds no value over the standard dispatcher.
+
+**Independent Test**: Evict entries from DRAM, issue lookups, verify data arrives correctly at the client GPU destination.
+
+**Acceptance Scenarios**:
+
+1. **Given** an entry evicted from DRAM to SSD, **When** a client requests that entry, **Then** data arrives at the client GPU destination with correct content.
+2. **Given** multiple chunks comprising a single entry, **When** the pipelined read completes, **Then** all chunks are present and ordered correctly at the destination.
+3. **Given** 4 concurrent clients requesting different cold entries, **When** lookups proceed in parallel, **Then** each client receives its own correct data without corruption.
+
+---
+
+### User Story 2 - Fail Fast When P2P Unavailable (Priority: P2)
+
+When the P2P staging ring cannot be initialized (missing gdrdrv/nvidia-peermem kernel modules, insufficient GPU memory), the server MUST fail at startup rather than silently degrading. Use the `full.yaml` profile (standard dispatcher) for DRAM-only deployments.
+
+**Why this priority**: Silent degradation to DRAM defeats the purpose of selecting the P2P profile. Explicit failure prevents misdiagnosis.
+
+**Independent Test**: Remove gdrdrv module, start server with full-p2p profile, verify it panics during initialization.
+
+**Acceptance Scenarios**:
+
+1. **Given** a system where P2P initialization fails, **When** the component starts, **Then** it logs a diagnostic warning. On the first cold lookup attempt, it panics with a message directing the operator to use the full.yaml profile.
+2. **Given** partial resource allocation before failure, **When** initialization fails, **Then** all partially allocated GPU memory is freed before the panic.
+
+---
+
+### User Story 3 - Hot Path Unaffected (Priority: P2)
+
+Lookups for entries still in DRAM proceed exactly as in the standard dispatcher with no performance degradation from P2P machinery.
+
+**Why this priority**: Hot path is the common case. Any regression here would negate the value of the cold path optimization.
+
+**Independent Test**: Measure hot-path lookup throughput with the P2P component vs the standard dispatcher; verify no regression.
+
+**Acceptance Scenarios**:
+
+1. **Given** an entry present in DRAM, **When** a client requests it, **Then** data is delivered at the same throughput as the standard dispatcher.
+2. **Given** concurrent hot and cold lookups, **When** cold lookups are in progress, **Then** hot-path lookups are not blocked or delayed.
+
+---
+
+### User Story 4 - Performance Is Measurable (Priority: P3)
+
+The system's end-to-end performance (P2P path vs DRAM path) can be measured using the existing benchmark tool under realistic workloads with hot/cold mixes and multi-client concurrency.
+
+**Why this priority**: Without measurement, there is no basis for evaluating whether the P2P path delivers value.
+
+**Independent Test**: Run the pipelined benchmark with cold entries, observe that throughput numbers are reported for both paths.
+
+**Acceptance Scenarios**:
+
+1. **Given** a deployed system with the P2P path active, **When** the benchmark tool runs a cold-heavy workload, **Then** throughput and latency numbers are reported.
+2. **Given** the standard dispatcher (full.yaml) deployed on the same hardware, **When** the same benchmark runs, **Then** comparable throughput numbers are reported for comparison against the P2P path.
+
+---
+
+### User Story 5 - Automatic Tier Capacity Management (Priority: P2)
+
+The system keeps both DRAM and SSD tiers within configured utilization bounds without operator intervention: it demotes cold DRAM entries to SSD, reclaims SSD capacity when full, and persists writes to SSD concurrently across drives. An administrator can also flush the DRAM tier on demand, and callers can pipeline hot lookups on their own CUDA stream.
+
+**Why this priority**: Sustained inferencing workloads outlive any fixed tier size; without automatic demotion, reclamation, and durable write-through the tiers fill and either error or stall. These are the mechanisms that make the cold path sustainable rather than a one-shot demo.
+
+**Independent Test**: Configure low DRAM and SSD watermarks, drive writes past each threshold, and verify demotion/reclamation events fire and utilization returns below the low watermark; call `clear_memory_tier()` and verify all entries are cleared.
+
+**Acceptance Scenarios**:
+
+1. **Given** `memory_tier_eviction_threshold` set and DRAM utilization above it, **When** the memory-tier evictor sweeps, **Then** oldest evictable entries are demoted to SSD (emitting `Demoted` events) until utilization falls below the low watermark.
+2. **Given** `ssd_eviction_threshold` set and SSD utilization above it, **When** the SSD evictor sweeps, **Then** oldest entries are removed and their extents freed (emitting `Removed` events) until utilization falls below the low watermark.
+3. **Given** write-through enabled across multiple drives, **When** writes are enqueued, **Then** each is routed to its target drive's writer thread and `flush()` blocks until all per-drive queues are drained.
+4. **Given** a populated memory tier, **When** `clear_memory_tier()` is called, **Then** every entry is demoted to its SSD copy or force-removed, and the count of cleared entries is returned.
+5. **Given** a hot (DRAM-resident) key, **When** a caller invokes `lookup_async()`, **Then** an H2D copy is issued on a warm CUDA stream and the stream is returned without blocking, and the read pin is held until the caller-driven synchronization completes.
+
+---
+
+### Edge Cases
+
+- What happens when all staging ring slots are occupied by in-flight reads? Additional cold reads MUST queue until a slot is recycled.
+- What happens when an NVMe read fails mid-pipeline? The affected lookup MUST return an error; the slot MUST be recycled; other in-flight lookups MUST not be affected.
+- What happens when the client GPU becomes unreachable during a D2D copy? The error MUST propagate to the requesting client without corrupting ring state.
+- What happens under 4+ concurrent clients? The ring MUST be partitioned to prevent conflicts between threads.
+
+## Requirements *(mandatory)*
+
+### Functional Requirements
+
+- **FR-001**: System MUST read evicted data from SSD directly into GPU staging buffers, bypassing host DRAM.
+- **FR-002**: System MUST copy data from staging buffers to the client's GPU destination.
+- **FR-003**: System MUST pre-allocate a fixed ring of 64 GPU staging buffers at initialization via `cudaMalloc` + GDRCopy BAR1 mapping (`gdr_pin_buffer` + `gdr_map`) + `spdk_mem_register`. Each slot's size is dynamically determined from the drive's `max_transfer_size()` (typically 128 KiB MDTS). The ring includes 4 pre-allocated CUDA streams (minimum 2 on constrained hardware). The ring is shared across all cold lookup threads.
+- **FR-004**: System MUST partition the staging ring for concurrent thread access using `ThreadPartition` (non-overlapping slot ranges, effective QD capped at 16 per thread to prevent NVMe qpair saturation). With `MAX_QUEUES_PER_DRIVE=1`, the ring is partitioned into one 16-slot region per drive, maximizing per-drive NVMe queue depth.
+- **FR-005**: System MUST pipeline SSD reads with D2D GPU copies using FIFO completion ordering. D2D copies are distributed round-robin across 4 CUDA streams for maximum PCIe overlap. Stream synchronization occurs once per ring partition wrap (sync interval = ring_size) to bound GPU queue depth and ensure slots are safe to reuse. A final stream sync is performed after all chunks complete.
+- **FR-006**: The `batch_lookup` path MUST panic if the P2P ring was not initialized (GDRCopy unavailable, GPU memory insufficient). Initialization logs a diagnostic warning but does not fail, allowing hot-only testing without P2P hardware. The single-key `lookup()` path does NOT panic — it silently falls back to the DRAM path when the P2P ring is unavailable (for test/staging environments). Use the `full.yaml` profile (standard dispatcher) for production DRAM-only deployments.
+- **FR-007**: The P2P ring is allocated once at initialization and is immutable for the component's lifetime. In production (full-p2p profile via `batch_lookup`), the P2P path is always used for cold reads and panics if unavailable. The single-key `lookup()` DRAM fallback path exists for test/staging environments where GDRCopy is unavailable.
+- **FR-008**: System MUST implement the same interface as the standard dispatcher, serving as a drop-in replacement. This includes the `IRemoteLookup` fallback for entries missed locally: the dispatcher calls `IRemoteLookup::batch_lookup` with `(key, size)` pairs (not `IpcHandle` — remote-lookup works only in DRAM), and on a successful remote fetch (the value becomes resident in the local memory tier) performs the DRAM→GPU delivery itself using the memory-tier→device copy.
+- **FR-009**: System MUST asynchronously promote cold entries to DRAM via a throttled background worker (`DramBackfillWorker`) after serving the client via P2P. The worker re-reads data from SSD into the memory-tier slot, then registers the key as MemoryTier in the dispatch-map. During the backfill window, repeat lookups of the same key use the P2P cold path (correct data, no stale DRAM). The backfill delay is controlled by `backfill_delay_ms` in `DispatcherConfig`.
+- **FR-010**: System MUST release all staging resources on shutdown with no leaks.
+- **FR-011**: System MUST handle read failures gracefully without corrupting ring state or affecting other in-flight operations.
+- **FR-012**: Performance measurement is handled by external benchmarking tools (e.g., `certus-api-bench_v2.py`) rather than built-in hooks, to avoid instrumentation overhead in the production path.
+- **FR-013**: System MUST implement `promote_to_memory_tier(keys)` to asynchronously read cold entries from NVMe into the memory-tier without GPU involvement, enabling future lookups to take the hot DRAM→GPU path. This uses the `pipelined_ssd_to_dram_only` pipeline function (one thread per drive, no P2P ring involvement).
+- **FR-014**: System MUST support configurable DRAM backfill throttling via `backfill_delay_ms` in `DispatcherConfig`. Default: 10ms. When set to 0, no background DRAM backfill occurs and cold-promoted keys remain as BlockDevice indefinitely (repeat lookups always use P2P). When > 0, the `DramBackfillWorker` sleeps for that duration between jobs to avoid contending with active P2P cold reads for NVMe bandwidth.
+- **FR-015**: The component's `IGpuServices` receptacle MUST expose multi-GPU device selection — `set_device(device)` to bind the active CUDA device and `device_of_ptr(ptr)` to resolve the GPU a device pointer resides on — so that cold-path staging-ring D2D copies and CUDA streams can be directed to the client destination's GPU in multi-GPU deployments. NOTE (as of 2026-07-21): this is an interface keep-up — the receptacle exposes these methods to satisfy the expanded `IGpuServices` trait (currently implemented only by the component's test mock), and the production cold path does NOT yet route transfers by device. The capability is present in the receptacle/mock; per-device routing (`device_of_ptr` → `set_device` before staging-ring copies/streams) is not yet wired into `pipelined_ssd_to_gpu_p2p`.
+- **FR-016**: System MUST maintain a persistent per-drive cold-path worker pool (`P2pColdReadPool`) that, at initialization (after the P2P ring is available), pre-allocates one long-lived OS thread plus a pre-connected `ClientChannels` for each (drive, queue-slot) pair (`MAX_QUEUES_PER_DRIVE` slots per drive), eliminating the per-batch `connect_client()` + scoped-thread setup previously required for every cold `batch_lookup`. Cold-read jobs are dispatched to the worker for the target drive over a bounded (depth-1) channel, and the worker executes the P2P pipeline (`pipelined_multi_object_p2p`) and returns per-job results. If pool creation fails at initialization (e.g., `connect_client()` error), the system MUST log a non-fatal diagnostic and fall back, for the remaining lifetime of the component, to the pre-existing inline per-batch path (connect + run the pipeline on the calling thread for each drive/chunk). The pool MUST be signaled to stop and its worker threads released as part of component shutdown, before the P2P ring itself is destroyed.
+- **FR-017**: System MUST provide an eviction-event notification channel for observability of memory-tier evictions. `create_eviction_channel(capacity)` registers a bounded `crossbeam_channel::Receiver<EvictionEvent>` for the component (single active subscriber). Every memory-tier eviction performed while serving a lookup or write (`evict_for_space_emit`, covering both the "demote to block device" and "remove" outcomes) attempts to publish an `EvictionEvent { key, reason }` (`EvictionReason::Demoted` or `EvictionReason::Removed`) to the registered channel using a non-blocking `try_send`. Eviction event delivery MUST NOT block, delay, or fail the eviction operation: if the channel is full or no subscriber has been registered, the event MUST be silently dropped and counted, and the running drop count MUST be readable and reset via `eviction_dropped_count()`.
+- **FR-018**: System MUST provide a parallel write-through persistence path from the memory tier to SSD using one dedicated writer thread per drive (`ParallelBackgroundWriter`). Each `WriteJob` is routed to the writer owning its target drive (`device_index % num_drives`) and processed asynchronously so that write-through across multiple NVMe devices proceeds concurrently. The writer pool MUST expose in-flight accounting, a `flush()` that blocks until all per-drive queues are drained, and a `shutdown()` that drains remaining jobs and joins all threads (also invoked on drop).
+- **FR-019**: System MUST reclaim SSD capacity via a background evictor thread (`BackgroundEvictor`) when configured (`ssd_eviction_threshold > 0.0`). On each `ssd_eviction_interval_secs` cycle it computes aggregate extent-manager utilization; when utilization exceeds `ssd_eviction_threshold` it evicts oldest keys in batches of `ssd_eviction_batch_size`, removing each from the memory tier and dispatch-map and freeing the backing extent on the extent manager selected by the same `drive_index(key, num_drives)` splitmix64 placement hash used by the write-through path (FR-018 enqueues each `WriteJob` with `device_index = drive_index(key, num_drives)`), publishing an `EvictionEvent { reason: Removed }` per eviction, and stops once utilization drops below `ssd_eviction_low_watermark`. *(Sync 2026-09-25 — code authoritative: the evictor previously selected the extent manager with a raw `key % num_drives`, which mismatched the splitmix64 placement hash and could free an extent on the wrong drive; it now uses `drive_index`.)* The evictor MUST honor a shutdown signal promptly (also invoked on drop).
+- **FR-020**: System MUST proactively demote LRU entries from DRAM to SSD via a background evictor thread (`MemoryTierEvictor`) when configured (`memory_tier_eviction_threshold > 0.0`, disabled by default at 0.0). On each `memory_tier_eviction_interval_secs` cycle it compares memory-tier utilization against the threshold and, when exceeded, demotes oldest evictable keys (via `try_evict_to_block` + memory-tier `remove`), publishing an `EvictionEvent { reason: Demoted }` per demotion, until utilization drops below `memory_tier_eviction_low_watermark`. Batch aggressiveness scales with pressure (up to 8× `memory_tier_eviction_batch_size` as utilization approaches full); when a sweep demotes nothing (candidates held by in-flight write-through) it backs off and widens the scan window on subsequent dry runs. The evictor MUST honor a shutdown signal promptly (also invoked on drop).
+- **FR-021**: System MUST provide an administrative `clear_memory_tier()` operation that flushes the entire memory tier, returning the number of entries cleared. Each entry is demoted to its SSD copy where one exists (`try_evict_to_block`), otherwise force-removed from both the memory tier and the dispatch-map. The operation requires the component to be initialized and its dispatch-map and memory-tier receptacles to be bound.
+- **FR-022**: System MUST provide `lookup_async(key, ipc_handle)` returning a `GpuStream` so callers can pipeline hot-path completions on their own schedule. For a memory-tier (hot) hit it issues an asynchronous H2D copy on a dedicated warm CUDA stream (falling back to a synchronous copy when no warm stream is available) and returns the stream without blocking on completion; the caller is responsible for synchronizing the returned stream before consuming the data. Read pins are released and the entry's LRU position is refreshed as part of the operation.
+- **FR-023**: System MUST hold dispatch-map read pins for the full lifetime of any asynchronous GPU copy, releasing them only after the copy completes (post `stream_synchronize`), not at submission. A batch guard (`PinnedKeys`) MUST own the adopted read pins and release them exactly once on drop across all exit paths (submission, submit failure, lookup miss, sync failure), because a leaked pin permanently prevents eviction of its entry and is indistinguishable from a live reader. This invariant applies to both the local hot-path async copy and the remote-lookup delivery path.
+
+### Key Entities
+
+- **Staging Ring**: A fixed-size collection of 64 GPU-resident buffer slots shared across cold lookup threads. Allocated once at initialization. Includes 4 pre-allocated CUDA streams for D2D copies.
+- **Ring Slot**: An individual buffer within the staging ring. Holds one chunk during transfer. Recyclable after stream sync confirms the D2D copy from that slot has completed.
+- **Thread Partition**: A non-overlapping slice of the ring assigned to one cold-path thread. With `MAX_QUEUES_PER_DRIVE=1` and 4 drives, each partition is 16 slots.
+- **Dispatch Map**: Routing table indicating whether a lookup key resides in DRAM (hot) or on SSD (cold).
+- **P2pColdReadPool**: Persistent pool of per-(drive, queue-slot) worker threads, each owning a pre-connected `ClientChannels`, that execute cold-path P2P pipeline jobs submitted over a bounded channel. Primary cold-path execution model; degrades to an inline per-batch fallback if pool creation fails at init.
+- **EvictionEvent / EvictionReason**: Notification emitted on every memory-tier eviction (`Demoted` to block device, or `Removed`), delivered best-effort over a bounded, single-subscriber channel with drop-and-count backpressure semantics.
+- **ParallelBackgroundWriter**: Pool of per-drive `BackgroundWriter` threads that route each `WriteJob` to its target drive's writer, giving concurrent memory-tier→SSD write-through across NVMe devices. Supports in-flight accounting, `flush()`, and draining `shutdown()`.
+- **BackgroundEvictor**: Periodic SSD capacity-reclamation thread driven by extent-manager utilization watermarks (`ssd_eviction_*` config). Evicts oldest keys down to a low watermark, freeing extents and emitting `Removed` events.
+- **MemoryTierEvictor**: Periodic DRAM→SSD demotion thread driven by memory-tier utilization watermarks (`memory_tier_eviction_*` config), with pressure-scaled batch sizing and dry-run backoff, emitting `Demoted` events.
+- **PinnedKeys**: A crate-local guard owning a batch of dispatch-map read pins, releasing them together on drop so a pin outlives the completion (not merely submission) of an asynchronous GPU copy, preventing an entry from being demoted while a copy is still reading it.
+
+- **FR-024** *(New 2026-09-29 — serving-tier attribution.)* `batch_lookup` MUST return one
+  `LookupOutcome` per requested entry, in order, each carrying a `ServedBy` from the taxonomy
+  defined in `components/interfaces`. This component MUST NOT define its own value space or
+  restate it; the dispatcher's spec 002 owns the feature and `components/interfaces` owns the
+  type.
+
+- **FR-025** *(New 2026-09-29.)* This component MUST attribute its SSD-to-GPU cold path as
+  `Ssd`, **and the value legitimately persists across repeat reads of the same key**, unlike in
+  `components/dispatcher`. The cold path here is SSD → GPU BAR1 ring → D2D with **no
+  synchronous DRAM promotion** (see the GPUDirect requirements above), so a second read of a
+  key may be `Ssd` again where `dispatcher` would report `Dram`.
+
+  This is the one place SC-005 of spec 002 permits the two dispatchers to disagree for
+  identical residency, and it is a difference in *persistence*, not in the value chosen. A test
+  asserting that a repeat read changes tier would be mis-specified against this component.
+
+- **FR-025a** *(New 2026-10-01 — drift found by sweep, previously unspecced.)* This component
+  MUST report the **route partition** through `IDispatcher::tier_event_stats()`:
+  `lookup_hits_dram`, `lookup_hits_ssd` and `remote_lookup_hits`, which MUST sum to the served
+  keys over any interval. It MUST NOT return `TierEventStats::default()` for these, which is
+  what it did until 2026-09-30.
+
+  It still reports **no tier-movement counters** (promotions, evictions, store backpressure) —
+  those belong to paths this component does not have — so those fields remain zero, and that is
+  intentional rather than an omission.
+
+  **Why this needed stating.** Returning zeros compiled and passed every test: adding fields to
+  `TierEventStats` is not compiler-enforced, because the other implementors build it with
+  `..Default::default()`. A p2p server therefore reported 5 526 hits with every route at zero,
+  and the per-key attribution was correct the whole time — only its aggregate face was missing,
+  which is exactly why the invariant tests passed and nothing caught it. The partition
+  assertion of FR-026 is what closes that, and it is required *in this component* for the same
+  reason.
+
+- **FR-026** *(New 2026-09-29.)* The three invariants of
+  `dispatcher/specs/002-served-by-tier-attribution/contracts/idispatcher.md` MUST hold here
+  and MUST be tested **in this component**, not by borrowing `dispatcher`'s tests: length and
+  order, `served_by.is_hit()` if and only if `result.is_ok()`, and `Miss` if and only if
+  `KeyNotFound` after any remote attempt. A shared test would hide a divergence in either
+  component, which is the failure two separate specs exist to prevent.
+
+## ROOT CAUSE FOUND 2026-09-30: the cold path panics when the P2P ring is absent
+
+Found while attempting the dispatcher's spec 002 T116. **Three defects, and the cold path
+appears never to have been exercised.**
+
+### Defect 1 — a promised fallback that does not exist
+
+`initialize` attempts `p2p_ring::P2pRing::new()`, and on `None` logs:
+
+> `dispatcher-p2p: P2P ring unavailable, cold reads use DRAM path`
+
+**No such DRAM path exists.** The only cold-path use of the ring (`src/lib.rs:1802`) is
+`p2p_ring_guard.as_ref().expect("dispatcher-p2p requires P2P ring; use full.yaml profile
+for DRAM path")`. So the component logs a fallback at startup and panics ~12 000 requests
+later when the first cold read arrives. Two contradictory statements about one condition.
+
+`P2pRing::new` returns `None` when **`cudaMalloc` fails** (`p2p_ring.rs:58`) — a CUDA
+allocation failure, unrelated to GDRCopy.
+
+### Defect 2 — a worker panic silently retires the thread
+
+Observed: **16 panics, one per shm-queue worker**, and the pool erodes to zero. The worker
+loop in `lib/shmq-dispatcher/src/serve.rs` replies in both the `Ok` and `Err` arms, but a
+**panic unwinds past both**, so no reply is written and `while let Ok(req) = rx.recv()`
+exits. The server then:
+
+- still answers `/metrics` and still checkpoints (poller and NVMe threads unaffected),
+- has an **empty** work queue, because no worker remains to take from it,
+- and leaves every client blocked forever on a reply that cannot come.
+
+Measured by the flow counters added for this: `taken 1520, enqueued 1519, dequeued 1519,
+replied 1503` — `deq->reply 16`, exactly the worker count. **`serve` must catch a worker
+panic, reply `STATUS_ERROR`, and restart or fail loudly.** A server that has lost its
+entire worker pool while reporting healthy is the worst available failure mode.
+
+**A deadline in `dispatch` would NOT fix this and was rejected as a band-aid**: the threads
+are dead, not slow. Considering one was a symptom of mistaking the panic for a hang.
+
+### Defect 3 — a composition error surfaces at first cold read, not at startup
+
+`expect` on a data-path resource defers a knowable startup condition by ~12 000 requests.
+The ring's availability is decidable in `initialize`; a profile that cannot supply it should
+fail there, where the operator can act on it.
+
+### Evidence the cold path has never been exercised
+
+1. The promised DRAM fallback is **unimplemented** — specified in a log message, never written.
+2. **No test reaches it.** This crate's mock `MockEntryLocation::BlockDevice` variant is
+   reported by the compiler as **never constructed**; its 72 unit tests cover warm hits and
+   remote delivery only.
+3. **`CERTUS_PROFILE=full-p2p` could not build the yaml server at all** before 2026-09-30
+   (duplicated `EvictionEvent`), so this stack had never run.
+4. On this hardware the ring **cannot allocate**, so the path is unreachable even composed.
+
+Not claimed: that it never worked on hardware where `cudaMalloc` succeeds. That cannot be
+determined from here. What is established is that nothing in the repository exercises it and
+this configuration cannot.
+
+**Consequence for FR-014 and SC-008**: the `Ssd`-share comparison against
+`components/dispatcher` remains unverifiable until Defect 1 is fixed, because the first cold
+read is what kills the server.
+
+## Success Criteria *(mandatory)*
+
+### Measurable Outcomes
+
+- **SC-007** *(New 2026-09-29, covers FR-024..FR-026)*: For a batch mixing a locally-resident
+  key, a cold key and a key no peer holds, every outcome satisfies the three invariants and the
+  batch produces more than one distinct `ServedBy` — a fixture where every key resolves
+  identically satisfies all three while exercising one path.
+
+- **SC-008** *(New 2026-09-29, refined 2026-09-30, **MY PREDICTION REFUTED AND CORRECTED
+  2026-10-01**)*: On an identical workload this component reports a **LOWER** `Ssd` share of
+  served keys than `components/dispatcher`.
+
+  **Measured, both arms valid, 2 instances on node2, `--until 10 --rate inf --seed 1`:**
+
+  | arm | hits | dram | ssd | ssd share |
+  |---|---|---|---|---|
+  | `dispatcher-p2p` | 330 280 | 269 540 | 60 740 | **18.39%** |
+  | `dispatcher` | 329 254 | 221 451 | 107 803 | **32.74%** |
+
+  Total work within 0.3%; the route partition exact in both.
+
+  **I predicted the opposite sign and was wrong.** The reasoning was that no synchronous DRAM
+  promotion means a repeat read stays SSD-attributed, so p2p should report *more* `Ssd`. It
+  reports far less, and the mechanism is one the prediction ignored: **this component does not
+  stage cold reads through the memory tier at all.** `dispatcher` promotes every cold read
+  into DRAM as part of serving it, consuming memory-tier slots and forcing evictions; p2p
+  stages in GPU BAR1 and backfills DRAM asynchronously, so it puts far less pressure on the
+  tier. A less-pressured tier retains more, so fewer later reads are cold at all — 48 089 more
+  DRAM hits on an identical workload. The `Ssd` share fell because there were fewer cold
+  reads, not because cold reads were attributed differently.
+
+  **FR-014 itself is VERIFIED**: this component does attribute its SSD-to-GPU cold path as
+  `Ssd` (60 740 of them), the three interface invariants hold, and the route partition closes
+  exactly. What was wrong was my *observable*, not the requirement.
+
+  **A share comparison is therefore the wrong test of FR-014 and this criterion should not be
+  read as one.** The share conflates two independent things — how a cold read is attributed,
+  and how many cold reads occur. Those move in opposite directions here, so the aggregate can
+  shift either way for reasons unrelated to attribution. A direct test needs a *fixed* set of
+  known-cold keys read once each, with the per-key `ServedBy` inspected, which the widened
+  `LOOKUP` byte now makes possible and which no existing harness does.
+
+  **Incidental finding worth more than the criterion**: p2p's cold path costs the DRAM tier
+  far less than the DRAM path does, which is a performance argument for it that this feature
+  was not looking for and did not set out to measure.
+
+  **Stated as an aggregate share rather than as "a repeat read reports `Ssd` twice", and the
+  correction matters.** The obvious per-key formulation is wrong, because this component *does*
+  backfill DRAM — asynchronously. A key read cold is therefore `Ssd` on that read and may
+  legitimately be `Dram` on a later one, once the backfill has landed. "Twice `Ssd`" holds only
+  within a window shorter than the backfill, which no black-box client can observe or control,
+  so a test asserting it would be measuring the scheduler's timing rather than this
+  requirement. What FR-014 actually claims is that the promotion is not on the serving path,
+  and a share comparison on one workload tests exactly that.
+
+  **Not yet verified, and the reason is structural rather than an omission.** Dispatcher
+  selection is a build-time `CERTUS_PROFILE` choice, so the two cannot be compared by flipping
+  a runtime flag, and this component's unit tests reach `batch_lookup` only through mocks whose
+  `MockEntryLocation::BlockDevice` variant is currently never constructed. Verifying it needs
+  either a mock that models a real cold path or a `--features p2p-native` hardware run.
+  Recorded as unverified rather than quietly dropped.
+
+
+
+- **SC-001**: Cold lookups complete successfully with correct data under single-client and multi-client (4+) workloads.
+- **SC-002**: Hot-path throughput shows no measurable regression compared to the standard dispatcher.
+- **SC-003**: The system handles 4+ concurrent clients performing cold lookups without data corruption or deadlock.
+- **SC-004**: All staging resources are fully released on shutdown with zero leaks.
+- **SC-005**: End-to-end throughput is measurable and comparable between the P2P path (full-p2p.yaml) and the DRAM path (full.yaml) using the pipelined benchmark tool.
+- **SC-006**: When P2P ring allocation fails (GDRCopy/BAR1 unavailable), initialization logs a clear, non-fatal diagnostic and continues (permitting hot-only testing without P2P hardware). The failure is surfaced fatally on first use: the first cold `batch_lookup` panics with a diagnostic directing the operator to the `full.yaml` profile, while the single-key `lookup()` path silently falls back to the DRAM path. (Consistent with FR-006, FR-007, and User Story 2 AC-1.)
+
+## Assumptions
+
+- The host system has a GPU with sufficient memory to allocate the staging ring.
+- Client GPU memory arrives via IPC and cannot be used directly as DMA targets.
+- NVMe drives are accessible via userspace drivers.
+- The standard dispatcher's interface is stable and will not change during this development.
+- Environment initialization (SPDK, GPU runtime) is handled by other components before this component starts.
+- The existing pipelined benchmark tool (`certus-api-bench_v2.py`) is available for performance measurement.

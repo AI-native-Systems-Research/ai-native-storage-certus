@@ -1,0 +1,53 @@
+# A hardware file: what to run a workload against, and nothing about the
+# workload itself (FR-005, FR-082). See `hardware.md` for the schema.
+#
+# Placed at ./cluster.yml a run picks it up without being told to — and says so
+# on its error stream when it does, because a run whose meaning came from a file
+# nobody named is not reproducible from its own report.
+#
+# A test keeps this file parseable, so it is an example that cannot rot.
+version: 1
+
+# Virtual seconds per wallclock second. This belongs to the hardware rather than
+# to the workload: a description's think times and lifetimes are arbitrary with
+# respect to any particular machine, so aiming one description at a faster or
+# slower target is what this knob is for (FR-080).
+#
+# `.inf` means work-conserving — issue as fast as the transport allows and
+# measure the ceiling. Note that a large finite rate is NOT the same thing: it
+# keeps a schedule the machine cannot meet, and the run is then correctly
+# reported invalid for lateness.
+rate: 1.0
+
+# The Certus instances to drive. **An instance is not a machine.** This example
+# is the shape `deploy/multi-instance/` produces: two instances on each of two
+# hosts, one per NUMA domain, each with its own mailbox and its own agent port.
+#
+# `host` is required; `port` defaults to 7420 and `mailbox` to
+# /dev/shm/certus-shmq, so a homogeneous cluster is just a list of hostnames.
+#
+# Two entries may share a `host`. They may NOT share a `(host, port)` pair: each
+# instance needs its own agent, and two agents on one port means the second
+# one's startup takes the first for a leftover of a crashed run and shuts it
+# down — so the run would drive one instance while reporting two.
+instances:
+  - host: node5
+    port: 7420
+    mailbox: /dev/shm/certus-numa0
+  - host: node5
+    port: 7421
+    mailbox: /dev/shm/certus-numa1
+  - host: node7
+    port: 7420
+    mailbox: /dev/shm/certus-numa0
+  - host: node7
+    port: 7421
+    mailbox: /dev/shm/certus-numa1
+
+# Deliberately absent, and named in `hardware.md` so the format's growth stays
+# visible: per-instance CPU/NUMA affinity (which needs an affinity option on the
+# agent first, and matters because cross-socket DMA has measured 16% run-to-run
+# variance on this hardware) and per-instance GPU device.
+#
+# Nothing about the workload will ever be added here. That is FR-005: one
+# description has to stay portable across clusters unchanged.

@@ -1,0 +1,34 @@
+use std::cell::RefCell;
+
+/// Runtime configuration passed to component init hooks.
+///
+/// `resolved_pci_addrs` is populated by `init_spdk_env` after device discovery
+/// and consumed by `init_dispatcher`. Uses interior mutability because the
+/// generated composition code passes `&StackConfig` (shared ref) to all hooks.
+#[derive(Debug)]
+pub struct StackConfig {
+    pub device_pci: Vec<String>,
+    pub device_paths: Vec<String>,
+    pub drive_count: Option<usize>,
+    pub memory_tier_size: usize,
+    pub format: bool,
+    pub poller_base_cpu: Option<usize>,
+    pub max_eviction_attempts: usize,
+    /// Milliseconds a store allocation backpressures on a momentarily full
+    /// memory tier before surfacing AllocationFailed. 0 disables (fail fast).
+    pub store_backpressure_ms: u64,
+    pub memory_tier_eviction_threshold: f64,
+    /// dispatcher-p2p DRAM backfill delay (`DispatcherConfig::backfill_delay_ms`).
+    pub backfill_delay_ms: u64,
+    /// Explicit zyre group (cluster name) for remote-lookup, from CLI
+    /// `--rl-group` or the `CERTUS_RL_GROUP` env var. `None` => the remote-lookup
+    /// init hook generates a unique random group so the node is its own
+    /// single-node cluster (isolation by default).
+    pub rl_group: Option<String>,
+    pub resolved_pci_addrs: RefCell<Vec<String>>,
+    /// NUMA node of the first selected drive (populated by init_spdk_env).
+    pub resolved_numa_node: RefCell<Option<i32>>,
+    /// The transfer endpoint's name, `"ip:port"`, once it listens (populated by
+    /// init_transfer_endpoint). Published beside the mailbox: see `main`.
+    pub transfer_endpoint_name: RefCell<Option<String>>,
+}

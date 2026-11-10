@@ -1,0 +1,36 @@
+{
+  "generated": "2026-10-05",
+  "project": "block-device-spdk-nvme",
+  "spec": "001-spdk-nvme-block-device",
+  "branch": "fix/poller-cpu-placement-logging",
+  "baseline": "origin/unstable (stamped 2c86a131; stamp re-verified against `git archive origin/unstable`)",
+  "method": "Delta analysis on a certified baseline: this component's existing clean stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's src/specs/interfaces changes. Every FR/SC touching CPU placement, NUMA pinning, threads or SPDK init was located by grep over specs/** and re-checked against the changed code.",
+  "summary": {
+    "specs_analyzed": 1,
+    "findings": 1,
+    "resolved": 1,
+    "open": 0
+  },
+  "aligned": [
+    "FR-021 (set_actor_cpu precedence unchanged)",
+    "SC-007 caveat (NUMA node hardcoded 0, src/lib.rs:335-336) still accurate; Task BD-2 remains open"
+  ],
+  "drifted": [
+    {
+      "requirement": "FR-013",
+      "direction": "ALIGN+BACKFILL",
+      "severity": "major",
+      "spec_text": "The actor service thread MUST be pinned to a core in the same NUMA zone as the NVMe controller device.",
+      "actual": "Branch revision used `cpus().iter().nth(2)` for the fallback core, which returns None on a NUMA node with <=2 cores and left the actor UNPINNED (violates the MUST). Fixed: `.nth(2).or_else(|| first core)`.",
+      "location": "components/block-device-spdk-nvme/src/lib.rs:229-250",
+      "note": "Regression introduced by this branch, caught by this sync before stamping.",
+      "resolution": "Code fixed; FR-013 now documents set_actor_cpu precedence and the third-core / first-core fallback."
+    }
+  ],
+  "unspecced": [],
+  "conflicts": [],
+  "drift_status": "clean",
+  "inputs_sha256": "f8fccf2582f77c77a320cb9e8006a05ad01d269e0178b5586f4e32746ec598b7",
+  "git_commit": "d102a00b",
+  "synced_at": "2026-10-06T00:17:03Z"
+}

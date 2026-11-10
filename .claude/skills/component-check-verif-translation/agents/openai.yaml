@@ -1,0 +1,4 @@
+interface:
+  display_name: "Check Component Verif Translation"
+  short_description: "Compare component code with its Creusot/Kani/Spin verification artifacts"
+  default_prompt: "Use $component-check-verif-translation to audit a component's implementation against its Creusot mirror, Kani harnesses, or Spin model for drift, vacuous contracts, and unmatched assumptions."

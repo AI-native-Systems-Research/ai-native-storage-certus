@@ -1,0 +1,60 @@
+{
+  "generated": "2026-08-07",
+  "branch": "sync/spec-drift-sweep-20260807",
+  "component": "memory-tier",
+  "based_on": "drift-report.{json,md} (2026-08-07 sweep re-analysis; 30 aligned, 9 drifted)",
+  "mode": "interactive",
+  "disposition": "NO_ACTION (verify + note) — every drifted item is already tracked in the 2026-07-22 align-tasks.md awaiting maintainer sign-off; no new spec edits, no code drafted.",
+  "summary": { "backfill": 0, "human_decision": 0, "align_open_tracked": 5, "no_action": 5 },
+  "proposals": [
+    {
+      "id": "mt-sharding-not-implemented",
+      "spec": "001-memory-tier",
+      "requirement": "FR-005/006/007, NFR-002, FR-013, FR-021, SC-3",
+      "direction": "ALIGN",
+      "severity": "HIGH",
+      "note": "16-way shard design vs single unsharded RwLock<Pool>. Options (implement / backfill-down) recorded 2026-07-22. Architectural decision, NOT a mechanical bug — not drafted per sweep pacing. Remains tracked pending maintainer sign-off.",
+      "approved": false,
+      "applied": false
+    },
+    {
+      "id": "mt-evict-lru-for-key-ignores-key",
+      "spec": "001-memory-tier",
+      "requirement": "FR-014",
+      "direction": "ALIGN",
+      "severity": "HIGH",
+      "note": "evict_lru_for_key(key) binds _key and is a pure alias for evict_lru() (src/lib.rs:465-467). Resolution coupled to the sharding decision. Remains tracked pending maintainer sign-off.",
+      "approved": false,
+      "applied": false
+    },
+    {
+      "id": "mt-creusot-proofs-absent",
+      "spec": "001-memory-tier",
+      "requirement": "SC-8",
+      "direction": "ALIGN",
+      "severity": "MEDIUM-HIGH",
+      "note": "No Creusot artifacts; imemory_tier.rs doc comments still assert P4/P5/P10 'Verified' for behavior not in code. Phantom verified claim — flagged, not silently backfilled.",
+      "approved": false,
+      "applied": false
+    },
+    {
+      "id": "mt-version-mismatch",
+      "spec": "001-memory-tier",
+      "requirement": "NFR-008",
+      "direction": "ALIGN",
+      "severity": "MEDIUM",
+      "note": "Cargo.toml 0.1.0 / define_component! 0.3.0 / spec 0.2.0 unreconciled; not guessed.",
+      "approved": false,
+      "applied": false
+    },
+    {
+      "id": "mt-readme-source-layout-drift",
+      "requirement": "(README, not a spec FR)",
+      "direction": "ALIGN",
+      "severity": "LOW",
+      "note": "README describes a nonexistent lru.rs/LruList; outside specs/**.",
+      "approved": false,
+      "applied": false
+    }
+  ]
+}

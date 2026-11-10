@@ -1,0 +1,28 @@
+[package]
+name = "dispatch-map"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+# Store a per-entry CRC-32 (see interfaces/integrity-check). The 4-byte field
+# is cfg'd out when this is off, so DispatchEntry stays 56 bytes.
+integrity-check = ["interfaces/integrity-check"]
+
+[dependencies]
+component-framework.workspace = true
+component-core.workspace = true
+component-macros.workspace = true
+interfaces = { workspace = true, features = ["spdk"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+eviction-policy-lru.workspace = true
+
+[[bench]]
+name = "dispatch_map_benchmark"
+harness = false
+
+[lints]
+workspace = true

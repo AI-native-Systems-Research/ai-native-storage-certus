@@ -1,0 +1,25 @@
+{
+  "generated": "2026-10-05",
+  "project": "block-device-spdk-nvme",
+  "spec": "001-spdk-nvme-block-device",
+  "branch": "fix/poller-cpu-placement-logging",
+  "mode": "interactive",
+  "summary": {
+    "proposals": 1,
+    "approved": 1
+  },
+  "proposals": [
+    {
+      "id": 1,
+      "requirement": "FR-013",
+      "direction": "ALIGN+BACKFILL",
+      "current_spec": "The actor service thread MUST be pinned to a core in the same NUMA zone as the NVMe controller device.",
+      "current_code": "Branch revision used `cpus().iter().nth(2)` for the fallback core, which returns None on a NUMA node with <=2 cores and left the actor UNPINNED (violates the MUST). Fixed: `.nth(2).or_else(|| first core)`.",
+      "location": "components/block-device-spdk-nvme/src/lib.rs:229-250",
+      "proposed": "Code fixed; FR-013 now documents set_actor_cpu precedence and the third-core / first-core fallback.",
+      "confidence": "HIGH",
+      "approved": true,
+      "approved_by": "user (interactive, 2026-10-05)"
+    }
+  ]
+}

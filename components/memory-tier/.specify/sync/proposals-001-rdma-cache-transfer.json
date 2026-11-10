@@ -1,0 +1,350 @@
+{
+  "generated": "2026-10-22T00:30:00Z",
+  "based_on": "drift-report.md section 'Sync 2026-10-21 (branch 001-rdma-cache-transfer, full re-analysis)'",
+  "component": "memory-tier",
+  "spec": "001-memory-tier",
+  "branch": "001-rdma-cache-transfer",
+  "git_commit": "c9429de6",
+  "base": "origin/unstable 460a6f55",
+  "mode": "batch",
+  "summary": {
+    "total": 14,
+    "backfill": 10,
+    "align": 3,
+    "human_decision": 1,
+    "new_spec": 0,
+    "remove_from_spec": 0,
+    "real_bugs": 1
+  },
+  "carried_open": [
+    "FR-013 (ALIGN, align-tasks P3)",
+    "SC-3 (ALIGN, align-tasks P4)",
+    "U2 disconnected receptacle (decision, 2026-10-14 P9)",
+    "2026-10-14 P2 interface docs (folded into P8 here)"
+  ],
+  "proposals": [
+    {
+      "id": "P1",
+      "requirement": "FR-031 / FR-004 / NFR-010: lease alignment",
+      "type": "ALIGN",
+      "confidence": "HIGH",
+      "severity": "moderate",
+      "real_bug": true,
+      "spec_says": "FR-004: All allocations are 4 KiB-aligned for NVMe DMA compatibility; FR-031: the reserve is whole pages at the top of the pool",
+      "code_does": "reserve start = pool_ptr + (pool_size - reserve). That is 4 KiB-aligned only if pool_size % 4096 == 0, which initialize does not require. Example: pool_size=64*4096+100 gives cache_size=229476, so every lease is misaligned by 100 bytes, and the dispatcher DMAs device reads into leases",
+      "code_location": "components/memory-tier/src/lib.rs:290-292,347-348,715; components/dispatcher/src/lib.rs:4005-4040; apps/certus-server-yaml/src/main.rs:203-219",
+      "code_change": "In initialize, round cache_size down to a page: `let cache_size = (pool_size - reserve) & !4095;` (the reserve then starts page-aligned; the sub-page tail, pool_size % 4096 bytes, is left unused by both and still counted in pool_info). Alternative: reject `pool_size % 4096 != 0` with InvalidSize. Add a test `a_reserve_in_an_unaligned_pool_is_page_aligned` (initialize(64*4096+100), pretend_dma, assert lease.ptr as usize % 4096 == 0); it fails on the current code.",
+      "spec_edits": [
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+          "line": 207,
+          "old": "| FR-031 | `initialize` sets aside a bounce reserve of `min(requested, pool_size / 8)` whole pages at the top of the pool (default",
+          "new": "| FR-031 | `initialize` sets aside a bounce reserve of `min(requested, pool_size / 8)` whole pages, starting on a 4 KiB boundary, at the top of the pool (default",
+          "note": "apply with the code change"
+        }
+      ],
+      "decision_point": "Round cache_size down (keeps accepting any pool_size) or reject unaligned pool_size (changes US3 acceptance; a breaking error for raw-byte --memory-tier-size). Recommended: round down.",
+      "approved": false
+    },
+    {
+      "id": "P2",
+      "requirement": "FR-007",
+      "type": "BACKFILL",
+      "confidence": "HIGH",
+      "severity": "minor",
+      "spec_says": "A single first-fit `FreeList` allocator and a single `HashMap<CacheKey, Slot>` slot map serve the whole pool",
+      "code_does": "One FreeList + HashMap serve the cache (pool_size less the reserve); a second FreeList in Mutex<Bounce> serves the reserve",
+      "code_location": "components/memory-tier/src/lib.rs:83-89,98,353-361",
+      "edits": [
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+          "line": 183,
+          "old": "| FR-007 | A single first-fit `FreeList` allocator and a single `HashMap<CacheKey, Slot>` slot map serve the whole pool | Implementation |",
+          "new": "| FR-007 | A single first-fit `FreeList` allocator and a single `HashMap<CacheKey, Slot>` slot map serve the whole cache (the pool less the bounce reserve); the reserve has its own allocator (FR-032) | Implementation |"
+        }
+      ],
+      "approved": false
+    },
+    {
+      "id": "P3",
+      "requirement": "FR-018",
+      "type": "BACKFILL",
+      "confidence": "HIGH",
+      "severity": "minor",
+      "spec_says": "clear() removes all entries, resets allocators, returns count",
+      "code_does": "clear() resets only the cache allocator, to cache_size; the bounce allocator and its live leases are untouched",
+      "code_location": "components/memory-tier/src/lib.rs:652-666",
+      "edits": [
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+          "line": 194,
+          "old": "| FR-018 | clear() removes all entries, resets allocators, returns count | Unit test |",
+          "new": "| FR-018 | clear() removes all entries, resets the cache allocator (the bounce reserve and its leases are untouched), returns count | Unit test |"
+        }
+      ],
+      "approved": false
+    },
+    {
+      "id": "P4",
+      "requirement": "FR-023",
+      "type": "BACKFILL",
+      "confidence": "HIGH",
+      "severity": "minor",
+      "spec_says": "exception list covers insert size==0, batch_touch([]), is_dma_capable, telemetry_snapshot, initialize",
+      "code_does": "set_bounce_reserve checks the flag inverted (errors once set); bounce_alloc returns BounceError::NotInitialized; bounce_free and bounce_usage do not check the flag (before init: bounce_free panics as 'not a live lease', bounce_usage returns (0, 0))",
+      "code_location": "components/memory-tier/src/lib.rs:673-738",
+      "edits": [
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+          "line": 199,
+          "old": "`is_dma_capable()` and `telemetry_snapshot()` do not check the flag (their results are well-defined before initialization); `initialize()` rejects an already-set flag | Implementation |",
+          "new": "`is_dma_capable()`, `telemetry_snapshot()` and `bounce_usage()` do not check the flag (their results are well-defined before initialization; `bounce_usage()` returns `(0, 0)`), and neither does `bounce_free()`, for which no lease can be live before initialization, so it panics (FR-032); `bounce_alloc()` returns `BounceError::NotInitialized`; `initialize()` and `set_bounce_reserve()` reject an already-set flag | Implementation |"
+        }
+      ],
+      "approved": false
+    },
+    {
+      "id": "P5",
+      "requirement": "FR-032 + US8 acceptance (NotInitialized)",
+      "type": "BACKFILL",
+      "confidence": "HIGH",
+      "severity": "minor",
+      "spec_says": "bounce_alloc answers NoSpace or NeverFits",
+      "code_does": "also BounceError::NotInitialized before initialize, asserted by a_lease_larger_than_the_reserve_never_fits",
+      "code_location": "components/memory-tier/src/lib.rs:686-688,1017-1021",
+      "edits": [
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+          "line": 208,
+          "old": "`bounce_alloc` answers `NoSpace` (transient) or `NeverFits` (oversize, zero, no reserve, or a pool that is not DMA-capable);",
+          "new": "`bounce_alloc` answers `NotInitialized` before `initialize`, then `NoSpace` (transient) or `NeverFits` (oversize, zero, no reserve, or a pool that is not DMA-capable);"
+        },
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+          "line": "127-128",
+          "old": "  `NeverFits` when it never can — larger than the reserve, no reserve, zero length, or a pool\n  that is not DMA-capable",
+          "new": "  `NeverFits` when it never can — larger than the reserve, no reserve, zero length, or a pool\n  that is not DMA-capable; `NotInitialized` before `initialize`"
+        }
+      ],
+      "approved": false
+    },
+    {
+      "id": "P6",
+      "requirement": "Overview (D3)",
+      "type": "BACKFILL",
+      "confidence": "HIGH",
+      "severity": "minor",
+      "spec_says": "The pool is held as a single, unsharded structure guarded by one `RwLock<Pool>`: a single first-fit free-list allocator and a single `HashMap<CacheKey, Slot>` slot map.",
+      "code_does": "the cache is the pool less a bounce reserve with its own allocator",
+      "code_location": "components/memory-tier/src/lib.rs:91-109,347-361",
+      "edits": [
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+          "line": 18,
+          "old": "Eviction decisions are delegated to an external `IEvictionPolicy` component via a receptacle binding, which provides pluggable eviction strategies (currently LRU) and its own internal synchronization; eviction-order touches are performed after releasing the pool lock.",
+          "new": "Eviction decisions are delegated to an external `IEvictionPolicy` component via a receptacle binding, which provides pluggable eviction strategies (currently LRU) and its own internal synchronization; eviction-order touches are performed after releasing the pool lock. The top of the pool (by default 16 MiB, at most an eighth) is a bounce reserve outside the cache, with its own allocator behind a mutex, leased to serve block-tier entries to peers (User Story 8); `capacity()`, `used()`, eviction and `clear()` cover only the cache."
+        }
+      ],
+      "approved": false
+    },
+    {
+      "id": "P7",
+      "requirement": "Implementation Notes + SAFETY comment (D4)",
+      "type": "BACKFILL",
+      "confidence": "HIGH",
+      "severity": "minor",
+      "spec_says": "immutable state fields (`pool_ptr`, `pool_size`, `pool_id`); all mutable access is serialized through the `RwLock<Pool>`",
+      "code_does": "cache_size is also immutable after init; the reserve is serialized by Mutex<Bounce>; leased bytes are owned by the lease holder",
+      "code_location": "components/memory-tier/src/lib.rs:91-115",
+      "edits": [
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+          "line": 271,
+          "old": "After initialization the immutable state fields (`pool_ptr`, `pool_size`, `pool_id`) do not change;",
+          "new": "After initialization the immutable state fields (`pool_ptr`, `pool_size`, `cache_size`, `pool_id`) do not change;"
+        },
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+          "line": 272,
+          "old": "and all mutable access is serialized through the `RwLock<Pool>`.",
+          "new": "and all mutable allocator state is serialized: the cache's through the `RwLock<Pool>`, the bounce reserve's through `Mutex<Bounce>`; the bytes of a lease belong to its holder until `bounce_free`."
+        },
+        {
+          "file": "components/memory-tier/src/lib.rs",
+          "line": "111-113",
+          "kind": "comment only",
+          "old": "// RwLock<Pool> serializes access. Immutable fields (pool_ptr, pool_size, spdk_allocated)",
+          "new": "// RwLock<Pool> and Mutex<Bounce> serialize access. Immutable fields (pool_ptr, pool_size, cache_size, spdk_allocated)"
+        }
+      ],
+      "approved": false
+    },
+    {
+      "id": "P8",
+      "requirement": "IMemoryTier docs (D5; also completes 2026-10-14 P2)",
+      "type": "BACKFILL",
+      "confidence": "HIGH",
+      "severity": "minor",
+      "spec_says": "capacity: 'Return the total pool capacity in bytes.'; pool_info: 'for CUDA host registration'; bounce_alloc/NeverFits omit zero length; bounce_alloc omits NotInitialized",
+      "code_does": "capacity = pool less reserve; pool_info includes the reserve; len == 0 is NeverFits; NotInitialized before init",
+      "code_location": "components/memory-tier/src/lib.rs:625-650,684-706",
+      "edits": [
+        {
+          "file": "components/interfaces/src/imemory_tier.rs",
+          "line": 197,
+          "old": "        /// Return the total pool capacity in bytes.",
+          "new": "        /// Return the bytes the cache may use: the pool size less the bounce\n        /// reserve (see [`set_bounce_reserve`](Self::set_bounce_reserve))."
+        },
+        {
+          "file": "components/interfaces/src/imemory_tier.rs",
+          "line": 203,
+          "old": "        /// Return the base pointer and size of the pool for CUDA host registration.",
+          "new": "        /// Return the base pointer and size of the whole pool, bounce reserve\n        /// included, for CUDA host and RDMA registration."
+        },
+        {
+          "file": "components/interfaces/src/imemory_tier.rs",
+          "line": "227-229",
+          "old": "        /// now; `NeverFits` if they never can — larger than the reserve, no\n        /// reserve, or a pool that is not DMA-capable.",
+          "new": "        /// now; `NeverFits` if they never can — zero, larger than the reserve, no\n        /// reserve, or a pool that is not DMA-capable; `NotInitialized` before\n        /// `initialize`."
+        },
+        {
+          "file": "components/interfaces/src/imemory_tier.rs",
+          "line": "108-109",
+          "old": "    /// Can never be satisfied: larger than the whole reserve, no reserve, or a\n    /// pool the device cannot DMA into. Retrying cannot help.",
+          "new": "    /// Can never be satisfied: zero length, larger than the whole reserve, no\n    /// reserve, or a pool the device cannot DMA into. Retrying cannot help."
+        }
+      ],
+      "note": "This branch already edits imemory_tier.rs, so every component re-stamps anyway; the deferral reason for 2026-10-14 P2 (insert / NotInitialized docs) no longer applies, so it can ride along. Re-stamp all components LAST.",
+      "approved": false
+    },
+    {
+      "id": "P9",
+      "requirement": "US8 bounce_free not-live case (D6)",
+      "type": "ALIGN",
+      "confidence": "HIGH",
+      "severity": "minor",
+      "spec_says": "bounce_free(lease) panics on a lease that is not live, or whose length differs",
+      "code_does": "both panic (lib.rs:724-731); only the wrong-length case is tested (lib.rs:1026-1030)",
+      "code_change": "Add `#[should_panic(expected = \"not a live lease\")] fn freeing_a_lease_twice_is_loud()` (alloc, free, free again) and list it in US8 Test Coverage.",
+      "spec_edits": [
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+          "line": 135,
+          "old": "  `freeing_with_the_wrong_length_is_loud`, `clear_empties_the_cache_and_leaves_the_reserve`",
+          "new": "  `freeing_with_the_wrong_length_is_loud`, `freeing_a_lease_twice_is_loud`, `clear_empties_the_cache_and_leaves_the_reserve`"
+        }
+      ],
+      "approved": false
+    },
+    {
+      "id": "P10",
+      "requirement": "Test comment cites wrong FR (D7)",
+      "type": "ALIGN",
+      "confidence": "HIGH",
+      "severity": "trivial",
+      "code_location": "components/memory-tier/src/lib.rs:953",
+      "kind": "comment only",
+      "edits": [
+        {
+          "file": "components/memory-tier/src/lib.rs",
+          "line": 953,
+          "old": "    /// FR-012: a full cache cannot reach the reserve, and leasing never evicts.",
+          "new": "    /// FR-031 (and certus-transfer-endpoint FR-012): a full cache cannot reach\n    /// the reserve, and leasing never evicts."
+        }
+      ],
+      "approved": false
+    },
+    {
+      "id": "P11",
+      "requirement": "tasks.md / plan.md inventories (D8)",
+      "type": "BACKFILL",
+      "confidence": "HIGH",
+      "severity": "minor",
+      "spec_says": "tasks.md:13 '12 unit tests in lib.rs'; plan.md:111-126 lists 12 lib.rs tests, no reserve",
+      "code_does": "20 tests in lib.rs (8 bounce), 1 regression, 9 allocator = 30; all pass (default and --features telemetry)",
+      "edits": [
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/tasks.md",
+          "line": 13,
+          "old": "- [ ] Confirm all 12 unit tests in lib.rs and the 1 regression test in `repair_test_insert_track_failure.rs` pass (`cargo test -p memory-tier`)",
+          "new": "- [x] Confirm all 20 unit tests in lib.rs (8 of them for the bounce reserve) and the 1 regression test in `repair_test_insert_track_failure.rs` pass (`cargo test -p memory-tier`; 30 passed with default features and with `--features telemetry`, 2026-10-21)"
+        },
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/plan.md",
+          "line": 126,
+          "old": "| `peek_does_not_update_eviction_order` | Peek does not promote |",
+          "new": "| `peek_does_not_update_eviction_order` | Peek returns the entry (order unchecked) |\n| `the_default_reserve_is_taken_quietly_and_capped` | 16 MiB default; capped at pool/8; pool_info covers the reserve |\n| `the_reserve_is_set_before_initialize_only` | Whole pages; error after init; zero = no reserve |\n| `the_cache_and_the_reserve_never_share_bytes` | Full cache cannot reach the reserve; leasing never evicts |\n| `leases_are_transient_until_freed_and_coalesce` | NoSpace when full; freed leases coalesce |\n| `a_pool_that_is_not_dma_capable_never_fits` | NeverFits on an mmap pool |\n| `a_lease_larger_than_the_reserve_never_fits` | NeverFits for oversize/zero; NotInitialized before init |\n| `freeing_with_the_wrong_length_is_loud` | bounce_free panics on a length mismatch |\n| `clear_empties_the_cache_and_leaves_the_reserve` | clear leaves leases alone |\n\nThe regression test `insert_fails_cleanly_when_policy_refuses_to_track` is in `src/repair_test_insert_track_failure.rs`."
+        }
+      ],
+      "approved": false
+    },
+    {
+      "id": "P12",
+      "requirement": "U3 pretend_dma + U4 set_bounce_reserve error variant",
+      "type": "BACKFILL",
+      "confidence": "MEDIUM",
+      "severity": "minor",
+      "code_does": "set_bounce_reserve after init returns MemoryTierError::AllocationFailed (lib.rs:676-678); US8 tests lease from an mmap pool via #[cfg(test)] pretend_dma set in setup() (lib.rs:103-106,690-693,778)",
+      "edits": [
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+          "line": 122,
+          "old": "- `set_bounce_reserve(bytes)` overrides it before `initialize` and is an error afterwards;",
+          "new": "- `set_bounce_reserve(bytes)` overrides it before `initialize` and returns `AllocationFailed` afterwards;"
+        },
+        {
+          "file": "components/memory-tier/specs/001-memory-tier/spec.md",
+          "line": 135,
+          "old": "  `freeing_with_the_wrong_length_is_loud`, `clear_empties_the_cache_and_leaves_the_reserve`",
+          "new": "  `freeing_with_the_wrong_length_is_loud`, `clear_empties_the_cache_and_leaves_the_reserve`\n- Unit tests run on an mmap pool; a test-only `pretend_dma` flag lets it lease as if DMA-capable",
+          "note": "if P9 is also approved, apply P9's edit to this line first"
+        }
+      ],
+      "approved": false
+    },
+    {
+      "id": "P13",
+      "requirement": "U5 reserve taken on a non-DMA pool",
+      "type": "HUMAN_DECISION",
+      "confidence": "MEDIUM",
+      "severity": "minor",
+      "code_does": "on an mmap pool initialize still carves the reserve (default 16 MiB) out of the cache, though every bounce_alloc there returns NeverFits",
+      "code_location": "components/memory-tier/src/lib.rs:347-348,694-700",
+      "options": {
+        "A": "Keep it (current). Document in FR-031: 'the reserve is taken whether or not the pool is DMA-capable'. Simple; capacity is independent of the SPDK env.",
+        "B": "ALIGN: take a zero reserve when !spdk_allocated (cfg(test) pretend_dma aside), so mmap pools keep the full cache. capacity() then depends on the allocation path."
+      },
+      "questions": [
+        "Is a node without SPDK ever expected to serve block-tier entries to peers?",
+        "Should capacity() be the same for a given pool_size regardless of SPDK?"
+      ],
+      "approved": false
+    },
+    {
+      "id": "P14",
+      "requirement": "Sync-artifact maintenance (D9 + carried FR-013/SC-3/U2)",
+      "type": "BACKFILL",
+      "confidence": "HIGH",
+      "severity": "trivial",
+      "spec_says": "align-tasks.md:52,57 and proposals.md:284 name the disconnected-receptacle draft 'FR-031'; align-tasks line refs are at 78f60ab8",
+      "code_does": "FR-031 is now the bounce reserve; the evict_next/touch/unwrap sites moved (evict_next lib.rs:492-524, touches :465-466,573-574,611-612, unwraps :387,445,488,498,538,569,659)",
+      "edits": [
+        {
+          "file": "components/memory-tier/.specify/sync/align-tasks.md",
+          "line": "52,57",
+          "old": "(proposed FR-031)",
+          "new": "(proposed FR-033; FR-031/FR-032 are now the bounce reserve)"
+        },
+        {
+          "file": "components/memory-tier/.specify/sync/align-tasks.md",
+          "line": "14-15,27-30,55",
+          "old": "(descriptive) every src/lib.rs line reference in the FR-013, SC-3 and P9 entries, as of 78f60ab8",
+          "new": "the c9429de6 line numbers listed in this proposal's code_does",
+          "exact": false
+        }
+      ],
+      "note": "Not a spec change; FR-013, SC-3 (ALIGN) and U2/P9 (decision) remain open and are unchanged in substance.",
+      "approved": false
+    }
+  ]
+}

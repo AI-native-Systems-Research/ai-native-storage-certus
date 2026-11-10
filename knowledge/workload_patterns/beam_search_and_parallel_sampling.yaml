@@ -1,0 +1,93 @@
+id: beam-search-and-parallel-sampling
+kind: atomic
+name: Beam Search with Shared Prefix and Divergence
+status: candidate
+parameters:
+  beam_width:
+    type: integer
+    range: [2, 32]
+    default: 4
+  shared_prefix_blocks:
+    type: integer
+    range: [8, 512]
+    default: 64
+  divergence_blocks_per_beam:
+    type: integer
+    range: [4, 256]
+    default: 32
+  block_size:
+    type: integer
+    range: [1, 64]
+    default: 16
+  num_layers:
+    type: integer
+    range: [24, 128]
+    default: 80
+  kv_bytes_per_token_per_layer:
+    type: integer
+    range: [256, 16384]
+    default: 4096
+keyspaces:
+  shared_prefix:
+    cardinality: shared_prefix_blocks
+    object_bytes: block_size * num_layers * kv_bytes_per_token_per_layer
+    sharing: global
+    disjoint_between_actors: false
+  beam_suffix:
+    cardinality: divergence_blocks_per_beam
+    object_bytes: block_size * num_layers * kv_bytes_per_token_per_layer
+    sharing: per_actor
+    disjoint_between_actors: true
+preconditions:
+  - subject: shared_prefix
+    state: present_in_store
+    value: true
+  - subject: shared_prefix
+    state: absent_from_local_cache
+    value: true
+phases:
+  - id: load-shared-prefix
+    actors:
+      count: 1
+      arrival: burst
+      concurrency: 1
+    operations:
+      - op: load
+        keys: shared_prefix
+        order: sequential
+    barrier_after: true
+  - id: beam-divergence-stores
+    actors:
+      count: beam_width
+      arrival: burst
+      concurrency: beam_width
+    operations:
+      - op: store
+        keys: beam_suffix
+        order: sequential
+    barrier_after: true
+  - id: prune-losers
+    actors:
+      count: 1
+      arrival: burst
+      concurrency: 1
+    operations:
+      - op: delete
+        keys: beam_suffix
+        order: sequential
+        repeat: (beam_width - 1) * divergence_blocks_per_beam
+    barrier_after: false
+measure:
+  - phase: load-shared-prefix
+    operation: load
+    metrics: [latency_p99_ms, throughput_MBps]
+  - phase: beam-divergence-stores
+    operation: store
+    metrics: [throughput_MBps]
+  - phase: prune-losers
+    operation: delete
+    metrics: [latency_p99_ms]
+expected_io:
+  stores: beam_width * divergence_blocks_per_beam
+  loads: shared_prefix_blocks
+  deletes: (beam_width - 1) * divergence_blocks_per_beam

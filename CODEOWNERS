@@ -1,0 +1,14 @@
+# CODEOWNERS
+#
+
+# Default owners for everything in the repo
+* @dwaddington @AI-native-Systems-Research/maintainers
+
+# Docs owners
+/docs/ @AI-native-Systems-Research/docs
+
+# Security policy owner
+SECURITY.md 
+
+# CI and GitHub Actions
+.github/workflows/ @AI-native-Systems-Research/ci

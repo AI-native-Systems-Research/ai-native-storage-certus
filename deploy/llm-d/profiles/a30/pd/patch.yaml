@@ -1,0 +1,147 @@
+# Both documents are already namePrefix'd: this overlay consumes ../base as a
+# resource, so base has applied its `namePrefix: pd-disaggregation-nvidia-gpu-vllm-`.
+#
+# What ../base already provides and is kept: the routing-proxy sidecar on decode
+# (port 8000, --kv-connector=nixlv2, vLLM moved to 8200), the NIXL side-channel
+# port 5600 and VLLM_NIXL_SIDE_CHANNEL_HOST=podIP on both roles, prefill's
+# VLLM_HTTP_TIMEOUT_KEEP_ALIVE, the 20Gi tmpfs /dev/shm, and the 60-min startup
+# probe. What changes is everything sized for gpt-oss-120b on H200s.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pd-disaggregation-nvidia-gpu-vllm-prefill
+spec:
+  # Placeholder; install.sh scales this to PD_PREFILL_REPLICAS.
+  replicas: 1
+  # Same reasoning as ../agg: the startup probe allows 60 min for a cold start,
+  # and with no spare GPU a rolling update must free one before claiming one.
+  progressDeadlineSeconds: 3900
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  template:
+    spec:
+      # Placement by node label rather than node name, so the overlay stays
+      # site-neutral. install.sh sets the labels from PD_PREFILL_NODES /
+      # PD_DECODE_NODES, or checks they already exist.
+      nodeSelector:
+        llm-d.ai/pd-prefill: "true"
+      containers:
+        - name: modelserver
+          # Lists without a merge key are replaced wholesale: this is the
+          # complete arg vector. Base's --block-size=128 and
+          # --no-disable-hybrid-kv-cache-manager are gpt-oss (sliding-window)
+          # settings and are dropped; Qwen3-8B is plain full attention.
+          args:
+            - "Qwen/Qwen3-8B"
+            - "--disable-access-log-for-endpoints=/health,/metrics,/v1/models"
+            - "--tensor-parallel-size=1"
+            - "--gpu-memory-utilization=0.90"
+            # Must match decode: the handed-over prompt has to fit there, and
+            # 24576 is what one A30's ~29.9k tokens of KV allows (see ../agg).
+            - "--max-model-len=24576"
+            # kv_buffer_device=cpu: stage KV through a pinned host buffer and
+            # let NIXL move host memory. Over a TCP-only pod network, without
+            # GPUDirect RDMA, UCX has no way to read GPU memory remotely; the
+            # host buffer is the configuration that does not depend on UCX's
+            # CUDA-over-TCP staging.
+            - "--kv-transfer-config"
+            - '{"kv_connector":"NixlConnector","kv_role":"kv_producer","kv_buffer_device":"cpu","kv_connector_extra_config":{"backends":["UCX"]}}'
+          env:
+            # As in ../agg: Qwen3-8B is ungated, so drop the HF token secret.
+            - name: HF_TOKEN
+              $patch: delete
+            - name: HF_HOME
+              value: /.cache/huggingface
+            - name: VLLM_CACHE_ROOT
+              value: /.cache/vllm
+            # TCP over the ordinary pod network. Without an RDMA
+            # resource the pod has no /dev/infiniband anyway; pinning the
+            # transport makes the choice explicit rather than discovered.
+            - name: UCX_TLS
+              value: tcp
+          resources:
+            limits:
+              cpu: '8'
+              memory: 96Gi
+              nvidia.com/gpu: 1
+            requests:
+              cpu: '4'
+              memory: 64Gi
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - mountPath: /.cache
+              name: model-cache
+      volumes:
+        # Same swap as ../agg, for the same reason ($patch: replace on a list
+        # element silently keeps the emptyDir): one shared copy of the weights
+        # per node, surviving restarts.
+        - name: torch-compile-cache
+          $patch: delete
+        - name: model-cache
+          hostPath:
+            path: /home/llm-d-cache
+            type: DirectoryOrCreate
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pd-disaggregation-nvidia-gpu-vllm-decode
+spec:
+  # Placeholder; install.sh scales this to PD_DECODE_REPLICAS.
+  replicas: 1
+  progressDeadlineSeconds: 3900
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  template:
+    spec:
+      nodeSelector:
+        llm-d.ai/pd-decode: "true"
+      containers:
+        - name: modelserver
+          args:
+            - "Qwen/Qwen3-8B"
+            - "--disable-access-log-for-endpoints=/health,/metrics,/v1/models"
+            - "--tensor-parallel-size=1"
+            - "--gpu-memory-utilization=0.90"
+            - "--max-model-len=24576"
+            # NIXL requires decode TP >= prefill TP; 1 == 1 here.
+            # kv_load_failure_policy=fail (vLLM's default, stated so it is not
+            # changed by accident): a failed KV pull returns an error instead
+            # of silently recomputing the prefill on decode, which would make
+            # a broken handoff look like a merely slow one.
+            - "--kv-transfer-config"
+            - '{"kv_connector":"NixlConnector","kv_role":"kv_consumer","kv_buffer_device":"cpu","kv_load_failure_policy":"fail","kv_connector_extra_config":{"backends":["UCX"]}}'
+            # Behind the routing sidecar, which owns :8000.
+            - "--port=8200"
+          env:
+            - name: HF_TOKEN
+              $patch: delete
+            - name: HF_HOME
+              value: /.cache/huggingface
+            - name: VLLM_CACHE_ROOT
+              value: /.cache/vllm
+            - name: UCX_TLS
+              value: tcp
+          resources:
+            limits:
+              cpu: '8'
+              memory: 96Gi
+              nvidia.com/gpu: 1
+            requests:
+              cpu: '4'
+              memory: 64Gi
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - mountPath: /.cache
+              name: model-cache
+      volumes:
+        - name: torch-compile-cache
+          $patch: delete
+        - name: model-cache
+          hostPath:
+            path: /home/llm-d-cache
+            type: DirectoryOrCreate

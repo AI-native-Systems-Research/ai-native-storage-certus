@@ -1,0 +1,13 @@
+[package]
+name = "helloworld-mainline"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+component-framework.workspace = true
+example-helloworld.workspace = true
+
+[lints]
+workspace = true

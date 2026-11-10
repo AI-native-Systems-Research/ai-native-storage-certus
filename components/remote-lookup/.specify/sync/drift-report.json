@@ -1,0 +1,95 @@
+{
+  "generated": "pending",
+  "project": "remote-lookup",
+  "summary": {
+    "specs_analyzed": 2,
+    "requirements_checked": 60,
+    "aligned": 54,
+    "drifted": 6,
+    "not_implemented": 0,
+    "unspecced_features": 3
+  },
+  "specs": [
+    {
+      "id": "002-remote-lookup-rdma",
+      "title": "Remote Lookup over Zyre + RDMA (design-of-record)",
+      "aligned": 44,
+      "drifted": [
+        {
+          "requirement": "FR-018",
+          "spec_text": "All wire messages MUST use a [version][msg_type] header + op_id; unknown message types MUST be logged and ignored; servers MUST echo op_id.",
+          "actual": "Framing and op_id echo are correct and unknown/malformed frames are ignored, but neither the WireMessage::Unknown arm nor the malformed-decode (Err) arm emits a log line, so the 'logged' half of the requirement is unmet.",
+          "location": "src/actor.rs:314,330",
+          "severity": "Low"
+        }
+      ],
+      "not_implemented": []
+    },
+    {
+      "id": "001-remote-lookup-placeholder",
+      "title": "Remote Lookup Batch Interface (SUPERSEDED by 002)",
+      "aligned": 10,
+      "drifted": [
+        {
+          "requirement": "FR-001",
+          "spec_text": "batch_lookup signature MUST be fn(&self, &[(CacheKey, IpcHandle)]) -> Vec<Result<(), RemoteLookupError>>.",
+          "actual": "Superseded by 002: signature is &[(CacheKey, u32 /*size*/)]; IpcHandle dropped because remote-lookup is CPU/DRAM-only. Intentional, non-actionable.",
+          "location": "components/interfaces/src/iremote_lookup.rs:163-166",
+          "severity": "Low"
+        },
+        {
+          "requirement": "FR-003",
+          "spec_text": "Each entry MUST produce a log message (placeholder behavior).",
+          "actual": "Superseded by 002: real KEY_QUERY->RDMA protocol, no per-entry placeholder log. Non-actionable.",
+          "location": "src/actor.rs",
+          "severity": "Low"
+        },
+        {
+          "requirement": "FR-004",
+          "spec_text": "The placeholder MUST return Err(NotFound) for each entry (no network I/O).",
+          "actual": "Superseded by 002: performs real zyre + one-sided RDMA I/O; Ok(()) when resident. Non-actionable.",
+          "location": "src/actor.rs, src/server.rs",
+          "severity": "Low"
+        },
+        {
+          "requirement": "FR-008",
+          "spec_text": "The component MUST expose functionality only through IRemoteLookup - no public functions outside the interface.",
+          "actual": "Superseded by 002 FR-029: peers_seen/signal_shutdown/shutdown are intentional out-of-interface teardown/test hooks. Non-actionable.",
+          "location": "src/lib.rs:336-367",
+          "severity": "Low"
+        },
+        {
+          "requirement": "SC-002",
+          "spec_text": "The interface compiles with the same (CacheKey, IpcHandle) parameter types as IDispatcher::batch_lookup.",
+          "actual": "Superseded by 002: compiles with (CacheKey, u32). Non-actionable.",
+          "location": "components/interfaces/src/iremote_lookup.rs:163-166",
+          "severity": "Low"
+        }
+      ],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "DISCONNECT_ACK_TIMEOUT (fixed 500ms bounded wait for DisconnectAck)",
+      "location": "src/actor.rs",
+      "lines": "37,1020-1033",
+      "suggested_spec": "Note the hardcoded ack-handshake bound in FR-014/FR-031, distinct from the configurable connection_teardown_timeout orphan grace."
+    },
+    {
+      "feature": "Malformed/truncated wire frame silent drop",
+      "location": "src/actor.rs",
+      "lines": "312-315",
+      "suggested_spec": "Extend FR-018 to require logging of malformed (WireError) frames, not only unknown message types; fold into the FR-018 logging ALIGN task."
+    },
+    {
+      "feature": "publish_success AlreadyExists size-collision guard",
+      "location": "src/actor.rs",
+      "lines": "576-591",
+      "suggested_spec": "Document in FR-006 that a racing AlreadyExists counts as success only at matching size; a differing size is reclaimed (never evicted). Already in knowledge/size-mismatch-handling.md."
+    }
+  ],
+  "conflicts": [],
+  "inputs_sha256": "0cb6bb4a6fac402016e4cb6fc9d796d10818754b171b4544fca56a2e317f5ad1",
+  "git_commit": "72c7182b"
+}

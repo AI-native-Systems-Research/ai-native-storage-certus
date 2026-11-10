@@ -1,0 +1,19 @@
+{
+  "applied": "2026-10-05",
+  "project": "interfaces",
+  "spec": "001-interfaces",
+  "branch": "fix/poller-cpu-placement-logging",
+  "backup": null,
+  "edits": [
+    {
+      "requirement": "DispatcherConfig::poller_base_cpu doc comment",
+      "direction": "ALIGN (doc)",
+      "result": "Doc comment corrected. FR-018 lists `poller_base_cpu` by name only, so no spec text change was needed."
+    }
+  ],
+  "source_files_modified": [
+    "components/interfaces/src/idispatcher.rs"
+  ],
+  "align_tasks_generated": 0,
+  "drift_status": "clean"
+}

@@ -1,0 +1,17 @@
+{
+  "applied": "2026-10-31T04:54:40Z",
+  "backup": "backups/20261031T045440Z/",
+  "specs_updated": [
+    {
+      "spec": "specs/001-lru-eviction-policy/spec.md",
+      "requirement": "FR-002",
+      "before": "`src/lib.rs:57` (`_semantics`) and `src/lib.rs:69` (`push_back`)",
+      "after": "`src/lib.rs:99` and `src/lib.rs:111`",
+      "change": "citation",
+      "applied_at": "2026-10-31T04:54:40Z"
+    }
+  ],
+  "align_tasks_generated": 0,
+  "not_applied": [],
+  "source_files_changed": 0
+}

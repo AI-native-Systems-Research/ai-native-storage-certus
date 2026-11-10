@@ -1,0 +1,20 @@
+{
+  "description": "Allowlist of skills that make sense applied locally to a single component. The component bootstrap skills (component-make-new, component-make-new-actor, component-new-version, component-like-existing) copy ONLY skills whose names match an 'include' pattern below into a new component's .claude/skills. Update this file to change what gets copied. Patterns support a trailing '*' wildcard; entries without '*' match exactly.",
+  "include": [
+    "component-check-leakage",
+    "component-sync-specs",
+    "component-update-docs",
+    "speckit-*",
+    "tools-creusot-*",
+    "tools-spin-*"
+  ],
+  "excludedRationale": {
+    "component-make-new, component-make-new-actor, component-like-existing, component-new-version, component-remove": "component lifecycle/scaffolding — run at the workspace level, not from inside a component",
+    "profile-*": "platform/system-wide performance benchmarking, not scoped to one component",
+    "design-artifacts-update": "operates on the certus-server-yaml profile, not a single component",
+    "wiki-update-component-design-descriptions": "updates the shared knowledge base",
+    "tools-count-sloc": "reports metrics for the whole code base",
+    "tools-speckit-init": "bootstraps spec-kit in a directory; already done during component creation",
+    "save": "session-transcript utility, unrelated to a component"
+  }
+}

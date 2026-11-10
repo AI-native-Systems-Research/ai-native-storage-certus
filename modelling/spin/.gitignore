@@ -1,0 +1,8 @@
+# Spin/Promela generated verifier artifacts — never commit; `make` regenerates.
+pan
+pan-*
+pan.[bchmpt]
+pan.c
+pan.tmp
+*.trail
+*.pml~
