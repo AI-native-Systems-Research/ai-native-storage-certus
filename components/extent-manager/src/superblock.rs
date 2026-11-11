@@ -3,7 +3,7 @@ use interfaces::ExtentManagerError;
 
 pub(crate) const SUPERBLOCK_SIZE: usize = 4096;
 pub(crate) const SUPERBLOCK_MAGIC: u64 = 0x4345_5254_5553_5634; // "CERTUSV4"
-pub(crate) const FORMAT_VERSION: u32 = 6;
+pub(crate) const FORMAT_VERSION: u32 = 7;
 
 #[derive(Debug, Clone)]
 #[allow(

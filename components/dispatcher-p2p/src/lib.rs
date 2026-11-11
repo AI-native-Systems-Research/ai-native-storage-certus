@@ -611,7 +611,7 @@ impl DispatcherP2pComponent {
         let idx = Self::drive_index(key, drives.len());
         let drive = &drives[idx];
         let block_size = drive.block_dev_iface.block_size();
-        let start_lba = offset / block_size as u64;
+        let start_lba = drive.extent_mgr.data_base_lba() + offset / block_size as u64;
         let block_dev = Arc::clone(&drive.block_dev_iface);
 
         // An exclusive channel pair for this read: concurrent lookups on the same
@@ -916,7 +916,7 @@ impl DispatcherP2pComponent {
         };
 
         let block_offset = write_handle.extent_offset();
-        let start_lba = block_offset / block_size as u64;
+        let start_lba = iem.data_base_lba() + block_offset / block_size as u64;
 
         let dma_capable = mt.is_dma_capable();
         if Self::write_buffer_to_ssd(&**drive, &temp_buf, start_lba, total_bytes, dma_capable)
@@ -1540,6 +1540,7 @@ impl IDispatcher for DispatcherP2pComponent {
                 .get()
                 .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
             let backfill_drives = bg_drives.clone();
+            let backfill_extent_mgrs = bg_extent_mgrs.clone();
 
             let chunk_size = {
                 let ring_guard = self.pipeline_ring.read();
@@ -1554,6 +1555,7 @@ impl IDispatcher for DispatcherP2pComponent {
                 let mt = Arc::clone(&mt_for_backfill);
                 let counters = Arc::clone(&backfill_counters);
                 let drive = Arc::clone(&backfill_drives[drive_idx]);
+                let base_lba = backfill_extent_mgrs[drive_idx].data_base_lba();
                 let channels = drive.connect_client().expect("backfill connect_client");
                 let block_size = drive.block_size() as u64;
                 move |job: DramBackfillJob| {
@@ -1600,7 +1602,7 @@ impl IDispatcher for DispatcherP2pComponent {
                             &*drive,
                             &channels,
                             mem_ptr,
-                            start_lba,
+                            base_lba + start_lba,
                             size as usize,
                             chunk_size,
                             16,
@@ -2077,7 +2079,8 @@ impl IDispatcher for DispatcherP2pComponent {
                                 let entry = &cold_entries[ci];
                                 pipeline::P2pColdJob {
                                     regions: entry.regions.clone(),
-                                    start_lba: entry.offset / block_size as u64,
+                                    start_lba: drives[drive_idx].extent_mgr.data_base_lba()
+                                        + entry.offset / block_size as u64,
                                     total_bytes: entry.ipc_handle_size as usize,
                                 }
                             })
@@ -2942,7 +2945,8 @@ impl IDispatcher for DispatcherP2pComponent {
                     for &ci in entry_indices {
                         let entry = &cold[ci];
                         let block_size = block_dev.block_size() as u64;
-                        let start_lba = entry.offset / block_size;
+                        let start_lba =
+                            drive.extent_mgr.data_base_lba() + entry.offset / block_size;
 
                         if Self::evict_for_space(dm, mt, entry.size, evict_ctx).is_err() {
                             continue;
