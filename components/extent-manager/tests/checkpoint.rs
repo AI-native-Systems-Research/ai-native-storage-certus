@@ -113,6 +113,40 @@ fn format_fresh_then_initialize() {
 }
 
 #[test]
+fn partitioned_recovery_rejects_legacy_data_layout() {
+    let (c, metadata_mock) = create_test_component(METADATA_DISK_SIZE);
+    c.set_data_base_lba(100);
+    c.format(format_params()).unwrap();
+
+    let recovered = extent_manager::ExtentManager::new_inner();
+    recovered
+        .metadata_device
+        .connect(metadata_mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
+        .unwrap();
+    recovered.set_dma_alloc(heap_dma_alloc());
+    recovered.set_data_base_lba(100);
+    recovered
+        .initialize()
+        .expect("new partitioned layout recovers");
+
+    let state = metadata_mock.shared_state();
+    {
+        let mut disk = state.lock().unwrap();
+        let superblock = disk.blocks.get_mut(&0).unwrap();
+        superblock[8..12].copy_from_slice(&6u32.to_le_bytes());
+        let crc = crc32fast::hash(&superblock[..92]);
+        superblock[92..96].copy_from_slice(&crc.to_le_bytes());
+    }
+    let err = recovered.initialize().unwrap_err().to_string();
+    assert!(err.contains("reformat"), "{err}");
+
+    recovered.set_data_base_lba(0);
+    recovered
+        .initialize()
+        .expect("unpartitioned legacy layout remains readable");
+}
+
+#[test]
 fn recover_checkpointed_extents() {
     let metadata_mock = Arc::new(MockBlockDevice::new(METADATA_DISK_SIZE));
     let metadata_shared = metadata_mock.shared_state();

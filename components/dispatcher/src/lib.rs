@@ -8527,8 +8527,30 @@ mod tests {
             assert_eq!(*disks[drive].lbas.lock().unwrap(), [3]);
             d.release_bounce(buf);
         }
+
         assert_eq!(mt.bounce_free_count(), 4, "every buffer returned");
         assert_eq!(mt.used(), 0, "serving promotes nothing into the cache");
+    }
+
+    #[test]
+    fn read_to_bounce_uses_each_drives_data_partition_base() {
+        let disks = [pattern_disk(16, 0x10, 4096), pattern_disk(16, 0x80, 4096)];
+        let (c, _) = bounce_dispatcher(&disks, 2, 8192);
+        c.data_drives.read()[0].extent_mgr.set_data_base_lba(4);
+        c.data_drives.read()[1].extent_mgr.set_data_base_lba(7);
+        let d = query_interface!(c, IDispatcher).unwrap();
+        for (drive, base) in [4, 7].into_iter().enumerate() {
+            let buf = d
+                .read_to_bounce(7, crate::encode_loc(drive, 0), 8192)
+                .unwrap();
+            // SAFETY: the buffer is ours until released.
+            let got = unsafe { std::slice::from_raw_parts(buf.ptr, 8192) };
+            assert!(got[..4096]
+                .iter()
+                .all(|&b| b == [0x10, 0x80][drive] + base as u8));
+            assert_eq!(*disks[drive].lbas.lock().unwrap(), [base, base + 1]);
+            d.release_bounce(buf);
+        }
     }
 
     /// A location whose drive index is past the drive list is an error, never a
