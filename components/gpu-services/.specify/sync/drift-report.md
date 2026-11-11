@@ -1,11 +1,13 @@
 ---
 spec_sync_component: gpu-services
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-11-09T07:24:06Z
-spec_sync_git_commit: 2024ea765
-spec_sync_inputs_sha256: afeedf75f366d328439d2b19fe766a48121cad232ee5c4632bcd9879266b6148
+spec_sync_synced_at: 2026-11-11T21:15:19Z
+spec_sync_git_commit: adacb8ce1
+spec_sync_inputs_sha256: c108befa2153eaddb814a8357a91b75353f3f5a38da771c3960fa446ca0c3bc2
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-11-11 (branch `copilot/fix-dispatcher-lba-issues`, on unstable).** Transitive only: this component's own `src/` and `specs/` are as unstable has them (its previous stamp was re-verified fresh in a clean worktree of `unstable`). Its digest moves because `components/interfaces` changed: one doc comment on `FormatParams::metadata_region_size`, which documents the partitioned extent-manager layout (see the extent-manager, dispatcher and dispatcher-p2p syncs of the same date). This component's `src/` does not reference `FormatParams`, `metadata_region_size` or `data_base_lba` (checked by grep). No analysis below changes.
+
 > **Apply 2026-11-08 (branch fix/dispatcher-j33-repairs, approved by Cornel).** Applied **P-6** (001 FR-016) as BACKFILL: if `spdk_mem_unregister` fails, `unregister_host_memory` still calls `cudaHostUnregister` and then returns the SPDK error; a CUDA failure returns the CUDA error (commit `d45ab524d`, review of PR #591, `src/lib.rs:1218-1242`). The old text occurred exactly once and was replaced with the exact text from `proposals.md`; a provenance note and a 2026-11-08 `Last-Synced` line were added. Backup: `backups/20261109T070901Z/`. **Tasks:** none (no ALIGN proposals). **Open:** **P-5** (`IGpuServices` doc comments in `components/interfaces/src/igpu_services.rs`) is not approved ("Cornel 2026-11-08: not in this PR (edits components/interfaces, re-stamps every component); bundle with the next interfaces change") and is recorded as open in `align-tasks.md` with the refreshed wording. The four observations (vacuous no-GPU test pass, no test for the SPDK-failure path, unpinned region after that `Err`, unguarded `allocate_pinned_dma_buffer` → `src/dma.rs:259`) remain for a human. No `src/` or interfaces file changed; no tests run. Frontmatter not touched. **Status to stamp: `clean`.** Details in `apply-report.md`.
 
 > **Sync 2026-11-08 (branch fix/dispatcher-j33-repairs, HEAD `d45ab524d`) — delta, 1 spec requirement drifted (001 FR-016), BACKFILL proposed as P-6. P-5 (interfaces doc) is still open and is carried forward. Nothing approved, nothing applied. Frontmatter left as stamped; the re-stamp script owns it.** Base: the stamp commit `0eb3d3955` (that stamp covered `9a79224a1`, applied as P-1…P-4 on 2026-11-07). `git log 0eb3d3955..HEAD -- components/gpu-services components/interfaces` shows one commit, `d45ab524d` (review of PR #591). It changes `src/lib.rs` (+12/−6) and `tests/host_memory_without_spdk.rs` (+5/−1). **`components/interfaces` is unchanged since the stamp** (empty `git diff --stat`).

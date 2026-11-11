@@ -1,17 +1,21 @@
-# Sync Apply Report: dispatcher-p2p
+# Sync Apply Report — dispatcher-p2p
 
-Applied: 2026-11-04T01:26:34Z — branch `feat/dispatcher-p2p-mr-pool` @ `6e2d2816`
+Applied: 2026-11-11T21:14:07Z · Branch `copilot/fix-dispatcher-lba-issues` · HEAD `adacb8ce1` · Mode: interactive · Backup: `backups/20261111T211120Z/`
+
+Approved interactively by the user in /component-sync-specs --interactive, 2026-11-11. Every proposal is `approved: true`. Before each replacement, the old text was checked to occur exactly once in its file. Every check passed.
 
 ## Specs Updated
-| Spec | Requirement | Change Type |
-|---|---|---|
-| 001-gpudirect-cold-path | FR-005 | Modified |
-| 001-gpudirect-cold-path | FR-015 | Modified (function name) |
-| 001-gpudirect-cold-path | FR-034 | Added |
-| 001-gpudirect-cold-path | FR-035 | Added |
-| 001-gpudirect-cold-path | FR-036 | Added |
-| 001-gpudirect-cold-path | research.md R3 | Annotated as superseded |
-| 001-gpudirect-cold-path | tasks.md T014 | Annotated |
 
-New specs: none. Align tasks: none (`align-tasks.md` unchanged). Not applied: none.
-Backups: `.specify/sync/backups/` (spec.md, research.md, tasks.md, drift-report.md before this sync).
+| Proposal | Requirement | Change Type |
+|---|---|---|
+| P-P2P1 | FR-037 (new) | Added |
+
+Files: `specs/001-gpudirect-cold-path/spec.md`. No `.rs` source was modified.
+
+## Implementation Tasks Generated
+
+- **A-P2P-LBA** (in `align-tasks.md`): add a mock-drive test for the p2p read and write paths that asserts the base LBA is applied.
+
+## Not Applied
+
+None.

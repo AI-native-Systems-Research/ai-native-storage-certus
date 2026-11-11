@@ -1,163 +1,35 @@
 {
-  "generated": "2026-11-09T06:53:49Z",
-  "analysis_run": "2026-11-08",
-  "project": "dispatcher",
-  "branch": "fix/dispatcher-j33-repairs",
-  "head": "d45ab524d",
-  "base": "7c12e427a (merge-base with origin/unstable)",
-  "based_on": "drift-report.json (same run)",
-  "on_top_of": "2026-11-07 apply (b153ea11e): B-35..B-49 applied, A-15..A-17 tasks",
-  "mode": "BATCH: no questions; every proposal approved=false; nothing applied",
-  "numbering": "continues the 2026-11-07 run: B-35..B-49 and A-13..A-17 taken; new ids from B-50 and A-18",
-  "summary": {
-    "proposals": 4,
-    "backfill": 3,
-    "align": 1,
-    "human_decision": 0,
-    "new_spec": 0,
-    "supersede": 0,
-    "other": 0,
-    "approved": 0,
-    "edits_components_interfaces": 0
-  },
-  "not_applicable": [
-    {
-      "id": "B-43",
-      "reason": "fix 7 taken out by 209b01de5; lookup_async is synchronous with the null stream (src/lib.rs:3428-3449, :3496)"
-    },
-    {
-      "id": "A-13",
-      "reason": "fix 7 taken out; finding kept as note N-13"
-    }
-  ],
-  "reversed": [
-    {
-      "id": "B-44",
-      "by": "B-50",
-      "reason": "fix 8 taken out by 709153326 (review of PR #591); src/pipeline.rs:1398-1411 again fails the whole drive on a timeout"
-    }
-  ],
-  "closed": [
-    {
-      "id": "A-16",
-      "by": "d45ab524d",
-      "spec_side": "B-52",
-      "evidence": "src/lib.rs:1833-1838, :2172-2176, :2445-2449, :4610-4615"
-    },
-    {
-      "id": "unspecced: repair_test_* modules without #[cfg(test)]",
-      "by": "d45ab524d",
-      "evidence": "src/lib.rs:72-86, :4740-4754, :8754-8816 (25 declarations)"
-    }
-  ],
-  "notes": [
-    {
-      "id": "N-13",
-      "from": "A-13 (2026-11-06)",
-      "text": "An asynchronous lookup_async must hold the entry's read pin until its copy has completed (not merely queued) and record hit counters only then; lookup (src/lib.rs:2482-2493) inherits it. Today's synchronous code is safe (src/lib.rs:3429-3437). Deferred to the lookup_async issue."
-    },
-    {
-      "id": "N-14",
-      "text": "lookup_async maps every dm.lookup error to KeyNotFound without retry (src/lib.rs:3500); documented in contracts/errors.md:37, so not drift; a writer-held live key is reported as a miss on the single-key path. Decision with the lookup_async issue."
-    }
-  ],
+  "generated": "2026-11-11T21:14:07Z",
+  "branch": "copilot/fix-dispatcher-lba-issues",
+  "head": "adacb8ce1",
+  "base": "unstable",
+  "mode": "interactive",
+  "based_on": "drift-report.json 2026-11-11T21:14:07Z",
   "proposals": [
     {
-      "id": "B-50",
+      "id": "B-53",
       "direction": "BACKFILL",
-      "fix": 8,
-      "fix_note": "reverses the applied B-44 (fix 8 taken out by 709153326)",
-      "spec": "001",
-      "requirement": "FR-061 (drain-all-on-error bullet) + new Last Synced header line",
-      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:471, :43",
-      "spec_says": "A read timeout (`Completion::Timeout`) ... MUST NOT fail the drive's other jobs. Submission and draining continue, and after the loop each job whose segments did not all complete is reported `Err` with the timeout message — that job only",
-      "code_does": "Completion::Timeout fails every still-Ok job of the drive (landed ones included), fills obj_failed[d], stops submissions to that drive; outstanding reads still drained; other drives unaffected; no incomplete-object pass",
-      "code_location": "src/pipeline.rs:1398-1411, :1361, :1275, :1462-1472",
-      "old_text": "  - Preserve the **drain-all-on-error** invariant of FR-054 per drive: never break early while reads are in flight; retain and report the first error per job while continuing to drain outstanding completions. A read timeout (`Completion::Timeout`) carries only the actor's operation handle, not the job tag, and the actor forgets the timed-out operation; it MUST NOT fail the drive's other jobs. Submission and draining continue, and after the loop each job whose segments did not all complete is reported `Err` with the timeout message — that job only (User Story 11 scenario 4). Completions that indicate a broken channel rather than a failed read — an invalid tag, an unexpected completion kind, a disconnected completion channel — still fail every job of that drive and stop its submissions. *(Sync 2026-11-07, branch `fix/dispatcher-j33-repairs` — code authoritative, commit `408a568d0`, `src/pipeline.rs:1402-1420`, `:1481-1495`. Before it one timeout failed every job of its drive. Known gap, tracked as A-15: the timed-out job's memory-tier slot is then released at once, although the drive may still write into it.)*",
-      "new_text": "  - Preserve the **drain-all-on-error** invariant of FR-054 per drive: never break early while reads are in flight; retain and report the first error per job while continuing to drain outstanding completions. A read timeout (`Completion::Timeout`) carries only the actor's operation handle, not the job tag, so the job it belongs to cannot be named: it fails **every** job of that drive that has not already failed — including jobs whose reads had already landed — and stops further submissions to that drive; the drive's outstanding reads are still drained, and jobs on other drives are unaffected. Completions that indicate a broken channel rather than a failed read — an invalid tag, an unexpected completion kind, a disconnected completion channel — do the same. *(Sync 2026-11-08, branch `fix/dispatcher-j33-repairs` — code authoritative, `src/pipeline.rs:1398-1411`: commit `709153326` reverted `408a568d0` after review of PR #591 — continuing to submit to a drive after a timeout made a late write into a freed slot more likely and let a hung drive hold `batch_lookup` for about 155 s instead of one read timeout. The 2026-11-07 text (\"MUST NOT fail the drive's other jobs\") is withdrawn. Known gaps: per-job isolation of a timeout (User Story 11 scenario 4) is tracked as A-18; every failed job's memory-tier slot, the timed-out one included, is released at once although the drive may still write into the timed-out one, tracked as A-15.)*",
-      "additional_edits": [
-        {
-          "where": "specs/001-dispatcher-cache-interface/spec.md:43 (end of the 2026-11-07 Last Synced line; a new header line is inserted after it, the dated 2026-11-07 line is kept)",
-          "old_text": "Code-side follow-ups A-15, A-16, A-17 in `.specify/sync/align-tasks.md`. No source changes.",
-          "new_text": "Code-side follow-ups A-15, A-16, A-17 in `.specify/sync/align-tasks.md`. No source changes.\n\n**Last Synced**: 2026-11-08 — spec-sync on branch `fix/dispatcher-j33-repairs`. BACKFILL: FR-061 and User Story 11 scenario 4 describe the code again after repair `408a568d0` was taken out (`709153326`, review of PR #591); the 2026-11-07 FR-061 text from that repair is withdrawn, and per-job timeout isolation is tracked as A-18. FR-056 `read_write_stats`: the A-16 hand-over gap is closed (`d45ab524d`). No source changes."
-        }
+      "confidence": "HIGH",
+      "requirements": [
+        "US13 AS1",
+        "FR-062",
+        "FR-064 (new)"
       ],
-      "confidence": "HIGH",
-      "approved": true,
-      "approval_note": "Approved by Cornel 2026-11-08 (all proposals of the 2026-11-08 analysis except gpu-services P-5)."
-    },
-    {
-      "id": "B-51",
-      "direction": "BACKFILL",
-      "fix": 8,
-      "spec": "001",
-      "requirement": "User Story 11, acceptance scenario 4",
-      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:219",
-      "spec_says": "the error is reported for that entry only; other entries in the batch continue to be processed independently",
-      "code_does": "isolated for a per-segment read error and a GPU copy error; a timeout, invalid tag, unexpected completion, disconnect or failed submit fail every not-yet-failed entry of that drive (other drives unaffected); same as origin/unstable",
-      "code_location": "src/pipeline.rs:1317-1322, :1385-1389, :1398-1411, :1307-1316, :1412-1425, :1439-1454, :1253-1256",
-      "old_text": "**Then** the error is reported for that entry only; other entries in the batch continue to be processed independently.",
-      "new_text": "**Then** the error is reported for that entry only; other entries in the batch continue to be processed independently. Exception: an NVMe read **timeout**, or a completion that shows the drive's channel is broken (invalid tag, unexpected completion, disconnect, failed submit), fails every entry on that drive not yet failed, because the timeout does not name its entry; entries on other drives are unaffected (FR-061; per-entry isolation of a timeout is tracked as A-18 — *Sync 2026-11-08*, `src/pipeline.rs:1398-1411`).",
-      "confidence": "HIGH",
-      "approved": true,
-      "approval_note": "Approved by Cornel 2026-11-08 (all proposals of the 2026-11-08 analysis except gpu-services P-5)."
-    },
-    {
-      "id": "B-52",
-      "direction": "BACKFILL",
-      "fix": 3,
-      "fix_note": "closes A-16 (d45ab524d)",
-      "spec": "001",
-      "requirement": "FR-056 read_write_stats",
-      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:398",
-      "spec_says": "Known gap, tracked as A-16: a call made while the drive list is being handed over can count the outgoing drives twice, so the next call can read lower.",
-      "code_does": "fold + swap/clear under one data_drives write guard; read_write_stats holds the read guard across baseline and live drives; lock order data_drives -> baseline at every site",
-      "code_location": "src/lib.rs:1833-1838, :2172-2176, :2445-2449, :4610-4615; test src/repair_test_rw_stats_after_shutdown.rs:620 (no concurrency test; Loom suggested)",
-      "old_text": " Known gap, tracked as A-16: a call made while the drive list is being handed over can count the outgoing drives twice, so the next call can read lower.)*",
-      "new_text": ")* *(Sync 2026-11-08, branch `fix/dispatcher-j33-repairs` — code authoritative, commit `d45ab524d`, `src/lib.rs:1833-1838`, `:2172-2176`, `:2445-2449`, `:4610-4615`:)* The fold and the replacement or clearing of the drive list MUST happen under one hold of the `data_drives` write lock, and `read_write_stats` MUST read the baseline and the live drives under one hold of its read lock (lock order `data_drives` → baseline), so a call made while the drive list is handed over never counts the outgoing drives twice. *(This closes align task A-16 of the 2026-11-07 apply.)*",
-      "on_apply": "mark A-16 RESOLVED by d45ab524d in align-tasks.md; its concurrent-reader acceptance criterion becomes a Loom-test follow-up",
-      "confidence": "HIGH",
-      "approved": true,
-      "approval_note": "Approved by Cornel 2026-11-08 (all proposals of the 2026-11-08 analysis except gpu-services P-5)."
-    },
-    {
-      "id": "A-18",
-      "direction": "ALIGN",
-      "fix": 8,
-      "fix_note": "redo of the reverted 408a568d0 with the PR #591 review points as properties; subsumes A-15",
-      "spec": "001",
-      "requirement": "US-11 AS4 + FR-061 (per-job timeout isolation)",
-      "spec_location": "specs/001-dispatcher-cache-interface/spec.md:219, :471 (as amended by B-51 / B-50)",
-      "spec_says": "the error is reported for that entry only (target; the timeout exception is tracked as A-18)",
-      "code_does": "one Completion::Timeout fails every job of its drive; batch_lookup / promote_and_serve release every failed job's slot at once",
-      "code_location": "src/pipeline.rs:1398-1411; src/lib.rs:3074-3076, :1014-1022",
-      "proposed_change": "(1) never release a slot the drive may still write (leak + log as FR-062 does, or fence the drive first) — subsumes A-15; (2) after a timeout stop submitting to that drive, fail its unsubmitted jobs, drain only the in-flight reads, so a hung drive costs about one READ_TIMEOUT_MS (src/pipeline.rs:61), not about 155 s; jobs that fully landed before the timeout keep Ok and their delivery; on apply remove the B-50 / B-51 exception text",
-      "acceptance": [
-        "mock drive times out one read: the other jobs of that drive whose reads landed are Ok and delivered; jobs with unsubmitted segments are Err",
-        "mock drive writes into the buffer after Timeout: the slot is not reused by a later insert",
-        "mock drive never completes after one timeout: batch_lookup returns within about 2 x READ_TIMEOUT_MS",
-        "tests written first; the first two fail at d45ab524d"
+      "spec_text": "read_to_bounce reads at LBA raw_offset / block_size; partition-relative data I/O unspecified",
+      "actual": "every data I/O path addresses data_base_lba + extent_offset / block_size; recorded locations stay relative; format bounds metadata_region_size to the metadata partition; pre-change drives must be reformatted",
+      "locations": [
+        "src/lib.rs:935",
+        "src/lib.rs:1100",
+        "src/lib.rs:1686",
+        "src/lib.rs:2088",
+        "src/lib.rs:2922",
+        "src/lib.rs:4354",
+        "src/lib.rs:4706",
+        "src/lib.rs:8536",
+        "src/repair_test_flush_failed_write.rs:622"
       ],
-      "confidence": "MEDIUM",
-      "severity": "moderate",
       "approved": true,
-      "approval_note": "Approved by Cornel 2026-11-08 (all proposals of the 2026-11-08 analysis except gpu-services P-5)."
+      "approval_note": "Approved interactively by the user in /component-sync-specs --interactive, 2026-11-11."
     }
-  ],
-  "carried_over_open": [
-    "A-1",
-    "A-3",
-    "A-4",
-    "A-5",
-    "A-02",
-    "A-05",
-    "A-08",
-    "A-10",
-    "A-12",
-    "A-15",
-    "A-17",
-    "N-01",
-    "RH-03",
-    "DISP-RESERVE-REASON"
   ]
 }

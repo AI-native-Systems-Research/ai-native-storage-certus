@@ -1,51 +1,53 @@
 {
-  "generated": "2026-09-01T22:59:04Z",
-  "based_on": "drift-report 2026-09-01T22:59:04Z",
-  "commit": "33bddaba",
-  "summary": {
-    "backfill": 2,
-    "align": 0,
-    "human_decision": 1,
-    "new_specs": 0,
-    "remove_from_spec": 0,
-    "plan_doc_fixes": 2
-  },
+  "generated": "2026-11-11T21:14:07Z",
+  "branch": "copilot/fix-dispatcher-lba-issues",
+  "head": "adacb8ce1",
+  "base": "unstable",
+  "mode": "interactive",
+  "based_on": "drift-report.json 2026-11-11T21:14:07Z",
   "proposals": [
     {
-      "id": "P1",
-      "spec": "001-extent-manager-v2",
-      "requirement": "FR-030",
+      "id": "P-EM1",
       "direction": "BACKFILL",
-      "recommended": "correct-spec-prose",
-      "spec_text": "issues a flush to the metadata device after checkpoint writes (and in the format path)",
-      "actual": "flush() called only in checkpoint path (lib.rs:308-310); format() has no flush (lib.rs:496-498); README.md:66 and Cargo.toml:24-27 say checkpoint-only",
-      "proposed_edit": "Remove the '(and in the format path)' parenthetical from FR-030 prose.",
-      "alternative": "Add a feature-gated flush() after lib.rs:498 (behavior change, not applied automatically).",
       "confidence": "HIGH",
-      "human_decision": true
-    },
-    {
-      "id": "P2",
-      "spec": "001-extent-manager-v2",
-      "requirement": "FR-016",
-      "direction": "BACKFILL",
-      "spec_text": "interface doc + README incorrectly state 'five minutes' ... should be corrected to 30-second default",
-      "actual": "iextent_manager.rs:205 and README.md:13 already say 30 seconds",
-      "proposed_edit": "Rewrite the FR-016 note to state the 30 s default plainly and drop the obsolete remediation language.",
-      "confidence": "HIGH",
-      "human_decision": false
-    },
-    {
-      "id": "P3",
-      "spec": "001-extent-manager-v2",
-      "target": "plan.md",
-      "direction": "BACKFILL",
-      "edits": [
-        {"location": "plan.md:59", "from": "checkpoint_interval_ms: AtomicU64 (default 5000)", "to": "checkpoint_timer_state: Arc<CheckpointTimerState> (Mutex<Option<Duration>> + Condvar + shutdown), default 30s"},
-        {"location": "plan.md:229", "from": "superblock.rs ... (v5)", "to": "superblock.rs ... (v6)"}
+      "requirements": [
+        "FR-002",
+        "FR-032",
+        "FR-035",
+        "FR-036"
       ],
+      "spec_text": "data_base_lba is caller-consumed only; metadata_region_size>0 always places data after the metadata area; capacity = data size minus metadata region",
+      "actual": "nonzero data_base_lba selects a partitioned layout: metadata_region_size must be >0 (bounds the metadata partition), data_start_offset=0, capacity = full data_disk_size",
+      "locations": [
+        "src/lib.rs:402-407",
+        "src/lib.rs:446-452",
+        "src/lib.rs:501-503"
+      ],
+      "approved": true,
+      "approval_note": "Approved interactively by the user in /component-sync-specs --interactive, 2026-11-11."
+    },
+    {
+      "id": "P-EM2",
+      "direction": "BACKFILL",
       "confidence": "HIGH",
-      "human_decision": false
+      "requirements": [
+        "FR-004",
+        "Superblock entity",
+        "On-disk table",
+        "US3 AS5-AS6",
+        "plan.md"
+      ],
+      "spec_text": "magic CERTUSV4, version 6; initialize validates magic + CRC",
+      "actual": "version 7; CERTUSP7 magic for partitioned formats; recovery rejects a layout/addressing-mode mismatch with a 'reformat' CorruptMetadata; unpartitioned CERTUSV4 of any version still readable",
+      "locations": [
+        "src/superblock.rs:6-7",
+        "src/superblock.rs:117",
+        "src/recovery.rs:18-26",
+        "tests/checkpoint.rs:116",
+        "tests/checkpoint.rs:159"
+      ],
+      "approved": true,
+      "approval_note": "Approved interactively by the user in /component-sync-specs --interactive, 2026-11-11."
     }
   ]
 }

@@ -1,101 +1,15 @@
 {
-  "generated": "2026-09-01T22:59:04Z",
-  "restamped": "2026-09-09T21:33:18Z",
-  "restamp_note": "Re-stamp only (no content change). extent-manager src/ and specs/ unchanged; the only moved hashed input since 2026-09-02 is components/interfaces/src/idispatcher.rs (dispatcher store-backpressure, 39ffee9b/c400ced8), which extent-manager does not reference. Folded interfaces hash moved 5e8ff021... -> 3817ba9e... at commit 5bb71702. drift_status remains clean. See drift-report.md frontmatter for the CI stamp.",
-  "project": "extent-manager",
-  "commit": "33bddaba",
+  "generated": "2026-11-11T21:14:49Z",
+  "branch": "copilot/fix-dispatcher-lba-issues",
+  "head": "adacb8ce1",
+  "base": "unstable",
+  "mode": "delta on a certified baseline",
+  "scope": "requirements touched by the branch diff (see drift-report.md)",
   "summary": {
-    "specs_analyzed": 1,
-    "requirements_checked": 43,
-    "aligned": 42,
-    "drifted": 1,
-    "not_implemented": 0,
-    "unspecced_features": 0
+    "drifted": 6,
+    "unspecced": 0,
+    "not_implemented": 0
   },
-  "specs": [
-    {
-      "id": "001-extent-manager-v2",
-      "title": "Extent Manager V2",
-      "aligned": [
-        "FR-001",
-        "FR-002",
-        "FR-003",
-        "FR-004",
-        "FR-005",
-        "FR-006",
-        "FR-007",
-        "FR-008",
-        "FR-009",
-        "FR-010",
-        "FR-011",
-        "FR-012",
-        "FR-013",
-        "FR-014",
-        "FR-015",
-        "FR-017",
-        "FR-018",
-        "FR-019",
-        "FR-020",
-        "FR-021",
-        "FR-022",
-        "FR-023",
-        "FR-024",
-        "FR-025",
-        "FR-026",
-        "FR-027",
-        "FR-028",
-        "FR-029",
-        "FR-031",
-        "FR-032",
-        "FR-033",
-        "FR-034",
-        "FR-035",
-        "FR-036",
-        "FR-037",
-        "SC-001",
-        "SC-002",
-        "SC-003",
-        "SC-004",
-        "SC-005",
-        "SC-006"
-      ],
-      "drifted": [
-        {
-          "requirement": "FR-030",
-          "spec_text": "the component issues a BlockDeviceClient::flush() to the metadata device after checkpoint writes (and in the format path)",
-          "actual": "flush() is implemented (block_io.rs:167-180, Command::FlushSync/Completion::FlushDone) but is called ONLY from the checkpoint path (lib.rs:308-310, gated by the feature). format() writes the superblock at lib.rs:496-498 with no flush. README.md:66 and Cargo.toml:24-27 also describe checkpoint-only flush. The '(and in the format path)' prose over-claims.",
-          "location": "components/extent-manager/src/lib.rs:308-310,496-498; components/extent-manager/src/block_io.rs:167-180; components/extent-manager/README.md:66",
-          "severity": "moderate",
-          "resolution": "correct-spec-prose"
-        },
-        {
-          "requirement": "FR-016",
-          "spec_text": "both the IExtentManager interface doc comment and this component's README.md incorrectly state \"five minutes\" ... These are stale doc strings that should be corrected to reference the true 30-second default.",
-          "actual": "The correction has already landed: iextent_manager.rs:205 and README.md:13 both state 30 seconds. The remediation note now describes a defect that no longer exists.",
-          "location": "components/interfaces/src/iextent_manager.rs:205; components/extent-manager/README.md:13",
-          "severity": "minor",
-          "resolution": "correct-spec-prose"
-        }
-      ],
-      "not_implemented": []
-    }
-  ],
-  "plan_doc_drift": [
-    {
-      "location": "components/extent-manager/specs/001-extent-manager-v2/plan.md:59",
-      "spec_text": "checkpoint_interval_ms: AtomicU64 (default 5000)",
-      "actual": "checkpoint_timer_state: Arc<CheckpointTimerState> (Mutex<Option<Duration>> + Condvar + shutdown), default 30s (lib.rs:62-79,95,112)",
-      "severity": "minor"
-    },
-    {
-      "location": "components/extent-manager/specs/001-extent-manager-v2/plan.md:229",
-      "spec_text": "superblock.rs -- on-disk superblock serialize/deserialize (v5)",
-      "actual": "FORMAT_VERSION = 6 (superblock.rs:6)",
-      "severity": "minor"
-    }
-  ],
-  "unspecced": [],
-  "conflicts": [],
-  "inputs_sha256": "7f894d51c8f3cad866a548ea9afa2749261e1db65374e4e5419c1f0a88f87aca",
-  "git_commit": "72c7182b"
+  "resolution": "all drift BACKFILLed (approved, applied); see proposals.json / apply-report.json",
+  "drift_status": "clean"
 }

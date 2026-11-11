@@ -1,44 +1,25 @@
 {
-  "applied": "2026-11-09T07:13:09Z",
-  "sync_date": "2026-11-08",
-  "project": "dispatcher",
-  "branch": "fix/dispatcher-j33-repairs",
-  "head": "d45ab524d",
-  "base": "7c12e427a",
-  "mode": "BATCH: apply approved proposals only",
-  "approved_by": "Cornel",
-  "approval_note": "Approved by Cornel 2026-11-08 (all proposals of the 2026-11-08 analysis except gpu-services P-5).",
-  "backup": "backups/20261109T071309Z",
+  "applied": "2026-11-11T21:14:07Z",
+  "branch": "copilot/fix-dispatcher-lba-issues",
+  "head": "adacb8ce1",
+  "mode": "interactive",
+  "backup": "backups/20261111T211120Z/",
   "backed_up_files": [
-    "specs/001-dispatcher-cache-interface/spec.md",
-    ".specify/sync/apply-report.md (as apply-report.md.prev)",
-    ".specify/sync/apply-report.json (as apply-report.json.prev)"
+    "specs/001-dispatcher-cache-interface/spec.md"
   ],
-  "uniqueness_check": "every old_text occurred exactly once before replacement (4 checks: B-50, B-50 additional header edit, B-51, B-52); 0 failures",
+  "uniqueness_check": "every replaced text was checked to occur exactly once before it was replaced; all checks passed",
   "changes": [
-    {"id": "B-50", "direction": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "FR-061 drain-all-on-error bullet", "change": "Modified", "reverses": "B-44", "before": "A read timeout ... MUST NOT fail the drive's other jobs ... that job only", "after": "a timeout fails every not-yet-failed job of that drive, stops its submissions, still drains; other drives unaffected; A-18, A-15 known gaps", "applied_at": "2026-11-09T07:13:09Z"},
-    {"id": "B-50", "direction": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "header Last Synced 2026-11-08", "change": "Added (line inserted after the kept 2026-11-07 line)", "applied_at": "2026-11-09T07:13:09Z"},
-    {"id": "B-51", "direction": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "User Story 11 AS4", "change": "Modified", "before": "the error is reported for that entry only; other entries ... independently.", "after": "same, plus exception: timeout or broken channel fails every not-yet-failed entry on that drive (A-18)", "applied_at": "2026-11-09T07:13:09Z"},
-    {"id": "B-52", "direction": "BACKFILL", "spec": "001", "file": "specs/001-dispatcher-cache-interface/spec.md", "requirement": "FR-056 read_write_stats", "change": "Modified", "before": "Known gap, tracked as A-16: ... can read lower.", "after": "fold + swap/clear under one data_drives write hold; reader holds the read lock across baseline + live drives; closes A-16", "applied_at": "2026-11-09T07:13:09Z"}
+    {
+      "proposal": "B-53",
+      "requirements": [
+        "US13 AS1",
+        "FR-062",
+        "FR-064 (new)"
+      ],
+      "type": "BACKFILL"
+    }
   ],
-  "header_lines": ["spec 001: Last Synced 2026-11-08"],
-  "new_specs": [],
-  "align_tasks_generated": [
-    {"id": "A-18", "spec": "001", "requirement": "US-11 AS4 + FR-061 (per-job timeout isolation)", "severity": "moderate", "confidence": "MEDIUM", "subsumes": "A-15", "file": ".specify/sync/align-tasks.md"}
-  ],
-  "align_tasks_closed": [
-    {"id": "A-16", "by": "d45ab524d", "via": "B-52", "follow_up": "Loom test for the concurrent-reader criterion"}
-  ],
-  "align_tasks_reanchored": [
-    {"id": "A-15", "to": "src/pipeline.rs:1398-1411; src/lib.rs:3074-3076, :1014-1022"}
-  ],
+  "align_tasks": [],
   "not_applied": [],
-  "unapproved_with_note": [],
-  "not_applicable": ["B-43", "A-13"],
-  "notes_recorded": ["N-13", "N-14"],
-  "still_open": ["A-18", "A-1", "A-3", "A-4", "A-5", "A-02", "A-05", "A-08", "A-10", "A-12", "A-15", "A-17", "N-01", "RH-03", "DISP-RESERVE-REASON", "N-13", "N-14"],
-  "source_files_changed": [],
-  "interfaces_files_changed": [],
-  "drift_report": "one Apply 2026-11-08 note inserted below the frontmatter; spec_sync_* frontmatter untouched",
-  "previous": "backups/20261109T071309Z/apply-report.json.prev"
+  "source_files_modified": []
 }

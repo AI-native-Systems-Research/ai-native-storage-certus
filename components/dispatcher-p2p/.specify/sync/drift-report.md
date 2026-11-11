@@ -1,11 +1,19 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-11-05T10:19:50Z
-spec_sync_git_commit: 32ffa627f
-spec_sync_inputs_sha256: fafa185c7204757b4eeb9856948f77b7b1f8e666b1f1c436e889c7cbe784ebb7
+spec_sync_synced_at: 2026-11-11T21:15:19Z
+spec_sync_git_commit: adacb8ce1
+spec_sync_inputs_sha256: eb5e713ded053befd02ef54d5129f8161c5e3c2e0acd419dc179feed129f495d
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-11-11 (branch `copilot/fix-dispatcher-lba-issues`, HEAD `adacb8ce1`, on unstable) — own code changed; no contradiction found, one requirement backfilled.** Unstable's stamp was current: 22/22 fresh in a clean worktree. This branch changes `src/lib.rs` only, plus the `FormatParams` doc in `components/interfaces`. All five data-I/O sites (`promote_and_serve:614`, `process_write_job:919`, the DRAM backfill worker `:1558/:1605`, `batch_lookup:2082`, `promote_to_memory_tier:2948`) now add the drive's data base. Format bounds `metadata_region_size` (`:1288`). The spec states no LBA formula, so no FR is contradicted. It was silent on this user-visible behavior, including the reformat requirement.
+>
+> - **Unspecced, fixed by BACKFILL P-P2P1** as **FR-037** (the approval preview said FR-064; this spec's own numbering ends at FR-036). It mirrors `dispatcher` FR-064.
+> - **Test gap, not drift**: no test in this crate pins the base LBA. Tracked as align task **A-P2P-LBA**. The crate builds (`cargo test -p dispatcher-p2p --no-run`).
+> - **Aligned, unchanged**: FR-008 (drop-in for the standard dispatcher), FR-009/FR-014 (backfill), FR-018 (write-through).
+>
+> No actionable spec/implementation drift remains → `clean`.
+
 > **Re-stamp 2026-11-05 (branch `certus-host-setup`, on unstable `bb0c9b9c`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them (its previous stamp was re-verified against `git archive origin/unstable`); its digest moves because `components/interfaces` changed (`ISPDKEnv::init_with_allowed`, added for the two-process drive race; see the spdk-env and interfaces syncs of the same date). This component does not implement `ISPDKEnv`. No analysis below changes.
 
 > **Sync 2026-11-03 (branch `feat/dispatcher-p2p-mr-pool`, base unstable `dc564aa3`) — own code changed; 5 drifts, all BACKFILL, approved and applied.** Unstable's stamp (`bde3368f`) was current, and this branch changes only `src/lib.rs` and `src/pipeline.rs` (no `specs/`, no `components/interfaces`), so the analysis is the 43 requirements against that diff.

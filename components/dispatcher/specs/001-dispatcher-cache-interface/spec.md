@@ -44,6 +44,8 @@
 
 **Last Synced**: 2026-11-08 — spec-sync on branch `fix/dispatcher-j33-repairs`. BACKFILL: FR-061 and User Story 11 scenario 4 describe the code again after repair `408a568d0` was taken out (`709153326`, review of PR #591); the 2026-11-07 FR-061 text from that repair is withdrawn, and per-job timeout isolation is tracked as A-18. FR-056 `read_write_stats`: the A-16 hand-over gap is closed (`d45ab524d`). No source changes.
 
+**Last Synced**: 2026-11-11 — spec-sync on branch `copilot/fix-dispatcher-lba-issues`. BACKFILL (code authoritative): **FR-064** added. Data I/O is partition-relative (`data_base_lba + extent_offset / block_size` on every read and write path), the extent manager's metadata region is bounded to the metadata partition, drives formatted by earlier versions must be reformatted, and checkpoint capacity is limited by the metadata partition. User Story 13 scenario 1 and FR-062 now give the LBA as `data_base_lba + raw_offset / block_size`.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Cache Population (GPU to Memory-Tier with Write-Through) (Priority: P1)
@@ -261,7 +263,7 @@ one, but done in the wrong layer it reads the wrong drive and reports the result
 **Acceptance Scenarios**:
 
 1. **Given** a pinned block-tier entry, **When** `read_to_bounce` is called, **Then** the
-   extent is read from the drive its SSD location records, at LBA `raw_offset / block_size`, segmented by
+   extent is read from the drive its SSD location records, at LBA `data_base_lba + raw_offset / block_size` (FR-064), segmented by
    the drive's maximum transfer, into a fresh buffer; nothing is promoted and the cache is
    untouched.
 2. **Given** the reserve is full, **When** `read_to_bounce` is called, **Then** it returns
@@ -421,7 +423,7 @@ one, but done in the wrong layer it reads the wrong drive and reports the result
   - The caller holds the entry's pin for the whole call; the method neither takes nor releases
     one. It MUST NOT promote and MUST NOT touch the cache or the dispatch map.
   - The read targets the drive recorded in the entry's SSD location (`select_drive`, bits 56-63,
-    FR-039 step (4)), at LBA `raw_offset / block_size`, `len` rounded up to the block size,
+    FR-039 step (4)), at LBA `data_base_lba + raw_offset / block_size` (that drive's data-partition base, FR-064; *Sync 2026-11-11*), `len` rounded up to the block size,
     segmented by the drive's maximum transfer, over a channel checked out of that drive's
     `ChannelPool`. A location that names a drive that does not exist returns `Io` without
     reading. *(Sync 2026-11-07 — code authoritative since the 2026-10-27 rebase onto
@@ -466,6 +468,13 @@ one, but done in the wrong layer it reads the wrong drive and reports the result
   SSD, so an "empty" server needed a restart. Design in
   `components/certus-transfer-endpoint/specs/001-rdma-cache-transfer/channel-reclaim.md`
   Part 2.)*
+- **FR-064** *(Sync 2026-11-11 — BACKFILL, code authoritative; branch `copilot/fix-dispatcher-lba-issues`, commits `46dd67536`..`adacb8ce1`. Before this, data I/O addressed LBA `extent_offset / block_size` from the start of the namespace, and the extent manager was formatted with `metadata_region_size: 0`, which sized its checkpoint regions from the whole namespace. Both reached past the metadata partition into the extended-metadata and data partitions.)*: Data-drive I/O MUST be partition-relative.
+  - Every data read and write MUST address LBA `extent_mgr.data_base_lba() + extent_offset / block_size` on the drive the entry is placed on. Here `data_base_lba` is the data partition's start LBA (`table.partitions[2].start_lba`, set before format/recover, FR-055) and `extent_offset` is the drive-relative offset decoded from the SSD location (FR-039 step (4)). This covers `promote_and_serve` (`src/lib.rs:935`), `serve_cold_staged` (`:1100`), write-through (`:1686`), the `batch_lookup` cold jobs (`:2922`), `promote_to_memory_tier` (`:4354`) and `read_to_bounce` (`:4706`, FR-062).
+  - The SSD location recorded through `convert_to_storage`, and the offsets passed to `IExtentManager::remove_extent` and recovered by FR-025, MUST stay partition-relative. The base is applied only when I/O is issued.
+  - When it formats a drive, the dispatcher MUST pass `metadata_region_size = table.partitions[0].num_sectors * sector_size` (`:2088`), so the superblock and both checkpoint copies stay inside the metadata partition (extent-manager FR-035).
+  - **Disk compatibility**: a drive formatted by an earlier dispatcher or dispatcher-p2p has an unpartitioned extent-manager superblock, and its objects were written outside the data partition. With `format_on_init = false`, `initialize()` MUST reject it with `DispatcherError::IoError("failed to recover extent manager for data drive {i}: … reformat …")` (`:2099`, extent-manager FR-004) and MUST NOT serve its data. The operator reformats the drive with `format_on_init = true`, which destroys its contents. Rolling back to an earlier dispatcher after such a format is unsupported (`README.md`).
+  - **Known limitation**: checkpoint capacity is about half the metadata partition. A checkpoint larger than that fails, and extents published since the last successful checkpoint may not be recovered after a restart. The metadata partition must be sized for the workload, and checkpoint errors must be monitored.
+  - Tests: `read_to_bounce_uses_each_drives_data_partition_base` (`src/lib.rs:8536`) and `write_through_uses_data_partition_base_but_records_relative_offset` (`src/repair_test_flush_failed_write.rs:622`).
 - **FR-061** *(Sync 2026-09-21 — backfilled; the multi-drive scatter-gather cold path shipped with no requirement. Commit `6f35b13a` "optimizer iter-005: scatter-gather")*: The pipeline module MUST provide a multi-drive scatter-gather cold-read path, `scatter_gather_multi_drive_zero_copy(gpu, streams: &[GpuStream; 2], drive_works: &[DriveWork], chunk_size, max_queue_depth, metrics) -> Vec<Vec<Result<(), DispatcherError>>>`, that `batch_lookup` uses to serve cold (BlockDevice) entries spread across multiple data drives. Each `DriveWork { channels: &ClientChannels, drive: &dyn IBlockDevice, jobs: &[ColdReadJob] }` descriptor names one drive's checked-out client channel and its cold-read jobs. The function MUST:
   - Segment every job's read against its drive's block size (respecting MDTS per FR-019) and, on the **caller thread**, run a **single multiplexed poll loop** that fans NVMe reads out to all drives simultaneously and fans completions in — there are NO spawned per-drive worker threads and NO persistent `ColdReadPool` (FR-044, retired).
   - Distribute the supplied `max_queue_depth` (128 from `batch_lookup`) **proportionally across drives by segment count**, so a drive holding more data gets a deeper share of the shared in-flight budget.

@@ -1,43 +1,25 @@
 {
-  "applied": "2026-11-04T01:26:34Z",
+  "applied": "2026-11-11T21:14:07Z",
+  "branch": "copilot/fix-dispatcher-lba-issues",
+  "head": "adacb8ce1",
+  "mode": "interactive",
+  "backup": "backups/20261111T211120Z/",
+  "backed_up_files": [
+    "specs/001-gpudirect-cold-path/spec.md"
+  ],
+  "uniqueness_check": "every replaced text was checked to occur exactly once before it was replaced; all checks passed",
   "changes": [
     {
-      "spec": "001-gpudirect-cold-path",
-      "requirement": "FR-005",
-      "change": "Modified"
-    },
-    {
-      "spec": "001-gpudirect-cold-path",
-      "requirement": "FR-015",
-      "change": "Modified"
-    },
-    {
-      "spec": "001-gpudirect-cold-path",
-      "requirement": "FR-034",
-      "change": "Added"
-    },
-    {
-      "spec": "001-gpudirect-cold-path",
-      "requirement": "FR-035",
-      "change": "Added"
-    },
-    {
-      "spec": "001-gpudirect-cold-path",
-      "requirement": "FR-036",
-      "change": "Added"
-    },
-    {
-      "spec": "001-gpudirect-cold-path",
-      "requirement": "research.md R3",
-      "change": "Annotated"
-    },
-    {
-      "spec": "001-gpudirect-cold-path",
-      "requirement": "tasks.md T014",
-      "change": "Annotated"
+      "proposal": "P-P2P1",
+      "requirements": [
+        "FR-037 (new)"
+      ],
+      "type": "BACKFILL"
     }
   ],
-  "align_tasks": 0,
+  "align_tasks": [
+    "A-P2P-LBA"
+  ],
   "not_applied": [],
-  "backup": ".specify/sync/backups/"
+  "source_files_modified": []
 }
