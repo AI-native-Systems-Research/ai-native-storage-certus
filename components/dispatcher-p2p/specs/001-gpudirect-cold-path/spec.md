@@ -16,6 +16,8 @@
 
 **Last-Synced**: 2026-11-03 (Spec-Sync on branch `feat/dispatcher-p2p-mr-pool` — FR-005 BACKFILL: tag-tracked ring slots replace FIFO recycling (a corruption fix); FR-034 multi-region blocks, FR-035 null-stream store sync, FR-036 per-reader channel pool (#583) added; FR-015 function name refreshed.)
 
+**Last-Synced**: 2026-11-11 (Spec-Sync on branch `copilot/fix-dispatcher-lba-issues`: FR-037 BACKFILL. Data I/O is partition-relative, the metadata region is bounded to the metadata partition, and drives formatted by earlier versions must be reformatted. Same rule as `dispatcher` FR-064.)
+
 **Input**: User description: "GPUDirect Storage cold-read path for dispatcher-p2p. NVMe DMA reads directly into GPU BAR1 staging buffers, then D2D copies to client GPU destination, eliminating host DRAM bounce."
 
 ## User Scenarios & Testing *(mandatory)*
@@ -331,6 +333,13 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
   a previous user left behind, so tags from an old operation are never matched against a new
   one. The cold pool of FR-016 already gave each worker its own channel and is unchanged.
   (`src/lib.rs:620`, `2928-2938`.) Tests: `channel_pool_tests`.
+- **FR-037** *(New 2026-11-11 — BACKFILL; branch `copilot/fix-dispatcher-lba-issues`, commit `46dd67536`; same rule as `dispatcher` FR-064.)* Data-drive I/O MUST be partition-relative.
+  - Every data read and write MUST address LBA `extent_mgr.data_base_lba() + extent_offset / block_size`, where `data_base_lba` is the data partition's start LBA (`table.partitions[2].start_lba`, `src/lib.rs:1243`). This covers `promote_and_serve` (`src/lib.rs:614`), write-through `process_write_job` (`:919`), the P2P cold jobs of `batch_lookup` (`:2082`), `promote_to_memory_tier` (`:2948`) and the DRAM backfill worker (FR-009). The backfill worker reads its drive's base once, when the worker starts (`:1558`), and adds it per job (`:1605`).
+  - The location recorded in the dispatch map (`convert_to_storage`, `:1615`) stays partition-relative.
+  - Format passes `metadata_region_size = table.partitions[0].num_sectors * sector_size` (`:1288`), which bounds checkpoints to the metadata partition.
+  - **Disk compatibility**: with `format_on_init = false`, a drive formatted by an earlier version fails `initialize()` with `IoError("failed to recover extent manager … reformat …")` (`:1299`). It must be reformatted, which destroys its data.
+  - **Known limitation**: checkpoint capacity is about half the metadata partition.
+  - Tests: `write_through_uses_data_partition_base_but_records_relative_offset` (write-through lands at `base + offset / block_size`, the dispatch map records the relative offset, the unbased block is untouched) and `promote_to_memory_tier_reads_at_data_partition_base` (the cold read is issued at the based LBA, and the promoted slot holds that block's bytes). Both fail if the base is removed from `process_write_job` or `promote_to_memory_tier`. *(2026-11-11 — align task A-P2P-LBA resolved.)* The `promote_and_serve`, `batch_lookup` P2P and DRAM-backfill sites still have no test of their own, because they need a GPU/P2P ring mock this crate lacks. They use the same expression.
 
 ## ROOT CAUSE FOUND 2026-09-30: the cold path panics when the P2P ring is absent
 

@@ -1,11 +1,13 @@
 ---
 spec_sync_component: remote-lookup-rdma-initiator
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-11-05T10:19:50Z
-spec_sync_git_commit: 32ffa627f
-spec_sync_inputs_sha256: 774628c609c1ae5211d1f45ba437c07edbbe9053023c76c607a1ef6ac9722574
+spec_sync_synced_at: 2026-11-11T21:15:19Z
+spec_sync_git_commit: adacb8ce1
+spec_sync_inputs_sha256: 20530d2d46c388719434b494db1121a58a729828706a01ac63d16f6adf5265cf
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-11-11 (branch `copilot/fix-dispatcher-lba-issues`, on unstable).** Transitive only: this component's own `src/` and `specs/` are as unstable has them (its previous stamp was re-verified fresh in a clean worktree of `unstable`). Its digest moves because `components/interfaces` changed: one doc comment on `FormatParams::metadata_region_size`, which documents the partitioned extent-manager layout (see the extent-manager, dispatcher and dispatcher-p2p syncs of the same date). This component's `src/` does not reference `FormatParams`, `metadata_region_size` or `data_base_lba` (checked by grep). No analysis below changes.
+
 > **Re-stamp 2026-11-05 (branch `certus-host-setup`, on unstable `bb0c9b9c`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them (its previous stamp was re-verified against `git archive origin/unstable`); its digest moves because `components/interfaces` changed (`ISPDKEnv::init_with_allowed`, added for the two-process drive race; see the spdk-env and interfaces syncs of the same date). This component does not implement `ISPDKEnv`. No analysis below changes.
 
 > **Re-stamp 2026-10-31 (branch `opt/evolve-piece-copy-v1/s20261029-094947`, merged with unstable `a0292be6`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IGpuServices::memcpy_batch_async` added by the optimizer session, the workspace clippy cleanup's doc/attribute-only edits, three fixed doc links, and the `copy_gpu_to_memory_async` doc). The interfaces sync of the same date found none of it changes a contract this component relies on. No analysis below changes.

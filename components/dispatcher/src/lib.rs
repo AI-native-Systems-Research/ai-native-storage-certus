@@ -932,7 +932,7 @@ impl DispatcherComponent {
             ));
         };
         let block_size = drive.block_dev_iface.block_size();
-        let start_lba = raw_offset / u64::from(block_size);
+        let start_lba = drive.extent_mgr.data_base_lba() + raw_offset / u64::from(block_size);
         let block_dev = Arc::clone(&drive.block_dev_iface);
 
         // Check out an exclusive channel for this read. A single shared SPSC
@@ -1097,7 +1097,7 @@ impl DispatcherComponent {
             .get(idx)
             .ok_or_else(|| DispatcherError::IoError("invalid drive in SSD location".into()))?;
         let block_size = drive.block_dev_iface.block_size();
-        let start_lba = raw_offset / u64::from(block_size);
+        let start_lba = drive.extent_mgr.data_base_lba() + raw_offset / u64::from(block_size);
         let block_dev = Arc::clone(&drive.block_dev_iface);
         // Exclusive channel for this read (see ChannelPool: sharing one SPSC
         // channel across concurrent readers causes completion theft).
@@ -1683,7 +1683,7 @@ impl DispatcherComponent {
         };
 
         let block_offset = write_handle.extent_offset();
-        let start_lba = block_offset / block_size as u64;
+        let start_lba = iem.data_base_lba() + block_offset / block_size as u64;
 
         let dma_capable = mt.is_dma_capable();
         if Self::write_buffer_to_ssd(&**drive, &temp_buf, start_lba, total_bytes, dma_capable)
@@ -2085,7 +2085,7 @@ impl DispatcherComponent {
                     sector_size,
                     slab_size,
                     max_extent_size,
-                    metadata_region_size: 0,
+                    metadata_region_size: table.partitions[0].num_sectors * u64::from(sector_size),
                     ..defaults
                 })
                 .map_err(|e| {
@@ -2919,7 +2919,8 @@ impl IDispatcher for DispatcherComponent {
                                 jobs.push(pipeline::ColdReadJob {
                                     mem_ptr,
                                     gpu_dst,
-                                    start_lba: decode_loc(entry.offset).1 / u64::from(block_size),
+                                    start_lba: drive.extent_mgr.data_base_lba()
+                                        + decode_loc(entry.offset).1 / u64::from(block_size),
                                     total_bytes: ipc_size as usize,
                                     // A multi-region block is scattered to its
                                     // pieces inside the scatter-gather loop.
@@ -4350,7 +4351,8 @@ impl IDispatcher for DispatcherComponent {
                     for &ci in entry_indices {
                         let entry = &cold[ci];
                         let block_size = block_dev.block_size() as u64;
-                        let start_lba = decode_loc(entry.offset).1 / block_size;
+                        let start_lba = drive.extent_mgr.data_base_lba()
+                            + decode_loc(entry.offset).1 / block_size;
 
                         if self
                             .evict_for_space(dm, mt, entry.size, entry.key, max_attempts)
@@ -4659,7 +4661,7 @@ impl IDispatcher for DispatcherComponent {
         // else's data. Its handles are cloned out so the drive list is not held
         // across a read with no timeout: shutdown's write lock would wait on
         // the drive.
-        let (dev, pool, offset) = {
+        let (dev, pool, offset, base_lba) = {
             let drives = self.data_drives.read();
             if drives.is_empty() {
                 return Err(BounceError::NeverFits("no data drives".into()));
@@ -4675,6 +4677,7 @@ impl IDispatcher for DispatcherComponent {
                 Arc::clone(&drive.block_dev_iface),
                 Arc::clone(&drive.channel_pool),
                 raw,
+                drive.extent_mgr.data_base_lba(),
             )
         };
         // The read is rounded up to whole blocks and the buffer to whole pages,
@@ -4700,7 +4703,7 @@ impl IDispatcher for DispatcherComponent {
                         &*dev,
                         channels.channels(),
                         buf.ptr,
-                        offset / block_size,
+                        base_lba + offset / block_size,
                         len as usize,
                         chunk_size,
                         16,
@@ -8524,8 +8527,30 @@ mod tests {
             assert_eq!(*disks[drive].lbas.lock().unwrap(), [3]);
             d.release_bounce(buf);
         }
+
         assert_eq!(mt.bounce_free_count(), 4, "every buffer returned");
         assert_eq!(mt.used(), 0, "serving promotes nothing into the cache");
+    }
+
+    #[test]
+    fn read_to_bounce_uses_each_drives_data_partition_base() {
+        let disks = [pattern_disk(16, 0x10, 4096), pattern_disk(16, 0x80, 4096)];
+        let (c, _) = bounce_dispatcher(&disks, 2, 8192);
+        c.data_drives.read()[0].extent_mgr.set_data_base_lba(4);
+        c.data_drives.read()[1].extent_mgr.set_data_base_lba(7);
+        let d = query_interface!(c, IDispatcher).unwrap();
+        for (drive, base) in [4, 7].into_iter().enumerate() {
+            let buf = d
+                .read_to_bounce(7, crate::encode_loc(drive, 0), 8192)
+                .unwrap();
+            // SAFETY: the buffer is ours until released.
+            let got = unsafe { std::slice::from_raw_parts(buf.ptr, 8192) };
+            assert!(got[..4096]
+                .iter()
+                .all(|&b| b == [0x10, 0x80][drive] + base as u8));
+            assert_eq!(*disks[drive].lbas.lock().unwrap(), [base, base + 1]);
+            d.release_bounce(buf);
+        }
     }
 
     /// A location whose drive index is past the drive list is an error, never a

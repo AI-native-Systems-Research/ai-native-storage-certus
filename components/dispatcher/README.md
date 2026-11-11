@@ -30,6 +30,17 @@ DispatcherComponent --> [IDispatcher provider]
 
 Block devices and extent managers are created internally during `initialize()` based on the `DispatcherConfig` PCI addresses. If the `ISPDKEnv` receptacle is not connected, the component operates in staging-only mode (for unit testing without hardware).
 
+**Disk compatibility:** Drives formatted by older dispatcher or dispatcher-p2p
+versions must be reformatted before use. Their object data was written outside
+the data partition; recovery rejects the old extent-manager layout. Formatting
+destroys all existing data. Do not roll back to an older dispatcher after
+formatting with this version.
+
+Checkpoint capacity is limited by the metadata partition. If checkpoint payloads
+exceed half that partition, checkpointing fails and recently written extents
+may not be recovered after restart; monitor checkpoint errors and size the
+metadata partition for the workload.
+
 ### Data Flow
 
 ```

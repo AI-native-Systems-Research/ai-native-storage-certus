@@ -1,56 +1,33 @@
 {
-  "generated": "2026-11-04T01:26:34Z",
-  "based_on": "2026-11-04T01:26:34Z",
+  "generated": "2026-11-11T21:14:07Z",
+  "branch": "copilot/fix-dispatcher-lba-issues",
+  "head": "adacb8ce1",
+  "base": "unstable",
+  "mode": "interactive",
+  "based_on": "drift-report.json 2026-11-11T21:14:07Z",
   "proposals": [
     {
-      "requirement": "FR-005",
-      "spec_text": "FIFO completion ordering; stream sync once per ring partition wrap (sync interval = ring_size)",
-      "actual": "tag-tracked slots (SlotTracker); slot reused only after its copy's stream syncs; sync at half the partition or when starved",
-      "location": "src/pipeline.rs:838, src/pipeline.rs:905",
-      "severity": "major",
+      "id": "P-P2P1",
       "direction": "BACKFILL",
+      "confidence": "MEDIUM",
+      "requirements": [
+        "FR-037 (new)"
+      ],
+      "spec_text": "(silent) \u2014 no LBA formula stated, so no contradiction",
+      "actual": "same partition-relative rule as dispatcher FR-064 on promote_and_serve, write-through, P2P cold batch jobs, promote_to_memory_tier and the DRAM backfill worker",
+      "locations": [
+        "src/lib.rs:614",
+        "src/lib.rs:919",
+        "src/lib.rs:1243",
+        "src/lib.rs:1288",
+        "src/lib.rs:1558",
+        "src/lib.rs:1605",
+        "src/lib.rs:2082",
+        "src/lib.rs:2948"
+      ],
       "approved": true,
-      "confidence": "HIGH"
-    },
-    {
-      "requirement": "FR-034 (new)",
-      "spec_text": "(unspecced; 2026-10-31 sync recorded N>1 blocks rejected)",
-      "actual": "N-region store gather, warm/remote scatter, cold segment split at region boundaries",
-      "location": "src/lib.rs:238, src/lib.rs:2673, src/pipeline.rs:761",
-      "severity": "major",
-      "direction": "BACKFILL",
-      "approved": true,
-      "confidence": "HIGH"
-    },
-    {
-      "requirement": "FR-035 (new)",
-      "spec_text": "(unspecced)",
-      "actual": "null-stream copy_gpu_to_memory_async syncs before returning (dispatcher FR-056)",
-      "location": "src/lib.rs:2658-2671",
-      "severity": "major",
-      "direction": "BACKFILL",
-      "approved": true,
-      "confidence": "HIGH"
-    },
-    {
-      "requirement": "FR-036 (new)",
-      "spec_text": "(unspecced)",
-      "actual": "per-drive ChannelPool replaces shared cached_channels (#583)",
-      "location": "src/lib.rs:157-229",
-      "severity": "moderate",
-      "direction": "BACKFILL",
-      "approved": true,
-      "confidence": "HIGH"
-    },
-    {
-      "requirement": "FR-015",
-      "spec_text": "names pipelined_ssd_to_gpu_p2p as the cold pipeline",
-      "actual": "that function now wraps pipelined_multi_object_p2p; device routing still not wired (unchanged)",
-      "location": "src/pipeline.rs:707",
-      "severity": "minor",
-      "direction": "BACKFILL",
-      "approved": true,
-      "confidence": "HIGH"
+      "note": "The approval preview called this FR-064. The p2p spec's own numbering ends at FR-036 (its FR-063 mention cross-references dispatcher), so the requirement was applied as FR-037.",
+      "approval_note": "Approved interactively by the user in /component-sync-specs --interactive, 2026-11-11."
     }
   ]
 }

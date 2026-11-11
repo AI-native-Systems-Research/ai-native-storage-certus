@@ -1,11 +1,21 @@
 ---
 spec_sync_component: extent-manager
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-11-05T10:19:50Z
-spec_sync_git_commit: 32ffa627f
-spec_sync_inputs_sha256: 87f8323a209cda8646b4e98dfd84e54ffba207c85e1048c1c7a88927966dd8d9
+spec_sync_synced_at: 2026-11-11T21:15:19Z
+spec_sync_git_commit: adacb8ce1
+spec_sync_inputs_sha256: 8e5d1d8cd7bcd7d77efcb3fa083776804f1acb02885b33f6b92db401c0833169
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-11-11 (branch `copilot/fix-dispatcher-lba-issues`, HEAD `adacb8ce1`, on unstable) — own code changed; drift found, approved and applied.** Unstable's stamp was current: re-verified in a clean `git worktree` of `unstable`, 22/22 fresh. This branch (`46dd67536` partition base + legacy-recovery gate, `429842db9` tests, `7652bebed` bounded metadata + rollback guard, `adacb8ce1` checkpoint-capacity doc) changes `src/lib.rs`, `src/recovery.rs`, `src/superblock.rs` and `tests/checkpoint.rs`, and edits the `FormatParams::metadata_region_size` doc in `components/interfaces`. The analysis checked the requirements this delta touches (FR-002/003/004/005/030/032/035/036, the Superblock entity, the on-disk format tables, US3, and `plan.md`'s recovery flow) against the new code. The rest of the spec is untouched by the diff and keeps its previous verdict.
+>
+> - **Drifted, fixed by BACKFILL P-EM1** (layout): a nonzero `data_base_lba` now selects a partitioned layout. `format()` rejects `metadata_region_size == 0` (`lib.rs:402-407`), `data_start_offset = 0` (`:446-452`), and capacity is the whole data partition. FR-002, FR-032, FR-035 and FR-036 had said the base was caller-consumed only and that a nonzero metadata region always comes before the data.
+> - **Drifted, fixed by BACKFILL P-EM2** (format): version 6 → 7, a second magic `CERTUSP7` (`superblock.rs:6-7`, `:117`, `lib.rs:501-503`), and a layout/addressing-mode compatibility check in recovery that names "reformat" (`recovery.rs:18-26`). FR-004, the Superblock entity, the on-disk table, the metadata-layout formula (which also now shows the `metadata_region_size` cap) and `plan.md` were updated. US3 AS5–AS6 were added for `tests/checkpoint.rs:116,159`.
+> - **Aligned, unchanged**: FR-003 (superblock at metadata LBA 0, shifted by `metadata_base_lba`), FR-005 (offsets returned are partition-relative, consistent with FR-036 as amended), FR-030, and US3 AS3 (other magics are still rejected, `superblock.rs:117`).
+> - **Verified**: `cargo test -p extent-manager`: all suites pass (30 + 14 + 3 + 7 + 16).
+> - **Doc note, not hashed**: `README.md:34` still says format version (5) and gives only one magic. That was stale before this branch too. Left for `/component-update-docs`.
+>
+> No actionable drift remains → `clean`.
+
 > **Re-stamp 2026-11-05 (branch `certus-host-setup`, on unstable `bb0c9b9c`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them (its previous stamp was re-verified against `git archive origin/unstable`); its digest moves because `components/interfaces` changed (`ISPDKEnv::init_with_allowed`, added for the two-process drive race; see the spdk-env and interfaces syncs of the same date). This component does not implement `ISPDKEnv`. No analysis below changes.
 
 > **Re-stamp 2026-10-31 (branch `opt/evolve-piece-copy-v1/s20261029-094947`, merged with unstable `a0292be6`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them; its digest moves because `components/interfaces` changed (`IGpuServices::memcpy_batch_async` added by the optimizer session, the workspace clippy cleanup's doc/attribute-only edits, three fixed doc links, and the `copy_gpu_to_memory_async` doc). The interfaces sync of the same date found none of it changes a contract this component relies on. No analysis below changes.

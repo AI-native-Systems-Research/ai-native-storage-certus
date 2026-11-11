@@ -1,16 +1,21 @@
-# Drift Resolution Proposals: dispatcher-p2p
+# Drift Resolution Proposals — dispatcher-p2p
 
-Generated: 2026-11-04T01:26:34Z — branch `feat/dispatcher-p2p-mr-pool` @ `6e2d2816`
+Generated: 2026-11-11T21:14:07Z · Branch `copilot/fix-dispatcher-lba-issues` · HEAD `adacb8ce1` · Mode: interactive
 
 | Resolution Type | Count |
 |---|---|
-| Backfill (Code → Spec) | 5 |
-| Align / Human / New spec / Remove | 0 |
+| Backfill (Code → Spec) | 1 |
+| Align (Spec → Code) | 0 |
+| Human Decision | 0 |
+| New Specs | 0 |
 
-All five approved by the user in one decision (2026-11-03). The code is authoritative for each: every change is a fix or a capability brought level with `dispatcher`, tested in this crate and on hardware.
+## P-P2P1: FR-037 (new)
 
-1. **FR-005 — BACKFILL.** FIFO slot recycling replaced by tag-tracked slots (`SlotTracker`, `src/pipeline.rs:838`). FIFO was the bug: out-of-order NVMe completions copied segments from another read's slot. HIGH.
-2. **FR-034 (new) — BACKFILL.** N-region blocks (vLLM 0.23+ LBHNC): gather, scatter, cold split at region boundaries. HIGH.
-3. **FR-035 (new) — BACKFILL.** Null-stream store copies synced before return, as `dispatcher` FR-056. HIGH.
-4. **FR-036 (new) — BACKFILL.** Per-reader `ChannelPool` (#583), as `dispatcher`'s. HIGH.
-5. **FR-015 — BACKFILL (wording).** Cold pipeline is `pipelined_multi_object_p2p`; device routing still not wired. HIGH.
+**Direction**: BACKFILL · **Confidence**: MEDIUM
+
+- Spec says: (silent) — no LBA formula stated, so no contradiction
+- Code does: same partition-relative rule as dispatcher FR-064 on promote_and_serve, write-through, P2P cold batch jobs, promote_to_memory_tier and the DRAM backfill worker
+- Evidence: `src/lib.rs:614`, `src/lib.rs:919`, `src/lib.rs:1243`, `src/lib.rs:1288`, `src/lib.rs:1558`, `src/lib.rs:1605`, `src/lib.rs:2082`, `src/lib.rs:2948`
+- Note: The approval preview called this FR-064. The p2p spec's own numbering ends at FR-036 (its FR-063 mention cross-references dispatcher), so the requirement was applied as FR-037.
+
+**Action**: [x] Approve — Approved interactively by the user in /component-sync-specs --interactive, 2026-11-11.

@@ -10,6 +10,9 @@
 > data path is owned by the caller (`dispatcher`/`dispatcher-p2p`), which consumes the
 > disk offsets returned by `reserve_extent` and applies `data_base_lba` (spec FR-036).
 > The component performs no data-device I/O itself.
+>
+> **Last Synced 2026-11-11**: superblock v7 with the partitioned magic `CERTUSP7`, and
+> the recovery-flow layout check (spec FR-004, FR-035).
 
 ## Summary
 
@@ -142,6 +145,8 @@ for each slab (BTreeMap order, i.e. by start_offset):
 ```
 initialize()
   1. Read superblock at LBA 0 of metadata device, validate magic + CRC
+     1a. Layout check (spec FR-004): data_base_lba != 0 requires CERTUSP7 v7;
+         data_base_lba == 0 rejects CERTUSP7. On mismatch: CorruptMetadata "reformat"
   2. Read active checkpoint region, verify seq + CRC
   3. If active copy fails: read inactive copy as fallback
   4. Deserialize region data (slab tables with key vectors)
@@ -227,7 +232,7 @@ components/extent-manager/
 ├── src/
 │   ├── lib.rs            -- component definition, IExtentManager impl
 │   ├── error.rs          -- ExtentManagerError factory functions
-│   ├── superblock.rs     -- on-disk superblock serialize/deserialize (v6)
+│   ├── superblock.rs     -- on-disk superblock serialize/deserialize (v7; CERTUSV4 / CERTUSP7)
 │   ├── checkpoint.rs     -- checkpoint write/read (contiguous regions)
 │   ├── recovery.rs       -- recover() from superblock + checkpoint
 │   ├── region.rs         -- RegionState, SharedState

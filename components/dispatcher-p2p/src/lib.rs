@@ -611,7 +611,7 @@ impl DispatcherP2pComponent {
         let idx = Self::drive_index(key, drives.len());
         let drive = &drives[idx];
         let block_size = drive.block_dev_iface.block_size();
-        let start_lba = offset / block_size as u64;
+        let start_lba = drive.extent_mgr.data_base_lba() + offset / block_size as u64;
         let block_dev = Arc::clone(&drive.block_dev_iface);
 
         // An exclusive channel pair for this read: concurrent lookups on the same
@@ -916,7 +916,7 @@ impl DispatcherP2pComponent {
         };
 
         let block_offset = write_handle.extent_offset();
-        let start_lba = block_offset / block_size as u64;
+        let start_lba = iem.data_base_lba() + block_offset / block_size as u64;
 
         let dma_capable = mt.is_dma_capable();
         if Self::write_buffer_to_ssd(&**drive, &temp_buf, start_lba, total_bytes, dma_capable)
@@ -1285,7 +1285,7 @@ impl DispatcherP2pComponent {
                     sector_size,
                     slab_size,
                     max_extent_size,
-                    metadata_region_size: 0,
+                    metadata_region_size: table.partitions[0].num_sectors * u64::from(sector_size),
                     ..defaults
                 })
                 .map_err(|e| {
@@ -1540,6 +1540,7 @@ impl IDispatcher for DispatcherP2pComponent {
                 .get()
                 .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
             let backfill_drives = bg_drives.clone();
+            let backfill_extent_mgrs = bg_extent_mgrs.clone();
 
             let chunk_size = {
                 let ring_guard = self.pipeline_ring.read();
@@ -1554,6 +1555,7 @@ impl IDispatcher for DispatcherP2pComponent {
                 let mt = Arc::clone(&mt_for_backfill);
                 let counters = Arc::clone(&backfill_counters);
                 let drive = Arc::clone(&backfill_drives[drive_idx]);
+                let base_lba = backfill_extent_mgrs[drive_idx].data_base_lba();
                 let channels = drive.connect_client().expect("backfill connect_client");
                 let block_size = drive.block_size() as u64;
                 move |job: DramBackfillJob| {
@@ -1600,7 +1602,7 @@ impl IDispatcher for DispatcherP2pComponent {
                             &*drive,
                             &channels,
                             mem_ptr,
-                            start_lba,
+                            base_lba + start_lba,
                             size as usize,
                             chunk_size,
                             16,
@@ -2077,7 +2079,8 @@ impl IDispatcher for DispatcherP2pComponent {
                                 let entry = &cold_entries[ci];
                                 pipeline::P2pColdJob {
                                     regions: entry.regions.clone(),
-                                    start_lba: entry.offset / block_size as u64,
+                                    start_lba: drives[drive_idx].extent_mgr.data_base_lba()
+                                        + entry.offset / block_size as u64,
                                     total_bytes: entry.ipc_handle_size as usize,
                                 }
                             })
@@ -2942,7 +2945,8 @@ impl IDispatcher for DispatcherP2pComponent {
                     for &ci in entry_indices {
                         let entry = &cold[ci];
                         let block_size = block_dev.block_size() as u64;
-                        let start_lba = entry.offset / block_size;
+                        let start_lba =
+                            drive.extent_mgr.data_base_lba() + entry.offset / block_size;
 
                         if Self::evict_for_space(dm, mt, entry.size, evict_ctx).is_err() {
                             continue;
@@ -3213,6 +3217,9 @@ mod tests {
 
     struct MockMemoryTier {
         inner: Mutex<MockMtInner>,
+        /// What `is_dma_capable` reports. A DMA-capable tier lets write-through
+        /// write straight from the slot rather than allocating SPDK staging.
+        dma_capable: AtomicBool,
     }
 
     struct MockMtInner {
@@ -3233,6 +3240,7 @@ mod tests {
                     capacity,
                     fail_insert: false,
                 }),
+                dma_capable: AtomicBool::new(false),
             }
         }
 
@@ -3245,6 +3253,7 @@ mod tests {
                     capacity,
                     fail_insert: true,
                 }),
+                dma_capable: AtomicBool::new(false),
             }
         }
     }
@@ -3348,7 +3357,7 @@ mod tests {
         }
 
         fn is_dma_capable(&self) -> bool {
-            false
+            self.dma_capable.load(Ordering::Relaxed)
         }
 
         fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot {
@@ -5891,6 +5900,275 @@ mod tests {
 
         std::thread::sleep(std::time::Duration::from_millis(200));
         evictor.shutdown();
+    }
+
+    // -----------------------------------------------------------------------
+    // Partition-relative data I/O (FR-037)
+    // -----------------------------------------------------------------------
+
+    /// A drive of 4 KiB blocks backed by a byte vector. It serves `ReadAsync` and
+    /// `WriteSync` on a thread per client and records every LBA it is asked for.
+    struct LbaDisk {
+        bytes: Arc<Mutex<Vec<u8>>>,
+        lbas: Arc<Mutex<Vec<u64>>>,
+    }
+
+    impl LbaDisk {
+        /// `blocks` blocks, block `i` filled with byte `i`.
+        fn new(blocks: usize) -> Arc<Self> {
+            let mut bytes = vec![0u8; blocks * 4096];
+            for (i, b) in bytes.chunks_mut(4096).enumerate() {
+                b.fill(u8::try_from(i % 256).unwrap());
+            }
+            Arc::new(Self {
+                bytes: Arc::new(Mutex::new(bytes)),
+                lbas: Arc::new(Mutex::new(Vec::new())),
+            })
+        }
+    }
+
+    impl IBlockDevice for LbaDisk {
+        fn connect_client(&self) -> Result<ClientChannels, interfaces::NvmeBlockError> {
+            use component_core::channel::SpscChannel;
+            let cmd = SpscChannel::<Command>::new(64);
+            let (cmd_tx, cmd_rx) = (cmd.sender().unwrap(), cmd.receiver().unwrap());
+            let done = SpscChannel::<Completion>::new(64);
+            let (done_tx, done_rx) = (done.sender().unwrap(), done.receiver().unwrap());
+            let (bytes, lbas) = (Arc::clone(&self.bytes), Arc::clone(&self.lbas));
+            thread::spawn(move || {
+                while let Ok(c) = cmd_rx.recv() {
+                    let done = match c {
+                        Command::ReadAsync { lba, buf, tag, .. } => {
+                            lbas.lock().unwrap().push(lba);
+                            let mut b = buf.lock().unwrap();
+                            let dst = b.as_mut_slice();
+                            let at = usize::try_from(lba).unwrap() * 4096;
+                            dst.copy_from_slice(&bytes.lock().unwrap()[at..at + dst.len()]);
+                            Completion::ReadDone {
+                                handle: interfaces::OpHandle(tag),
+                                tag,
+                                result: Ok(()),
+                            }
+                        }
+                        Command::WriteSync { lba, buf, .. } => {
+                            lbas.lock().unwrap().push(lba);
+                            let at = usize::try_from(lba).unwrap() * 4096;
+                            let src = buf.as_slice();
+                            bytes.lock().unwrap()[at..at + src.len()].copy_from_slice(src);
+                            Completion::WriteDone {
+                                handle: interfaces::OpHandle(0),
+                                tag: 0,
+                                result: Ok(()),
+                            }
+                        }
+                        other => panic!("LbaDisk does not serve {other:?}"),
+                    };
+                    let _ = done_tx.send(done);
+                }
+            });
+            Ok(ClientChannels {
+                command_tx: cmd_tx,
+                completion_rx: done_rx,
+            })
+        }
+        fn sector_size(&self, _: u32) -> Result<u32, interfaces::NvmeBlockError> {
+            Ok(4096)
+        }
+        fn num_sectors(&self, _: u32) -> Result<u64, interfaces::NvmeBlockError> {
+            Ok(self.bytes.lock().unwrap().len() as u64 / 4096)
+        }
+        fn max_queue_depth(&self) -> u32 {
+            64
+        }
+        fn num_io_queues(&self) -> u32 {
+            1
+        }
+        fn max_transfer_size(&self) -> u32 {
+            128 * 1024
+        }
+        fn block_size(&self) -> u32 {
+            4096
+        }
+        fn numa_node(&self) -> i32 {
+            -1
+        }
+        fn nvme_version(&self) -> String {
+            "lba-disk".into()
+        }
+        fn telemetry(&self) -> Result<interfaces::TelemetrySnapshot, interfaces::NvmeBlockError> {
+            Err(interfaces::NvmeBlockError::NotSupported("mock".into()))
+        }
+        fn read_write_stats(&self) -> interfaces::ReadWriteStats {
+            interfaces::ReadWriteStats::default()
+        }
+    }
+
+    /// An extent manager that hands out the extent at a fixed drive-relative
+    /// offset and reports a configurable data-partition base.
+    struct BaseEm {
+        offset: u64,
+        base_lba: Mutex<u64>,
+        published: Arc<Mutex<Vec<u64>>>,
+    }
+
+    impl IExtentManager for BaseEm {
+        fn format(
+            &self,
+            _: interfaces::FormatParams,
+        ) -> Result<(), interfaces::ExtentManagerError> {
+            Ok(())
+        }
+        fn initialize(&self) -> Result<(), interfaces::ExtentManagerError> {
+            Ok(())
+        }
+        fn reserve_extent(
+            &self,
+            key: CacheKey,
+            size: u32,
+        ) -> Result<interfaces::WriteHandle, interfaces::ExtentManagerError> {
+            let (offset, published) = (self.offset, Arc::clone(&self.published));
+            Ok(interfaces::WriteHandle::new(
+                key,
+                offset,
+                size,
+                Box::new(move || {
+                    published.lock().unwrap().push(offset);
+                    Ok(interfaces::Extent {
+                        key,
+                        size: size / 4096,
+                        offset,
+                    })
+                }),
+                Box::new(|| {}),
+            ))
+        }
+        fn get_extents(&self) -> Vec<interfaces::Extent> {
+            Vec::new()
+        }
+        fn for_each_extent(&self, _: &mut dyn FnMut(&interfaces::Extent)) {}
+        fn remove_extent(&self, _: u64) -> Result<(), interfaces::ExtentManagerError> {
+            Ok(())
+        }
+        fn checkpoint(&self) -> Result<(), interfaces::ExtentManagerError> {
+            Ok(())
+        }
+        fn get_instance_id(&self) -> Result<u64, interfaces::ExtentManagerError> {
+            Ok(1)
+        }
+        fn set_checkpoint_interval(&self, _: Option<std::time::Duration>) {}
+        fn used_bytes(&self) -> u64 {
+            0
+        }
+        fn capacity_bytes(&self) -> u64 {
+            1 << 30
+        }
+        fn set_metadata_base_lba(&self, _: u64) {}
+        fn set_data_base_lba(&self, base_lba: u64) {
+            *self.base_lba.lock().unwrap() = base_lba;
+        }
+        fn data_base_lba(&self) -> u64 {
+            *self.base_lba.lock().unwrap()
+        }
+    }
+
+    fn base_em(offset: u64, base_lba: u64) -> Arc<BaseEm> {
+        Arc::new(BaseEm {
+            offset,
+            base_lba: Mutex::new(base_lba),
+            published: Arc::new(Mutex::new(Vec::new())),
+        })
+    }
+
+    /// Write-through lands at `data_base_lba + extent_offset / block_size`, and
+    /// the dispatch map records the drive-relative extent offset, not the LBA.
+    #[test]
+    fn write_through_uses_data_partition_base_but_records_relative_offset() {
+        const KEY: CacheKey = 9;
+        const BASE: u64 = 10;
+        const OFFSET: u64 = 3 * 4096;
+        let disk = LbaDisk::new(32);
+        let em = base_em(OFFSET, BASE);
+        let dm = Arc::new(MockDispatchMap::new());
+        let mt = Arc::new(MockMemoryTier::new(1024 * 1024));
+        mt.dma_capable.store(true, Ordering::Relaxed);
+
+        let ptr = mt.insert(KEY, 4096).unwrap();
+        // SAFETY: the slot is 4096 bytes of the mock pool and nothing else uses it.
+        unsafe { std::ptr::write_bytes(ptr, 0xAB, 4096) };
+        dm.create_memory_tier_entry(KEY, ptr, 4096).unwrap();
+
+        let dm_dyn = Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>;
+        let mt_dyn = Arc::clone(&mt) as Arc<dyn IMemoryTier + Send + Sync>;
+        DispatcherP2pComponent::process_write_job(
+            &dm_dyn,
+            &mt_dyn,
+            &[Arc::clone(&disk) as Arc<dyn IBlockDevice + Send + Sync>],
+            &[Arc::clone(&em) as Arc<dyn IExtentManager + Send + Sync>],
+            WriteJob {
+                key: KEY,
+                size: 4096,
+                device_index: 0,
+            },
+        );
+
+        let lba = BASE + OFFSET / 4096;
+        assert_eq!(*disk.lbas.lock().unwrap(), [lba]);
+        let bytes = disk.bytes.lock().unwrap();
+        let at = usize::try_from(lba).unwrap() * 4096;
+        assert!(bytes[at..at + 4096].iter().all(|&b| b == 0xAB));
+        // Block OFFSET/4096 (no base) still holds its original pattern.
+        let unbased = usize::try_from(OFFSET).unwrap();
+        let unbased_tag = u8::try_from(OFFSET / 4096).unwrap();
+        assert!(bytes[unbased..unbased + 4096]
+            .iter()
+            .all(|&b| b == unbased_tag));
+        drop(bytes);
+        assert_eq!(*em.published.lock().unwrap(), [OFFSET]);
+        let inner = dm.inner.lock().unwrap();
+        let MockEntryLocation::MemoryTier { ssd_offset, .. } = &inner.entries[&KEY].location;
+        assert_eq!(*ssd_offset, Some(OFFSET), "recorded offset stays relative");
+    }
+
+    /// A cold promotion reads `data_base_lba + offset / block_size` from the drive,
+    /// and the promoted slot holds that block's bytes.
+    #[test]
+    fn promote_to_memory_tier_reads_at_data_partition_base() {
+        const KEY: CacheKey = 5;
+        const BASE: u64 = 7;
+        const OFFSET: u64 = 2 * 4096;
+        let (c, dm) = setup_initialized();
+        let disk = LbaDisk::new(32);
+        let iface = Arc::clone(&disk) as Arc<dyn IBlockDevice + Send + Sync>;
+        // A placeholder IUnknown for the drive's component handles; never queried.
+        let placeholder: Arc<dyn component_core::IUnknown + Send + Sync> =
+            spdk_env::SPDKEnvComponent::new_default();
+        c.data_drives.write().push(DataDrive {
+            _block_dev: Arc::clone(&placeholder),
+            block_dev_admin: None,
+            block_dev_iface: Arc::clone(&iface),
+            _extent_mgr_component: placeholder,
+            extent_mgr: base_em(0, BASE) as Arc<dyn IExtentManager + Send + Sync>,
+            channel_pool: ChannelPool::new(iface, None),
+        });
+        dm.create_memory_tier_entry(KEY, std::ptr::null_mut(), 4096)
+            .unwrap();
+        dm.convert_entry_to_block(KEY, OFFSET);
+        {
+            let mut inner = dm.inner.lock().unwrap();
+            inner.entries.get_mut(&KEY).unwrap().write_ref = false;
+        }
+
+        let d = query_interface!(c, IDispatcher).unwrap();
+        d.promote_to_memory_tier(&[KEY]);
+
+        let lba = BASE + OFFSET / 4096;
+        assert_eq!(*disk.lbas.lock().unwrap(), [lba]);
+        let mt = c.memory_tier.get().unwrap();
+        let (ptr, size) = mt.get(KEY).expect("promoted into the memory tier");
+        // SAFETY: the slot is `size` bytes of the mock pool, owned by the tier.
+        let got = unsafe { std::slice::from_raw_parts(ptr, size as usize) };
+        let tag = u8::try_from(lba).unwrap();
+        assert!(got.iter().all(|&b| b == tag), "bytes of block {lba}");
     }
 }
 

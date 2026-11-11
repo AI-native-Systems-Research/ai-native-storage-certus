@@ -1,11 +1,21 @@
 ---
 spec_sync_component: dispatcher-p2p
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-11-05T10:19:50Z
-spec_sync_git_commit: 32ffa627f
-spec_sync_inputs_sha256: fafa185c7204757b4eeb9856948f77b7b1f8e666b1f1c436e889c7cbe784ebb7
+spec_sync_synced_at: 2026-11-11T21:25:45Z
+spec_sync_git_commit: 74b0c5080
+spec_sync_inputs_sha256: 82f726f55ef6a29c98c7cfe2aab137bf90fcf0b39094d6da6ebcf4f9274903d3
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Follow-up 2026-11-11 (same branch) — test gap closed, own code changed (tests only).** Align task A-P2P-LBA is resolved. Two tests in `src/lib.rs` `mod tests` pin FR-037: `write_through_uses_data_partition_base_but_records_relative_offset` (`process_write_job`) and `promote_to_memory_tier_reads_at_data_partition_base`. Both fail when the base is removed and pass with it. `cargo test -p dispatcher-p2p`: 94 passed. The test-only `MockMemoryTier` gained a `dma_capable` flag. No production code changed. FR-037's "not covered by a test" line now names the tests and the three sites still untested, which need a GPU/P2P-ring mock. Clippy (`--tests --no-deps`) stays at its baseline count. Stays `clean`.
+
+> **Sync 2026-11-11 (branch `copilot/fix-dispatcher-lba-issues`, HEAD `adacb8ce1`, on unstable) — own code changed; no contradiction found, one requirement backfilled.** Unstable's stamp was current: 22/22 fresh in a clean worktree. This branch changes `src/lib.rs` only, plus the `FormatParams` doc in `components/interfaces`. All five data-I/O sites (`promote_and_serve:614`, `process_write_job:919`, the DRAM backfill worker `:1558/:1605`, `batch_lookup:2082`, `promote_to_memory_tier:2948`) now add the drive's data base. Format bounds `metadata_region_size` (`:1288`). The spec states no LBA formula, so no FR is contradicted. It was silent on this user-visible behavior, including the reformat requirement.
+>
+> - **Unspecced, fixed by BACKFILL P-P2P1** as **FR-037** (the approval preview said FR-064; this spec's own numbering ends at FR-036). It mirrors `dispatcher` FR-064.
+> - **Test gap, not drift**: no test in this crate pins the base LBA. Tracked as align task **A-P2P-LBA**. The crate builds (`cargo test -p dispatcher-p2p --no-run`).
+> - **Aligned, unchanged**: FR-008 (drop-in for the standard dispatcher), FR-009/FR-014 (backfill), FR-018 (write-through).
+>
+> No actionable spec/implementation drift remains → `clean`.
+
 > **Re-stamp 2026-11-05 (branch `certus-host-setup`, on unstable `bb0c9b9c`).** Transitive only: this component's own `src/` and `specs/` are as unstable has them (its previous stamp was re-verified against `git archive origin/unstable`); its digest moves because `components/interfaces` changed (`ISPDKEnv::init_with_allowed`, added for the two-process drive race; see the spdk-env and interfaces syncs of the same date). This component does not implement `ISPDKEnv`. No analysis below changes.
 
 > **Sync 2026-11-03 (branch `feat/dispatcher-p2p-mr-pool`, base unstable `dc564aa3`) — own code changed; 5 drifts, all BACKFILL, approved and applied.** Unstable's stamp (`bde3368f`) was current, and this branch changes only `src/lib.rs` and `src/pipeline.rs` (no `specs/`, no `components/interfaces`), so the analysis is the 43 requirements against that diff.

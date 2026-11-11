@@ -1,11 +1,13 @@
 ---
 spec_sync_component: interfaces
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-11-05T10:19:50Z
-spec_sync_git_commit: 32ffa627f
-spec_sync_inputs_sha256: 06ad9c036940a509c6eb72a4e635007ea1ae9b12e359f63337b3d8baaa400591
+spec_sync_synced_at: 2026-11-11T21:15:19Z
+spec_sync_git_commit: adacb8ce1
+spec_sync_inputs_sha256: 3612ca53389a619bfa32b307660ffa121f15bcc317b46e5952cb85c5e699b283
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-11-11 (branch `copilot/fix-dispatcher-lba-issues`, HEAD `adacb8ce1`, on unstable) — doc-comment-only change; no drift.** The only change is the doc comment of `FormatParams::metadata_region_size` (`src/iextent_manager.rs:62-65`): "With a nonzero data base LBA, this is the metadata partition size and data offsets start at zero within the data partition." No signature, field, default or method changed. FR-010 (the `IExtentManager` method list, including `set_data_base_lba`) and the 9-field `FormatParams` entry in FR-021 still match. The new semantics are specified where they belong, in extent-manager FR-035/FR-036 of the same sync. Stays `clean`.
+
 > **Sync 2026-11-05 (branch `certus-host-setup`, on unstable `bb0c9b9c`) — delta on a certified baseline, drift resolved.** Previous stamp re-verified against `git archive origin/unstable`. One change: `ISPDKEnv::init_with_allowed(&self, pci_addrs: &[String]) -> Result<(), SpdkEnvError>` added to `src/ispdk_env.rs`, textually identical (signature and docs) to spdk-env's local definition (spdk-env FR-018).
 >
 > - **FR-003 ISPDKEnv method list — updated** with the new method.

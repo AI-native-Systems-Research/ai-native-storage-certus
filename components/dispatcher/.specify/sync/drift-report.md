@@ -1,11 +1,19 @@
 ---
 spec_sync_component: dispatcher
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-11-09T07:24:06Z
-spec_sync_git_commit: 2024ea765
-spec_sync_inputs_sha256: e7e0a41a374271dd74596305bf249a4e55a1ac2f08f1f75dd222e1f25548ec05
+spec_sync_synced_at: 2026-11-11T21:15:19Z
+spec_sync_git_commit: adacb8ce1
+spec_sync_inputs_sha256: a6fbd09f1ce358292c6ffd3adebbd807b32deb6bb24ea80791837e80b07840a2
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-11-11 (branch `copilot/fix-dispatcher-lba-issues`, HEAD `adacb8ce1`, on unstable) — own code changed; drift found, approved and applied.** Unstable's stamp was current: 22/22 fresh in a clean worktree of `unstable`. This branch changes `src/lib.rs` and `src/repair_test_flush_failed_write.rs` (README, unhashed), plus the `FormatParams` doc in `components/interfaces`. Every data-I/O site in `src/` was listed by grep for LBA arithmetic. All six (`promote_and_serve:935`, `serve_cold_staged:1100`, `write_through:1686`, `batch_lookup:2922`, `promote_to_memory_tier:4354`, `read_to_bounce:4706`) now add `extent_mgr.data_base_lba()`, and none was missed. The SSD evictor and `remove` pass relative offsets to `remove_extent` and do no data I/O.
+>
+> - **Drifted, fixed by BACKFILL B-53**: User Story 13 scenario 1 and FR-062 gave the LBA as `raw_offset / block_size`. Corrected to `data_base_lba + raw_offset / block_size`. **FR-064 added**: partition-relative data I/O on every path, recorded locations stay relative, format bounds `metadata_region_size` to the metadata partition (`:2088`), drives formatted by earlier versions are rejected on `format_on_init=false` and must be reformatted (`:2099`), and the checkpoint-capacity limitation.
+> - **Aligned, unchanged**: FR-004 (write-through records `encode_loc(drive, extent_offset)`, still relative, confirmed by `repair_test_flush_failed_write.rs:622`), FR-025 (recovery takes relative offsets from `for_each_extent`), FR-055 (`partitions[0]`/`partitions[2]` base LBAs, set at `:2041-2043` before format/recover), SC-018.
+> - **Verified**: `cargo test -p dispatcher -- data_partition_base`: both new tests pass.
+>
+> No actionable drift remains → `clean`.
+
 > **Apply 2026-11-08 (branch fix/dispatcher-j33-repairs, approved by Cornel).** Approval note on every proposal: *"Approved by Cornel 2026-11-08 (all proposals of the 2026-11-08 analysis except gpu-services P-5)."* All four proposals of the 2026-11-08 analysis are `approved: true`, so all were taken. Applied at HEAD `d45ab524d` in BATCH mode. The edited spec is backed up in `.specify/sync/backups/20261109T071309Z/` (byte-identical, checked with `diff`), along with the previous apply reports. Every old text was checked to occur exactly once before it was replaced; none failed.
 >
 > - **Applied** with the exact proposal text (3 BACKFILL, all in `specs/001-dispatcher-cache-interface/spec.md`): **B-50** reverses the applied B-44. FR-061: a read timeout fails every not-yet-failed job of its drive, stops submissions to it, and still drains; the 2026-11-07 "MUST NOT fail the drive's other jobs" is withdrawn. B-50 also adds a new `Last Synced 2026-11-08` header line after the 2026-11-07 one, which is kept. **B-51**: US-11 AS4 gets the exception for a timeout or a broken channel, tracked as A-18. **B-52**: FR-056 `read_write_stats` drops the A-16 gap sentence and states the one-lock-hold rule of `d45ab524d`. No SUPERSEDE or NEW_SPEC proposal was in this run.

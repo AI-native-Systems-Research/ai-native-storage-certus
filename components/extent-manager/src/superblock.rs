@@ -3,7 +3,8 @@ use interfaces::ExtentManagerError;
 
 pub(crate) const SUPERBLOCK_SIZE: usize = 4096;
 pub(crate) const SUPERBLOCK_MAGIC: u64 = 0x4345_5254_5553_5634; // "CERTUSV4"
-pub(crate) const FORMAT_VERSION: u32 = 6;
+pub(crate) const PARTITIONED_MAGIC: u64 = 0x4345_5254_5553_5037; // "CERTUSP7"
+pub(crate) const FORMAT_VERSION: u32 = 7;
 
 #[derive(Debug, Clone)]
 #[allow(
@@ -113,7 +114,7 @@ impl Superblock {
 
         let magic = u64::from_le_bytes(buf[pos..pos + 8].try_into().unwrap());
         pos += 8;
-        if magic != SUPERBLOCK_MAGIC {
+        if magic != SUPERBLOCK_MAGIC && magic != PARTITIONED_MAGIC {
             return Err(error::corrupt_metadata(&format!(
                 "invalid superblock magic: {magic:#x}"
             )));

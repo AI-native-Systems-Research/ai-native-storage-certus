@@ -469,6 +469,7 @@ impl IBlockDevice for MockNvme {
 #[derive(Default)]
 struct MockEm {
     published: Arc<Mutex<HashMap<u64, CacheKey>>>,
+    base_lba: Mutex<u64>,
 }
 
 impl IExtentManager for MockEm {
@@ -518,9 +519,11 @@ impl IExtentManager for MockEm {
         1 << 40
     }
     fn set_metadata_base_lba(&self, _base_lba: u64) {}
-    fn set_data_base_lba(&self, _base_lba: u64) {}
+    fn set_data_base_lba(&self, base_lba: u64) {
+        *self.base_lba.lock().unwrap() = base_lba;
+    }
     fn data_base_lba(&self) -> u64 {
-        0
+        *self.base_lba.lock().unwrap()
     }
 }
 
@@ -613,6 +616,30 @@ impl Fixture {
             std::thread::sleep(Duration::from_millis(2));
         }
     }
+}
+
+#[test]
+fn write_through_uses_data_partition_base_but_records_relative_offset() {
+    let f = setup(&[]);
+    let base = 100;
+    f._c.data_drives.read()[0]
+        .extent_mgr
+        .set_data_base_lba(base);
+    f.store(0);
+    f.store(1);
+    f.wait_persisted(&[0, 1]);
+
+    let disk = f.disk.lock().unwrap();
+    assert_eq!(disk.blocks.get(&base), Some(&0));
+    assert_eq!(
+        disk.blocks.get(&(base + EXTENT / u64::from(BLOCK))),
+        Some(&1)
+    );
+    assert!(disk.blocks.keys().all(|lba| *lba >= base));
+    drop(disk);
+    assert_eq!(f.dm.ssd_offset(0), Some(0));
+    assert_eq!(f.dm.ssd_offset(1), Some(EXTENT));
+    f.d.shutdown().unwrap();
 }
 
 /// The drive fails the write of key 2. `flush_to_ssd` must report it: an `Ok`

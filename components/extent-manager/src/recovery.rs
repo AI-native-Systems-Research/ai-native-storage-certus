@@ -4,7 +4,7 @@ use crate::block_io::BlockDeviceClient;
 use crate::checkpoint::{self, SlabDescriptor};
 use crate::error;
 use crate::slab::{Slab, FREE_KEY};
-use crate::superblock::{Superblock, SUPERBLOCK_SIZE};
+use crate::superblock::{Superblock, FORMAT_VERSION, PARTITIONED_MAGIC, SUPERBLOCK_SIZE};
 
 pub(crate) type PerRegionData = Vec<Vec<SlabDescriptor>>;
 
@@ -14,6 +14,16 @@ pub(crate) fn recover(
 ) -> Result<(Superblock, PerRegionData), ExtentManagerError> {
     let sb_data = metadata_client.read_blocks(0, SUPERBLOCK_SIZE)?;
     let sb = Superblock::deserialize(&sb_data)?;
+
+    let partitioned = *component.data_base_lba.lock().unwrap() != 0;
+    if (partitioned && (sb.magic != PARTITIONED_MAGIC || sb.version != FORMAT_VERSION))
+        || (!partitioned && sb.magic == PARTITIONED_MAGIC)
+    {
+        return Err(error::corrupt_metadata(&format!(
+            "incompatible data layout version {}; reformat the drive before using partition-relative data I/O",
+            sb.version
+        )));
+    }
 
     if sb.checkpoint_seq == 0 {
         let empty: PerRegionData = (0..sb.region_count as usize).map(|_| Vec::new()).collect();

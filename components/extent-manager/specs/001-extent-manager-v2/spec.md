@@ -2,10 +2,23 @@
 
 **Feature Branch**: `001-extent-manager-v2`
 **Created**: 2026-04-23
-**Updated**: 2026-09-01
+**Updated**: 2026-11-11
 **Status**: Active
 **Source**: Generated from implementation, updated for index-free key-vector design
 
+> **Last Synced 2026-11-11** (component-sync-specs, branch `copilot/fix-dispatcher-lba-issues`):
+> - Partitioned layout backfilled (code authoritative, commits `46dd67536`..`7652bebed`).
+>   A nonzero `data_base_lba` set before `format()` selects a partitioned layout:
+>   `metadata_region_size` must be nonzero and bounds the metadata partition,
+>   `data_start_offset` is 0, and the superblock carries magic `CERTUSP7`
+>   (`lib.rs:402-407`, `:446-452`, `:501-503`). FR-002, FR-032, FR-035 and FR-036
+>   were updated.
+> - Format version 6 → 7, plus a second magic (`superblock.rs:6-7`, `:117`). FR-004
+>   gains the layout-compatibility check of `recovery.rs:18-26`. The Superblock
+>   entity, the on-disk table, the metadata-layout formula (it now shows the
+>   `metadata_region_size` cap) and `plan.md` were updated.
+> - US3 AS5–AS6 added for `tests/checkpoint.rs:116` and `:159`.
+>
 > **Last Synced 2026-09-01** (component-sync-specs):
 > - FR-030 corrected — the flush is issued only after **checkpoint** writes; the
 >   stale "(and in the format path)" claim was removed. `format()` writes the
@@ -145,6 +158,18 @@ then initialize and verify the inactive copy's extents are recovered.
    identifying the magic mismatch.
 4. **Given** a superblock with a CRC mismatch, **When**
    `initialize()` is called, **Then** it returns CorruptMetadata.
+5. *(Sync 2026-11-11, `tests/checkpoint.rs:116`)* **Given** an instance
+   with a nonzero `data_base_lba` whose metadata holds an unpartitioned
+   (`CERTUSV4`, version 6) superblock, **When** `initialize()` is
+   called, **Then** it returns CorruptMetadata telling the operator to
+   reformat. With `data_base_lba` reset to 0, the same superblock
+   recovers. A partitioned format recovers under a nonzero base.
+6. *(Sync 2026-11-11, `tests/checkpoint.rs:159`)* **Given** nonzero
+   metadata and data base LBAs, **When** `format()` is called with
+   `metadata_region_size == 0`, **Then** it fails. With a bounded
+   region it succeeds, the first extent is at offset 0, and every
+   superblock and checkpoint write lands inside
+   `[metadata_base_lba, metadata_base_lba + metadata_region_size / sector_size)`.
 
 ---
 
@@ -298,14 +323,28 @@ again to verify the old slot is now reusable.
 - **FR-002**: `format()` MUST validate all FormatParams: `sector_size
   > 0`, `slab_size` is a multiple of `sector_size`, `max_extent_size
   <= slab_size`, `region_count` is a positive power of two, metadata
-  device is large enough for two checkpoint regions.
+  device is large enough for two checkpoint regions. *(Sync 2026-11-11:)*
+  When `data_base_lba()` is nonzero (partitioned mode, FR-035),
+  `format()` MUST also reject `metadata_region_size == 0` with
+  CorruptMetadata ("partitioned data requires a bounded metadata
+  region"). An unbounded metadata area would let the checkpoint regions
+  grow past the metadata partition into the partitions that follow it.
 - **FR-003**: `format()` MUST write a superblock at LBA 0 of the
   metadata device containing format parameters, checkpoint region
   layout, and a CRC32 checksum.
 - **FR-004**: `initialize()` MUST read the superblock from the
   metadata device, validate its magic and CRC, recover the extent
   mapping from the active checkpoint region, and rebuild all in-memory
-  allocation state from the slab key vectors.
+  allocation state from the slab key vectors. *(Sync 2026-11-11,
+  `recovery.rs:18-26`:)* Before recovering, it MUST check that the
+  on-disk layout matches the configured addressing mode. If
+  `data_base_lba()` is nonzero, the superblock MUST carry the
+  partitioned magic (`CERTUSP7`) and format version 7. If
+  `data_base_lba()` is 0, it MUST NOT carry the partitioned magic. A
+  mismatch returns CorruptMetadata naming the on-disk version and
+  telling the operator to reformat the drive. An unpartitioned
+  (`CERTUSV4`) superblock of any version, including the earlier
+  version 6, stays readable when `data_base_lba()` is 0.
 - **FR-035**: `FormatParams` MUST support an optional
   `metadata_region_size` field (`u64`, default 128 MiB). When
   non-zero, `format()` and `initialize()` treat the metadata device
@@ -318,6 +357,18 @@ again to verify the old slot is now reusable.
   with `data_start_offset = 0`, as described elsewhere in this spec.
   This enables shared-device deployments where a single NVMe
   namespace hosts both extent-manager metadata and extent data.
+  *(Sync 2026-11-11, `lib.rs:446-452`:)* The shared-device placement
+  above applies only when `data_base_lba()` is 0. When it is nonzero
+  (partitioned mode, FR-036), metadata and data are separate partitions
+  of one namespace. `metadata_region_size` is the size of the metadata
+  partition: it caps the superblock plus both checkpoint copies, and
+  MUST be nonzero (FR-002). `data_start_offset` is 0, because extent
+  offsets are relative to the data partition, and `format()` writes the
+  partitioned superblock magic (`CERTUSP7`, FR-004). The checkpoint
+  capacity is therefore about half the metadata partition: a checkpoint
+  whose payload exceeds `checkpoint_region_size` returns an error, "checkpoint
+  payload (N bytes) exceeds region size (M bytes)" (`checkpoint.rs:70-74`), and the caller must
+  size the metadata partition for the workload.
 
 #### Extent Lifecycle
 
@@ -470,7 +521,15 @@ again to verify the old slot is now reusable.
   component stores and returns it but performs **no** data-device I/O
   itself — the `dispatcher`/`dispatcher-p2p` owns the data path and
   applies the offset when addressing extents. Both default to `0`
-  (whole-namespace addressing) until explicitly set. Used by
+  (whole-namespace addressing) until explicitly set. *(Sync 2026-11-11:)*
+  The component still does no data-device I/O, but a nonzero
+  `data_base_lba` now changes its own behavior. It selects the
+  partitioned layout at `format()` (FR-035, FR-002) and the
+  layout-compatibility check at `initialize()` (FR-004), so callers MUST
+  call `set_data_base_lba` before `format()` / `initialize()`. Offsets
+  returned by `reserve_extent` and listed by recovery are relative to
+  the data partition, and the caller adds `data_base_lba` when it issues
+  I/O. Used by
   `dispatcher` and `dispatcher-p2p` to host multiple logical
   extent-manager instances on distinct partitions of a shared
   physical NVMe namespace.
@@ -486,7 +545,11 @@ again to verify the old slot is now reusable.
   data device size minus any in-device metadata region reserved during
   `format()` (shared-device mode, `metadata_region_size > 0`). In
   separate-device mode (`metadata_region_size == 0`) this equals the
-  full data device capacity configured during `format()`.
+  full data device capacity configured during `format()`. *(Sync
+  2026-11-11:)* In partitioned mode (`data_base_lba() != 0`, FR-035),
+  nothing is subtracted, because the metadata lives in its own
+  partition. Capacity equals the full `data_disk_size`, the size of the
+  data partition.
 
 #### Write Handle
 
@@ -548,7 +611,9 @@ and are documented here for completeness (previously unspecced):
 - **Superblock**: On-disk header at LBA 0 of the metadata device
   (4096 bytes). Contains format parameters, active checkpoint
   indicator, checkpoint region layout, sequence number, and CRC32.
-  Magic: `0x4345_5254_5553_5634` ("CERTUSV4"), version 6.
+  Magic: `0x4345_5254_5553_5634` ("CERTUSV4") for an unpartitioned
+  format, or `0x4345_5254_5553_5037` ("CERTUSP7") for a partitioned
+  format (FR-035); version 7. *(Sync 2026-11-11 — was CERTUSV4 / version 6.)*
 - **Checkpoint Region**: Contiguous CRC32-protected blob on the
   metadata device. Two copies alternate; the superblock records which
   is active. Encodes the slab table and key vectors for all regions.
@@ -597,15 +662,17 @@ and are documented here for completeness (previously unspecced):
 
 Where:
 - `checkpoint_region_offset = align_up(4096, metadata_alignment)`
-- `checkpoint_region_size = (metadata_disk_size - checkpoint_region_offset) / 2`
-  (rounded down to sector alignment)
+- `checkpoint_region_size = (effective_metadata_size - checkpoint_region_offset) / 2`
+  (rounded down to sector alignment), where `effective_metadata_size` is
+  `min(metadata_disk_size, metadata_region_size)` when `metadata_region_size > 0`
+  and `metadata_disk_size` otherwise (FR-035)
 
 ### Superblock (LBA 0 of metadata device, 4096 bytes)
 
 | Offset | Size | Field |
 |--------|------|-------|
-| 0 | 8 | magic (`0x4345_5254_5553_5634` = "CERTUSV4") |
-| 8 | 4 | version (6) |
+| 0 | 8 | magic (`0x4345_5254_5553_5634` = "CERTUSV4"; partitioned: `0x4345_5254_5553_5037` = "CERTUSP7") |
+| 8 | 4 | version (7) |
 | 12 | 8 | data_disk_size |
 | 20 | 4 | sector_size |
 | 24 | 8 | slab_size |

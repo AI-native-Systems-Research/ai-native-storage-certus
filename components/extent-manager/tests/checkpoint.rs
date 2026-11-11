@@ -113,6 +113,82 @@ fn format_fresh_then_initialize() {
 }
 
 #[test]
+fn partitioned_recovery_rejects_legacy_data_layout() {
+    let (c, metadata_mock) = create_test_component(METADATA_DISK_SIZE);
+    c.set_data_base_lba(100);
+    c.format(FormatParams {
+        metadata_region_size: 4 * 1024 * 1024,
+        ..format_params()
+    })
+    .unwrap();
+
+    assert_ne!(
+        &metadata_mock.shared_state().lock().unwrap().blocks[&0][..8],
+        &0x4345_5254_5553_5634u64.to_le_bytes()
+    );
+    let recovered = extent_manager::ExtentManager::new_inner();
+    recovered
+        .metadata_device
+        .connect(metadata_mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
+        .unwrap();
+    recovered.set_dma_alloc(heap_dma_alloc());
+    recovered.set_data_base_lba(100);
+    recovered
+        .initialize()
+        .expect("new partitioned layout recovers");
+
+    let state = metadata_mock.shared_state();
+    {
+        let mut disk = state.lock().unwrap();
+        let superblock = disk.blocks.get_mut(&0).unwrap();
+        superblock[..8].copy_from_slice(&0x4345_5254_5553_5634u64.to_le_bytes());
+        superblock[8..12].copy_from_slice(&6u32.to_le_bytes());
+        let crc = crc32fast::hash(&superblock[..92]);
+        superblock[92..96].copy_from_slice(&crc.to_le_bytes());
+    }
+    let err = recovered.initialize().unwrap_err().to_string();
+    assert!(err.contains("reformat"), "{err}");
+
+    recovered.set_data_base_lba(0);
+    recovered
+        .initialize()
+        .expect("unpartitioned legacy layout remains readable");
+}
+
+#[test]
+fn partitioned_checkpoints_stay_in_metadata_and_extents_start_in_data() {
+    let (c, metadata_mock) = create_test_component(METADATA_DISK_SIZE);
+    let metadata_base = 8;
+    let metadata_size = 4 * 1024 * 1024;
+    c.set_metadata_base_lba(metadata_base);
+    c.set_data_base_lba(2048);
+    assert!(c.format(format_params()).is_err());
+    c.format(FormatParams {
+        metadata_region_size: metadata_size,
+        ..format_params()
+    })
+    .unwrap();
+
+    let h = c.reserve_extent(0, 4096).unwrap();
+    assert_eq!(h.extent_offset(), 0);
+    h.publish().unwrap();
+    c.checkpoint().unwrap();
+    c.reserve_extent(4, 4096).unwrap().publish().unwrap();
+    c.checkpoint().unwrap();
+
+    let state = metadata_mock.shared_state();
+    let disk = state.lock().unwrap();
+    let lbas: Vec<_> = disk.blocks.keys().copied().collect();
+    assert!(
+        lbas.iter().all(|&lba| {
+            lba >= metadata_base && lba < metadata_base + metadata_size / u64::from(SECTOR_SIZE)
+        }),
+        "{lbas:?}"
+    );
+    assert!(lbas.iter().any(|&lba| lba >= metadata_base + 512));
+}
+
+#[test]
 fn recover_checkpointed_extents() {
     let metadata_mock = Arc::new(MockBlockDevice::new(METADATA_DISK_SIZE));
     let metadata_shared = metadata_mock.shared_state();

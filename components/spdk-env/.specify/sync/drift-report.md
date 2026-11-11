@@ -1,11 +1,13 @@
 ---
 spec_sync_component: spdk-env
 spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-11-05T10:19:50Z
-spec_sync_git_commit: 32ffa627f
-spec_sync_inputs_sha256: 320a72a0d549ae14b069a0097c23eef16d2335b3c5dfe1bb813159dd04127226
+spec_sync_synced_at: 2026-11-11T21:15:19Z
+spec_sync_git_commit: adacb8ce1
+spec_sync_inputs_sha256: 74408aedb3fbfb5f6a97e5b2b5ad141d4ae6bccb519acfb64010de52621736b0
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Re-stamp 2026-11-11 (branch `copilot/fix-dispatcher-lba-issues`, on unstable).** Transitive only: this component's own `src/` and `specs/` are as unstable has them (its previous stamp was re-verified fresh in a clean worktree of `unstable`). Its digest moves because `components/interfaces` changed: one doc comment on `FormatParams::metadata_region_size`, which documents the partitioned extent-manager layout (see the extent-manager, dispatcher and dispatcher-p2p syncs of the same date). This component's `src/` does not reference `FormatParams`, `metadata_region_size` or `data_base_lba` (checked by grep). No analysis below changes.
+
 > **Sync 2026-11-05 (branch `certus-host-setup`, on unstable `bb0c9b9c`) — delta on a certified baseline, drift resolved.** This component's previous stamp was re-verified to equal the spec-sync hash of `git archive origin/unstable`, so the only new inputs are this branch's: the fix for two Certus processes per host blocking each other's drives. An independent read-only review checked every changed statement against the code with file:line evidence; all of its findings are applied.
 >
 > - **FR-023 (new) — `ISPDKEnv::init_with_allowed(&[String])`.** Parses each address (`PciAddress::parse`, `src/device.rs:30-65`) and fails with `InitFailed` before `do_init`'s singleton `compare_exchange` (`src/lib.rs:82-94`, `src/env.rs:26-27`); passes the list as `spdk_env_opts.pci_allowed`/`num_pci_addr` only when non-empty (`src/env.rs:101-121`), which SPDK turns into DPDK `--allow` (`deps/spdk/lib/env_dpdk/init.c:462-475`). `init()` and `init_with_allowed(&[])` both run `do_init(self, &[])`.
