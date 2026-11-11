@@ -339,7 +339,7 @@ The system keeps both DRAM and SSD tiers within configured utilization bounds wi
   - Format passes `metadata_region_size = table.partitions[0].num_sectors * sector_size` (`:1288`), which bounds checkpoints to the metadata partition.
   - **Disk compatibility**: with `format_on_init = false`, a drive formatted by an earlier version fails `initialize()` with `IoError("failed to recover extent manager … reformat …")` (`:1299`). It must be reformatted, which destroys its data.
   - **Known limitation**: checkpoint capacity is about half the metadata partition.
-  - *Not covered by a test in this crate*: no test asserts that the base is applied on the p2p read or write paths. The code mirrors the standard dispatcher's, whose tests cover it (`dispatcher` FR-064). See align task A-P2P-LBA.
+  - Tests: `write_through_uses_data_partition_base_but_records_relative_offset` (write-through lands at `base + offset / block_size`, the dispatch map records the relative offset, the unbased block is untouched) and `promote_to_memory_tier_reads_at_data_partition_base` (the cold read is issued at the based LBA, and the promoted slot holds that block's bytes). Both fail if the base is removed from `process_write_job` or `promote_to_memory_tier`. *(2026-11-11 — align task A-P2P-LBA resolved.)* The `promote_and_serve`, `batch_lookup` P2P and DRAM-backfill sites still have no test of their own, because they need a GPU/P2P ring mock this crate lacks. They use the same expression.
 
 ## ROOT CAUSE FOUND 2026-09-30: the cold path panics when the P2P ring is absent
 

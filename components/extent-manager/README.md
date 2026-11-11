@@ -31,7 +31,9 @@ Data Device:
 +------------------+------------------+-----+------------------+
 ```
 
-**Superblock** (4 KiB, sector 0 of the metadata device): contains magic (`CERTUSV4`), format version (5), disk geometry parameters, active checkpoint copy indicator, checkpoint region offsets, instance ID, and a trailing CRC32. Written atomically on format and after each checkpoint.
+**Superblock** (4 KiB, sector 0 of the metadata device): contains magic (`CERTUSV4`, or `CERTUSP7` for a partitioned format), format version (7), disk geometry parameters, active checkpoint copy indicator, checkpoint region offsets, instance ID, data start offset, and a trailing CRC32. Written atomically on format and after each checkpoint.
+
+**Partitioned layout**: when the caller sets a nonzero `set_data_base_lba` before `format()` / `initialize()` (as `dispatcher` and `dispatcher-p2p` do, using the drive's GPT data partition), metadata and data are separate partitions of one namespace. `metadata_region_size` must then be nonzero; it is the metadata partition size and bounds the superblock plus both checkpoint copies. Extent offsets start at 0 within the data partition, and the caller adds the data base LBA when it issues I/O. The component itself does no data I/O. `initialize()` rejects a superblock whose layout does not match the addressing mode, with an error telling the operator to reformat: a nonzero base needs `CERTUSP7` version 7, and a zero base must not see `CERTUSP7`. An unpartitioned `CERTUSV4` superblock, including version 6, still loads with a zero base. Each checkpoint copy gets about half the metadata partition, and a checkpoint larger than that fails.
 
 **Checkpoint regions**: two equally-sized copies placed after the superblock (aligned to `metadata_alignment`). Each checkpoint contains a 16-byte header (sequence number, payload length, CRC32) followed by serialized region state (all slab descriptors and their per-slot key vectors). Writes alternate between copies; the superblock's `active_copy` field is flipped only after the new checkpoint is fully written, ensuring crash consistency.
 

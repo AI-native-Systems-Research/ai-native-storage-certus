@@ -75,7 +75,9 @@ background threads; add a unit test that fills a capacity-1 channel and asserts
 - [ ] Non-blocking / silent-drop behavior of eviction delivery is unchanged (eviction never blocks
       or fails on a full channel).
 
-## Task: A-P2P-LBA — test partition-relative data I/O in dispatcher-p2p *(2026-11-11, from FR-037)*
+## Task: A-P2P-LBA — test partition-relative data I/O in dispatcher-p2p *(2026-11-11, from FR-037)* — ✅ RESOLVED 2026-11-11
+
+> **Resolved** by two tests in `src/lib.rs` (`mod tests`): `write_through_uses_data_partition_base_but_records_relative_offset` and `promote_to_memory_tier_reads_at_data_partition_base`. Both were checked to fail with the base removed from `process_write_job` and `promote_to_memory_tier`. `MockMemoryTier` gained a `dma_capable` flag so write-through can run without SPDK staging buffers. Not covered: `promote_and_serve`, the P2P `batch_lookup` jobs and the DRAM backfill worker, which need a GPU/P2P-ring mock.
 
 **Spec Requirement**: FR-037
 **Current Code**: Every p2p data I/O path adds `extent_mgr.data_base_lba()` (`src/lib.rs:614`, `:919`, `:1605`, `:2082`, `:2948`), but no test in this crate pins that. The behavior is covered only by the standard dispatcher's tests (`read_to_bounce_uses_each_drives_data_partition_base`, `write_through_uses_data_partition_base_but_records_relative_offset`).
@@ -84,5 +86,5 @@ background threads; add a unit test that fills a capacity-1 channel and asserts
 **Estimated Effort**: small
 
 ### Acceptance Criteria
-- [ ] With base B, a write-through lands at LBA `B + extent_offset / block_size`, and the dispatch map records the relative offset.
-- [ ] A cold read (promote_and_serve or promote_to_memory_tier) reads from LBA `B + offset / block_size`.
+- [x] With base B, a write-through lands at LBA `B + extent_offset / block_size`, and the dispatch map records the relative offset.
+- [x] A cold read (promote_to_memory_tier) reads from LBA `B + offset / block_size`.
