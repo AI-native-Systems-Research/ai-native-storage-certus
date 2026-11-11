@@ -1285,7 +1285,7 @@ impl DispatcherP2pComponent {
                     sector_size,
                     slab_size,
                     max_extent_size,
-                    metadata_region_size: 0,
+                    metadata_region_size: table.partitions[0].num_sectors * u64::from(sector_size),
                     ..defaults
                 })
                 .map_err(|e| {

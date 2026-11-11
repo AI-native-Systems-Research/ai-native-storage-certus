@@ -399,6 +399,12 @@ impl IExtentManager for ExtentManager {
                 "region_count must be a power of two",
             ));
         }
+        let partitioned = *self.data_base_lba.lock().unwrap() != 0;
+        if partitioned && params.metadata_region_size == 0 {
+            return Err(error::corrupt_metadata(
+                "partitioned data requires a bounded metadata region",
+            ));
+        }
 
         let data_disk_size = params.data_disk_size;
 
@@ -437,9 +443,9 @@ impl IExtentManager for ExtentManager {
             ));
         }
 
-        // When metadata_region_size > 0, metadata and data share a device:
-        // data starts after the metadata area. Otherwise data starts at 0.
-        let data_start_offset = if params.metadata_region_size > 0 {
+        // A nonzero data partition base makes offsets relative to that partition.
+        // Otherwise a nonzero metadata reservation precedes the data on the device.
+        let data_start_offset = if params.metadata_region_size > 0 && !partitioned {
             checkpoint_region_offset + 2 * checkpoint_region_size
         } else {
             0
@@ -480,7 +486,7 @@ impl IExtentManager for ExtentManager {
             }
         };
 
-        let sb = Superblock::new(
+        let mut sb = Superblock::new(
             data_disk_size,
             params.sector_size,
             params.slab_size,
@@ -492,6 +498,9 @@ impl IExtentManager for ExtentManager {
             params.metadata_disk_ns_id,
             data_start_offset,
         );
+        if partitioned {
+            sb.magic = superblock::PARTITIONED_MAGIC;
+        }
 
         let metadata_client = self.get_metadata_client(params.metadata_disk_ns_id)?;
         let sb_data = sb.serialize();

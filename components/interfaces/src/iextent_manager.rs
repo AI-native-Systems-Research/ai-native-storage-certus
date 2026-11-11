@@ -60,9 +60,9 @@ pub struct FormatParams {
     /// `NVMe` namespace identifier for the metadata disk.
     pub metadata_disk_ns_id: u32,
     /// Maximum bytes reserved for metadata (superblock + checkpoints) on the
-    /// device. Caps the checkpoint region calculation so that metadata and data
-    /// can coexist on the same SSD without the checkpoint area consuming the
-    /// entire device. Default: 128 MiB.
+    /// device. Caps the checkpoint region calculation. With a nonzero data
+    /// base LBA, this is the metadata partition size and data offsets start at
+    /// zero within the data partition. Default: 128 MiB.
     pub metadata_region_size: u64,
 }
 
