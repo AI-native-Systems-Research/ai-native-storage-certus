@@ -36,6 +36,11 @@ the data partition; recovery rejects the old extent-manager layout. Formatting
 destroys all existing data. Do not roll back to an older dispatcher after
 formatting with this version.
 
+Checkpoint capacity is limited by the metadata partition. If checkpoint payloads
+exceed half that partition, checkpointing fails and recently written extents
+may not be recovered after restart; monitor checkpoint errors and size the
+metadata partition for the workload.
+
 ### Data Flow
 
 ```
