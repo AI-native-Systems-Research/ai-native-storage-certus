@@ -57,6 +57,10 @@ GPU_KV_GB=""            # --gpu-kv-gb: absolute GPU KV cache size (GiB); empty =
 GPU="all"
 SHM_PATH="${SHM_PATH:-/dev/shm/certus-shmq}"   # Certus-SPDK shmq mailbox (host <-> client)
 CHANNELS="${CHANNELS:-32}"                      # server worker threads / max in-flight requests
+# certus-server /metrics port. vLLM's external_prefix_cache_hits lumps DRAM and SSD
+# together; the per-tier split (certus_lookup_hits_{dram,ssd}_total) is only on the
+# server's own endpoint, scraped into the logdir just before teardown. 0 = off.
+CERTUS_METRICS_PORT="${CERTUS_METRICS_PORT:-9464}"
 # The DRAM tier is a single contiguous spdk_zmalloc from the reserved 1G hugepage
 # pool (CERTUS_HUGEPAGES, default 16 — configure-bench.sh sizes the pool to leave
 # node-0 RAM for vLLM). It cannot exceed the pool: DPDK's heap plus SPDK's
@@ -1662,9 +1666,36 @@ fi
 # hugepage pool while it is still intact (no runtime realloc, no reboot). The pool
 # is released right after (free_1g_hugepages) so the host-RAM backends get it back.
 SERVER_PID=""
+# Snapshot certus-server /metrics into the logdir. Counters are cumulative since
+# server start, so one scrape at teardown covers the whole run. Writes the raw
+# exposition (certus-metrics.prom) plus certus-tier-hits.json with the DRAM / SSD /
+# remote split of Certus-served lookups, which should sum to vLLM's
+# external_prefix_cache_hits for the same run.
+scrape_certus_metrics() {
+    [[ "${CERTUS_METRICS_PORT:-0}" -gt 0 ]] || return 0
+    [[ -n "${LOGDIR:-}" && -d "${LOGDIR:-}" ]] || return 0
+    local prom="${LOGDIR}/certus-metrics.prom"
+    if ! curl -sf --max-time 5 "http://127.0.0.1:${CERTUS_METRICS_PORT}/metrics" -o "$prom"; then
+        warn "certus /metrics scrape failed on port ${CERTUS_METRICS_PORT} — no DRAM/SSD hit split for this run"
+        rm -f "$prom"
+        return 0
+    fi
+    awk '
+        $1=="certus_lookup_hits_dram_total"   {d=$2}
+        $1=="certus_lookup_hits_ssd_total"    {s=$2}
+        $1=="certus_remote_lookup_hits_total" {r=$2}
+        $1=="certus_lookup_misses_total"      {m=$2}
+        END {
+            d+=0; s+=0; r+=0; m+=0; t=d+s+r
+            pd = t>0 ? 100*d/t : 0; ps = t>0 ? 100*s/t : 0; pr = t>0 ? 100*r/t : 0
+            printf "{\"dram_hits\": %d, \"ssd_hits\": %d, \"remote_hits\": %d, \"certus_misses\": %d, \"served\": %d, \"dram_pct\": %.2f, \"ssd_pct\": %.2f, \"remote_pct\": %.2f}\n", d, s, r, m, t, pd, ps, pr
+        }' "$prom" > "${LOGDIR}/certus-tier-hits.json"
+    log "certus tier hits: $(cat "${LOGDIR}/certus-tier-hits.json")"
+}
 stop_server() {
     [[ -z "$SERVER_PID" ]] && return 0
     sudo kill -0 "$SERVER_PID" 2>/dev/null || { SERVER_PID=""; return 0; }
+    scrape_certus_metrics
     log "stopping Certus-SPDK server (pid ${SERVER_PID})"
     sudo kill -TERM "$SERVER_PID" 2>/dev/null
     for _ in $(seq 1 8); do
@@ -1776,7 +1807,10 @@ if want certus-spdk; then
                 warn "Certus-SPDK server: libcuda.so.1 not found off the ldconfig path; CUDA init may fail (set LD_LIBRARY_PATH to the NVIDIA driver dir)"
             fi
         fi
+        metrics_flags=()
+        [[ "${CERTUS_METRICS_PORT:-0}" -gt 0 ]] && metrics_flags=(--metrics-port "$CERTUS_METRICS_PORT")
         sudo env LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}" "${numa_prefix[@]}" "$SERVER_BIN" "${dev_flags[@]}" \
+            "${metrics_flags[@]}" \
             --memory-tier-size "$MEM_TIER_SIZE" \
             --memory-tier-eviction-threshold "$EVICT_THRESH" \
             --shm-path "$SHM_PATH" \
