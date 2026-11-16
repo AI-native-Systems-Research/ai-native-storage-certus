@@ -19,4 +19,15 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 #![allow(missing_debug_implementations)]
 
+// Manual definition: bindgen + clang 23 miscompiles this as a single-byte
+// opaque when processing the full SPDK header set.
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct spdk_pci_addr {
+    pub domain: u32,
+    pub bus: u8,
+    pub dev: u8,
+    pub func: u8,
+}
+
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
