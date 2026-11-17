@@ -1,5 +1,38 @@
 # Drift Resolution Proposals — dispatcher
 
+Generated: 2026-11-17T22:05:43Z · Branch `opt/evolve-connector-store-sustained-v5/s20261112-203027` · HEAD `b5cf747d1` · Mode: interactive
+
+| Resolution Type | Count |
+|---|---|
+| Backfill (Code → Spec) | 2 |
+| Align (Spec → Code) | 0 |
+| Human Decision | 0 |
+| New Specs | 0 |
+
+## B-54: FR-039 step (4), SC-007, FR-004
+
+**Direction**: BACKFILL · **Confidence**: HIGH
+
+- Spec says: a store's drive is chosen round-robin per committing thread at `copy_gpu_to_memory_completed`/`schedule_write_through`
+- Code does: an early write-through (FR-004 amendment) takes the drive from the same per-thread cursor at the block's copy sync, on the copying thread; one request's blocks still get consecutive drives
+- Evidence: `src/lib.rs:1630-1641`, `src/lib.rs:666`, `src/lib.rs:4119`
+
+**Action**: [x] Approve — Approved interactively by the user in /component-sync-specs --interactive, 2026-11-17.
+
+## B-55: FR-018
+
+**Direction**: BACKFILL · **Confidence**: HIGH
+
+- Spec says: the write-through pin is recorded before the job is enqueued, so the job cannot start first
+- Code does: for an early write-through the job is queued before the commit; the commit records the pin under the same `WriteThroughPins` lock, and the job settles it, or the commit settles a write that already landed
+- Evidence: `src/background.rs:330-357`, `src/background.rs:421-445`
+
+**Action**: [ ] Not approved in the interactive review, 2026-11-17: FR-018 left unchanged; drift remains open.
+
+---
+
+# Drift Resolution Proposals — dispatcher
+
 Generated: 2026-11-11T21:14:07Z · Branch `copilot/fix-dispatcher-lba-issues` · HEAD `adacb8ce1` · Mode: interactive
 
 | Resolution Type | Count |

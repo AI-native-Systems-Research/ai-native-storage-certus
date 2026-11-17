@@ -1,11 +1,18 @@
 ---
 spec_sync_component: dispatcher
-spec_sync_drift_status: clean
-spec_sync_synced_at: 2026-11-11T21:15:19Z
-spec_sync_git_commit: adacb8ce1
-spec_sync_inputs_sha256: a6fbd09f1ce358292c6ffd3adebbd807b32deb6bb24ea80791837e80b07840a2
+spec_sync_drift_status: drift
+spec_sync_synced_at: 2026-11-17T22:06:10Z
+spec_sync_git_commit: b5cf747d1
+spec_sync_inputs_sha256: 2540397b55f0a14b707b47810e45daabeadfd7c178e91d903b440d7ec7a68e77
 spec_sync_hash_tool: scripts/spec-sync-hash.sh
 ---
+> **Sync 2026-11-17 (branch `opt/evolve-connector-store-sustained-v5/s20261112-203027`, HEAD `b5cf747d1`, on unstable `c7951a00f`) — own code changed: early write-through (optimizer session s20261112-203027 iteration 1).** The branch changes `src/lib.rs`, `src/background.rs`, adds `src/repair_test_early_writethrough.rs` (9 tests), and amends FR-004 in the spec. Every changed write-through, commit, abort and copy site was read against the requirements that name write-through, the write-through pin or the store drive.
+>
+> - **Aligned, unchanged**: FR-004 amendment (early job only on the synchronous null-stream path, after the block's copy synchronized: `src/lib.rs:4119`; only with data drives and a running writer: `:1630-1641`; extent left unpublished until the commit: `write_unpublished` `:1690`, `publish_written` `:1651`; the commit publishes a landed write, hands the pin to a pending job, or queues a new one: `:4223`, `src/background.rs:330`; an abort or reap, a failed commit or a repeated copy cancels it: `src/lib.rs:4073`, `:4142`, `:4150`, `:4192`, `:4206`, `:4257`, `src/background.rs:374`; early jobs are ordinary `WriteJob`s, so `flush_to_ssd` waits for them). FR-003 failure release (each pre-registration failure cancels the early job before `mt.remove`). FR-005 (the slot is not freed by the write). FR-025 recovery (an unpublished extent is never recorded; dropping its handle aborts it). FR-056 `release_memory` (cancels first, `:4257`).
+> - **Drifted (wording), BACKFILL B-54 approved and applied**: FR-039 step (4), SC-007 and FR-004's 2026-10-27 sentence say a store's drive is chosen round-robin per committing thread at `copy_gpu_to_memory_completed`/`schedule_write_through`. An early write-through chooses it with the same per-thread cursor at the block's copy sync, on the copying thread (`:1630-1641`, `next_store_drive` `:666`); one request's blocks still get consecutive drives.
+> - **Drifted (wording), BACKFILL B-55 not approved — open**: FR-018 says the write-through pin is recorded before the job is enqueued, so the job cannot start first. For an early write-through the job is queued before the commit; the commit records the pin under the same `WriteThroughPins` lock, and the job settles it when done, or the commit settles a write that already landed (`src/background.rs:330-357`, `:421-445`).
+> - **Unspecced**: none.
+
 > **Sync 2026-11-11 (branch `copilot/fix-dispatcher-lba-issues`, HEAD `adacb8ce1`, on unstable) — own code changed; drift found, approved and applied.** Unstable's stamp was current: 22/22 fresh in a clean worktree of `unstable`. This branch changes `src/lib.rs` and `src/repair_test_flush_failed_write.rs` (README, unhashed), plus the `FormatParams` doc in `components/interfaces`. Every data-I/O site in `src/` was listed by grep for LBA arithmetic. All six (`promote_and_serve:935`, `serve_cold_staged:1100`, `write_through:1686`, `batch_lookup:2922`, `promote_to_memory_tier:4354`, `read_to_bounce:4706`) now add `extent_mgr.data_base_lba()`, and none was missed. The SSD evictor and `remove` pass relative offsets to `remove_extent` and do no data I/O.
 >
 > - **Drifted, fixed by BACKFILL B-53**: User Story 13 scenario 1 and FR-062 gave the LBA as `raw_offset / block_size`. Corrected to `data_base_lba + raw_offset / block_size`. **FR-064 added**: partition-relative data I/O on every path, recorded locations stay relative, format bounds `metadata_region_size` to the metadata partition (`:2088`), drives formatted by earlier versions are rejected on `format_on_init=false` and must be reformatted (`:2099`), and the checkpoint-capacity limitation.

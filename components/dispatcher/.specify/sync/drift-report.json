@@ -1,5 +1,5 @@
 {
-  "generated": "2026-11-11T21:14:49Z",
+  "generated": "2026-11-17T22:03:53Z",
   "branch": "copilot/fix-dispatcher-lba-issues",
   "head": "adacb8ce1",
   "base": "unstable",
@@ -11,5 +11,35 @@
     "not_implemented": 0
   },
   "resolution": "all drift BACKFILLed (approved, applied); see proposals.json / apply-report.json",
-  "drift_status": "clean"
+  "drift_status": "clean",
+  "syncs": [],
+  "latest_sync": {
+    "date": "2026-11-17",
+    "branch": "opt/evolve-connector-store-sustained-v5/s20261112-203027",
+    "head": "b5cf747d1",
+    "aligned": [
+      "FR-004 (amended 2026-11-12)",
+      "FR-003",
+      "FR-005",
+      "FR-025",
+      "FR-056"
+    ],
+    "drifted": [
+      {
+        "requirement": "FR-039 step (4), SC-007, FR-004",
+        "spec_text": "drive chosen round-robin per committing thread at copy_gpu_to_memory_completed/schedule_write_through",
+        "actual": "an early write-through chooses it with the same per-thread cursor at the block's copy sync",
+        "location": "src/lib.rs:1630-1641",
+        "severity": "minor"
+      },
+      {
+        "requirement": "FR-018",
+        "spec_text": "the pin is recorded before the job is enqueued, so the job cannot start first",
+        "actual": "for an early write-through the job is queued before the commit; the commit records the pin under the same lock and the job settles it, or the commit settles a landed write",
+        "location": "src/background.rs:330-357",
+        "severity": "minor"
+      }
+    ],
+    "unspecced": []
+  }
 }
