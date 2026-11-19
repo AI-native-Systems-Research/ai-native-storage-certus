@@ -84,6 +84,45 @@ def parse_guidellm(path):
     }
 
 
+def parse_aiperf(path):
+    """The same fields as parse_guidellm, from aiperf's profile_export_aiperf.json (an arm
+    run with run-aiperf-weka-iobound.sh). tokens/s is input + output tokens per second,
+    as guidellm's tokens_per_second is prompt + output."""
+    try:
+        d = json.load(open(path))
+    except Exception:
+        return None
+
+    def avg(name):
+        return (d.get(name) or {}).get("avg")
+
+    ttft = d.get("time_to_first_token") or {}
+    errored = sum(e.get("count", 0) for e in d.get("error_summary") or [])
+    return {
+        "duration": avg("benchmark_duration"),
+        "tokens_per_s": avg("total_token_throughput"),
+        "output_tokens_per_s": avg("output_token_throughput"),
+        "prompt_tokens_per_s": avg("input_token_throughput"),
+        "requests_per_s": avg("request_throughput"),
+        "ttft_ms": {"p50": ttft.get("p50"), "p90": ttft.get("p90"), "p99": ttft.get("p99"),
+                    "mean": ttft.get("avg")},
+        "ok": int(avg("request_count") or 0),
+        "errored": errored,
+    }
+
+
+def aiperf_streams(path):
+    """Requests in flight the aiperf run was asked to keep (--concurrency), or None."""
+    try:
+        phases = json.load(open(path))["input_config"].get("phases") or []
+    except Exception:
+        return None
+    for p in phases:
+        if p.get("kind") == "profiling" and p.get("concurrency"):
+            return str(p["concurrency"])
+    return None
+
+
 def parse_kvio(path):
     try:
         rows = list(csv.DictReader(open(path)))
@@ -401,6 +440,13 @@ def parse_run_facts(sub):
             f["streams"] = str(strat.get("streams") or strat.get("max_concurrency"))
     except Exception:
         pass
+    if "streams" not in f:
+        s = aiperf_streams(os.path.join(sub, "aiperf", "profile_export_aiperf.json"))
+        if s:
+            f["streams"] = s
+    mo = re.search(r"\[ccweka\] trace=(\S+) \((\d+) conversations\)", chead)
+    if mo:
+        f["trace"], f["trace_convs"] = os.path.basename(mo.group(1)), mo.group(2)
     return f
 
 
@@ -460,6 +506,8 @@ def main():
     p_prefix = run_value("prefix_count", "PREFIX_COUNT")
     p_prefix_tok = run_value("prefix_tokens", "PREFIX_TOKENS")
     p_scale = run_value("think_scale", "DELAY_SCALE")
+    p_trace = run_value("trace")
+    p_trace_convs = run_value("trace_convs")
     has_intervals = any(d.endswith("-intervals") and facts[d] for d in facts)
     scale_note = (f"intervals arms: real chat think times scaled by {p_scale}" if has_intervals
                   else "none (no intervals arms ran)")
@@ -479,10 +527,22 @@ def main():
                       if ws_gib > tier_gib else f"fits the {tiers[0]} DRAM/CPU tier")
     else:
         tier_vs_ws = "tier size per arm in the results table"
+    if p_trace != "?":  # CC-weka trace replay (aiperf): the trace defines turns and reuse
+        workload_html = (f"{p_streams} requests in flight &middot; CC-weka trace "
+                         f"<code>{p_trace}</code> ({p_trace_convs} conversations, recorded turns, "
+                         f"input and output lengths), replayed back to back")
+        ws_html = f"per-conversation prefix reuse as recorded in the trace ({tier_vs_ws})"
+        scale_note = "none: trace delays ignored (requests sent back to back)"
+    else:
+        workload_html = (f"{p_streams} concurrent streams &middot; {p_turns} turns each &middot;\n"
+                         f"{p_prefix} shared prefixes of {p_prefix_tok} tokens")
+        ws_html = f"{p_ws} of reused KV ({tier_vs_ws})"
     data = []
     for key, label, color in ARMS:
         sub = os.path.join(rd, key)
-        g = parse_guidellm(os.path.join(sub, "guidellm.json"))
+        # guidellm arms write guidellm.json; aiperf (CC-weka trace) arms write aiperf/.
+        g = (parse_guidellm(os.path.join(sub, "guidellm.json"))
+             or parse_aiperf(os.path.join(sub, "aiperf", "profile_export_aiperf.json")))
         k = parse_kvio(os.path.join(sub, "kvio.csv"))
         mt = parse_metrics(os.path.join(sub, "guidellm.metrics.txt")) or {}
         sv = parse_serve_log(os.path.join(sub, "server.log"))
@@ -687,9 +747,8 @@ def main():
 <table class="setup"><tbody>
 <tr><th>Model</th><td>{p_model} &middot; {p_attn} &middot; {p_kv} KiB of KV per token</td></tr>
 <tr><th>Serving</th><td>vLLM {p_vllm} &middot; TP={p_tp} &middot; {p_window}-token context window</td></tr>
-<tr><th>Workload</th><td>{p_streams} concurrent streams &middot; {p_turns} turns each &middot;
-{p_prefix} shared prefixes of {p_prefix_tok} tokens</td></tr>
-<tr><th>Working set</th><td>{p_ws} of reused KV ({tier_vs_ws})</td></tr>
+<tr><th>Workload</th><td>{workload_html}</td></tr>
+<tr><th>Working set</th><td>{ws_html}</td></tr>
 <tr><th>Think time</th><td>{scale_note}</td></tr>
 <tr><th>Per arm</th><td>offload block size and DRAM/CPU tier: first columns of the results table</td></tr>
 <tr><th>Source</th><td><code>{rd}</code></td></tr>
