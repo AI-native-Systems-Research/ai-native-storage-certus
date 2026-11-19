@@ -57,6 +57,7 @@ the interesting hardware points are caps **4, 8, 12**.
 | file | role |
 |---|---|
 | `ccweka-out1-think-lowconc-sweep.sh` | **driver** — per-point loop over `STREAMS`, launches the sweep, stop rule, wedge watchdog, merges summaries |
+| `workload-summary.md` | properties of the replayed trace (sessions, turn counts, think-time and prompt-length distributions) |
 | `stop-rule-live-watch.sh` | stop-rule watcher (waits out preflight, matches aiperf's retitled process, parses labeled vLLM metrics) |
 | `run-gqa-iobound-stream-sweep.sh` | per-point harness: preflight (hugepages/NVMe), certus-server probe, invokes the matrix |
 | `run-gqa-iobound-matrix.sh` | per-arm orchestrator: server launch, vLLM, client, teardown, report |
