@@ -163,6 +163,8 @@ esac
 [[ -n "$BENCHMARK_DURATION" ]] && ARGS+=(--benchmark-duration "$BENCHMARK_DURATION")
 [[ -n "$NUM_CONVERSATIONS"  ]] && ARGS+=(--num-dataset-entries "$NUM_CONVERSATIONS")
 [[ -n "$MAX_CONTEXT_LEN"    ]] && ARGS+=(--max-context-length "$MAX_CONTEXT_LEN")
+# Any other aiperf flags, word-split (e.g. "--extra-inputs ignore_eos:true").
+[[ -n "${AIPERF_EXTRA_ARGS:-}" ]] && read -ra _extra <<<"$AIPERF_EXTRA_ARGS" && ARGS+=("${_extra[@]}")
 
 # ── Certus / KV-offload metrics snapshot (server-side, like run-guidellm.sh) ──────
 # The number that matters for a tiering backend is the SERVER's external/offload
