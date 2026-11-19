@@ -24,7 +24,7 @@
 # Self-contained bundle: all scripts this driver needs live in this directory.
 STREAMS="${STREAMS:-32}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WATCHDOG="$SCRIPT_DIR/run-cputier-wedge-capture.sh"
+WATCHDOG="$SCRIPT_DIR/wedge-watch-live.sh"   # attach-mode watchdog (matches retitled aiperf)
 STOP_RULE="$SCRIPT_DIR/stop-rule-live-watch.sh"
 TOP="${TOP:-/mnt/certus1/vllm-serve-matrix/ccweka-out1-think-lowconc-sweep-$(date +%Y%m%d_%H%M%S)}"
 MAX_SECONDS="${MAX_SECONDS:-14400}"          # 4h per-arm safety cap (stop rule can end earlier)
@@ -48,13 +48,22 @@ for n in $STREAMS; do
   sp=$!
   "$STOP_RULE" "$n" "$TOP/${n}streams-stop-rule.log" "$MATRIX_RE" &
   sr=$!
-  # cputier wedge watchdog: attach once the matrix for this point is up
-  until [[ -f "$TOP/${n}streams/orchestrator.log" ]]; do kill -0 "$sp" 2>/dev/null || break; sleep 10; done
+  # cputier wedge watchdog: attach once the matrix for this point is up. The
+  # matrix results nest one deeper than SWEEP_DIR ($TOP/<n>streams/<n>streams),
+  # so discover the matrix dir from its orchestrator.log rather than guessing —
+  # v1 hardcoded $TOP/<n>streams/orchestrator.log, never found it, and passed a
+  # RESULTS_DIR one level too shallow, so no watchdog ever attached.
+  mdir=""
+  until [[ -n "$mdir" ]]; do
+    found=$(ls "$TOP/${n}streams"/*/orchestrator.log 2>/dev/null | head -1)
+    [[ -n "$found" ]] && mdir="$(dirname "$found")"
+    [[ -n "$mdir" ]] || { kill -0 "$sp" 2>/dev/null || break; sleep 10; }
+  done
   mp=""; until [[ -n "$mp" ]]; do mp=$(pgrep -f "$MATRIX_RE" | head -1); [[ -n "$mp" ]] || { kill -0 "$sp" 2>/dev/null || break; sleep 2; }; done
-  if [[ -n "$mp" ]]; then
-    log "  ${n} streams: wedge watchdog on matrix pid ${mp}"
-    ATTACH_PID="$mp" RESULTS_DIR="$TOP/${n}streams" ARM=cputier-nointervals CONCURRENT_STREAMS="$n" \
-      MAX_SECONDS="$MAX_SECONDS" STALL_SECONDS="${STALL_SECONDS:-300}" "$WATCHDOG" >> "$TOP/watchdog.log" 2>&1
+  if [[ -n "$mp" && -n "$mdir" ]]; then
+    log "  ${n} streams: wedge watchdog on matrix pid ${mp} (dir ${mdir})"
+    ATTACH_PID="$mp" RESULTS_DIR="$mdir" ARM=cputier-nointervals CONCURRENT_STREAMS="$n" \
+      STALL_SECONDS="${STALL_SECONDS:-300}" "$WATCHDOG" >> "$TOP/watchdog.log" 2>&1
   fi
   wait "$sp"; rc=$?
   kill "$sr" 2>/dev/null

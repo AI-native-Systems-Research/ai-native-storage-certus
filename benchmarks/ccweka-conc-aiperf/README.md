@@ -63,7 +63,8 @@ the interesting hardware points are caps **4, 8, 12**.
 | `run-gqa-iobound-matrix.sh` | per-arm orchestrator: server launch, vLLM, client, teardown, report |
 | `run-aiperf-weka-iobound.sh` | client wrapper: maps `TIMING=think` onto aiperf `--use-think-time-only` + pool-size `--concurrency` + `--prefill-concurrency` cap |
 | `run-aiperf-weka.sh` | actual aiperf invocation |
-| `run-cputier-wedge-capture.sh` | cputier wedge watchdog |
+| `wedge-watch-live.sh` | attach-mode wedge watchdog the driver uses — matches aiperf's retitled `system_controller` process by name |
+| `run-cputier-wedge-capture.sh` | standalone variant: re-runs one arm itself under the watchdog (its attach mode matches the client by results-dir in its cmdline, which the retitled aiperf process no longer carries — use `wedge-watch-live.sh` to watch a live run) |
 | `run-serve-certus-shmq-gqa-iobound.sh` / `run-serve-certus-shmq.sh` | certus vLLM serve scripts |
 | `run-serve-cputier-gqa-iobound.sh` / `run-serve-cputier.sh` | cputier vLLM serve scripts |
 | `poll-kv-metrics.sh` (+ `plot-gpu-vs-io.py`) | kvio.csv poller (2s metrics snapshots) |
