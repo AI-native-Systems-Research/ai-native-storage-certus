@@ -583,6 +583,41 @@ for variant in variants:
                             point["ttft_p95_ms"] = p95 * 1000
             except (json.JSONDecodeError, KeyError):
                 pass
+        point["ttft_src"] = "histogram" if point["ttft_p50_ms"] is not None else "—"
+
+        # Exact TTFT from the client log, preferred over the histogram, whose
+        # buckets (…10, 20, 40 … 640, 2560 s) are far too coarse for runs with
+        # a handful of requests. Newer clients print one "[turn] … ttft_s= …"
+        # line per turn; older ones only the "[run] async turn latency:" summary,
+        # which has an exact ttft_p50 but no TTFT tail, so p95 is left blank.
+        ttfts, summ = [], None
+        for lf in sorted(os.listdir(run_dir)) if os.path.isdir(run_dir) else []:
+            if not lf.endswith(".log"):
+                continue
+            try:
+                for ln in open(os.path.join(run_dir, lf), errors="replace"):
+                    if ln.startswith("[turn] "):
+                        m = re.search(r"\bttft_s=([0-9.eE+-]+)", ln)
+                        if m:
+                            ttfts.append(float(m.group(1)))
+                    elif "[run] async turn latency:" in ln:
+                        m = re.search(r"ttft_p50=([0-9.eE+-]+)", ln)
+                        if m:
+                            summ = float(m.group(1))
+            except OSError:
+                pass
+        if ttfts:
+            ttfts.sort()
+            def _pct(vals, p):
+                return vals[min(len(vals) - 1, int(p * len(vals)))]
+            point["ttft_p50_ms"] = _pct(ttfts, 0.50) * 1000
+            point["ttft_p95_ms"] = ttfts[-1] * 1000          # max: with ~8 turns a p95 is just the max
+            point["ttft_all_s"] = ttfts
+            point["ttft_src"] = f"per-turn (n={len(ttfts)})"
+        elif summ is not None:
+            point["ttft_p50_ms"] = summ * 1000
+            point["ttft_p95_ms"] = None
+            point["ttft_src"] = "client summary (p50 only)"
 
         rows[variant].append(point)
 
@@ -667,9 +702,17 @@ for vi, variant in enumerate(variants):
     p50s = [p["ttft_p50_ms"] for p in rows[variant]]
     p95s = [p["ttft_p95_ms"] for p in rows[variant]]
     c = COLORS[vi % len(COLORS)]
-    series2.append((f"{variant} p50", c, p50s, ""))
-    series2.append((f"{variant} p95", c, p95s, "6,3"))
-chart2 = line_chart(x_labels, series2, "DRAM tier (GiB)", "TTFT (ms)")
+    series2.append((f"{variant} p50", c, [v / 1000 if v is not None else None for v in p50s], ""))
+    series2.append((f"{variant} max", c, [v / 1000 if v is not None else None for v in p95s], "6,3"))
+chart2 = line_chart(x_labels, series2, "DRAM tier (GiB)", "TTFT (s)")
+
+def ttft_all_cell(p):
+    vals = p.get("ttft_all_s")
+    if vals:
+        return ", ".join(f"{v:.2f}" for v in vals)
+    if p.get("ttft_src", "").startswith("client summary"):
+        return "not logged (run predates per-turn output; p50 only)"
+    return "—"
 
 table_rows = []
 for variant in variants:
@@ -678,8 +721,9 @@ for variant in variants:
             f'<tr><td>{variant}</td><td>{p["dram_gib"]}</td>'
             f'<td>{fmt_num(p["req_per_s"])}</td>'
             f'<td>{fmt_num(p["tok_per_s"])}</td>'
-            f'<td>{fmt_num(p["ttft_p50_ms"])}</td>'
-            f'<td>{fmt_num(p["ttft_p95_ms"])}</td>'
+            f'<td>{fmt_num(p["ttft_p50_ms"] / 1000 if p["ttft_p50_ms"] is not None else None)}</td>'
+            f'<td>{fmt_num(p["ttft_p95_ms"] / 1000 if p["ttft_p95_ms"] is not None else None)}</td>'
+            f'<td>{ttft_all_cell(p)}</td>'
             f'<td>{fmt_num(p["wall_s"])}</td>'
             f'<td>{fmt_num(p["gens"])}</td></tr>')
 
@@ -744,7 +788,7 @@ td {{ padding: 6px 8px; border-bottom: 1px solid var(--border); }}
 <h2>Data</h2>
 <table>
 <tr><th>Variant</th><th>DRAM (GiB)</th><th>req/s</th><th>tok/s</th>
-    <th>TTFT p50 (ms)</th><th>TTFT p95 (ms)</th><th>Wall (s)</th><th>Gens</th></tr>
+    <th>TTFT p50 (s)</th><th>TTFT max (s)</th><th>TTFT, every turn (s, sorted)</th><th>Wall (s)</th><th>Gens</th></tr>
 {"".join(table_rows)}
 </table>
 </section>

@@ -345,6 +345,14 @@ def run_async_driver(engine_kwargs, convs, sampling_params, *, prompt_budget,
     print(f"[run] async turn latency: n={len(lat)}  "
           f"p50={_pct(lat, 0.50)} p90={_pct(lat, 0.90)} p99={_pct(lat, 0.99)}  "
           f"ttft_p50={_pct(ttfts, 0.50)}", file=sys.stderr, flush=True)
+    # One exact line per turn, so reports can show the real TTFT distribution
+    # rather than vLLM's coarse TTFT histogram buckets.
+    for conv, turn, ptoks, gtoks, ttft, latency in sorted(
+            result["turn_records"], key=lambda r: (r[0], r[1])):
+        ttft_s = f"{ttft:.6f}" if ttft is not None else "none"
+        print(f"[turn] conv={conv} turn={turn} prompt_toks={ptoks} "
+              f"gen_toks={gtoks} ttft_s={ttft_s} latency_s={latency:.6f}",
+              file=sys.stderr, flush=True)
 
     # ── Per-tick [prom] markers (renderer input) ──────────────────────────────
     # The 1 Hz sampler recorded cumulative counters (+ SSD device bytes, when the
