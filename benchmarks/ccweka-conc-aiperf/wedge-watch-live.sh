@@ -22,7 +22,12 @@ RESULTS_DIR="${RESULTS_DIR:?RESULTS_DIR required}"
 CONCURRENT_STREAMS="${CONCURRENT_STREAMS:-16}"
 STALL_SECONDS="${STALL_SECONDS:-300}"
 POLL_SECONDS="${POLL_SECONDS:-10}"
-CLIENT_RE='aiperf (profile --url|system_controller)'
+# Anchored so it can only match the real client: an unanchored -f pattern also
+# matches OTHER tools' pgrep/pkill processes whose cmdline embeds the pattern
+# (the stop-rule polls with the same regex) — that race made the v1 watchdog
+# false-detect "client running" during preflight and exit before the client
+# ever started, missing both cap-32 stalls on 2026-11-19.
+CLIENT_RE='^aiperf (profile --url|system_controller)'
 PY_SPY="${PY_SPY:-$(command -v py-spy || echo "$HOME/.local/bin/py-spy")}"
 SUB="${RESULTS_DIR}/${ARM}"
 WLOG="${RESULTS_DIR}/watchdog.log"
