@@ -544,6 +544,91 @@ seed           = sys.argv[11] or "—"
 gpu            = sys.argv[12] or "—"
 tp             = sys.argv[13] or "—"
 model          = sys.argv[14] or "—"
+gpu_kv_gb      = "—"
+output_tokens  = "—"
+
+# ── Workload definition: from the runs themselves, not this script's flags ───
+# The arguments above are this invocation's settings, which under --report-only
+# are just script defaults. Prefer what the runs recorded: run-params.json
+# (written by every run since it was added), else what the run logs show.
+def _run_meta():
+    for raw_sz in raw_sizes:
+        rp = os.path.join(sweep_dir, f"sweep-{raw_sz}", "run-params.json")
+        if os.path.isfile(rp):
+            try:
+                return json.load(open(rp)), "run-params.json"
+            except (json.JSONDecodeError, OSError):
+                pass
+    meta = {}
+    for raw_sz in raw_sizes:
+        rd = os.path.join(sweep_dir, f"sweep-{raw_sz}")
+        if not os.path.isdir(rd):
+            continue
+        convs, turns, first_prompt = set(), {}, None
+        for lf in sorted(os.listdir(rd)):
+            if not lf.endswith(".log"):
+                continue
+            try:
+                lines = open(os.path.join(rd, lf), errors="replace").readlines()
+            except OSError:
+                continue
+            for ln in lines:
+                m = re.search(r"^\[run-bench\] workload=(\S+)", ln)
+                if m: meta.setdefault("workload", m.group(1))
+                m = re.search(r"^\[run-bench\] image=\S+ gpu=(\S+)", ln)
+                if m: meta.setdefault("gpu", m.group(1))
+                m = re.search(r"tensor_parallel_size=(\d+)", ln)
+                if m: meta.setdefault("tp", m.group(1))
+                m = re.search(r"^\[run\] num_convs=(\d+) max_model_len=(\d+) output_tokens=(\d+)", ln)
+                if m:
+                    meta.setdefault("num_convs", m.group(1))
+                    meta.setdefault("max_model_len", m.group(2))
+                    meta.setdefault("output_tokens", m.group(3))
+                m = re.search(r"^\[run\] model=(\S+)", ln)
+                if m: meta.setdefault("model", m.group(1))
+                m = re.search(r"^\[run\] GPU_KV_GB=(\d+)", ln)
+                if m: meta.setdefault("gpu_kv_gb", m.group(1))
+                m = re.search(r"^\[turn\] conv=(\d+) turn=(\d+) prompt_toks=(\d+)", ln)
+                if m:
+                    c, t = int(m.group(1)), int(m.group(2))
+                    convs.add(c)
+                    turns[c] = max(turns.get(c, 0), t + 1)
+                    if c == 0 and t == 0:
+                        first_prompt = int(m.group(3))
+        if meta:
+            if meta.get("workload") == "long-doc-qa" and turns:
+                # One conversation per document; questions = turns per conversation.
+                meta.setdefault("longdoc_num_docs", str(len(convs)))
+                meta.setdefault("longdoc_questions", str(max(turns.values())))
+                if first_prompt:
+                    meta.setdefault("longdoc_doc_tokens", f"~{first_prompt:,} (turn-1 prompt)")
+            return meta, "run logs"
+    return {}, None
+
+_meta, _meta_src = _run_meta()
+if _meta:
+    def _pick(key, cur):
+        v = _meta.get(key)
+        return str(v) if v not in (None, "") else cur
+    workload_name = _pick("workload", workload_name)
+    model         = _pick("model", model)
+    num_convs     = _pick("num_convs", num_convs)
+    max_model_len = _pick("max_model_len", max_model_len)
+    gpu           = _pick("gpu", gpu)
+    tp            = _pick("tp", tp)
+    gpu_kv_gb     = _pick("gpu_kv_gb", gpu_kv_gb)
+    output_tokens = _pick("output_tokens", output_tokens)
+    doc_tokens    = _pick("longdoc_doc_tokens", doc_tokens)
+    questions     = _pick("longdoc_questions", questions)
+    num_docs      = _pick("longdoc_num_docs", num_docs)
+    seed          = _pick("longdoc_seed", seed)
+if workload_name == "default":
+    workload_name = "sharegpt (default)"
+longdoc_line = (f'<p class="sub">doc_tokens={doc_tokens} &middot; questions/doc={questions} '
+                f'&middot; num_docs={num_docs} &middot; seed={seed}</p>'
+                if workload_name == "long-doc-qa" else "")
+meta_note = (f'<p class="sub">workload details from {_meta_src}</p>' if _meta_src
+             else '<p class="sub">workload details from this invocation\'s flags</p>')
 
 # Parse sizes: accept "32G", "32g", or bare "32" → always GiB int
 dram_sizes = []
@@ -887,7 +972,9 @@ td {{ padding: 6px 8px; border-bottom: 1px solid var(--border); }}
 <body>
 <h1>DRAM Capacity Sweep</h1>
 <p class="sub">workload={workload_name} &middot; model={model} &middot; TP={tp} &middot; GPU={gpu}</p>
-<p class="sub">doc_tokens={doc_tokens} &middot; questions={questions} &middot; num_docs={num_docs} &middot; num_convs={num_convs} &middot; max_model_len={max_model_len} &middot; seed={seed}</p>
+<p class="sub">num_convs={num_convs} &middot; max_model_len={max_model_len} &middot; output_tokens={output_tokens} &middot; GPU KV cache={gpu_kv_gb + " GiB" if gpu_kv_gb not in ("—", "") else "—"}</p>
+{longdoc_line}
+{meta_note}
 
 <section>
 <h2>Requests / sec vs DRAM tier</h2>
@@ -1227,6 +1314,23 @@ log "run id ${RUNID}"
 log "model=${MODEL} num_convs=${NUM_CONVS} output_tokens=${OUTPUT_TOKENS}"
 log "logdir=${LOGDIR}"
 mkdir -p "$LOGDIR" "$HF_CACHE" || { echo "error: cannot create logdir/HF cache" >&2; exit 1; }
+
+# Record the workload definition next to the results, so a report built later
+# (e.g. --report-only) describes what actually ran instead of this script's
+# defaults. Long-doc parameters only ever existed as env vars before this.
+python3 - "${LOGDIR}/run-params.json" <<PARAMS_EOF || warn "could not write run-params.json"
+import json, sys
+p = {
+    "workload": "${WORKLOAD_NAME:-}", "model": "${MODEL}", "vllm_version": "${VLLM_VERSION}",
+    "num_convs": "${NUM_CONVS:-}", "max_model_len": "${MAX_MODEL_LEN}",
+    "output_tokens": "${OUTPUT_TOKENS}", "gpu": "${GPU}", "tp": "${TENSOR_PARALLEL_SIZE}",
+    "gpu_kv_gb": "${GPU_KV_GB:-}", "memory_tier_size": "${MEM_TIER_SIZE:-}",
+    "workload_mode": "${WORKLOAD_MODE:-}",
+    "longdoc_doc_tokens": "${LONGDOC_DOC_TOKENS:-}", "longdoc_questions": "${LONGDOC_QUESTIONS:-}",
+    "longdoc_num_docs": "${LONGDOC_NUM_DOCS:-}", "longdoc_seed": "${LONGDOC_SEED:-}",
+}
+json.dump(p, open(sys.argv[1], "w"), indent=1)
+PARAMS_EOF
 
 # Reconfiguring the shared NVMe group (RAID0/XFS <-> vfio/hugepages) needs root.
 # Cache the sudo credential ONCE, up front — before any long-running work — but
