@@ -57,6 +57,10 @@ GPU_KV_GB=""            # --gpu-kv-gb: absolute GPU KV cache size (GiB); empty =
 GPU="all"
 SHM_PATH="${SHM_PATH:-/dev/shm/certus-shmq}"   # Certus-SPDK shmq mailbox (host <-> client)
 CHANNELS="${CHANNELS:-32}"                      # server worker threads / max in-flight requests
+# certus-server /metrics port. vLLM's external_prefix_cache_hits lumps DRAM and SSD
+# together; the per-tier split (certus_lookup_hits_{dram,ssd}_total) is only on the
+# server's own endpoint, scraped into the logdir just before teardown. 0 = off.
+CERTUS_METRICS_PORT="${CERTUS_METRICS_PORT:-9464}"
 # The DRAM tier is a single contiguous spdk_zmalloc from the reserved 1G hugepage
 # pool (CERTUS_HUGEPAGES, default 16 — configure-bench.sh sizes the pool to leave
 # node-0 RAM for vLLM). It cannot exceed the pool: DPDK's heap plus SPDK's
@@ -195,6 +199,11 @@ Flags (all optional; defaults shown):
   --gpu <sel>                  CDI GPU selector (all | 0 | 0,1 | <uuid>). [all]
   --memory-tier-size <sz>      Certus-SPDK server DRAM pool (e.g. 32G). Wins over
                                --total-mem if both are given. [CERTUS_HUGEPAGES-3 G]
+                               A space-separated list (e.g. "32G 64G 128G 512G")
+                               triggers a DRAM-capacity sweep: each selected variant
+                               runs at every size (outer=variant, inner=size) and an
+                               HTML report with req/s + TTFT charts is generated.
+                               Results land in <logdir>/sweep-<sz>/.
   --total-mem <GiB>            Derive the Certus-SPDK DRAM tier from total system
                                memory: tier = GiB − vLLM floor (${VLLM_MIN_RAM_GIB}G) − DPDK/SPDK
                                overhead (${DPDK_HUGEPAGE_OVERHEAD_GIB}G), clamped to the reserved 1G pool
@@ -286,6 +295,7 @@ EOF
 }
 
 # ── Arg parsing ─────────────────────────────────────────────────────────────
+ORIG_ARGS=("$@")
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --device-pci)       DEVICE_PCI+=("$2"); shift 2;;
@@ -432,6 +442,342 @@ if [[ -n "$VLLM_VERSION" ]]; then
 fi
 
 [[ -z "$LOGDIR" ]] && LOGDIR="${MODEL_FS}/kvprofile-${VER_LABEL}${RUNID}"
+
+# ── DRAM capacity sweep ──────────────────────────────────────────────────────
+# When --memory-tier-size is a space-separated list, re-invoke ourselves once per
+# (variant, size) pair — outer=variant (avoids host reconfiguration churn),
+# inner=size — then generate an HTML report and exit.
+read -ra _MTS_PARTS <<< "$MEM_TIER_SIZE"
+if [[ ${#_MTS_PARTS[@]} -gt 1 ]]; then
+    mkdir -p "$LOGDIR"
+    echo "[sweep] DRAM capacity sweep: sizes=${MEM_TIER_SIZE}"
+    echo "[sweep] variants: ${ONLY:-all}"
+    echo "[sweep] logdir:   ${LOGDIR}"
+    echo ""
+
+    # Determine variant list: honour --only, else default to certus-spdk
+    if [[ -n "$ONLY" ]]; then
+        IFS=',' read -ra _SWEEP_VARIANTS <<< "$ONLY"
+    else
+        _SWEEP_VARIANTS=(certus-spdk)
+    fi
+
+    # Build passthrough args: strip --memory-tier-size, --logdir, --only from ORIG_ARGS
+    _PASS=()
+    _skip_next=0
+    for _a in "${ORIG_ARGS[@]}"; do
+        if [[ $_skip_next -eq 1 ]]; then _skip_next=0; continue; fi
+        case "$_a" in
+            --memory-tier-size|--logdir|--only) _skip_next=1; continue ;;
+        esac
+        _PASS+=("$_a")
+    done
+
+    _SWEEP_FAILED=0
+    for _sv in "${_SWEEP_VARIANTS[@]}"; do
+        echo "[sweep] ━━ variant: ${_sv} ━━"
+        for _sz in "${_MTS_PARTS[@]}"; do
+            _run_dir="${LOGDIR}/sweep-${_sz}"
+            echo "[sweep] ── ${_sv} @ ${_sz} ──"
+            "$0" --only "$_sv" --memory-tier-size "$_sz" --logdir "$_run_dir" \
+                "${_PASS[@]}" || {
+                    echo "[sweep] WARN: ${_sv} @ ${_sz} exited $? — continuing"
+                    _SWEEP_FAILED=$((_SWEEP_FAILED + 1))
+                }
+            echo "[sweep]   → ${_run_dir}/"
+            echo ""
+        done
+    done
+
+    # Generate HTML report
+    _REPORT="${LOGDIR}/dram-sweep-report.html"
+    echo "[sweep] generating report → ${_REPORT}"
+    _SIZES_STR="${_MTS_PARTS[*]}"
+    _VARIANTS_STR="$(IFS=,; echo "${_SWEEP_VARIANTS[*]}")"
+    python3 - "$LOGDIR" "$_SIZES_STR" "$_VARIANTS_STR" "$_REPORT" \
+        "${WORKLOAD_NAME:-}" "${NUM_CONVS:-}" "${MAX_MODEL_LEN:-}" \
+        "${LONGDOC_DOC_TOKENS:-}" "${LONGDOC_QUESTIONS:-}" \
+        "${LONGDOC_NUM_DOCS:-}" "${LONGDOC_SEED:-}" \
+        "${GPU:-}" "${TENSOR_PARALLEL_SIZE:-}" \
+        "${MODEL:-}" << 'PYEOF'
+import json, os, sys, math, re
+
+sweep_dir = sys.argv[1]
+raw_sizes = sys.argv[2].split()
+variants_str = sys.argv[3]
+report_path = sys.argv[4]
+variants = [v.strip() for v in variants_str.split(",")]
+
+workload_name  = sys.argv[5] or "default"
+num_convs      = sys.argv[6] or "—"
+max_model_len  = sys.argv[7] or "—"
+doc_tokens     = sys.argv[8] or "—"
+questions      = sys.argv[9] or "—"
+num_docs       = sys.argv[10] or "—"
+seed           = sys.argv[11] or "—"
+gpu            = sys.argv[12] or "—"
+tp             = sys.argv[13] or "—"
+model          = sys.argv[14] or "—"
+
+# Parse sizes: accept "32G", "32g", or bare "32" → always GiB int
+dram_sizes = []
+for s in raw_sizes:
+    m = re.match(r'^(\d+)[Gg]?$', s)
+    dram_sizes.append(int(m.group(1)) if m else int(s))
+
+# ── Collect data ──────────────────────────────────────────────────────────────
+rows = {}
+for variant in variants:
+    rows[variant] = []
+    for raw_sz, gib in zip(raw_sizes, dram_sizes):
+        run_dir = os.path.join(sweep_dir, f"sweep-{raw_sz}")
+        point = {"dram_gib": gib, "req_per_s": None, "tok_per_s": None,
+                 "wall_s": None, "gens": None, "rounds": None,
+                 "ttft_p50_ms": None, "ttft_p95_ms": None}
+
+        slug = variant.lower()
+        rfile = os.path.join(run_dir, f"result-{slug}.json")
+        if os.path.isfile(rfile):
+            try:
+                d = json.load(open(rfile))
+                wall = d.get("wall_s")
+                gens = d.get("generations")
+                tps = d.get("tokens_per_sec")
+                if wall and gens and wall > 0:
+                    point["req_per_s"] = gens / wall
+                    point["wall_s"] = wall
+                    point["gens"] = gens
+                    point["rounds"] = d.get("rounds")
+                if tps:
+                    point["tok_per_s"] = tps
+            except (json.JSONDecodeError, KeyError):
+                pass
+
+        hfile = os.path.join(run_dir, f"{slug}.histograms.json")
+        if not os.path.isfile(hfile):
+            for f in (os.listdir(run_dir) if os.path.isdir(run_dir) else []):
+                if f.endswith(".histograms.json"):
+                    hfile = os.path.join(run_dir, f)
+                    break
+        if os.path.isfile(hfile):
+            try:
+                hists = json.load(open(hfile))
+                ttft = hists.get("vllm:time_to_first_token_seconds")
+                if ttft:
+                    buckets = ttft.get("buckets", {})
+                    count = ttft.get("count", 0)
+                    if count > 0:
+                        def hist_pct(bkts, cnt, p):
+                            target = p * cnt
+                            def _le(k):
+                                return float("inf") if k in ("+Inf","inf","Inf") else float(k)
+                            for le in sorted(bkts, key=_le):
+                                if bkts[le] >= target:
+                                    return _le(le) if _le(le) != float("inf") else None
+                            return None
+                        p50 = hist_pct(buckets, count, 0.50)
+                        p95 = hist_pct(buckets, count, 0.95)
+                        if p50 is not None:
+                            point["ttft_p50_ms"] = p50 * 1000
+                        if p95 is not None:
+                            point["ttft_p95_ms"] = p95 * 1000
+            except (json.JSONDecodeError, KeyError):
+                pass
+
+        rows[variant].append(point)
+
+# ── SVG chart helpers ─────────────────────────────────────────────────────────
+W, H = 680, 300
+PAD_L, PAD_R, PAD_T, PAD_B = 64, 130, 20, 48
+
+def fmt_num(v):
+    if v is None: return "—"
+    if v >= 1000: return f"{v:,.0f}"
+    if v >= 10: return f"{v:.1f}"
+    return f"{v:.2f}"
+
+COLORS = ["var(--s1)", "var(--s2)", "var(--s3)", "var(--s4)"]
+
+def line_chart(x_labels, series, x_title, y_title):
+    pw = W - PAD_L - PAD_R
+    ph = H - PAD_T - PAD_B
+    all_vals = [v for _, _, vals, _ in series for v in vals if v is not None]
+    if not all_vals:
+        return '<p style="color:var(--muted)">No data</p>'
+    y_max = max(all_vals) * 1.15
+    y_min = 0
+    def sx(i): return PAD_L + i * pw / max(len(x_labels) - 1, 1)
+    def sy(v): return PAD_T + ph - (v - y_min) / max(y_max - y_min, 1e-9) * ph
+
+    lines = [f'<svg viewBox="0 0 {W} {H}" xmlns="http://www.w3.org/2000/svg" '
+             f'style="width:100%;max-width:{W}px;font:12px system-ui">']
+    n_grid = 5
+    for i in range(n_grid + 1):
+        y = PAD_T + ph * i / n_grid
+        v = y_max - (y_max - y_min) * i / n_grid
+        lines.append(f'<line x1="{PAD_L}" y1="{y:.1f}" x2="{PAD_L+pw}" y2="{y:.1f}" '
+                     f'stroke="var(--grid)" stroke-width="1"/>')
+        lines.append(f'<text x="{PAD_L-8}" y="{y:.1f}" text-anchor="end" '
+                     f'dominant-baseline="middle" fill="var(--muted)" font-size="11">'
+                     f'{fmt_num(v)}</text>')
+    for i, lbl in enumerate(x_labels):
+        x = sx(i)
+        lines.append(f'<text x="{x:.1f}" y="{H-6}" text-anchor="middle" '
+                     f'fill="var(--muted)" font-size="11">{lbl}</text>')
+        lines.append(f'<line x1="{x:.1f}" y1="{PAD_T}" x2="{x:.1f}" y2="{PAD_T+ph}" '
+                     f'stroke="var(--grid)" stroke-width="0.5" stroke-dasharray="3,3"/>')
+    lines.append(f'<text x="{PAD_L + pw/2}" y="{H+2}" text-anchor="middle" '
+                 f'fill="var(--muted)" font-size="12">{x_title}</text>')
+    end_labels = []
+    for si, (name, color, vals, dash) in enumerate(series):
+        pts = [(i, v) for i, v in enumerate(vals) if v is not None]
+        if not pts: continue
+        d = " ".join(f"{'M' if j==0 else 'L'}{sx(i):.1f},{sy(v):.1f}" for j,(i,v) in enumerate(pts))
+        sd = f' stroke-dasharray="{dash}"' if dash else ""
+        lines.append(f'<path d="{d}" fill="none" stroke="{color}" stroke-width="2.5"{sd}/>')
+        for i, v in pts:
+            lines.append(f'<circle cx="{sx(i):.1f}" cy="{sy(v):.1f}" r="3.5" '
+                         f'fill="{color}" stroke="var(--bg)" stroke-width="1.5"/>')
+            tip = f"{name}: {fmt_num(v)}"
+            lines.append(f'<circle cx="{sx(i):.1f}" cy="{sy(v):.1f}" r="12" '
+                         f'fill="transparent" data-tip="{tip}"/>')
+        last_v = pts[-1][1]
+        end_labels.append((sy(last_v), name, color))
+    end_labels.sort(key=lambda t: t[0])
+    for i in range(1, len(end_labels)):
+        if end_labels[i][0] - end_labels[i-1][0] < 14:
+            end_labels[i] = (end_labels[i-1][0] + 14, end_labels[i][1], end_labels[i][2])
+    for y, name, color in end_labels:
+        lines.append(f'<text x="{PAD_L+pw+8}" y="{y:.1f}" dominant-baseline="middle" '
+                     f'fill="{color}" font-size="11">{name}</text>')
+    lines.append('</svg>')
+    return "\n".join(lines)
+
+# ── Build report ──────────────────────────────────────────────────────────────
+x_labels = [str(s) for s in dram_sizes]
+
+series1 = []
+for vi, variant in enumerate(variants):
+    vals = [p["req_per_s"] for p in rows[variant]]
+    series1.append((variant, COLORS[vi % len(COLORS)], vals, ""))
+chart1 = line_chart(x_labels, series1, "DRAM tier (GiB)", "Requests / sec")
+
+series2 = []
+for vi, variant in enumerate(variants):
+    p50s = [p["ttft_p50_ms"] for p in rows[variant]]
+    p95s = [p["ttft_p95_ms"] for p in rows[variant]]
+    c = COLORS[vi % len(COLORS)]
+    series2.append((f"{variant} p50", c, p50s, ""))
+    series2.append((f"{variant} p95", c, p95s, "6,3"))
+chart2 = line_chart(x_labels, series2, "DRAM tier (GiB)", "TTFT (ms)")
+
+table_rows = []
+for variant in variants:
+    for p in rows[variant]:
+        table_rows.append(
+            f'<tr><td>{variant}</td><td>{p["dram_gib"]}</td>'
+            f'<td>{fmt_num(p["req_per_s"])}</td>'
+            f'<td>{fmt_num(p["tok_per_s"])}</td>'
+            f'<td>{fmt_num(p["ttft_p50_ms"])}</td>'
+            f'<td>{fmt_num(p["ttft_p95_ms"])}</td>'
+            f'<td>{fmt_num(p["wall_s"])}</td>'
+            f'<td>{fmt_num(p["gens"])}</td></tr>')
+
+html = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DRAM Capacity Sweep</title>
+<style>
+:root {{
+  --bg: #fcfcfb; --fg: #0b0b0b; --muted: #6b6b6b; --surface: #f4f4f2;
+  --grid: #e0e0de; --border: #d8d8d4;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+}}
+@media (prefers-color-scheme: dark) {{
+  :root:not([data-theme="light"]) {{
+    --bg: #0d0d0d; --fg: #e8e8e8; --muted: #8a8a8a; --surface: #1a1a19;
+    --grid: #2a2a28; --border: #333330;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  }}
+}}
+:root[data-theme="dark"] {{
+  --bg: #0d0d0d; --fg: #e8e8e8; --muted: #8a8a8a; --surface: #1a1a19;
+  --grid: #2a2a28; --border: #333330;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+}}
+body {{ background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif;
+       max-width: 820px; margin: 2rem auto; padding: 0 16px; }}
+h1 {{ font-size: 1.4rem; margin: 0 0 0.3rem; }}
+.sub {{ color: var(--muted); font-size: 0.9rem; margin-bottom: 1.5rem; }}
+section {{ background: var(--surface); border: 1px solid var(--border);
+           border-radius: 10px; padding: 1.2rem; margin-bottom: 1.2rem; }}
+section h2 {{ font-size: 1rem; margin: 0 0 0.8rem; }}
+table {{ width: 100%; border-collapse: collapse; font-size: 0.85rem;
+         font-variant-numeric: tabular-nums; }}
+th {{ text-align: left; padding: 6px 8px; border-bottom: 2px solid var(--border);
+      color: var(--muted); font-weight: 600; }}
+td {{ padding: 6px 8px; border-bottom: 1px solid var(--border); }}
+#tip {{ display: none; position: fixed; background: var(--surface);
+        border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px;
+        font: 12px/1.4 system-ui; white-space: pre; pointer-events: none;
+        box-shadow: 0 2px 8px rgba(0,0,0,.15); z-index: 9; }}
+</style>
+</head>
+<body>
+<h1>DRAM Capacity Sweep</h1>
+<p class="sub">workload={workload_name} &middot; model={model} &middot; TP={tp} &middot; GPU={gpu}</p>
+<p class="sub">doc_tokens={doc_tokens} &middot; questions={questions} &middot; num_docs={num_docs} &middot; num_convs={num_convs} &middot; max_model_len={max_model_len} &middot; seed={seed}</p>
+
+<section>
+<h2>Requests / sec vs DRAM tier</h2>
+{chart1}
+</section>
+
+<section>
+<h2>TTFT vs DRAM tier</h2>
+{chart2}
+</section>
+
+<section>
+<h2>Data</h2>
+<table>
+<tr><th>Variant</th><th>DRAM (GiB)</th><th>req/s</th><th>tok/s</th>
+    <th>TTFT p50 (ms)</th><th>TTFT p95 (ms)</th><th>Wall (s)</th><th>Gens</th></tr>
+{"".join(table_rows)}
+</table>
+</section>
+
+<div id="tip"></div>
+<script>
+const tip=document.getElementById("tip");
+document.addEventListener("mousemove",e=>{{
+  const t=e.target.closest("[data-tip]");
+  if(!t){{tip.style.display="none";return}}
+  tip.textContent=t.dataset.tip;tip.style.display="block";
+  let x=e.clientX+14,y=e.clientY+14;
+  if(x+tip.offsetWidth>innerWidth)x=e.clientX-tip.offsetWidth-8;
+  if(y+tip.offsetHeight>innerHeight)y=e.clientY-tip.offsetHeight-8;
+  tip.style.left=x+"px";tip.style.top=y+"px";
+}});
+document.addEventListener("mouseleave",()=>tip.style.display="none",true);
+</script>
+</body>
+</html>"""
+
+with open(report_path, "w") as f:
+    f.write(html)
+print(f"[sweep] report written to {report_path}")
+PYEOF
+
+    echo ""
+    echo "[sweep] === sweep complete ==="
+    echo "[sweep] results: ${LOGDIR}/"
+    echo "[sweep] report:  ${_REPORT}"
+    [[ $_SWEEP_FAILED -gt 0 ]] && echo "[sweep] WARNING: ${_SWEEP_FAILED} run(s) failed"
+    exit 0
+fi
 
 # Auto-resolve the fs-backend repo if not set: prefer the model-fs copy (this
 # host keeps it at <model-fs>/llm-d-kv-cache/kv_connectors/llmd_fs_backend),
@@ -1003,6 +1349,7 @@ run_container_bench() {  # variant image extra-args...
         -e "TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-1}" \
         -e "GPU_KV_GB=${GPU_KV_GB}" \
         -e "TIER_DEBUG=${TIER_DEBUG:-0}" \
+        -e "VLLM_ALLOW_LONG_MAX_MODEL_LEN=${VLLM_ALLOW_LONG_MAX_MODEL_LEN:-1}" \
         -v "${HF_CACHE}:/root/.cache/huggingface:z" \
         "${wl[@]}" \
         "${extra[@]}" \
@@ -1319,17 +1666,44 @@ fi
 # hugepage pool while it is still intact (no runtime realloc, no reboot). The pool
 # is released right after (free_1g_hugepages) so the host-RAM backends get it back.
 SERVER_PID=""
+# Snapshot certus-server /metrics into the logdir. Counters are cumulative since
+# server start, so one scrape at teardown covers the whole run. Writes the raw
+# exposition (certus-metrics.prom) plus certus-tier-hits.json with the DRAM / SSD /
+# remote split of Certus-served lookups, which should sum to vLLM's
+# external_prefix_cache_hits for the same run.
+scrape_certus_metrics() {
+    [[ "${CERTUS_METRICS_PORT:-0}" -gt 0 ]] || return 0
+    [[ -n "${LOGDIR:-}" && -d "${LOGDIR:-}" ]] || return 0
+    local prom="${LOGDIR}/certus-metrics.prom"
+    if ! curl -sf --max-time 5 "http://127.0.0.1:${CERTUS_METRICS_PORT}/metrics" -o "$prom"; then
+        warn "certus /metrics scrape failed on port ${CERTUS_METRICS_PORT} — no DRAM/SSD hit split for this run"
+        rm -f "$prom"
+        return 0
+    fi
+    awk '
+        $1=="certus_lookup_hits_dram_total"   {d=$2}
+        $1=="certus_lookup_hits_ssd_total"    {s=$2}
+        $1=="certus_remote_lookup_hits_total" {r=$2}
+        $1=="certus_lookup_misses_total"      {m=$2}
+        END {
+            d+=0; s+=0; r+=0; m+=0; t=d+s+r
+            pd = t>0 ? 100*d/t : 0; ps = t>0 ? 100*s/t : 0; pr = t>0 ? 100*r/t : 0
+            printf "{\"dram_hits\": %d, \"ssd_hits\": %d, \"remote_hits\": %d, \"certus_misses\": %d, \"served\": %d, \"dram_pct\": %.2f, \"ssd_pct\": %.2f, \"remote_pct\": %.2f}\n", d, s, r, m, t, pd, ps, pr
+        }' "$prom" > "${LOGDIR}/certus-tier-hits.json"
+    log "certus tier hits: $(cat "${LOGDIR}/certus-tier-hits.json")"
+}
 stop_server() {
     [[ -z "$SERVER_PID" ]] && return 0
-    kill -0 "$SERVER_PID" 2>/dev/null || { SERVER_PID=""; return 0; }
+    sudo kill -0 "$SERVER_PID" 2>/dev/null || { SERVER_PID=""; return 0; }
+    scrape_certus_metrics
     log "stopping Certus-SPDK server (pid ${SERVER_PID})"
-    kill -TERM "$SERVER_PID" 2>/dev/null
+    sudo kill -TERM "$SERVER_PID" 2>/dev/null
     for _ in $(seq 1 8); do
-        kill -0 "$SERVER_PID" 2>/dev/null || { SERVER_PID=""; return 0; }
+        sudo kill -0 "$SERVER_PID" 2>/dev/null || { SERVER_PID=""; return 0; }
         sleep 1
     done
     warn "server ignored SIGTERM (SPDK teardown) — escalating to SIGKILL"
-    kill -9 "$SERVER_PID" 2>/dev/null
+    sudo kill -9 "$SERVER_PID" 2>/dev/null
     wait "$SERVER_PID" 2>/dev/null
     SERVER_PID=""
 }
@@ -1433,7 +1807,10 @@ if want certus-spdk; then
                 warn "Certus-SPDK server: libcuda.so.1 not found off the ldconfig path; CUDA init may fail (set LD_LIBRARY_PATH to the NVIDIA driver dir)"
             fi
         fi
-        "${numa_prefix[@]}" "$SERVER_BIN" "${dev_flags[@]}" \
+        metrics_flags=()
+        [[ "${CERTUS_METRICS_PORT:-0}" -gt 0 ]] && metrics_flags=(--metrics-port "$CERTUS_METRICS_PORT")
+        sudo env LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}" "${numa_prefix[@]}" "$SERVER_BIN" "${dev_flags[@]}" \
+            "${metrics_flags[@]}" \
             --memory-tier-size "$MEM_TIER_SIZE" \
             --memory-tier-eviction-threshold "$EVICT_THRESH" \
             --shm-path "$SHM_PATH" \
@@ -1447,8 +1824,8 @@ if want certus-spdk; then
         # server is serving and the client container can attach via --ipc=host.
         up=0
         for _ in $(seq 1 "$SERVER_WAIT"); do
-            if ! kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
-            if [[ -e "$SHM_PATH" ]]; then up=1; break; fi
+            if ! sudo kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
+            if [[ -e "$SHM_PATH" ]]; then up=1; sudo chmod a+rw "$SHM_PATH"; break; fi
             sleep 1
         done
 
@@ -1496,6 +1873,7 @@ if want certus-spdk; then
             LONGDOC_NUM_DOCS="$LONGDOC_NUM_DOCS" \
             LONGDOC_SEED="$LONGDOC_SEED" \
             HF_CACHE="$HF_CACHE" \
+            VLLM_ALLOW_LONG_MAX_MODEL_LEN="${VLLM_ALLOW_LONG_MAX_MODEL_LEN:-1}" \
             PODMAN_STORE="$PODMAN_STORE" \
             PODMAN_RUNROOT="$PODMAN_RUNROOT" \
                 bash "${REPO_ROOT}/certus-shmq-connector/run-bench.sh" 2>&1 | tee "$f"
