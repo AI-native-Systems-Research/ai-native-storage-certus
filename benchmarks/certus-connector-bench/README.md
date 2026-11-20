@@ -482,15 +482,6 @@ python benchmarks/certus-connector-bench/bench_connector_path.py \
     --shm-path /dev/shm/certus-shmq --bs 16 --num-blocks 128
 ```
 
-### bench_connector_race.py
-
-Reproduces and validates the check→pin→lookup eviction race. Two threads run concurrently: a storer that fills the memory tier forcing eviction, and a loader that uses `check_and_pin` to atomically verify+protect keys. Validates that pinned keys see zero load failures.
-
-```bash
-python benchmarks/certus-connector-bench/bench_connector_race.py \
-    --shm-path /dev/shm/certus-shmq --duration 30
-```
-
 ## Results
 
 Output goes to `bench-results/` in the repo root. The lifecycle benchmark writes `connector_lifecycle.csv` with per-phase throughput, IOPS, and latency percentiles (p50/p99/mean) for every sub-operation. The `mode` column identifies which benchmark mode produced each row.

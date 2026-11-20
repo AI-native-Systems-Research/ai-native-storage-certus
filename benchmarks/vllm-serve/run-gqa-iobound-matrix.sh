@@ -106,6 +106,9 @@ run_arm(){  # $1 = key
     lmcache-intervals)   serve=run-serve-lmcache-gqa-iobound.sh; client=run-guidellm-gqa-iobound-intervals.sh; backend=lmcache ;;
     *) log "unknown arm $key"; return 1 ;;
   esac
+  # CLIENT_SCRIPT swaps the workload for every arm (e.g. run-aiperf-weka-iobound.sh
+  # replays the CC-weka trace); unset = the arm's guidellm client above.
+  client="${CLIENT_SCRIPT:-$client}"
 
   log "===== ARM ${key} (backend=${backend}) ====="
   if [[ "$backend" == certus ]]; then
