@@ -1,3 +1,12 @@
+# Apply report — dispatcher, 2026-11-17T22:06:10Z
+
+Branch `opt/evolve-connector-store-sustained-v5/s20261112-203027`, HEAD `b5cf747d1`.
+
+- B-54 applied: FR-004, FR-039 step (4) and SC-007 now say an early write-through takes its drive from the same per-thread cursor at the block's copy sync.
+- B-55 not approved: FR-018 unchanged; drift left open (stamp `drift`).
+
+---
+
 # Sync Apply Report — dispatcher
 
 Applied: 2026-11-11T21:14:07Z · Branch `copilot/fix-dispatcher-lba-issues` · HEAD `adacb8ce1` · Mode: interactive · Backup: `backups/20261111T211120Z/`

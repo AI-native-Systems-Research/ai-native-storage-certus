@@ -85,6 +85,10 @@ mod repair_test_eviction_errors_counted_unpersisted;
 #[path = "repair_test_route_partition_does_not_add_up.rs"]
 mod repair_test_route_partition_does_not_add_up;
 
+#[cfg(test)]
+#[path = "repair_test_early_writethrough.rs"]
+mod repair_test_early_writethrough;
+
 use parking_lot::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -103,7 +107,7 @@ use spdk_env::ISPDKEnv;
 
 use crate::background::{
     BackgroundEvictor, EvictionSender, EvictorConfig, JobStart, MemoryTierEvictor,
-    MemoryTierEvictorConfig, ParallelBackgroundWriter, WriteJob, WriteThroughPins,
+    MemoryTierEvictorConfig, ParallelBackgroundWriter, WriteJob, WriteThroughPins, Written,
 };
 pub use crate::metrics::PipelineMetrics;
 
@@ -1602,22 +1606,53 @@ impl DispatcherComponent {
             }
             JobStart::Owned => {}
         }
-        let written = Self::write_through(mt, drives, extent_mgrs, &job);
-        pins.finish(job.key, |owned| {
+        // The extent stays unpublished until the key's store has committed: an
+        // early job (queued at copy sync) parks it in `pins` for the commit.
+        let written = Self::write_unpublished(mt, drives, extent_mgrs, &job);
+        pins.finish(job.key, written, |owned, written| {
             if owned {
+                let written = written.map(Self::publish_written);
                 pins.record_write(job.key, written.is_some());
                 Self::settle_write_through(dm, job.key, written);
                 return;
             }
             // `remove` took the entry while we were reading the slot: free the
-            // slot, and the extent just written, which nothing points at now.
+            // slot, and abort the extent just written (dropping its unpublished
+            // handle), which nothing points at now.
             let _ = mt.remove(job.key);
-            if let (Some(loc), false) = (written, drives.is_empty()) {
-                if let Some((em, raw)) = select_drive(extent_mgrs, loc) {
-                    let _ = em.remove_extent(raw);
-                }
-            }
+            drop(written);
         });
+    }
+
+    /// Queue the write-through of the uncommitted `key`, whose copy has just
+    /// synchronized, on its store drive. Only with data drives and a running
+    /// writer; the job is coordinated with the commit through the pins.
+    fn start_early_write_through(&self, key: CacheKey, size: u32) {
+        let num_drives = self.data_drives.read().len();
+        if num_drives == 0 {
+            return;
+        }
+        let guard = self.bg_writer.lock().unwrap();
+        let Some(ref writer) = *guard else {
+            return;
+        };
+        self.write_through_pins.early(key, || {
+            writer
+                .enqueue(WriteJob {
+                    key,
+                    size,
+                    device_index: Self::next_store_drive(num_drives),
+                })
+                .is_ok()
+        });
+    }
+
+    /// Publish the extent of a landed write-through; returns its SSD location.
+    fn publish_written((loc, handle): (u64, Option<interfaces::WriteHandle>)) -> u64 {
+        if let Some(handle) = handle {
+            let _ = handle.publish();
+        }
+        loc
     }
 
     /// Release the write-through pin: `convert_to_storage` records the SSD copy
@@ -1646,13 +1681,25 @@ impl DispatcherComponent {
         extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
         job: &WriteJob,
     ) -> Option<u64> {
+        Self::write_unpublished(mt, drives, extent_mgrs, job).map(Self::publish_written)
+    }
+
+    /// `write_through` without the publish: returns the SSD location and the
+    /// handle of the written, still unpublished extent (`None` with no block
+    /// devices). Dropping the handle aborts the extent.
+    fn write_unpublished(
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        drives: &[Arc<dyn IBlockDevice + Send + Sync>],
+        extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
+        job: &WriteJob,
+    ) -> Written {
         // Get the memory-tier pointer without refreshing its eviction-order position —
         // the write-through must not prevent this entry from being evicted under memory pressure.
         let (mem_ptr, _size) = mt.peek(job.key)?;
 
         if drives.is_empty() {
             // No block devices: mark as converted with a synthetic offset.
-            return Some(job.key * 4096);
+            return Some((job.key * 4096, None));
         }
 
         let drive_idx = job.device_index % drives.len();
@@ -1695,9 +1742,8 @@ impl DispatcherComponent {
         // Prevent the noop-free DmaBuffer from being dropped normally.
         std::mem::forget(temp_buf);
 
-        // Data written successfully — commit the extent metadata.
-        let _ = write_handle.publish();
-        Some(encode_loc(drive_idx, block_offset))
+        // Data written successfully — the caller commits the extent metadata.
+        Some((encode_loc(drive_idx, block_offset), Some(write_handle)))
     }
 }
 
@@ -4022,6 +4068,10 @@ impl IDispatcher for DispatcherComponent {
             (stream, false)
         };
 
+        // A repeated copy into an uncommitted key: no early write-through of
+        // the previous copy may read the slot while this one overwrites it.
+        self.write_through_pins.cancel_early(key);
+
         let map_err = |e: String| {
             let _ = mt.remove(key);
             DispatcherError::IoError(format!("GPU async DMA copy failed: {e}"))
@@ -4064,6 +4114,9 @@ impl IDispatcher for DispatcherComponent {
             gpu.stream_synchronize(effective_stream).map_err(|e| {
                 DispatcherError::IoError(format!("store stream_synchronize failed: {e}"))
             })?;
+            // The block is in DRAM: start its write-through now rather than at
+            // the commit. Its extent stays unpublished until then.
+            self.start_early_write_through(key, slot_size);
         }
         Ok(())
     }
@@ -4085,9 +4138,17 @@ impl IDispatcher for DispatcherComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
-        let (mem_ptr, _) = mt.get(key).ok_or(DispatcherError::KeyNotFound(key))?;
+        let Some((mem_ptr, _)) = mt.get(key) else {
+            self.write_through_pins.cancel_early(key);
+            return Err(DispatcherError::KeyNotFound(key));
+        };
 
         dm.create_memory_tier_entry(key, mem_ptr, size)
+            .inspect_err(|_| {
+                // Not committed: stop the early write-through before the slot
+                // is freed (or left to the live entry).
+                self.write_through_pins.cancel_early(key);
+            })
             .map_err(|e| match e {
                 interfaces::DispatchMapError::AlreadyExists(k) => {
                     // The tier holds one slot per key, so the existing entry may
@@ -4128,6 +4189,7 @@ impl IDispatcher for DispatcherComponent {
                 .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
             gpu.stream_synchronize(GpuStream(std::ptr::null_mut()))
                 .map_err(|e| {
+                    self.write_through_pins.cancel_early(key);
                     let _ = mt.remove(key);
                     DispatcherError::IoError(format!(
                         "integrity: stream_synchronize before hash failed: {e}"
@@ -4141,6 +4203,7 @@ impl IDispatcher for DispatcherComponent {
             hasher.update(bytes);
             let crc = hasher.finalize();
             dm.set_checksum(key, crc).map_err(|e| {
+                self.write_through_pins.cancel_early(key);
                 let _ = mt.remove(key);
                 DispatcherError::IoError(format!("integrity: set_checksum failed: {e}"))
             })?;
@@ -4153,21 +4216,30 @@ impl IDispatcher for DispatcherComponent {
             let dd = self.data_drives.read();
             dd.len().max(1)
         };
-        // Round-robin per committing thread: one batch's keys get consecutive
-        // drives (see `next_store_drive`).
-        let device_index = Self::next_store_drive(num_drives);
         let guard = self.bg_writer.lock().unwrap();
         // Record the pin before its job can run, so `remove` can take it over.
-        self.write_through_pins.pin(key, || match *guard {
-            Some(ref writer) => writer
-                .enqueue(WriteJob {
-                    key,
-                    size,
-                    device_index,
-                })
-                .is_ok(),
-            None => false,
-        });
+        // An early write-through of the key takes the pin instead, or, if it
+        // already landed, is published and recorded here.
+        self.write_through_pins.commit(
+            key,
+            |loc, handle| {
+                let loc = Self::publish_written((loc, handle));
+                let _ = dm.convert_to_storage(key, loc);
+                self.write_through_pins.record_write(key, true);
+            },
+            || match *guard {
+                Some(ref writer) => writer
+                    .enqueue(WriteJob {
+                        key,
+                        size,
+                        // Round-robin per committing thread: one batch's keys
+                        // get consecutive drives (see `next_store_drive`).
+                        device_index: Self::next_store_drive(num_drives),
+                    })
+                    .is_ok(),
+                None => false,
+            },
+        );
 
         Ok(())
     }
@@ -4179,6 +4251,10 @@ impl IDispatcher for DispatcherComponent {
             .memory_tier
             .get()
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        // An early write-through of the uncommitted key must be done with the
+        // slot first (cancelled, or waited for while it writes).
+        self.write_through_pins.cancel_early(key);
 
         // Idempotent — KeyNotFound is not an error.
         match mt.remove(key) {
@@ -8828,6 +8904,9 @@ mod repair_test_check_present_map_timeout;
 #[path = "repair_test_failed_initialize_changes_config.rs"]
 mod repair_test_failed_initialize_changes_config;
 #[cfg(test)]
+#[path = "repair_test_no_drives_promote_without_read.rs"]
+mod repair_test_no_drives_promote_without_read;
+#[cfg(test)]
 #[path = "repair_test_register_host_memory.rs"]
 mod repair_test_register_host_memory;
 #[cfg(test)]
@@ -8836,6 +8915,3 @@ mod repair_test_rw_stats_after_shutdown;
 #[cfg(test)]
 #[path = "repair_test_transient_map_error.rs"]
 mod repair_test_transient_map_error;
-#[cfg(test)]
-#[path = "repair_test_no_drives_promote_without_read.rs"]
-mod repair_test_no_drives_promote_without_read;

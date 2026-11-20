@@ -3,11 +3,13 @@
 use crossbeam_channel::{Receiver, Sender};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use interfaces::{CacheKey, IDispatchMap, IExtentManager, ILogger, IMemoryTier, LookupResult};
+use interfaces::{
+    CacheKey, IDispatchMap, IExtentManager, ILogger, IMemoryTier, LookupResult, WriteHandle,
+};
 
 use crate::{EvictionEvent, EvictionReason, TierEventCounters};
 
@@ -264,12 +266,25 @@ impl EvictionSender {
 ///
 /// It also records the keys whose latest write-through failed, so that
 /// `flush_to_ssd` can report an entry left with no SSD copy.
+///
+/// It owns the early write-through too: a job queued once a block's copy has
+/// synchronized, before its store commits. Until the commit the job's extent
+/// stays unpublished and nothing is recorded in the dispatch map; the commit
+/// hands the job the pin (or settles a write that already landed), and an
+/// abort cancels it.
 #[derive(Default)]
 pub struct WriteThroughPins {
     keys: Mutex<HashMap<CacheKey, PinState>>,
+    /// Signalled when a running job finishes, for `cancel_early` to wait on.
+    done: Condvar,
     /// Keys whose latest write-through did not land on the block device.
     failed: Mutex<HashSet<CacheKey>>,
 }
+
+/// What an owned job wrote: the SSD location and the handle of its still
+/// unpublished extent (`None` without block devices), or `None` if nothing
+/// was written.
+pub(crate) type Written = Option<(u64, Option<WriteHandle>)>;
 
 impl std::fmt::Debug for WriteThroughPins {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -289,6 +304,11 @@ struct PinState {
     removed: bool,
     /// Queued jobs whose pin `remove` already released; they are dropped.
     stale: u32,
+    /// The queued, running or parked job is an early write-through of a key
+    /// whose store has not committed: it holds no pin.
+    early: bool,
+    /// Outcome of a finished early job, kept until the commit or a cancel.
+    parked: Option<Written>,
 }
 
 /// What a write job does, decided by [`WriteThroughPins::start`].
@@ -302,13 +322,75 @@ pub(crate) enum JobStart {
 }
 
 impl WriteThroughPins {
-    /// Record the pin `populate` just left on `key` and queue its job with
+    /// Record the pin `populate` just left on `key`. An early job of the key
+    /// that is queued or running takes the pin over; one that already landed
+    /// is settled by `settle_landed(loc, handle)` (publish, then convert).
+    /// Otherwise (no early job, or it failed) the pin's job is queued with
     /// `enqueue` (true if queued). Under the lock, so the job cannot start first.
-    pub(crate) fn pin(&self, key: CacheKey, enqueue: impl FnOnce() -> bool) {
+    pub(crate) fn commit(
+        &self,
+        key: CacheKey,
+        settle_landed: impl FnOnce(u64, Option<WriteHandle>),
+        enqueue: impl FnOnce() -> bool,
+    ) {
         let mut keys = self.keys.lock().unwrap();
         let s = keys.entry(key).or_default();
+        if std::mem::take(&mut s.early) {
+            match s.parked.take() {
+                Some(Some((loc, handle))) => {
+                    settle_landed(loc, handle);
+                    Self::forget_if_idle(&mut keys, key);
+                    return;
+                }
+                // The early write failed: queue a new one.
+                Some(None) => {}
+                // Still queued or running: it settles the key when done.
+                None => {
+                    s.pinned = true;
+                    return;
+                }
+            }
+        }
         s.pinned = true;
         s.queued = enqueue();
+    }
+
+    /// Queue an early write-through of the uncommitted `key` with `enqueue`
+    /// (true if queued), unless a job of the key is already pending.
+    pub(crate) fn early(&self, key: CacheKey, enqueue: impl FnOnce() -> bool) {
+        let mut keys = self.keys.lock().unwrap();
+        let s = keys.entry(key).or_default();
+        if !(s.pinned || s.queued || s.running || s.early) {
+            s.queued = enqueue();
+            s.early = s.queued;
+        }
+        Self::forget_if_idle(&mut keys, key);
+    }
+
+    /// Cancel the early write-through of the uncommitted `key`, if any, so the
+    /// caller may free or overwrite its DRAM slot: a queued job goes stale, a
+    /// running one is waited for (one block write), and the extent of a
+    /// finished one is aborted. A committed key is left alone.
+    pub(crate) fn cancel_early(&self, key: CacheKey) {
+        let mut keys = self.keys.lock().unwrap();
+        if !keys.get(&key).is_some_and(|s| s.early) {
+            return;
+        }
+        while keys.get(&key).is_some_and(|s| s.early && s.running) {
+            keys = self.done.wait(keys).unwrap();
+        }
+        let Some(s) = keys.get_mut(&key).filter(|s| s.early) else {
+            return;
+        };
+        s.early = false;
+        if std::mem::take(&mut s.queued) {
+            s.stale += 1;
+        }
+        let parked = s.parked.take();
+        Self::forget_if_idle(&mut keys, key);
+        drop(keys);
+        // Dropping an unpublished handle aborts its extent.
+        drop(parked);
     }
 
     /// A write job for `key` was dequeued.
@@ -330,18 +412,34 @@ impl WriteThroughPins {
         JobStart::Owned
     }
 
-    /// The owned job for `key` is done with the DRAM slot. Runs `settle` under the
-    /// lock: `settle(true)` if the job still owns the pin (it converts or releases
-    /// it), `settle(false)` if `remove` took the entry meanwhile (the job frees the
-    /// slot and the extent it wrote).
-    pub(crate) fn finish(&self, key: CacheKey, settle: impl FnOnce(bool)) {
+    /// The owned job for `key` is done with the DRAM slot, having `written`.
+    /// Runs `settle` under the lock: `settle(true, written)` if the job still
+    /// owns the pin (it publishes, then converts or releases it),
+    /// `settle(false, written)` if `remove` took the entry meanwhile (the job
+    /// frees the slot and the extent it wrote). An early job whose key has not
+    /// committed parks `written` for the commit or a cancel instead.
+    pub(crate) fn finish(
+        &self,
+        key: CacheKey,
+        written: Written,
+        settle: impl FnOnce(bool, Written),
+    ) {
         let mut keys = self.keys.lock().unwrap();
-        let owned = keys.get_mut(&key).map_or(true, |s| {
-            s.running = false;
-            s.pinned = false;
-            !std::mem::take(&mut s.removed)
-        });
-        settle(owned);
+        let owned = match keys.get_mut(&key) {
+            Some(s) if s.early => {
+                s.running = false;
+                s.parked = Some(written);
+                self.done.notify_all();
+                return;
+            }
+            Some(s) => {
+                s.running = false;
+                s.pinned = false;
+                !std::mem::take(&mut s.removed)
+            }
+            None => true,
+        };
+        settle(owned, written);
         Self::forget_if_idle(&mut keys, key);
     }
 
@@ -396,7 +494,7 @@ impl WriteThroughPins {
     fn forget_if_idle(keys: &mut HashMap<CacheKey, PinState>, key: CacheKey) {
         if keys
             .get(&key)
-            .is_some_and(|s| !s.pinned && !s.queued && !s.running && s.stale == 0)
+            .is_some_and(|s| !s.pinned && !s.queued && !s.running && s.stale == 0 && !s.early)
         {
             keys.remove(&key);
         }
