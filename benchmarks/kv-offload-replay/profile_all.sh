@@ -132,6 +132,7 @@ SERVER_WAIT=180        # seconds to wait for the Certus-SPDK server mailbox
 DO_REBUILD=0           # --rebuild: force a fresh build of each bench image even if it exists
 VLLM_VERSION="0.26.0"  # pin the vLLM base-image version for ALL backends (override with --vllm-version)
 ONLY=""
+REPORT_ONLY=0           # --report-only: rebuild dram-sweep-report.html from <logdir>/sweep-*/, run nothing
 SKIP=""
 LOGDIR=""
 
@@ -290,6 +291,10 @@ Flags (all optional; defaults shown):
   --skip a,b                   Skip these variants.
                                Names: nooffload, cpuoffload, certus-spdk, sharedstorage, tiered-cpu-fs.
   --logdir <dir>               Output dir. [<model-fs>/kvprofile-<runid>]
+  --report-only                Run nothing; rebuild <logdir>/dram-sweep-report.html from the
+                               sweep-<size>/ dirs already in --logdir (sizes and variants
+                               are found automatically). e.g.
+                                 profile_all.sh --report-only --logdir /path/to/sweep
   -h, --help                   This help.
 EOF
 }
@@ -328,6 +333,7 @@ while [[ $# -gt 0 ]]; do
         --only)             ONLY="$2"; shift 2;;
         --skip)             SKIP="$2"; shift 2;;
         --logdir)           LOGDIR="$2"; shift 2;;
+        --report-only)      REPORT_ONLY=1; shift;;
         -h|--help)          usage; exit 0;;
         *) echo "error: unknown argument '$1'" >&2; usage >&2; exit 2;;
     esac
@@ -447,8 +453,27 @@ fi
 # When --memory-tier-size is a space-separated list, re-invoke ourselves once per
 # (variant, size) pair — outer=variant (avoids host reconfiguration churn),
 # inner=size — then generate an HTML report and exit.
+if [[ $REPORT_ONLY -eq 1 ]]; then
+    # Find the sweep sizes (sweep-<N>G dirs, numeric order) and the variants that
+    # have results, so the report needs nothing but --logdir.
+    [[ -d "$LOGDIR" ]] || { echo "error: --report-only needs an existing --logdir" >&2; exit 2; }
+    MEM_TIER_SIZE="$(cd "$LOGDIR" && ls -d sweep-* 2>/dev/null | sed -n 's/^sweep-\([0-9][0-9]*[GgMmTt]\{0,1\}\)$/\1/p' | sort -n | tr '\n' ' ')"
+    MEM_TIER_SIZE="${MEM_TIER_SIZE% }"
+    [[ -n "$MEM_TIER_SIZE" ]] || { echo "error: no sweep-<size>/ dirs in ${LOGDIR}" >&2; exit 2; }
+    if [[ -z "$ONLY" ]]; then
+        ONLY="$(cd "$LOGDIR" && ls sweep-*/result-*.json 2>/dev/null | sed 's#.*/result-##; s#\.json$##' | sort -u | paste -sd, -)"
+        ONLY="${ONLY:-certus-spdk}"
+    fi
+    # Header details come from the runs themselves, not this script's defaults.
+    _first="$(cd "$LOGDIR" && ls sweep-*/results.json 2>/dev/null | head -1)"
+    if [[ -n "$_first" ]]; then
+        MODEL="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("model",""))' "$LOGDIR/$_first" 2>/dev/null)"
+        NUM_CONVS="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("num_convs",""))' "$LOGDIR/$_first" 2>/dev/null)"
+    fi
+fi
+
 read -ra _MTS_PARTS <<< "$MEM_TIER_SIZE"
-if [[ ${#_MTS_PARTS[@]} -gt 1 ]]; then
+if [[ ${#_MTS_PARTS[@]} -gt 1 || $REPORT_ONLY -eq 1 ]]; then
     mkdir -p "$LOGDIR"
     echo "[sweep] DRAM capacity sweep: sizes=${MEM_TIER_SIZE}"
     echo "[sweep] variants: ${ONLY:-all}"
@@ -474,7 +499,8 @@ if [[ ${#_MTS_PARTS[@]} -gt 1 ]]; then
     done
 
     _SWEEP_FAILED=0
-    for _sv in "${_SWEEP_VARIANTS[@]}"; do
+    [[ $REPORT_ONLY -eq 1 ]] && _SWEEP_VARIANTS_RUN=() || _SWEEP_VARIANTS_RUN=("${_SWEEP_VARIANTS[@]}")
+    for _sv in "${_SWEEP_VARIANTS_RUN[@]}"; do
         echo "[sweep] ━━ variant: ${_sv} ━━"
         for _sz in "${_MTS_PARTS[@]}"; do
             _run_dir="${LOGDIR}/sweep-${_sz}"
