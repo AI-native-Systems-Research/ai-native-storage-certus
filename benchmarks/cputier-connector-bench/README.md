@@ -29,7 +29,7 @@ No engine, model or HTTP server is started. The benchmark builds the `Offloading
 | Remove keys between passes | `ring.remove` | not possible; each store pass uses a **fresh key set** instead |
 | Extra phases | — | `new_request`, `lookup_wait`, `schedule_end`, `reset`/`demote` |
 
-There is no counterpart to `bench_connector_path.py` or `bench_connector_race.py`. Those scripts exercise the shmq ring, and cputier has no ring.
+There is no counterpart to `bench_connector_path.py`. That script exercises the shmq ring, and cputier has no ring.
 
 Things to know when reading cputier numbers:
 
