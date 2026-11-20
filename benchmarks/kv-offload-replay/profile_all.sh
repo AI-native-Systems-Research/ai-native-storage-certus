@@ -619,6 +619,41 @@ for variant in variants:
             point["ttft_p95_ms"] = None
             point["ttft_src"] = "client summary (p50 only)"
 
+        # Hit / miss by tier, as a share of vLLM prefix-cache lookups (tokens).
+        # vLLM splits lookups into GPU HBM hits (prefix_cache_hits) and external
+        # = Certus hits (external_prefix_cache_hits); the rest miss and are
+        # recomputed. Certus's own counters (certus-tier-hits.json, in blocks)
+        # say which Certus tier served each hit, so the external share is split
+        # in those proportions.
+        point["tiers"] = None
+        vtot = {}
+        for lf in sorted(os.listdir(run_dir)) if os.path.isdir(run_dir) else []:
+            if not lf.endswith(".log"):
+                continue
+            try:
+                for ln in open(os.path.join(run_dir, lf), errors="replace"):
+                    for k, v in re.findall(r"\b((?:external_)?prefix_cache_(?:hits|queries)_total)=([0-9]+)", ln):
+                        vtot[k] = int(v)            # last value wins (cumulative)
+            except OSError:
+                pass
+        q = vtot.get("prefix_cache_queries_total")
+        if q:
+            hbm = vtot.get("prefix_cache_hits_total", 0)
+            ext = vtot.get("external_prefix_cache_hits_total", 0)
+            t = {"lookups": q, "hbm": hbm, "ext": ext, "miss": max(q - hbm - ext, 0),
+                 "dram": None, "ssd": None, "remote": None}
+            tf = os.path.join(run_dir, "certus-tier-hits.json")
+            if os.path.isfile(tf):
+                try:
+                    th = json.load(open(tf))
+                    served = th.get("served") or 0
+                    if served > 0:
+                        for key in ("dram", "ssd", "remote"):
+                            t[key] = ext * th.get(f"{key}_hits", 0) / served
+                except (json.JSONDecodeError, OSError):
+                    pass
+            point["tiers"] = t
+
         rows[variant].append(point)
 
 # ── SVG chart helpers ─────────────────────────────────────────────────────────
@@ -727,6 +762,48 @@ for variant in variants:
             f'<td>{fmt_num(p["wall_s"])}</td>'
             f'<td>{fmt_num(p["gens"])}</td></tr>')
 
+TIER_KEYS = [("hbm", "GPU HBM", "var(--s1)"), ("dram", "Certus DRAM", "var(--s3)"),
+             ("ssd", "Certus SSD", "var(--s4)"), ("remote", "Remote", "var(--s2)"),
+             ("miss", "Miss", "var(--miss)")]
+
+def tier_pct(t, key):
+    if t is None:
+        return None
+    if key in ("dram", "ssd", "remote") and t[key] is None:
+        return None
+    return 100.0 * t[key] / t["lookups"]
+
+tier_rows = []
+for variant in variants:
+    for p in rows[variant]:
+        t = p.get("tiers")
+        if t is None:
+            tier_rows.append(f'<tr><td>{variant}</td><td>{p["dram_gib"]}</td>'
+                             f'<td colspan="7">no prefix-cache counters in this run\'s log</td></tr>')
+            continue
+        cells, segs = [], []
+        for key, label, color in TIER_KEYS:
+            pct = tier_pct(t, key)
+            if pct is None:
+                # No Certus per-tier split for this run: show Certus as one share.
+                cells.append('<td>—</td>')
+                continue
+            cells.append(f'<td>{pct:.1f}%</td>')
+            if pct > 0:
+                segs.append(f'<span style="width:{pct:.3f}%;background:{color}" '
+                            f'data-tip="{label}: {pct:.1f}%"></span>')
+        if t["dram"] is None and t["ext"]:
+            pct = 100.0 * t["ext"] / t["lookups"]
+            segs.insert(1, f'<span style="width:{pct:.3f}%;background:var(--muted)" '
+                           f'data-tip="Certus (no DRAM/SSD split): {pct:.1f}%"></span>')
+        tier_rows.append(
+            f'<tr><td>{variant}</td><td>{p["dram_gib"]}</td>{"".join(cells)}'
+            f'<td>{t["lookups"]:,}</td>'
+            f'<td class="barcell"><div class="bar">{"".join(segs)}</div></td></tr>')
+
+tier_legend = "".join(f'<span class="key"><i style="background:{c}"></i>{l}</span>'
+                      for _, l, c in TIER_KEYS)
+
 html = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -763,6 +840,18 @@ table {{ width: 100%; border-collapse: collapse; font-size: 0.85rem;
 th {{ text-align: left; padding: 6px 8px; border-bottom: 2px solid var(--border);
       color: var(--muted); font-weight: 600; }}
 td {{ padding: 6px 8px; border-bottom: 1px solid var(--border); }}
+:root {{ --miss: #b7b7b2; }}
+@media (prefers-color-scheme: dark) {{ :root:not([data-theme="light"]) {{ --miss: #55554f; }} }}
+.barcell {{ width: 34%; min-width: 120px; }}
+.bar {{ display: flex; height: 14px; border-radius: 3px; overflow: hidden;
+        background: var(--grid); }}
+.bar span {{ display: block; height: 100%; }}
+.legend {{ display: flex; flex-wrap: wrap; gap: 14px; font-size: 0.8rem;
+           color: var(--muted); margin: 0.6rem 0 0; }}
+.key i {{ display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+          margin-right: 5px; vertical-align: -1px; }}
+.note {{ color: var(--muted); font-size: 0.8rem; margin: 0.6rem 0 0; }}
+.scroll {{ overflow-x: auto; }}
 #tip {{ display: none; position: fixed; background: var(--surface);
         border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px;
         font: 12px/1.4 system-ui; white-space: pre; pointer-events: none;
@@ -782,6 +871,19 @@ td {{ padding: 6px 8px; border-bottom: 1px solid var(--border); }}
 <section>
 <h2>TTFT vs DRAM tier</h2>
 {chart2}
+</section>
+
+<section>
+<h2>Hit rate by tier</h2>
+<div class="scroll"><table>
+<tr><th>Variant</th><th>DRAM (GiB)</th><th>GPU HBM</th><th>Certus DRAM</th>
+    <th>Certus SSD</th><th>Remote</th><th>Miss</th><th>Lookups</th><th>Split</th></tr>
+{"".join(tier_rows)}
+</table></div>
+<div class="legend">{tier_legend}</div>
+<p class="note">Share of vLLM prefix-cache lookups, counted in tokens. GPU HBM, Certus
+(external) and miss come from vLLM's counters; Certus hits are split into DRAM, SSD and
+remote using certus-server's own per-tier counts. Miss means the prefix was recomputed.</p>
 </section>
 
 <section>
