@@ -622,6 +622,25 @@ if _meta:
     questions     = _pick("longdoc_questions", questions)
     num_docs      = _pick("longdoc_num_docs", num_docs)
     seed          = _pick("longdoc_seed", seed)
+gpu_model = _meta.get("gpu_model") or ""
+gpu_model_src = ""
+if not gpu_model:
+    # Older runs did not record it. Ask this host, which is where --report-only
+    # normally runs, and say so in the header.
+    try:
+        import subprocess
+        sel = gpu.split(",")[0]
+        sel = sel if sel.isdigit() else "0"
+        out = subprocess.run(["nvidia-smi", "--query-gpu=index,name", "--format=csv,noheader"],
+                             capture_output=True, text=True, timeout=15).stdout
+        for ln in out.splitlines():
+            idx, _, name = ln.partition(",")
+            if idx.strip() == sel:
+                gpu_model, gpu_model_src = name.strip(), " (queried when this report was built)"
+                break
+    except (OSError, subprocess.SubprocessError):
+        pass
+gpu_desc = f"{gpu} &middot; GPU model={gpu_model or '—'}{gpu_model_src}"
 if workload_name == "default":
     workload_name = "sharegpt (default)"
 longdoc_line = (f'<p class="sub">doc_tokens={doc_tokens} &middot; questions/doc={questions} '
@@ -971,7 +990,7 @@ td {{ padding: 6px 8px; border-bottom: 1px solid var(--border); }}
 </head>
 <body>
 <h1>DRAM Capacity Sweep</h1>
-<p class="sub">workload={workload_name} &middot; model={model} &middot; TP={tp} &middot; GPU={gpu}</p>
+<p class="sub">workload={workload_name} &middot; model={model} &middot; TP={tp} &middot; GPU={gpu_desc}</p>
 <p class="sub">num_convs={num_convs} &middot; max_model_len={max_model_len} &middot; output_tokens={output_tokens} &middot; GPU KV cache={gpu_kv_gb + " GiB" if gpu_kv_gb not in ("—", "") else "—"}</p>
 {longdoc_line}
 {meta_note}
@@ -1318,12 +1337,17 @@ mkdir -p "$LOGDIR" "$HF_CACHE" || { echo "error: cannot create logdir/HF cache" 
 # Record the workload definition next to the results, so a report built later
 # (e.g. --report-only) describes what actually ran instead of this script's
 # defaults. Long-doc parameters only ever existed as env vars before this.
+# GPU model: the selected GPU's name (first index when GPU is a list or "all").
+_gsel="${GPU%%,*}"; [[ "$_gsel" =~ ^[0-9]+$ ]] || _gsel=0
+GPU_MODEL="$(nvidia-smi --query-gpu=index,name --format=csv,noheader 2>/dev/null \
+    | awk -F', *' -v i="$_gsel" '$1==i{print $2; exit}')"
 python3 - "${LOGDIR}/run-params.json" <<PARAMS_EOF || warn "could not write run-params.json"
 import json, sys
 p = {
     "workload": "${WORKLOAD_NAME:-}", "model": "${MODEL}", "vllm_version": "${VLLM_VERSION}",
     "num_convs": "${NUM_CONVS:-}", "max_model_len": "${MAX_MODEL_LEN}",
-    "output_tokens": "${OUTPUT_TOKENS}", "gpu": "${GPU}", "tp": "${TENSOR_PARALLEL_SIZE}",
+    "output_tokens": "${OUTPUT_TOKENS}", "gpu": "${GPU}", "gpu_model": "${GPU_MODEL:-}",
+    "tp": "${TENSOR_PARALLEL_SIZE}",
     "gpu_kv_gb": "${GPU_KV_GB:-}", "memory_tier_size": "${MEM_TIER_SIZE:-}",
     "workload_mode": "${WORKLOAD_MODE:-}",
     "longdoc_doc_tokens": "${LONGDOC_DOC_TOKENS:-}", "longdoc_questions": "${LONGDOC_QUESTIONS:-}",
