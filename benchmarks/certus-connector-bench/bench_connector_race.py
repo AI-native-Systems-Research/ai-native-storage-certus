@@ -5,14 +5,14 @@ Simulates the vLLM connector workload that triggers the crash:
 - Thread 1 (storer): continuously stores new blocks via 3-phase protocol,
   filling the memory tier and forcing eviction of old entries.
 - Thread 2 (loader): loads COMMITTED keys (from a shared queue), doing
-  check_and_pin → lookup. Only loads keys the storer has fully committed,
-  mimicking vLLM where the scheduler only loads previously-stored blocks.
+  check → pin → lookup → unpin, the connector's load sequence. Only loads keys
+  the storer has fully committed, mimicking vLLM where the scheduler only loads
+  blocks already stored.
 
-The race: between the scheduler's lookup (which saw the key as present) and
-the load worker's lookup, the evictor can demote/remove the key. With
-check_and_pin, the pin is atomic with the existence check — if it succeeds,
-the entry is protected. The loader should see ZERO LOAD failures for
-successfully-pinned keys.
+The race: between the Check (which saw the key as resident) and the Pin, the
+evictor can demote/remove the key. Pin succeeds only for a key that is present
+and protects it from eviction until Unpin, so a Pin failure is the race being
+caught. The loader should see ZERO LOAD failures for successfully-pinned keys.
 
 Usage (server must be running):
     python bench_connector_race.py --shm-path /dev/shm/certus-shmq --duration 30
@@ -34,7 +34,7 @@ sys.path.insert(0, os.path.join(_repo, 'certus-shmq-connector'))
 
 import torch
 from certus_shmq_helpers import single_region
-from certus_shmq_connector.ring import Ring
+from certus_shmq_connector.ring import CHECK_RESIDENT, Ring
 
 assert torch.cuda.is_available(), "CUDA GPU required"
 
@@ -130,10 +130,19 @@ def load_worker(ring, region, stats, batch_size, stop_event, committed_queue):
             continue
 
         try:
-            # Atomic check_and_pin: verifies existence + acquires read-ref
-            cap_oks = ring.check_and_pin(keys)
+            # Check: which committed keys are still resident.
+            states = ring.check_states(keys)
+            resident = [k for k, s in zip(keys, states) if s == CHECK_RESIDENT]
+            with stats.lock:
+                stats.check_misses += len(keys) - len(resident)
+            if not resident:
+                continue
+
+            # Pin: succeeds only for a key still present, and protects it from
+            # eviction until Unpin. A failure is a key evicted after the Check.
+            pin_oks = ring.pin(resident)
             pinned = []
-            for k, ok in zip(keys, cap_oks):
+            for k, ok in zip(resident, pin_oks):
                 if ok:
                     pinned.append(k)
                 else:
@@ -141,14 +150,20 @@ def load_worker(ring, region, stats, batch_size, stop_event, committed_queue):
                         stats.pin_failures += 1
 
             if not pinned:
-                with stats.lock:
-                    stats.check_misses += len(keys)
                 continue
 
             # Lookup: should ALWAYS succeed for pinned keys (read_ref > 0
             # protects from eviction)
             entries = [(k, [region]) for k in pinned]
-            lookup_oks = ring.lookup(entries)
+            try:
+                lookup_oks = ring.lookup(entries)
+            finally:
+                # Unpin whatever happens to the lookup: a pin left behind
+                # keeps its entry from ever being evicted.
+                try:
+                    ring.unpin(pinned)
+                except Exception:
+                    pass
 
             with stats.lock:
                 stats.loads += len(pinned)
@@ -158,16 +173,10 @@ def load_worker(ring, region, stats, batch_size, stop_event, committed_queue):
                     else:
                         stats.load_failures += 1
                         print(
-                            f"  LOAD FAILURE key={k} (was check_and_pin=true, "
+                            f"  LOAD FAILURE key={k} (pinned, "
                             f"read_ref>0, should be impossible!)",
                             flush=True,
                         )
-
-            # Unpin
-            try:
-                ring.unpin(pinned)
-            except Exception:
-                pass
 
         except Exception:
             pass
@@ -232,18 +241,18 @@ def main():
     print(f"  Stores:        {stats.stores} ({stats.store_errors} errors)")
     print(f"  Loads:         {stats.loads}")
     print(f"  Load OK:       {stats.load_ok}")
-    print(f"  PIN failures:  {stats.pin_failures}  (key evicted between commit and check_and_pin)")
+    print(f"  PIN failures:  {stats.pin_failures}  (key evicted between Check and Pin)")
     print(f"  LOAD failures: {stats.load_failures}  (pinned key failed at lookup — should be 0!)")
-    print(f"  Check misses:  {stats.check_misses}")
+    print(f"  Check misses:  {stats.check_misses}  (key not resident at Check)")
     print()
 
     if stats.load_failures > 0:
         print(f"  *** BUG: {stats.load_failures} pinned keys failed lookup ***")
         print(f"  This should be impossible — read_ref > 0 prevents eviction.")
     elif stats.pin_failures > 0 and stats.load_failures == 0:
-        print(f"  OK: {stats.pin_failures} keys evicted between commit and check_and_pin")
+        print(f"  OK: {stats.pin_failures} keys evicted between Check and Pin")
         print(f"  (expected under memory pressure), but ZERO load failures on pinned keys.")
-        print(f"  check_and_pin is working correctly.")
+        print(f"  Pin protects pinned keys correctly.")
     else:
         print(f"  CLEAN: no pin failures, no load failures.")
 

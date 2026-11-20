@@ -484,7 +484,7 @@ python benchmarks/certus-connector-bench/bench_connector_path.py \
 
 ### bench_connector_race.py
 
-Reproduces and validates the check→pin→lookup eviction race. Two threads run concurrently: a storer that fills the memory tier forcing eviction, and a loader that uses `check_and_pin` to atomically verify+protect keys. Validates that pinned keys see zero load failures.
+Reproduces and validates the check→pin→lookup eviction race. Two threads run concurrently: a storer that fills the memory tier forcing eviction, and a loader that runs the connector's load sequence on committed keys: `check_states`, then `pin` on the resident ones, `lookup`, and `unpin`. A key evicted between the Check and the Pin shows up as a pin failure; pinned keys must see zero load failures.
 
 ```bash
 python benchmarks/certus-connector-bench/bench_connector_race.py \
