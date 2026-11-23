@@ -28,8 +28,9 @@ regime the sweep is designed to create.
 - **Stop rule**: an arm ends when in-flight (vLLM running+waiting) stays below the
   cap for 10 minutes after a 15-minute ramp — i.e. when fewer than N conversations
   remain actively cycling. Backstop: 4h (`--benchmark-duration 14400`) per arm.
-- **Watchdog**: the cputier arm runs under a wedge-capture watchdog (py-spy dumps +
-  `WEDGED` marker + client stop, so the sweep continues past a wedged arm).
+- **Watchdog**: every arm runs under a wedge-capture watchdog (0 running, waiting > 0,
+  no completion for 300 s → py-spy dumps + `WEDGED` marker + client stop, so the
+  sweep continues past a wedged arm).
 
 ## Results on the patched scheduler (2026-11-21) — current
 
@@ -91,8 +92,8 @@ the interesting hardware points are caps **4, 8, 12**.
 | `stop-rule-live-watch.sh` | stop-rule watcher (waits out preflight, matches aiperf's retitled process, parses labeled vLLM metrics) |
 | `run-gqa-iobound-stream-sweep.sh` | per-point harness: preflight (hugepages/NVMe), certus-server probe, invokes the matrix |
 | `run-gqa-iobound-matrix.sh` | per-arm orchestrator: server launch, vLLM, client, teardown, report |
-| `run-aiperf-weka-iobound.sh` | client wrapper: maps `TIMING=think` onto aiperf `--use-think-time-only` + pool-size `--concurrency` + `--prefill-concurrency` cap |
-| `run-aiperf-weka.sh` | actual aiperf invocation |
+| `run-aiperf-weka-iobound.sh` | client wrapper: for every timing except `asap`, admits the whole pool as sessions (`--concurrency` = pool size) and caps in-flight requests with `--prefill-concurrency` |
+| `run-aiperf-weka.sh` | actual aiperf invocation; maps `TIMING` onto aiperf's delay flags (see *Timing modes*) |
 | `wedge-watch-live.sh` | attach-mode wedge watchdog the driver uses — matches aiperf's retitled `system_controller` process by name; watches every arm in turn, reads the arm name from `orchestrator.log`, finds the container in either podman store, and with `DEBUG_DUMP=1` takes two SIGUSR2 state dumps before py-spy |
 | `diag/sitecustomize.py` | opt-in engine state-dump hook: mounted at `/opt/certus-debug` and put first on `PYTHONPATH`, it dumps the scheduler's waiting queue, connector jobs, tier lookups and GPU copy queues on SIGUSR2 (never signal an engine without it — SIGUSR2's default action kills the process) |
 | `plot-lowconc-patched.py` | PNG chart of the patched results, drawn from the combined table |
@@ -103,55 +104,174 @@ the interesting hardware points are caps **4, 8, 12**.
 | `gen-iobound-report.py` | per-arm report/summary generation |
 
 The `*-nointervals` arm labels are inert — `CLIENT_SCRIPT` overrides the client for
-every arm; both labels run the same think-time aiperf replay. The naming is
-inherited from the `{certus,cputier}×{nointervals,intervals}` matrix grid.
+every arm, so both labels run the same aiperf CC-weka replay; the pacing comes from
+`TIMING`, not the label. The naming is inherited from the
+`{certus,cputier}×{nointervals,intervals}` matrix grid.
 
-## Re-running
+## Running the sweep
 
-Requirements: node with SPDK-built certus (server binary below), the 4 NVMe devices
-free, hugepages, podman image with vLLM 0.30 + tiering patches, aiperf 0.12.0, and
-the trace pool.
+### 1. Prerequisites
+
+Check each of these on the node before starting; the sweep does not build or fix any of them.
+
+| what | check / how |
+|---|---|
+| GPU free | `nvidia-smi` shows ~0 MiB used; nothing listening on port 8000 (`ss -ltn \| grep :8000`) |
+| NVMe devices free | the 4 data drives (`0000:61:00.0`–`0000:64:00.0`) are not held by a stale `certus-server-yaml` (`pgrep -x certus-server-yaml` prints nothing); preflight binds them |
+| hugepages | node 0 has at least `CPU_TIER_GB + 4` free 1 GiB hugepages (preflight checks and logs it) |
+| certus server | `SERVER_BIN` exists and was built from the branch you mean to test: `cargo build --release -p certus-server-yaml` (the sweep never rebuilds it) |
+| vLLM images | `certus-offload:vllm0.30.0` (default podman store) and `certus-shmq-connector:vllm0.30.0` (`/mnt/certus1/podman` store), **with the scheduler fix** (step 2) |
+| client | aiperf 0.12.0 on `PATH` (`aiperf --version`) |
+| trace | `TRACE` directory with the 391 conversation JSON files (`trunc262k-out1`) |
+| model | `/mnt/certus1/hf-cache/qwen7b1m-dense` on the host (the dense repack of Qwen2.5-7B-1M), seen as `/root/.cache/huggingface/qwen7b1m-dense` through the serve scripts' `HF_CACHE` mount |
+
+### 2. Use a vLLM 0.30 with the scheduler fix
+
+**Stock vLLM 0.30.0 deadlocks under this workload** (0 running, N waiting, forever), so
+results from stock images are invalid. Either:
+
+- **rebuild the images with the fix baked in** (the fix is in
+  `benchmarks/kv-offload-replay/vllm-fix-kvload-hol/`, added by PR #600; once that is
+  on your branch, the builds apply it by default):
+
+  ```bash
+  ../vllm-serve/rebuild-bench-containers.sh          # shmq + cputier on vLLM 0.30.0
+  podman image inspect certus-offload:vllm0.30.0 --format '{{index .Labels "org.certus.vllm-fix-kvload-hol"}}'   # -> 1
+  ```
+
+- **or mount the patched scheduler over the current images** with `EXTRA_PODMAN_ARGS`
+  (step 4). The patched file is
+  `benchmarks/kv-offload-replay/vllm-fix-kvload-hol/scheduler.py` (PR #600); a copy is kept at
+  `/mnt/certus1/vllm-serve-matrix/vllm-fix-kvload-hol/scheduler.py`
+  (md5 `a01271366fcb7ec89237c795b8565151`).
+
+Either way, confirm it in a running container:
+`podman exec <id> md5sum /usr/local/lib/python3.12/dist-packages/vllm/v1/core/sched/scheduler.py`
+must print `a01271366fcb…` (stock is `849cc72e…`). The server log shows
+`[certus-fix] moved …` lines while it is working.
+
+### 3. Launch
+
+Run from this directory, detached, so it survives the terminal (a full 5-cap,
+2-arm sweep takes about 12.5 hours):
 
 ```bash
-# this point (cap 32, both arms, 4h/arm backstop):
-./ccweka-out1-think-lowconc-sweep.sh
-
-# several caps (16/64/128 were the originally planned set; 4/8/12 straddle the
-# DRAM-hit cliff per the simulator):
-STREAMS="4 8 12" ./ccweka-out1-think-lowconc-sweep.sh
-
-# detached:
-nohup setsid ./ccweka-out1-think-lowconc-sweep.sh > /tmp/lowconc.log 2>&1 &
+cd benchmarks/ccweka-conc-aiperf
+TOP=/mnt/certus1/vllm-serve-matrix/ccweka-lowconc-$(date +%Y%m%d_%H%M%S)
+STREAMS="4 8 16 32 64" ARMS="certus-nointervals cputier-nointervals" \
+MAX_SECONDS=3600 COOLDOWN_SECONDS=600 TIMING=think TOP=$TOP \
+  nohup setsid ./ccweka-out1-think-lowconc-sweep.sh > /tmp/lowconc-launch.log 2>&1 < /dev/null &
 ```
 
-Results land in `TOP` (default
-`/mnt/certus1/vllm-serve-matrix/ccweka-out1-think-lowconc-sweep-<timestamp>/`):
-per-arm dirs with `aiperf/profile_export.jsonl`, `kvio.csv`, server/client logs,
-`report.md`, per-point `summary.{md,csv}`, plus `driver.log`,
-`<n>streams-stop-rule.log`, and `watchdog.log`.
+The first line of `$TOP/driver.log` records the caps, timing, branch and commit.
+Each point runs its arms in `ARMS` order with a `COOLDOWN_SECONDS` pause between arms
+and between points.
 
-Defaults (override via env): `CPU_TIER_GB=64`, `OFFLOAD_BLOCK_SIZE=64`,
-`MAX_SECONDS=14400`, `MODEL=/root/.cache/huggingface/qwen7b1m-dense`,
-`SERVED_MODEL_NAME=qwen2.5-7b-1m`, `MAX_MODEL_LEN=262144`,
-`TRACE=/mnt/certus1/cc-traces-weka-062126.trunc262k-out1`,
-`SERVER_BIN=/mnt/certus1/dwaddington-spdk-tier128/certus/target/release/certus-server-yaml`.
+### 4. Knobs (environment variables)
 
-More knobs: `COOLDOWN_SECONDS` (default 600) pauses between points and between arms;
-`EXTRA_PODMAN_ARGS` adds `podman run` flags to both serve scripts (word-split), e.g.
-the diagnostics hook and, on an image built without the fix, the patched scheduler
-as an overlay (the patched file is on the vLLM-fix branch):
+| variable | default | meaning |
+|---|---|---|
+| `STREAMS` | `32` | space-separated in-flight caps, one point each |
+| `ARMS` | `certus-nointervals cputier-nointervals` | backends to run at each point, in order |
+| `TIMING` | `think` | inter-turn pacing; see *Timing modes* |
+| `DELAY_CAP` | `30` | seconds; only used by `TIMING=delaycap` |
+| `MAX_SECONDS` | `14400` | per-arm length (aiperf `--benchmark-duration`); `3600` was used for the published results |
+| `COOLDOWN_SECONDS` | `600` | pause between arms and between points (`0` disables) |
+| `CPU_TIER_GB` | `64` | DRAM tier size for both backends |
+| `OFFLOAD_BLOCK_SIZE` | `64` | offload block size in tokens |
+| `TRACE` | `/mnt/certus1/cc-traces-weka-062126.trunc262k-out1` | conversation pool; use `…-out1-x3` (1,173 convs) for caps above 391 |
+| `TOP` | `/mnt/certus1/vllm-serve-matrix/ccweka-out1-think-lowconc-sweep-<ts>` | results directory |
+| `SERVER_BIN` | `/mnt/certus1/dwaddington-spdk-tier128/certus/target/release/certus-server-yaml` | certus server binary |
+| `MODEL`, `SERVED_MODEL_NAME`, `MAX_MODEL_LEN` | `qwen7b1m-dense`, `qwen2.5-7b-1m`, `262144` | model served by both backends |
+| `STALL_SECONDS` | `300` | watchdog: no completion this long with 0 running = wedge |
+| `EXTRA_PODMAN_ARGS` | empty | extra `podman run` flags for both serve scripts (word-split) |
+| `DEBUG_DUMP` | `0` | `1`: on a wedge, take two engine state dumps before py-spy (needs the `diag/` hook mounted) |
+
+Mounting the patched scheduler and the diagnostics hook on current images:
 
 ```bash
-B=$PWD; TOP=/mnt/certus1/vllm-serve-matrix/my-run; mkdir -p $TOP/dumps
-DEBUG_DUMP=1 TOP=$TOP STREAMS="8 16" EXTRA_PODMAN_ARGS="\
- -v $B/../kv-offload-replay/vllm-fix-kvload-hol/scheduler.py:/usr/local/lib/python3.12/dist-packages/vllm/v1/core/sched/scheduler.py:ro,z \
+B=$PWD; FIX=/mnt/certus1/vllm-serve-matrix/vllm-fix-kvload-hol/scheduler.py
+mkdir -p $TOP/dumps
+DEBUG_DUMP=1 EXTRA_PODMAN_ARGS="\
+ -v $FIX:/usr/local/lib/python3.12/dist-packages/vllm/v1/core/sched/scheduler.py:ro,z \
  -v $B/diag:/opt/certus-debug:ro,z -v $TOP/dumps:/opt/certus-debug-out:z \
  -e PYTHONPATH=/opt/certus-debug:/workspace/bench:/workspace/benchmarks/kv-offload-replay \
- -e CERTUS_DEBUG_OUT=/opt/certus-debug-out" ./ccweka-out1-think-lowconc-sweep.sh
+ -e CERTUS_DEBUG_OUT=/opt/certus-debug-out" \
+ STREAMS=... TOP=$TOP ./ccweka-out1-think-lowconc-sweep.sh
 ```
 
 The `PYTHONPATH` keeps both images' own entries (`/workspace/bench` for cputier,
-`/workspace/benchmarks/kv-offload-replay` for certus).
+`/workspace/benchmarks/kv-offload-replay` for certus). Never set `DEBUG_DUMP=1`
+without the hook mounted: the watchdog checks for it, because SIGUSR2's default
+action kills the engine.
+
+### 5. Timing modes
+
+`TIMING` picks how long each conversation waits between turns. Every mode except
+`asap` admits all 391 conversations and caps requests in flight at the point's
+`STREAMS` value.
+
+| `TIMING` | aiperf flags | gap before each turn |
+|---|---|---|
+| `think` | `--no-fixed-schedule --use-think-time-only` | the recorded think time only |
+| `intervals` | `--no-fixed-schedule` | the full recorded inter-request gap (`t_curr − t_prev`: original response time + think time), uncapped |
+| `delaycap` | `--no-fixed-schedule --inter-turn-delay-cap-seconds $DELAY_CAP` | the full recorded gap, clamped to `DELAY_CAP` |
+| `asap` | `--no-fixed-schedule --ignore-trace-delays` | none (back to back); `--concurrency` = cap |
+
+`intervals` and `delaycap` replay a different gap than `think`, so they send a
+different mix of request sizes; compare modes in tokens/s as well as req/s.
+With long gaps (`intervals`, large `DELAY_CAP`) fewer conversations may be ready at
+high caps, and the stop rule can end an arm early (step 6).
+
+### 6. Monitoring
+
+| where | what to look for |
+|---|---|
+| `$TOP/driver.log` | point start/done, cooldowns, `sweep finished; wedged arms: N` |
+| `$TOP/<n>streams/<n>streams/orchestrator.log` | per arm: `===== ARM …`, `vLLM ready`, `arm … done` |
+| `$TOP/<n>streams-stop-rule.log` | `elapsed=… live=… cap=…` every 15 s; `STOP-RULE:` when it ends an arm |
+| `$TOP/<n>streams/<n>streams/watchdog.log` | `no stall detected while the <arm> client ran`, or `STALL` + capture |
+| `$TOP/<n>streams/<n>streams/<arm>/WEDGED` | present only if that arm wedged; its results are invalid |
+| `curl -s http://<host>:8000/metrics` | `vllm:num_requests_running`, `…_waiting`, `vllm:request_success_total` rising |
+
+The stop rule ends an arm when requests in flight stay below the cap for 600 s after
+a 900 s ramp (both fixed in `stop-rule-live-watch.sh`); otherwise `MAX_SECONDS` ends
+it. A brief `running=0` between engine steps is normal; a wedge is `running=0`,
+`waiting>0`, and no completions for `STALL_SECONDS`.
+
+### 7. Stopping a sweep cleanly
+
+Kill by PID; do not `pkill -f` a pattern that also matches your own shell's command line.
+
+```bash
+ps -eo pid,args | grep -E 'ccweka-out1-think-lowconc-sweep|run-gqa-iobound|stop-rule-live|wedge-watch|run-aiperf|aiperf (profile|system)' | grep -v grep
+kill -INT <aiperf system_controller pid>            # lets aiperf export results
+kill -TERM <driver, matrix, stream-sweep, watchdog, stop-rule pids>
+podman ps -q | xargs -r podman stop -t 30
+podman --root /mnt/certus1/podman/storage --runroot /mnt/certus1/podman/run ps -q | \
+  xargs -r podman --root /mnt/certus1/podman/storage --runroot /mnt/certus1/podman/run stop -t 30
+pkill -TERM -x certus-server-yaml                    # releases the NVMe devices
+```
+
+Then confirm the GPU is at ~0 MiB, port 8000 is free and no `certus-server-yaml` is left.
+
+### 8. Results
+
+```
+$TOP/
+  driver.log  summary.{md,csv}          # summary merges every point's rows
+  <n>streams-stop-rule.log
+  <n>streams/summary.{md,csv}
+  <n>streams/<n>streams/{orchestrator.log, watchdog.log, certus-server.log, report.html}
+  <n>streams/<n>streams/<arm>/{client.log, server.log, kvio.csv, aiperf/…, WEDGE-*/, WEDGED}
+```
+
+`summary.md` has, per arm: run time, tokens/s, req/s, TTFT p50/p99, errored requests,
+vLLM queue time, external-tier hit %, recomputed %, and KV loaded. "Errored" requests
+are almost always client-side connection-reuse failures (`ServerDisconnectedError` /
+`ClientOSError` within a few ms of sending) that never reach vLLM; check
+`aiperf/profile_export.jsonl` for the type. `plot-lowconc-patched.py` draws a PNG
+from a combined summary table.
 
 Notes:
 - The driver is self-contained (scripts resolve siblings via `SCRIPT_DIR`); it does
