@@ -150,7 +150,14 @@ cleanup(){ log "cleanup"; stop_vllm; stop_certus; }
 trap cleanup EXIT INT TERM
 
 log "results -> ${RESULTS_DIR}  arms: ${ARMS}  MAX_SECONDS=${MAX_SECONDS}  CPU_TIER_GB=${CPU_TIER_GB}"
-for arm in $ARMS; do run_arm "$arm" || log "arm ${arm} FAILED (continuing)"; done
+arm_list=($ARMS)
+for i in "${!arm_list[@]}"; do
+  arm="${arm_list[$i]}"
+  run_arm "$arm" || log "arm ${arm} FAILED (continuing)"
+  if (( i < ${#arm_list[@]} - 1 )) && (( ${COOLDOWN_SECONDS:-600} > 0 )); then
+    log "cooldown ${COOLDOWN_SECONDS:-600}s before next arm"; sleep "${COOLDOWN_SECONDS:-600}"
+  fi
+done
 
 log "generating report"
 # Pass the workload knobs through so the report records them (unset => defaults).

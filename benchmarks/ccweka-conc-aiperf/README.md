@@ -31,7 +31,34 @@ regime the sweep is designed to create.
 - **Watchdog**: the cputier arm runs under a wedge-capture watchdog (py-spy dumps +
   `WEDGED` marker + client stop, so the sweep continues past a wedged arm).
 
-## Headline results (cap 32, first run)
+## Results on the patched scheduler (2026-11-21) — current
+
+Stock vLLM 0.30 deadlocks under this workload: a request whose async KV load has
+finished can wait forever behind a queue head that cannot be admitted, because the
+admission reserves blocks for loads that already finished (0 running, N waiting,
+engine sleep-polling; diagnosed from SIGUSR2 state dumps). Unpatched, both backends
+wedged at caps 8 and 16 and cputier also at 32 and 64, so **every number from the
+2026-11-18/19/20 unpatched sweeps, including the first-run headline below, is
+invalid**. The fix (move finished-load requests to the front of the waiting queue)
+lives on its own branch and is baked into the v0.30 image builds there; see
+`benchmarks/kv-offload-replay/vllm-fix-kvload-hol/PROVENANCE.md` on that branch.
+
+All 20 patched arms ran their full 3600 s with no stall (64G DRAM tier both):
+
+| cap | certus req/s | cputier req/s | certus lead | TTFT p50 certus / cputier | tier hit certus / cputier |
+|---|---|---|---|---|---|
+| 4 | 0.65 | 0.60 | +8% | 4.0 / 4.5 s | 93.2 / 93.0% |
+| 8 | 0.62 | 0.55 | +13% | 9.9 / 11.4 s | 93.5 / 92.7% |
+| 16 | 0.56 | 0.43 | +30% | 24.4 / 31.5 s | 92.8 / 90.5% |
+| 32 | 0.58 | 0.37 | +57% | 51.3 / 83.3 s | 92.4 / 85.6% |
+| 64 | 0.56 | 0.38 | +47% | 96.2 / 152.0 s | 90.0 / 83.0% |
+
+Full table with sources: `/mnt/certus1/vllm-serve-matrix/ccweka-lowconc-patched-combined.md`.
+Charts: `plot-lowconc-patched.py` (PNG) and `lowconc-sweep.html` (interactive, open locally).
+TTFT is mostly vLLM queue time (≈ cap ÷ req/s); the residual "errored" counts are
+client-side keep-alive reuse failures that never reach vLLM.
+
+## Headline results (cap 32, first run) — superseded, invalid (unpatched deadlock)
 
 | | certus | cputier |
 |---|---|---|
@@ -63,7 +90,9 @@ the interesting hardware points are caps **4, 8, 12**.
 | `run-gqa-iobound-matrix.sh` | per-arm orchestrator: server launch, vLLM, client, teardown, report |
 | `run-aiperf-weka-iobound.sh` | client wrapper: maps `TIMING=think` onto aiperf `--use-think-time-only` + pool-size `--concurrency` + `--prefill-concurrency` cap |
 | `run-aiperf-weka.sh` | actual aiperf invocation |
-| `wedge-watch-live.sh` | attach-mode wedge watchdog the driver uses — matches aiperf's retitled `system_controller` process by name |
+| `wedge-watch-live.sh` | attach-mode wedge watchdog the driver uses — matches aiperf's retitled `system_controller` process by name; watches every arm in turn, reads the arm name from `orchestrator.log`, finds the container in either podman store, and with `DEBUG_DUMP=1` takes two SIGUSR2 state dumps before py-spy |
+| `diag/sitecustomize.py` | opt-in engine state-dump hook: mounted at `/opt/certus-debug` and put first on `PYTHONPATH`, it dumps the scheduler's waiting queue, connector jobs, tier lookups and GPU copy queues on SIGUSR2 (never signal an engine without it — SIGUSR2's default action kills the process) |
+| `plot-lowconc-patched.py` / `lowconc-sweep.html` | charts of the patched results (PNG from the combined table; self-contained interactive page) |
 | `run-cputier-wedge-capture.sh` | standalone variant: re-runs one arm itself under the watchdog (its attach mode matches the client by results-dir in its cmdline, which the retitled aiperf process no longer carries — use `wedge-watch-live.sh` to watch a live run) |
 | `run-serve-certus-shmq-gqa-iobound.sh` / `run-serve-certus-shmq.sh` | certus vLLM serve scripts |
 | `run-serve-cputier-gqa-iobound.sh` / `run-serve-cputier.sh` | cputier vLLM serve scripts |
@@ -103,6 +132,23 @@ Defaults (override via env): `CPU_TIER_GB=64`, `OFFLOAD_BLOCK_SIZE=64`,
 `SERVED_MODEL_NAME=qwen2.5-7b-1m`, `MAX_MODEL_LEN=262144`,
 `TRACE=/mnt/certus1/cc-traces-weka-062126.trunc262k-out1`,
 `SERVER_BIN=/mnt/certus1/dwaddington-spdk-tier128/certus/target/release/certus-server-yaml`.
+
+More knobs: `COOLDOWN_SECONDS` (default 600) pauses between points and between arms;
+`EXTRA_PODMAN_ARGS` adds `podman run` flags to both serve scripts (word-split), e.g.
+the diagnostics hook and, on an image built without the fix, the patched scheduler
+as an overlay (the patched file is on the vLLM-fix branch):
+
+```bash
+B=$PWD; TOP=/mnt/certus1/vllm-serve-matrix/my-run; mkdir -p $TOP/dumps
+DEBUG_DUMP=1 TOP=$TOP STREAMS="8 16" EXTRA_PODMAN_ARGS="\
+ -v $B/../kv-offload-replay/vllm-fix-kvload-hol/scheduler.py:/usr/local/lib/python3.12/dist-packages/vllm/v1/core/sched/scheduler.py:ro,z \
+ -v $B/diag:/opt/certus-debug:ro,z -v $TOP/dumps:/opt/certus-debug-out:z \
+ -e PYTHONPATH=/opt/certus-debug:/workspace/bench:/workspace/benchmarks/kv-offload-replay \
+ -e CERTUS_DEBUG_OUT=/opt/certus-debug-out" ./ccweka-out1-think-lowconc-sweep.sh
+```
+
+The `PYTHONPATH` keeps both images' own entries (`/workspace/bench` for cputier,
+`/workspace/benchmarks/kv-offload-replay` for certus).
 
 Notes:
 - The driver is self-contained (scripts resolve siblings via `SCRIPT_DIR`); it does

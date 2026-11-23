@@ -68,6 +68,9 @@ for n in $STREAMS; do
   wait "$sp"; rc=$?
   kill "$sr" 2>/dev/null
   log "  ${n} streams done rc=${rc} (stop-rule log: ${TOP}/${n}streams-stop-rule.log)"
+  if [[ "$n" != "${STREAMS##* }" && "${COOLDOWN_SECONDS:-600}" -gt 0 ]]; then
+    log "  cooldown ${COOLDOWN_SECONDS:-600}s before next point"; sleep "${COOLDOWN_SECONDS:-600}"
+  fi
 done
 
 # Merge the per-point summaries into one cross-sweep summary (rows sorted by streams).
@@ -92,4 +95,4 @@ if rows:
     open(os.path.join(top, "summary.md"), "w").write("\n".join(md) + "\n")
     print(f"merged {len(rows)} rows -> {top}/summary.md")
 PY
-log "sweep finished; wedged arms: $(ls "$TOP"/*/*/WEDGED 2>/dev/null | wc -l); summary: ${TOP}/summary.md"
+log "sweep finished; wedged arms: $(ls "$TOP"/*/*/*/WEDGED 2>/dev/null | wc -l); summary: ${TOP}/summary.md"
