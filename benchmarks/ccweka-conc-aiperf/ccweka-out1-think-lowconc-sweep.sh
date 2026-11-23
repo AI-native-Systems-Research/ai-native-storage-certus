@@ -27,7 +27,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WATCHDOG="$SCRIPT_DIR/wedge-watch-live.sh"   # attach-mode watchdog (matches retitled aiperf)
 STOP_RULE="$SCRIPT_DIR/stop-rule-live-watch.sh"
 TOP="${TOP:-/mnt/certus1/vllm-serve-matrix/ccweka-out1-think-lowconc-sweep-$(date +%Y%m%d_%H%M%S)}"
-TIMING="${TIMING:-think}"                    # think | delaycap | asap (run-aiperf-weka.sh); think = recorded gaps
+TIMING="${TIMING:-think}"                    # think | delaycap | intervals | asap (run-aiperf-weka.sh)
 DELAY_CAP="${DELAY_CAP:-30}"                 # seconds; TIMING=delaycap clamps each inter-turn gap to this
 MAX_SECONDS="${MAX_SECONDS:-14400}"          # 4h per-arm safety cap (stop rule can end earlier)
 TRACE="${TRACE:-/mnt/certus1/cc-traces-weka-062126.trunc262k-out1}"
