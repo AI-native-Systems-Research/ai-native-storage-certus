@@ -70,6 +70,10 @@ env overrides:
                           overlay is applied by Dockerfile.offload on a 0.26.x base
                           only, else it warns and builds stock). Use 0 for the
                           deliberate stock/crashing baseline in a 0.26 A/B.
+  FIX_KVLOAD_HOL=0|1      VLLM_FIX_KVLOAD_HOL build arg (default 1; bakes the vLLM
+                          0.30.0 finished-KV-load scheduler deadlock fix, see
+                          benchmarks/kv-offload-replay/vllm-fix-kvload-hol/; no-op on
+                          other versions). Use 0 for a stock-scheduler baseline.
   NO_CACHE=1              pass --no-cache to podman build
 
 examples:
@@ -106,6 +110,8 @@ if [[ "$PRINT_ONLY" == "1" ]]; then echo "$IMAGE"; exit 0; fi
 # Tiering fix#2 overlay build arg (Dockerfile default is 1; only takes effect on a
 # 0.26.x base — Dockerfile.offload warns + builds stock otherwise).
 FIX_TIERING="${FIX_TIERING:-1}"
+# vLLM 0.30.0 scheduler deadlock fix build arg (Dockerfile default is 1; no-op off 0.30.0).
+FIX_KVLOAD_HOL="${FIX_KVLOAD_HOL:-1}"
 
 command -v podman >/dev/null 2>&1 || { echo "error: podman not on PATH" >&2; exit 1; }
 [[ -f "$DOCKERFILE" ]] || { echo "error: Dockerfile not found at ${DOCKERFILE}" >&2; exit 1; }
@@ -116,6 +122,7 @@ build_flags=()
 echo "[build] image        : ${IMAGE}"
 echo "[build] vLLM base    : docker.io/vllm/vllm-openai:v${VLLM_VERSION}"
 echo "[build] fix-tiering  : VLLM_FIX_TIERING=${FIX_TIERING} (0.26.x-only overlay)"
+echo "[build] fix-kvload   : VLLM_FIX_KVLOAD_HOL=${FIX_KVLOAD_HOL} (0.30.0-only scheduler fix)"
 echo "[build] store        : default (bare 'podman images' will show it)"
 echo "[build] context      : ${REPO_ROOT}"
 echo "[build] dockerfile   : ${DOCKERFILE}"
@@ -124,6 +131,7 @@ echo "[build] dockerfile   : ${DOCKERFILE}"
 podman build \
   --build-arg "VLLM_VERSION=${VLLM_VERSION}" \
   --build-arg "VLLM_FIX_TIERING=${FIX_TIERING}" \
+  --build-arg "VLLM_FIX_KVLOAD_HOL=${FIX_KVLOAD_HOL}" \
   "${build_flags[@]}" \
   -f "$DOCKERFILE" \
   -t "$IMAGE" \

@@ -66,6 +66,10 @@ env overrides:
   IMAGE_REPO=<repo>       override the repo (default localhost/certus-shmq-connector)
   PODMAN_STORE= PODMAN_RUNROOT=   use a different podman store
                           (default /mnt/certus1/podman/{storage,run})
+  FIX_KVLOAD_HOL=0|1      VLLM_FIX_KVLOAD_HOL build arg (default 1; bakes the vLLM
+                          0.30.0 finished-KV-load scheduler deadlock fix, see
+                          benchmarks/kv-offload-replay/vllm-fix-kvload-hol/; no-op on
+                          other versions). Use 0 for a stock-scheduler baseline.
   NO_CACHE=1              pass --no-cache to podman build
 
 examples:
@@ -109,17 +113,22 @@ STORE_FLAGS=(--root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT")
 command -v podman >/dev/null 2>&1 || { echo "error: podman not on PATH" >&2; exit 1; }
 [[ -f "$DOCKERFILE" ]] || { echo "error: Dockerfile not found at ${DOCKERFILE}" >&2; exit 1; }
 
+# vLLM 0.30.0 scheduler deadlock fix build arg (Dockerfile default is 1; no-op off 0.30.0).
+FIX_KVLOAD_HOL="${FIX_KVLOAD_HOL:-1}"
+
 build_flags=()
 [[ -n "${NO_CACHE:-}" ]] && build_flags+=(--no-cache)
 
 echo "[build] image      : ${IMAGE}"
 echo "[build] vLLM base  : docker.io/vllm/vllm-openai:v${VLLM_VERSION}"
+echo "[build] fix-kvload : VLLM_FIX_KVLOAD_HOL=${FIX_KVLOAD_HOL} (0.30.0-only scheduler fix)"
 echo "[build] store      : ${PODMAN_STORE}"
 echo "[build] context    : ${REPO_ROOT}"
 echo "[build] dockerfile : ${DOCKERFILE}"
 
 podman "${STORE_FLAGS[@]}" build \
   --build-arg "VLLM_VERSION=${VLLM_VERSION}" \
+  --build-arg "VLLM_FIX_KVLOAD_HOL=${FIX_KVLOAD_HOL}" \
   "${build_flags[@]}" \
   -f "$DOCKERFILE" \
   -t "$IMAGE" \
