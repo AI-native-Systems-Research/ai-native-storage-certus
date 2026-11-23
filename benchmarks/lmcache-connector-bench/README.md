@@ -23,7 +23,7 @@ No engine, model or HTTP front end is started. The bench allocates a fake GPU KV
 | Lookup | per key | per key, `RETRY`/`HIT_PENDING` across steps | one round trip per request for the whole prefix, polled |
 | No `touch` | | | LMCache has no touch; `--lookup-order` is accepted and ignored |
 
-There's no counterpart to `bench_connector_path.py`, `bench_connector_race.py` or the `contention` and `--pattern` modes.
+There's no counterpart to `bench_connector_path.py` or the `contention` and `--pattern` modes.
 
 Things to know when reading LMCache numbers:
 
