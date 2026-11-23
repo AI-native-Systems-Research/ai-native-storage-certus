@@ -1,0 +1,7 @@
+NAME                                                         READY   STATUS    RESTARTS   AGE     IP             NODE                       NOMINATED NODE   READINESS GATES
+pd-disaggregation-nvidia-gpu-vllm-decode-7f9cf5fdbf-j9krd    2/2     Running   0          9m46s   10.244.2.187   node2                      <none>           <none>
+pd-disaggregation-nvidia-gpu-vllm-decode-7f9cf5fdbf-qz7rb    2/2     Running   0          9m46s   10.244.4.77    node5   <none>           <none>
+pd-disaggregation-nvidia-gpu-vllm-decode-7f9cf5fdbf-z9jrs    2/2     Running   0          9m46s   10.244.2.186   node2                      <none>           <none>
+pd-disaggregation-nvidia-gpu-vllm-prefill-669fc6ffdf-slsz5   1/1     Running   0          11m     10.244.4.76    node5   <none>           <none>
+quickstart-epp-7f7dbcddf9-qml9k                              2/2     Running   0          6h18m   10.244.4.67    node5   <none>           <none>
+render-98664b8b6-cvf9c                                       1/1     Running   0          6h31m   10.244.4.63    node5   <none>           <none>

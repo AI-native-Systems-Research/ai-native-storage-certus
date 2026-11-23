@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "disable_existing_loggers": false,
+  "formatters": {"vllm": {"class": "vllm.logging_utils.NewLineFormatter", "datefmt": "%m-%d %H:%M:%S", "format": "%(levelname)s %(asctime)s.%(msecs)03d [%(filename)s:%(lineno)d] %(message)s"}},
+  "handlers": {
+    "vllm": {"class": "logging.StreamHandler", "formatter": "vllm", "level": "DEBUG", "stream": "ext://sys.stdout"}
+  },
+  "loggers": {
+    "vllm": {"handlers": ["vllm"], "level": "INFO", "propagate": false},
+    "vllm.v1.kv_offload.tiering.p2p": {"handlers": ["vllm"], "level": "DEBUG", "propagate": false}
+  }
+}

@@ -1,0 +1,92 @@
+10:40:15 start: overflow arms 1-3 from empty certus tiers
+10:40:15 === arm 1 (seed 401): fresh start
+10:40:42 certus restarted fresh: 4 instances on fc2a2b80, allow-listed and 4 drives pinned each, tiers 0 bytes used, batched piece copies on
+11:14:00 FATAL: decode rollout
+11:17:15 start: overflow arms 1-3 from empty certus tiers
+11:17:15 === arm 1 (seed 401): fresh start
+11:34:31 FATAL: certus rollout
+11:38:11 start: overflow arms 1-3 from empty certus tiers
+11:38:11 === arm 1 (seed 401): fresh start
+11:38:49 certus restarted fresh: 4 instances on fc2a2b80, allow-listed and 4 drives pinned each, tiers 0 bytes used, batched piece copies on
+16:58:21 start: overflow arms 1-3 from empty certus tiers
+16:58:21 === arm 1 (seed 401): fresh start
+16:58:49 certus restarted fresh: 4 instances on fc2a2b80, allow-listed and 4 drives pinned each, tiers 0 bytes used, batched piece copies on
+17:11:38 sidecars (decode) on ddabbfd0a4f50983260e88949d67de67d15adcd7
+17:11:39   pd-disaggregation-nvidia-gpu-vllm-decode-7f9cf5fdbf-j9krd node2 00000000:A1:00.0 GPU KV cache size: 37,184
+17:11:39   pd-disaggregation-nvidia-gpu-vllm-decode-7f9cf5fdbf-qz7rb node5 00000000:41:00.0 GPU KV cache size: 37,184
+17:11:39   pd-disaggregation-nvidia-gpu-vllm-decode-7f9cf5fdbf-z9jrs node2 00000000:41:00.0 GPU KV cache size: 37,184
+17:11:40   pd-disaggregation-nvidia-gpu-vllm-prefill-669fc6ffdf-slsz5 node5 00000000:A1:00.0 GPU KV cache size: 37,184
+router-check: OK  quickstart-epp-7f7dbcddf9-qml9k  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 377
+  cluster.ext_proc.membership_healthy: 1
+17:11:43 router check ok
+17:11:53 warm-up ok
+17:11:54 tiers used before run: 568590336 bytes (warm-up only)
+17:21:54 load-watch node2 j9krd:    0.0 GB in    0.0 s =   0.0 GB/s
+17:21:54 load-watch node5 qz7rb:    0.0 GB in    0.0 s =   0.0 GB/s
+17:21:54 load-watch node2 z9jrs:    0.0 GB in    0.0 s =   0.0 GB/s
+17:21:54 load-watch node5 slsz5:   28.4 GB in    1.8 s =  15.4 GB/s
+17:31:54 load-watch node2 j9krd:    0.0 GB in    0.0 s =   0.0 GB/s
+17:31:54 load-watch node5 qz7rb:    0.0 GB in    0.0 s =   0.0 GB/s
+17:31:54 load-watch node2 z9jrs:    0.0 GB in    0.0 s =   0.0 GB/s
+17:31:54 load-watch node5 slsz5:   89.9 GB in    5.7 s =  15.8 GB/s
+17:41:54 load-watch node2 j9krd:    0.0 GB in    0.0 s =   0.0 GB/s
+17:41:54 load-watch node5 qz7rb:    0.0 GB in    0.0 s =   0.0 GB/s
+17:41:54 load-watch node2 z9jrs:    0.0 GB in    0.0 s =   0.0 GB/s
+17:41:54 load-watch node5 slsz5:  115.4 GB in    7.4 s =  15.6 GB/s
+17:51:54 load-watch node2 j9krd:    0.0 GB in    0.0 s =   0.0 GB/s
+17:51:55 load-watch node5 qz7rb:    0.0 GB in    0.0 s =   0.0 GB/s
+17:51:55 load-watch node2 z9jrs:    0.0 GB in    0.0 s =   0.0 GB/s
+17:51:55 load-watch node5 slsz5:  109.5 GB in    6.9 s =  15.8 GB/s
+18:01:55 load-watch node2 j9krd:    1.0 GB in    0.1 s =  16.8 GB/s
+18:01:55 load-watch node5 qz7rb:    1.1 GB in    0.1 s =  15.1 GB/s
+18:01:55 load-watch node2 z9jrs:    0.6 GB in    0.0 s =  16.5 GB/s
+18:01:55 load-watch node5 slsz5:  106.0 GB in    6.6 s =  16.0 GB/s
+RUN fx2-1-arm1 DONE rc=0
+18:08:20 load-watch: 0 slow-load warnings in the log so far
+  {'wall_s': 3365.9, 'turns_ok': 320, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 0.6431, 'later_ttft_p90_s': 0.9169}
+18:08:21 certus fetch requests in the run: 280
+18:08:21 ARM 1 DONE
+18:08:21 ALL DONE
+18:09:29 start: overflow arms 1-3 from empty certus tiers
+18:09:29 === arm 2 (seed 402): fresh start
+18:09:58 certus restarted fresh: 4 instances on fc2a2b80, allow-listed and 4 drives pinned each, tiers 0 bytes used, batched piece copies on
+18:14:49 sidecars (decode) on ddabbfd0a4f50983260e88949d67de67d15adcd7
+18:14:49   pd-disaggregation-nvidia-gpu-vllm-decode-5cff55c658-9v4rv node5 00000000:41:00.0 GPU KV cache size: 37,184
+18:14:50   pd-disaggregation-nvidia-gpu-vllm-decode-5cff55c658-c7q6h node2 00000000:A1:00.0 GPU KV cache size: 37,184
+18:14:50   pd-disaggregation-nvidia-gpu-vllm-decode-5cff55c658-rwpq4 node2 00000000:41:00.0 GPU KV cache size: 37,184
+18:14:51   pd-disaggregation-nvidia-gpu-vllm-prefill-669fc6ffdf-r2zqc node5 00000000:A1:00.0 GPU KV cache size: 37,184
+router-check: OK  quickstart-epp-7f7dbcddf9-qml9k  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 756
+  cluster.ext_proc.membership_healthy: 1
+18:14:54 router check ok
+18:15:04 warm-up ok
+18:15:05 tiers used before run: 568590336 bytes (warm-up only)
+18:25:05 load-watch node5 9v4rv:    0.0 GB in    0.0 s =   0.0 GB/s
+18:25:05 load-watch node2 c7q6h:    0.0 GB in    0.0 s =   0.0 GB/s
+18:25:05 load-watch node2 rwpq4:    0.0 GB in    0.0 s =   0.0 GB/s
+18:25:05 load-watch node5 r2zqc:   18.9 GB in    1.4 s =  13.5 GB/s
+18:35:05 load-watch node5 9v4rv:    0.0 GB in    0.0 s =   0.0 GB/s
+18:35:05 load-watch node2 c7q6h:    0.0 GB in    0.0 s =   0.0 GB/s
+18:35:05 load-watch node2 rwpq4:    0.0 GB in    0.0 s =   0.0 GB/s
+18:35:05 load-watch node5 r2zqc:   68.6 GB in    5.1 s =  13.5 GB/s
+18:45:06 load-watch node5 9v4rv:    0.0 GB in    0.0 s =   0.0 GB/s
+18:45:06 load-watch node2 c7q6h:    0.0 GB in    0.0 s =   0.0 GB/s
+18:45:06 load-watch node2 rwpq4:    0.0 GB in    0.0 s =   0.0 GB/s
+18:45:06 load-watch node5 r2zqc:   92.3 GB in    6.8 s =  13.7 GB/s
+18:55:06 load-watch node5 9v4rv:    0.0 GB in    0.0 s =   0.0 GB/s
+18:55:06 load-watch node2 c7q6h:    0.0 GB in    0.0 s =   0.0 GB/s
+18:55:06 load-watch node2 rwpq4:    0.0 GB in    0.0 s =   0.0 GB/s
+18:55:06 load-watch node5 r2zqc:   90.0 GB in    6.5 s =  13.9 GB/s
+19:05:06 load-watch node5 9v4rv:    1.1 GB in    0.1 s =  14.3 GB/s
+19:05:06 load-watch node2 c7q6h:    0.8 GB in    0.1 s =  15.4 GB/s
+19:05:06 load-watch node2 rwpq4:    0.8 GB in    0.1 s =  11.9 GB/s
+19:05:06 load-watch node5 r2zqc:  101.9 GB in    7.2 s =  14.2 GB/s
+RUN fx2-2-arm2 DONE rc=0
+19:12:12 load-watch: 0 slow-load warnings in the log so far
+  {'wall_s': 3406.3, 'turns_ok': 320, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 0.9903, 'later_ttft_p90_s': 1.3235}
+19:12:13 certus fetch requests in the run: 0
+19:12:13 ARM 2 DONE
+19:12:13 ALL DONE

@@ -1,0 +1,17 @@
+11:28:17 start
+11:28:17 deploy arm 4: P/D + vLLM tiered (CPU + fs), no certus
+deployment.apps "optimized-baseline-nvidia-gpu-vllm-decode" deleted from llm-d-quickstart namespace
+Error from server (NotFound): deployments.apps "pd-disaggregation-nvidia-gpu-vllm-decode" not found
+  pd-disaggregation-nvidia-gpu-vllm-decode-57ff7657c8-6m25w: [tiered] GPU 00000000:41:00.0 -> NUMA 0 -> fs tier /mnt/kv-tier/numa0/kv-pd-disaggregation-nvidia-gpu-vllm-decode-57ff7657c8-6m25w (/dev/md127       12T)
+  pd-disaggregation-nvidia-gpu-vllm-decode-57ff7657c8-b6xkh: [tiered] GPU 00000000:41:00.0 -> NUMA 0 -> fs tier /mnt/kv-tier/numa0/kv-pd-disaggregation-nvidia-gpu-vllm-decode-57ff7657c8-b6xkh (/dev/md127       12T)
+  pd-disaggregation-nvidia-gpu-vllm-decode-57ff7657c8-lvsrw: [tiered] GPU 00000000:A1:00.0 -> NUMA 1 -> fs tier /mnt/kv-tier/numa1/kv-pd-disaggregation-nvidia-gpu-vllm-decode-57ff7657c8-lvsrw (/dev/md126       12T)
+  pd-disaggregation-nvidia-gpu-vllm-prefill-54f775d96d-nhglk: [tiered] GPU 00000000:A1:00.0 -> NUMA 1 -> fs tier /mnt/kv-tier/numa1/kv-pd-disaggregation-nvidia-gpu-vllm-prefill-54f775d96d-nhglk (/dev/md126       12T)
+11:31:41   pd-disaggregation-nvidia-gpu-vllm-decode-57ff7657c8-6m25w: GPU KV cache size: 37,184 tokens
+11:31:41   pd-disaggregation-nvidia-gpu-vllm-decode-57ff7657c8-b6xkh: GPU KV cache size: 37,184 tokens
+11:31:41   pd-disaggregation-nvidia-gpu-vllm-decode-57ff7657c8-lvsrw: GPU KV cache size: 37,184 tokens
+11:31:42   pd-disaggregation-nvidia-gpu-vllm-prefill-54f775d96d-nhglk: GPU KV cache size: 37,184 tokens
+11:31:52 warm-up ok
+11:31:52 run 4: arm 4 seed 404
+RUN ov-4-arm4 DONE rc=0
+  {'wall_s': 3330.9, 'turns_ok': 320, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 1.7651, 'later_ttft_p90_s': 2.7057}
+12:27:43 ALL DONE

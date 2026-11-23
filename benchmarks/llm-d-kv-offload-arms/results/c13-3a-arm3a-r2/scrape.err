@@ -1,0 +1,10 @@
+[scrape_prom] baseline decode0 keys=17 url=http://10.244.4.39:8200/metrics
+[scrape_prom] baseline decode1 keys=17 url=http://10.244.2.149:8200/metrics
+[scrape_prom] baseline decode2 keys=19 url=http://10.244.2.148:8200/metrics
+[scrape_prom] baseline decode3 keys=17 url=http://10.244.4.40:8200/metrics
+[scrape_prom] baseline certus-node5-numa0 keys=36 url=http://192.168.0.26:9400/metrics
+[scrape_prom] baseline certus-node2-numa0 keys=36 url=http://192.168.0.28:9400/metrics
+[scrape_prom] baseline certus-node2-numa1 keys=36 url=http://192.168.0.28:9401/metrics
+[scrape_prom] baseline certus-node5-numa1 keys=36 url=http://192.168.0.26:9401/metrics
+[scrape_prom] histograms captured: ['e2e_request_latency_seconds', 'inter_token_latency_seconds', 'request_decode_time_seconds', 'request_queue_time_seconds', 'request_time_per_output_token_seconds', 'time_to_first_token_seconds']
+[scrape_prom] stopped after 332 rounds -> /home/scooter/certus-experiments/kv-offload-arms-2026-11/c13-3a-arm3a-r2/prom.log

@@ -1,0 +1,6 @@
+[scrape_prom] baseline decode0 keys=20 url=http://10.244.2.194:8000/metrics
+[scrape_prom] baseline decode1 keys=25 url=http://10.244.4.88:8000/metrics
+[scrape_prom] baseline decode2 keys=25 url=http://10.244.2.195:8000/metrics
+[scrape_prom] baseline prefill keys=25 url=http://10.244.4.87:8000/metrics
+[scrape_prom] histograms captured: ['e2e_request_latency_seconds', 'inter_token_latency_seconds', 'request_decode_time_seconds', 'request_queue_time_seconds', 'request_time_per_output_token_seconds', 'time_to_first_token_seconds']
+[scrape_prom] stopped after 329 rounds -> /home/scooter/certus-experiments/kv-offload-arms-2026-11/ov-5fs-probe/prom.log
