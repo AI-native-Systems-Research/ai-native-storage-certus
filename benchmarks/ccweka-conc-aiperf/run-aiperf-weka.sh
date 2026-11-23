@@ -28,6 +28,9 @@
 #     asap  (default) -> --no-fixed-schedule --ignore-trace-delays   (back-to-back; max stress)
 #     think           -> --no-fixed-schedule --use-think-time-only   (replay recorded think-time)
 #     delaycap        -> --no-fixed-schedule --inter-turn-delay-cap-seconds ${DELAY_CAP}
+#     intervals       -> --no-fixed-schedule   (full recorded inter-request gap t_curr - t_prev,
+#                        uncapped: original response latency + think time; delaycap clamps this
+#                        same gap, while think replays only the think_time part)
 #                        (replay authored inter-turn delays, but clamp the pathological
 #                         ones — the corpus has gaps up to ~68000s that would otherwise
 #                         make the client sleep for hours)
@@ -58,7 +61,7 @@ ENDPOINT_TYPE="${ENDPOINT_TYPE:-chat}"
 TRACE="${TRACE:-/mnt/certus1/cc-traces-weka-062126.jsonl}"
 
 # ── Timing / load profile ────────────────────────────────────────────────────────
-TIMING="${TIMING:-asap}"            # asap | think | delaycap  (see header)
+TIMING="${TIMING:-asap}"            # asap | think | delaycap | intervals  (see header)
 DELAY_CAP="${DELAY_CAP:-30}"        # seconds; only used by TIMING=delaycap
 CONCURRENCY="${CONCURRENCY:-1}"     # concurrent requests (aiperf --concurrency)
 STREAMING="${STREAMING:-1}"         # 1 = --streaming (per-token metrics), 0 = non-streaming
@@ -155,7 +158,8 @@ case "$TIMING" in
   asap)     ARGS+=(--no-fixed-schedule --ignore-trace-delays) ;;
   think)    ARGS+=(--no-fixed-schedule --use-think-time-only) ;;
   delaycap) ARGS+=(--no-fixed-schedule --inter-turn-delay-cap-seconds "$DELAY_CAP") ;;
-  *) echo "error: TIMING must be asap|think|delaycap (got '$TIMING')" >&2; exit 1 ;;
+  intervals) ARGS+=(--no-fixed-schedule) ;;
+  *) echo "error: TIMING must be asap|think|delaycap|intervals (got '$TIMING')" >&2; exit 1 ;;
 esac
 
 # Bounds (optional).

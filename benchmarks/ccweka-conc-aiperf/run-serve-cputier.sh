@@ -207,7 +207,15 @@ echo "[serve] clients -> base_url http://127.0.0.1:${PORT}/v1   model ${SERVED_M
 # the API port. --pull=never (image is built locally). --entrypoint vllm
 # overrides the image's replay-driver entrypoint with the OpenAI API server.
 # No --ipc=host and no external server: cputier is self-contained.
+# EXTRA_PODMAN_ARGS: optional extra `podman run` flags (word-split), e.g. a debug
+# hook mount: -v <dir>:/opt/certus-debug:ro,z -e PYTHONPATH=/opt/certus-debug:...
+EXTRA_PODMAN_ARR=()
+if [[ -n "${EXTRA_PODMAN_ARGS:-}" ]]; then
+  read -r -a EXTRA_PODMAN_ARR <<<"${EXTRA_PODMAN_ARGS}"
+  echo "[serve] extra podman args: ${EXTRA_PODMAN_ARGS}"
+fi
 exec command podman run --rm --pull=never \
+  "${EXTRA_PODMAN_ARR[@]}" \
   --shm-size "${SHM_BYTES}" \
   --device "nvidia.com/gpu=${GPU}" \
   -p "${PORT}:${PORT}" \

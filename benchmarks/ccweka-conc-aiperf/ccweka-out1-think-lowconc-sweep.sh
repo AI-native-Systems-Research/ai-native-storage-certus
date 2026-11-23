@@ -24,9 +24,11 @@
 # Self-contained bundle: all scripts this driver needs live in this directory.
 STREAMS="${STREAMS:-32}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WATCHDOG="$SCRIPT_DIR/run-cputier-wedge-capture.sh"
+WATCHDOG="$SCRIPT_DIR/wedge-watch-live.sh"   # attach-mode watchdog (matches retitled aiperf)
 STOP_RULE="$SCRIPT_DIR/stop-rule-live-watch.sh"
 TOP="${TOP:-/mnt/certus1/vllm-serve-matrix/ccweka-out1-think-lowconc-sweep-$(date +%Y%m%d_%H%M%S)}"
+TIMING="${TIMING:-think}"                    # think | delaycap | intervals | asap (run-aiperf-weka.sh)
+DELAY_CAP="${DELAY_CAP:-30}"                 # seconds; TIMING=delaycap clamps each inter-turn gap to this
 MAX_SECONDS="${MAX_SECONDS:-14400}"          # 4h per-arm safety cap (stop rule can end earlier)
 TRACE="${TRACE:-/mnt/certus1/cc-traces-weka-062126.trunc262k-out1}"
 mkdir -p "$TOP"
@@ -34,7 +36,7 @@ log(){ echo "[$(date '+%F %T')] $*" | tee -a "$TOP/driver.log"; }
 # Match this bundle's matrix, not the original benchmarks/vllm-serve copy.
 MATRIX_RE="^/bin/bash ${SCRIPT_DIR}/run-gqa-iobound-matrix\\.sh"
 
-log "low-concurrency think-time CC-weka out1 sweep: ${STREAMS} -> ${TOP} (branch $(git -C "$SCRIPT_DIR" branch --show-current) @ $(git -C "$SCRIPT_DIR" rev-parse --short HEAD))"
+log "low-concurrency CC-weka out1 sweep (timing=${TIMING}$([[ $TIMING == delaycap ]] && echo " cap=${DELAY_CAP}s")): ${STREAMS} -> ${TOP} (branch $(git -C "$SCRIPT_DIR" branch --show-current) @ $(git -C "$SCRIPT_DIR" rev-parse --short HEAD))"
 for n in $STREAMS; do
   log "===== ${n} streams (in-flight cap) ====="
   ( cd "$SCRIPT_DIR" && SWEEP_DIR="$TOP/${n}streams" STREAMS="$n" CPU_TIER_GB="${CPU_TIER_GB:-64}" \
@@ -42,23 +44,35 @@ for n in $STREAMS; do
       ARMS="${ARMS:-certus-nointervals cputier-nointervals}" MAX_SECONDS="$MAX_SECONDS" \
       MODEL="${MODEL:-/root/.cache/huggingface/qwen7b1m-dense}" SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-qwen2.5-7b-1m}" \
       MAX_MODEL_LEN="${MAX_MODEL_LEN:-262144}" ROPE_YARN="${ROPE_YARN:-0}" CLIENT_SCRIPT=run-aiperf-weka-iobound.sh \
-      TRACE="$TRACE" TIMING=think \
+      TRACE="$TRACE" TIMING="$TIMING" DELAY_CAP="$DELAY_CAP" \
       SERVER_BIN="${SERVER_BIN:-/mnt/certus1/dwaddington-spdk-tier128/certus/target/release/certus-server-yaml}" \
       ./run-gqa-iobound-stream-sweep.sh > "$TOP/sweep-${n}.out" 2>&1 ) &
   sp=$!
   "$STOP_RULE" "$n" "$TOP/${n}streams-stop-rule.log" "$MATRIX_RE" &
   sr=$!
-  # cputier wedge watchdog: attach once the matrix for this point is up
-  until [[ -f "$TOP/${n}streams/orchestrator.log" ]]; do kill -0 "$sp" 2>/dev/null || break; sleep 10; done
+  # cputier wedge watchdog: attach once the matrix for this point is up. The
+  # matrix results nest one deeper than SWEEP_DIR ($TOP/<n>streams/<n>streams),
+  # so discover the matrix dir from its orchestrator.log rather than guessing —
+  # v1 hardcoded $TOP/<n>streams/orchestrator.log, never found it, and passed a
+  # RESULTS_DIR one level too shallow, so no watchdog ever attached.
+  mdir=""
+  until [[ -n "$mdir" ]]; do
+    found=$(ls "$TOP/${n}streams"/*/orchestrator.log 2>/dev/null | head -1)
+    [[ -n "$found" ]] && mdir="$(dirname "$found")"
+    [[ -n "$mdir" ]] || { kill -0 "$sp" 2>/dev/null || break; sleep 10; }
+  done
   mp=""; until [[ -n "$mp" ]]; do mp=$(pgrep -f "$MATRIX_RE" | head -1); [[ -n "$mp" ]] || { kill -0 "$sp" 2>/dev/null || break; sleep 2; }; done
-  if [[ -n "$mp" ]]; then
-    log "  ${n} streams: wedge watchdog on matrix pid ${mp}"
-    ATTACH_PID="$mp" RESULTS_DIR="$TOP/${n}streams" ARM=cputier-nointervals CONCURRENT_STREAMS="$n" \
-      MAX_SECONDS="$MAX_SECONDS" STALL_SECONDS="${STALL_SECONDS:-300}" "$WATCHDOG" >> "$TOP/watchdog.log" 2>&1
+  if [[ -n "$mp" && -n "$mdir" ]]; then
+    log "  ${n} streams: wedge watchdog on matrix pid ${mp} (dir ${mdir})"
+    ATTACH_PID="$mp" RESULTS_DIR="$mdir" ARM=cputier-nointervals CONCURRENT_STREAMS="$n" \
+      STALL_SECONDS="${STALL_SECONDS:-300}" "$WATCHDOG" >> "$TOP/watchdog.log" 2>&1
   fi
   wait "$sp"; rc=$?
   kill "$sr" 2>/dev/null
   log "  ${n} streams done rc=${rc} (stop-rule log: ${TOP}/${n}streams-stop-rule.log)"
+  if [[ "$n" != "${STREAMS##* }" && "${COOLDOWN_SECONDS:-600}" -gt 0 ]]; then
+    log "  cooldown ${COOLDOWN_SECONDS:-600}s before next point"; sleep "${COOLDOWN_SECONDS:-600}"
+  fi
 done
 
 # Merge the per-point summaries into one cross-sweep summary (rows sorted by streams).
@@ -83,4 +97,4 @@ if rows:
     open(os.path.join(top, "summary.md"), "w").write("\n".join(md) + "\n")
     print(f"merged {len(rows)} rows -> {top}/summary.md")
 PY
-log "sweep finished; wedged arms: $(ls "$TOP"/*/*/WEDGED 2>/dev/null | wc -l); summary: ${TOP}/summary.md"
+log "sweep finished; wedged arms: $(ls "$TOP"/*/*/*/WEDGED 2>/dev/null | wc -l); summary: ${TOP}/summary.md"

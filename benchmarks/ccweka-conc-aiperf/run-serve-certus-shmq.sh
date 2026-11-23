@@ -258,7 +258,15 @@ fi
 
 # --ipc=host shares the mailbox + exposes CUDA IPC handles; -p publishes the API
 # port. --pull=never against the alt store.
+# EXTRA_PODMAN_ARGS: optional extra `podman run` flags (word-split), e.g. a debug
+# hook or patched-file mount: -v <file>:<in-container file>:ro,z
+EXTRA_PODMAN_ARR=()
+if [[ -n "${EXTRA_PODMAN_ARGS:-}" ]]; then
+  read -r -a EXTRA_PODMAN_ARR <<<"${EXTRA_PODMAN_ARGS}"
+  echo "[serve] extra podman args: ${EXTRA_PODMAN_ARGS}"
+fi
 exec command podman "${STORE_FLAGS[@]}" run --rm --pull=never \
+  "${EXTRA_PODMAN_ARR[@]}" \
   --ipc=host \
   --device "nvidia.com/gpu=${GPU}" \
   -p "${PORT}:${PORT}" \
