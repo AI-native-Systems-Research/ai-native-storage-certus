@@ -54,7 +54,10 @@ All 20 patched arms ran their full 3600 s with no stall (64G DRAM tier both):
 | 64 | 0.56 | 0.38 | +47% | 96.2 / 152.0 s | 90.0 / 83.0% |
 
 Full table with sources: `/mnt/certus1/vllm-serve-matrix/ccweka-lowconc-patched-combined.md`.
-Charts: `plot-lowconc-patched.py` (PNG) and `lowconc-sweep.html` (interactive, open locally).
+Charts: `plot-lowconc-patched.py` (PNG beside the combined table). Interactive reports live with the data:
+`ccweka-lowconc-patched-20261120_144612/lowconc-sweep.html` (think time) and
+`ccweka-lowconc-delaycap600-20261122_191629/lowconc-delaycap-sweep.html` (10-minute gap cap, with a switch
+to the think-time results), both under `/mnt/certus1/vllm-serve-matrix/`.
 TTFT is mostly vLLM queue time (≈ cap ÷ req/s); the residual "errored" counts are
 client-side keep-alive reuse failures that never reach vLLM.
 
@@ -92,7 +95,7 @@ the interesting hardware points are caps **4, 8, 12**.
 | `run-aiperf-weka.sh` | actual aiperf invocation |
 | `wedge-watch-live.sh` | attach-mode wedge watchdog the driver uses — matches aiperf's retitled `system_controller` process by name; watches every arm in turn, reads the arm name from `orchestrator.log`, finds the container in either podman store, and with `DEBUG_DUMP=1` takes two SIGUSR2 state dumps before py-spy |
 | `diag/sitecustomize.py` | opt-in engine state-dump hook: mounted at `/opt/certus-debug` and put first on `PYTHONPATH`, it dumps the scheduler's waiting queue, connector jobs, tier lookups and GPU copy queues on SIGUSR2 (never signal an engine without it — SIGUSR2's default action kills the process) |
-| `plot-lowconc-patched.py` / `lowconc-sweep.html` | charts of the patched results (PNG from the combined table; self-contained interactive page) |
+| `plot-lowconc-patched.py` | PNG chart of the patched results, drawn from the combined table |
 | `run-cputier-wedge-capture.sh` | standalone variant: re-runs one arm itself under the watchdog (its attach mode matches the client by results-dir in its cmdline, which the retitled aiperf process no longer carries — use `wedge-watch-live.sh` to watch a live run) |
 | `run-serve-certus-shmq-gqa-iobound.sh` / `run-serve-certus-shmq.sh` | certus vLLM serve scripts |
 | `run-serve-cputier-gqa-iobound.sh` / `run-serve-cputier.sh` | cputier vLLM serve scripts |
