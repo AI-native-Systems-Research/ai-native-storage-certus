@@ -50,6 +50,23 @@ ENTRYPOINT []
 LABEL org.certus.gpu-required="true" \
       org.certus.host-prereq="nvidia-container-toolkit (docker --gpus / podman CDI); --ipc=host"
 
+# ── Bake in the vLLM 0.30.0 finished-KV-load scheduler fix (default ON) ───────
+# Stock 0.30.0 deadlocks under sustained async KV loading (0 running, N waiting,
+# forever): requests whose loads already finished sit behind a queue head that
+# cannot be admitted because its reservation still counts their blocks. The fix
+# schedules finished loads ahead of new admissions. apply.sh replaces
+# vllm/v1/core/sched/scheduler.py only on a 0.30.0 base whose file is stock (md5
+# checked; any other file fails the build), and is a no-op on other versions.
+# Opt out: --build-arg VLLM_FIX_KVLOAD_HOL=0.
+# See benchmarks/kv-offload-replay/vllm-fix-kvload-hol/PROVENANCE.md.
+# Re-declare VLLM_VERSION after FROM so the RUN below can read the build-arg.
+ARG VLLM_VERSION
+ARG VLLM_FIX_KVLOAD_HOL=1
+COPY benchmarks/kv-offload-replay/vllm-fix-kvload-hol/ /tmp/vllm-fix-kvload-hol/
+RUN VLLM_FIX_KVLOAD_HOL="${VLLM_FIX_KVLOAD_HOL}" sh /tmp/vllm-fix-kvload-hol/apply.sh "${VLLM_VERSION}" \
+    && rm -rf /tmp/vllm-fix-kvload-hol
+LABEL org.certus.vllm-fix-kvload-hol="${VLLM_FIX_KVLOAD_HOL}"
+
 WORKDIR /workspace
 
 # Connector sources + the shared dataset (paths relative to the repo-root build

@@ -1,0 +1,66 @@
+--- a/vllm/v1/core/sched/scheduler.py
++++ b/vllm/v1/core/sched/scheduler.py
+@@ -853,6 +853,14 @@
+ 
+         # Next, schedule the WAITING requests.
+         if not preempted_reqs and self._pause_state == PauseState.UNPAUSED:
++            # certus fix: schedule finished async KV loads before new admissions.
++            # See _certus_front_finished_kv_loads for the deadlock this breaks.
++            if (
++                self.connector is not None
++                and self.finished_recving_kv_req_ids
++                and self.policy == SchedulingPolicy.FCFS
++            ):
++                self._certus_front_finished_kv_loads()
+             step_skipped_waiting = create_request_queue(self.policy)
+ 
+             while (self.waiting or self.skipped_waiting) and token_budget > 0:
+@@ -2959,6 +2967,48 @@
+ 
+         self.finished_recving_kv_req_ids.remove(request.request_id)
+ 
++    def _certus_front_finished_kv_loads(self) -> None:
++        """certus fix (cputier wedge on vLLM 0.30, 2026-11-20).
++
++        Move WAITING_FOR_REMOTE_KVS requests whose async KV load has finished to
++        the front of skipped_waiting, which FCFS selection reads first, so the
++        waiting loop promotes and schedules them before admitting anything new.
++
++        Without this, a circular wait with 0 running requests is possible:
++          * the queue head is an async-load admission; allocate_slots() is given
++            reserved_blocks = _inflight_prefill_reserved_blocks(), which still
++            counts the remaining blocks of the finished loads;
++          * the head does not fit, allocate_slots() returns None, the loop
++            `break`s before reaching the finished loads queued behind it;
++          * the finished loads are never promoted or run, so their reservation
++            and the KV blocks they hold are never released.
++        """
++        ready = [
++            req
++            for queue in (self.skipped_waiting, self.waiting)
++            for req in queue
++            if req.status == RequestStatus.WAITING_FOR_REMOTE_KVS
++            and req.request_id in self.finished_recving_kv_req_ids
++        ]
++        if not ready:
++            return
++        ready_set = set(ready)
++        order = list(self.skipped_waiting) + list(self.waiting)
++        if all(req in ready_set for req in order[: len(ready)]):
++            return  # already at the front
++        self.skipped_waiting.remove_requests(ready_set)
++        self.waiting.remove_requests(ready_set)
++        for req in reversed(ready):  # keep their relative order
++            self.skipped_waiting.prepend_request(req)
++        self._certus_fronted_total = getattr(self, "_certus_fronted_total", 0) + len(ready)
++        logger.info(
++            "[certus-fix] moved %d finished-KV-load request(s) ahead of %d other "
++            "waiting request(s) (total moved: %d)",
++            len(ready),
++            len(order) - len(ready),
++            self._certus_fronted_total,
++        )
++
+     def _try_promote_blocked_waiting_request(self, request: Request) -> bool:
+         """
+         Try to promote a blocked waiting request back to schedulable states.
