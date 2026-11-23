@@ -41,7 +41,7 @@ CONCURRENT_STREAMS="${CONCURRENT_STREAMS:-8}"
 # admit the whole pool (SESSION_CONCURRENCY) and cap in-flight REQUESTS with
 # --prefill-concurrency: that slot is released at TTFT (~= completion for out=1), so a
 # thinking conversation holds nothing and others process in the meantime.
-TIMING="${TIMING:-asap}"            # asap | think | delaycap (see run-aiperf-weka.sh)
+TIMING="${TIMING:-asap}"            # asap | think | delaycap | intervals (see run-aiperf-weka.sh)
 SESSION_CONCURRENCY="${SESSION_CONCURRENCY:-$(find "$TRACE" -maxdepth 1 -name '*.json' 2>/dev/null | wc -l)}"
 MAX_SECONDS="${MAX_SECONDS:-900}"
 GRACE_SECONDS="${GRACE_SECONDS:-120}"      # responses still in flight at the deadline
