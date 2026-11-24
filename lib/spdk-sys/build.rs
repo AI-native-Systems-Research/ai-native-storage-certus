@@ -226,7 +226,7 @@ fn main() {
         .allowlist_function("spdk_free")
         // Types
         .allowlist_type("spdk_env_opts")
-        .allowlist_type("spdk_pci_addr")
+        .blocklist_type("spdk_pci_addr")
         .allowlist_type("spdk_pci_id")
         .allowlist_type("spdk_pci_device")
         .allowlist_type("spdk_pci_driver")
