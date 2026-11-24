@@ -393,4 +393,5 @@ exec command podman "${store_flags[@]}" run --rm \
     -e "DTYPE=${DTYPE:-float16}" \
     -e "GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.90}" \
     -e "GPU_KV_GB=${GPU_KV_GB:-}" \
+    -e "VLLM_ALLOW_LONG_MAX_MODEL_LEN=${VLLM_ALLOW_LONG_MAX_MODEL_LEN:-1}" \
     "${IMAGE}"
