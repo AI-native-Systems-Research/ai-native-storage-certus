@@ -1,0 +1,7 @@
+NAME                                                        READY   STATUS    RESTARTS   AGE     IP             NODE                       NOMINATED NODE   READINESS GATES
+optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-7cqdr   2/2     Running   0          2m27s   10.244.4.39    node5   <none>           <none>
+optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-ngq27   2/2     Running   0          2m27s   10.244.2.149   node2                      <none>           <none>
+optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-pklkq   2/2     Running   0          2m27s   10.244.2.148   node2                      <none>           <none>
+optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-xn58h   2/2     Running   0          2m27s   10.244.4.40    node5   <none>           <none>
+quickstart-epp-55bf6b5d97-nq6mn                             2/2     Running   0          86m     10.244.4.34    node5   <none>           <none>
+render-7f4b89884b-94xxx                                     1/1     Running   0          87m     10.244.4.33    node5   <none>           <none>

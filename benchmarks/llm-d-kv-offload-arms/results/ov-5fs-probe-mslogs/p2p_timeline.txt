@@ -1,0 +1,10 @@
+fetches with lookup events on both sides: 279 (of 279 ids seen)
+  lookup in flight                     n= 279  median     17.0 ms  p90     29.0 ms  max    346.0 ms
+  producer resolves all keys           n= 279  median    558.0 ms  p90    818.0 ms  max   1623.0 ms
+  reply in flight                      n= 279  median      4.0 ms  p90      7.0 ms  max    107.0 ms
+  consumer turns reply into a fetch    n= 279  median     10.0 ms  p90     18.0 ms  max     67.0 ms
+  fetch in flight                      n= 279  median     20.0 ms  p90     31.0 ms  max     57.0 ms
+  producer submits NIXL write          n= 279  median      1.0 ms  p90      2.0 ms  max      3.0 ms
+  NIXL write + producer notices        n= 279  median     86.0 ms  p90    172.0 ms  max   1449.0 ms
+  TOTAL lookup→data written            n= 279  median    738.0 ms  p90   1027.0 ms  max   3026.0 ms
+  keys per lookup: median 753, max 1130

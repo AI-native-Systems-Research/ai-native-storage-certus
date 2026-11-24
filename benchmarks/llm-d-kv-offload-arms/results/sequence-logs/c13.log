@@ -1,0 +1,429 @@
+20:08:34 start: overflow arms 1-3 from empty certus tiers
+20:08:34 === arm 1 (seed 401): fresh start
+20:08:59 certus restarted fresh: 4 instances, tiers 0 bytes used, batched piece copies on
+20:22:40   pd-disaggregation-nvidia-gpu-vllm-decode-6b7cc7b94-j67jv node5 00000000:41:00.0 GPU KV cache size: 37,184
+20:22:40   pd-disaggregation-nvidia-gpu-vllm-decode-6b7cc7b94-tm8h2 node2 00000000:41:00.0 GPU KV cache size: 37,184
+20:22:40   pd-disaggregation-nvidia-gpu-vllm-decode-6b7cc7b94-xcksp node2 00000000:A1:00.0 GPU KV cache size: 37,184
+20:22:41   pd-disaggregation-nvidia-gpu-vllm-prefill-6b8cc646fd-8wklb node5 00000000:A1:00.0 GPU KV cache size: 37,184
+router-check: OK  quickstart-epp-7f7dbcddf9-wswtc  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 12
+  cluster.ext_proc.membership_healthy: 1
+20:22:44 router check ok
+20:22:54 warm-up ok
+20:22:55 tiers used before run: 568590336 bytes (warm-up only)
+RUN c13-1-arm1 DONE rc=0
+  {'wall_s': 3311.3, 'turns_ok': 320, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 1.3356, 'later_ttft_p90_s': 1.7934}
+21:18:26 ARM 1 DONE
+21:18:26 ALL DONE
+21:35:41 start: overflow arms 1-3 from empty certus tiers
+21:35:41 === arm 1 (seed 401): fresh start
+21:36:19 certus restarted fresh: 4 instances, tiers 0 bytes used, batched piece copies on
+21:41:40 decode sidecars on ddabbfd0a4f50983260e88949d67de67d15adcd7
+21:41:40   pd-disaggregation-nvidia-gpu-vllm-decode-5f4655688b-7k4ss node2 00000000:A1:00.0 GPU KV cache size: 37,184
+21:41:40   pd-disaggregation-nvidia-gpu-vllm-decode-5f4655688b-tdndx node2 00000000:41:00.0 GPU KV cache size: 37,184
+21:41:41   pd-disaggregation-nvidia-gpu-vllm-decode-5f4655688b-xj5sr node5 00000000:41:00.0 GPU KV cache size: 37,184
+21:41:41   pd-disaggregation-nvidia-gpu-vllm-prefill-6b8cc646fd-fllbx node5 00000000:A1:00.0 GPU KV cache size: 37,184
+router-check: OK  quickstart-epp-7f7dbcddf9-wswtc  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 481
+  cluster.ext_proc.membership_healthy: 1
+21:41:44 router check ok
+21:41:54 warm-up ok
+21:41:55 tiers used before run: 568590336 bytes (warm-up only)
+RUN c13-1-arm1 DONE rc=0
+  {'wall_s': 3386.1, 'turns_ok': 320, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 0.6279, 'later_ttft_p90_s': 0.973}
+22:38:42 certus fetch requests in the run: 280
+22:38:42 ARM 1 DONE
+22:38:42 ALL DONE
+23:11:36 start: overflow arms 1-3 from empty certus tiers
+23:11:36 === arm 2 (seed 402): fresh start
+23:12:01 certus restarted fresh: 4 instances, tiers 0 bytes used, batched piece copies on
+23:16:51 sidecars (decode) on ddabbfd0a4f50983260e88949d67de67d15adcd7
+23:16:52   pd-disaggregation-nvidia-gpu-vllm-decode-5cff55c658-2t2xc node5 00000000:41:00.0 GPU KV cache size: 37,184
+23:16:53   pd-disaggregation-nvidia-gpu-vllm-decode-5cff55c658-vkln8 node2 00000000:41:00.0 GPU KV cache size: 37,184
+23:16:53   pd-disaggregation-nvidia-gpu-vllm-decode-5cff55c658-x5t7c node2 00000000:A1:00.0 GPU KV cache size: 37,184
+23:16:53   pd-disaggregation-nvidia-gpu-vllm-prefill-669fc6ffdf-j9d5d node5 00000000:A1:00.0 GPU KV cache size: 37,184
+router-check: OK  quickstart-epp-7f7dbcddf9-wswtc  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 1052
+  cluster.ext_proc.membership_healthy: 1
+23:16:56 router check ok
+23:17:06 warm-up ok
+23:17:07 tiers used before run: 568590336 bytes (warm-up only)
+RUN c13-2-arm2 DONE rc=0
+  {'wall_s': 3484.4, 'turns_ok': 320, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 0.9486, 'later_ttft_p90_s': 1.3199}
+00:15:33 certus fetch requests in the run: 0
+00:15:33 ARM 2 DONE
+00:15:33 === arm 3 (seed 403): fresh start
+00:16:01 certus restarted fresh: 4 instances, tiers 0 bytes used, batched piece copies on
+00:19:58 sidecars (optimized-baseline) on ddabbfd0a4f50983260e88949d67de67d15adcd7
+00:19:59 arm 3: prompt-only=true, KV events off
+00:19:59   optimized-baseline-nvidia-gpu-vllm-decode-9b4444d4-gkm2h node2 00000000:A1:00.0 GPU KV cache size: 37,184
+00:20:00   optimized-baseline-nvidia-gpu-vllm-decode-9b4444d4-hsmbx node5 00000000:A1:00.0 GPU KV cache size: 37,184
+00:20:00   optimized-baseline-nvidia-gpu-vllm-decode-9b4444d4-wg2wd node5 00000000:41:00.0 GPU KV cache size: 37,184
+00:20:00   optimized-baseline-nvidia-gpu-vllm-decode-9b4444d4-zs2mx node2 00000000:41:00.0 GPU KV cache size: 37,184
+router-check: OK  quickstart-epp-55bf6b5d97-rblf8  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 3
+  cluster.ext_proc.membership_healthy: 1
+00:20:04 router check ok
+00:20:13 warm-up ok
+00:20:14 tiers used before run: 179306496 bytes (warm-up only)
+RUN c13-3-arm3 DONE rc=1
+  {'wall_s': 3380.7, 'turns_ok': 317, 'errors': 1, 'retired': 0, 'later_ttft_p50_s': 0.6452, 'later_ttft_p90_s': 10.9737}
+01:16:56 certus fetch requests in the run: 0
+01:16:56 ARM 3 DONE
+01:16:56 === arm 3a (seed 403): fresh start
+01:17:21 certus restarted fresh: 4 instances, tiers 0 bytes used, batched piece copies on
+01:21:18 sidecars (optimized-baseline) on ddabbfd0a4f50983260e88949d67de67d15adcd7
+01:21:19 arm 3a: prompt-only=false, KV events off
+01:21:19   optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-4vprb node2 00000000:A1:00.0 GPU KV cache size: 37,184
+01:21:19   optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-bdq7l node2 00000000:41:00.0 GPU KV cache size: 37,184
+01:21:20   optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-lcp97 node5 00000000:41:00.0 GPU KV cache size: 37,184
+01:21:20   optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-p8hdt node5 00000000:A1:00.0 GPU KV cache size: 37,184
+router-check: OK  quickstart-epp-55bf6b5d97-rblf8  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 367
+  cluster.ext_proc.membership_healthy: 1
+01:21:23 router check ok
+01:21:33 warm-up ok
+01:21:34 tiers used before run: 209977344 bytes (warm-up only)
+RUN c13-3a-arm3a DONE rc=0
+  {'wall_s': 3344.2, 'turns_ok': 320, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 0.2728, 'later_ttft_p90_s': 3.8299}
+02:17:39 certus fetch requests in the run: 0
+02:17:39 ARM 3a DONE
+02:17:39 === arm 3b (seed 403): fresh start
+02:18:07 certus restarted fresh: 4 instances, tiers 0 bytes used, batched piece copies on
+02:22:54 sidecars (optimized-baseline) on ddabbfd0a4f50983260e88949d67de67d15adcd7
+02:22:55 arm 3b: prompt-only=false, KV events on
+02:22:55   optimized-baseline-nvidia-gpu-vllm-decode-8fb5cb564-65sgz node5 00000000:41:00.0 GPU KV cache size: 37,184
+02:22:55   optimized-baseline-nvidia-gpu-vllm-decode-8fb5cb564-n9bld node5 00000000:A1:00.0 GPU KV cache size: 37,184
+02:22:56   optimized-baseline-nvidia-gpu-vllm-decode-8fb5cb564-pqjl7 node2 00000000:A1:00.0 GPU KV cache size: 37,184
+02:22:56   optimized-baseline-nvidia-gpu-vllm-decode-8fb5cb564-x5s6m node2 00000000:41:00.0 GPU KV cache size: 37,184
+router-check: OK  quickstart-epp-55bf6b5d97-rblf8  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 737
+  cluster.ext_proc.membership_healthy: 1
+02:22:59 router check ok
+02:23:09 warm-up ok
+02:23:10 tiers used before run: 209977344 bytes (warm-up only)
+RUN c13-3b-arm3b DONE rc=0
+  {'wall_s': 3435.8, 'turns_ok': 320, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 0.4444, 'later_ttft_p90_s': 7.1435}
+03:20:47 certus fetch requests in the run: 48
+03:20:47 ARM 3b DONE
+03:20:47 ALL DONE
+04:09:29 start: overflow arms 1-3 from empty certus tiers
+04:09:29 === arm 3b (seed 403): fresh start
+04:09:56 certus restarted fresh: 4 instances, tiers 0 bytes used, batched piece copies on
+04:13:53 sidecars (optimized-baseline) on ddabbfd0a4f50983260e88949d67de67d15adcd7
+04:13:53 arm 3b: prompt-only=false, KV events on
+04:13:54   optimized-baseline-nvidia-gpu-vllm-decode-8fb5cb564-45gjd node2 00000000:A1:00.0 GPU KV cache size: 37,184
+04:13:54   optimized-baseline-nvidia-gpu-vllm-decode-8fb5cb564-fshdh node2 00000000:41:00.0 GPU KV cache size: 37,184
+04:13:55   optimized-baseline-nvidia-gpu-vllm-decode-8fb5cb564-kp68l node5 00000000:A1:00.0 GPU KV cache size: 37,184
+04:13:55   optimized-baseline-nvidia-gpu-vllm-decode-8fb5cb564-l72lw node5 00000000:41:00.0 GPU KV cache size: 37,184
+router-check: OK  quickstart-epp-55bf6b5d97-rblf8  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 1403
+  cluster.ext_proc.membership_healthy: 1
+04:13:58 router check ok
+04:14:08 warm-up ok
+04:14:09 tiers used before run: 209977344 bytes (warm-up only)
+04:24:09 load-watch node2 45gjd:    7.1 GB in    0.3 s =  21.4 GB/s
+04:24:09 load-watch node2 fshdh:    2.0 GB in    0.1 s =  22.8 GB/s
+04:24:09 load-watch node5 kp68l:   10.6 GB in    0.6 s =  17.8 GB/s
+04:24:09 load-watch node5 l72lw:    6.2 GB in    0.3 s =  21.9 GB/s
+04:34:09 load-watch node2 45gjd:   17.4 GB in    0.9 s =  19.0 GB/s
+04:34:09 load-watch node2 fshdh:   13.6 GB in    0.6 s =  21.3 GB/s
+04:34:09 load-watch node5 kp68l:   24.2 GB in    1.3 s =  18.0 GB/s
+04:34:09 load-watch node5 l72lw:   23.7 GB in    1.2 s =  19.6 GB/s
+04:44:09 load-watch node2 45gjd:   24.5 GB in    1.3 s =  18.6 GB/s
+04:44:09 load-watch node2 fshdh:   19.8 GB in    1.0 s =  20.8 GB/s
+04:44:09 load-watch node5 kp68l:   27.0 GB in    1.5 s =  18.3 GB/s
+04:44:09 load-watch node5 l72lw:   23.1 GB in    1.1 s =  20.9 GB/s
+04:54:09 load-watch node2 45gjd:   29.6 GB in    1.6 s =  18.5 GB/s
+04:54:09 load-watch node2 fshdh:   25.2 GB in    1.2 s =  21.3 GB/s
+04:54:09 load-watch node5 kp68l:   29.3 GB in    1.6 s =  18.7 GB/s
+04:54:09 load-watch node5 l72lw:   28.4 GB in    1.3 s =  21.2 GB/s
+05:04:10 load-watch node2 45gjd:   31.2 GB in    1.5 s =  20.7 GB/s
+05:04:10 load-watch node2 fshdh:   27.8 GB in    1.2 s =  22.4 GB/s
+05:04:10 load-watch node5 kp68l:   33.1 GB in    1.7 s =  19.6 GB/s
+05:04:10 load-watch node5 l72lw:   28.7 GB in    1.3 s =  21.7 GB/s
+RUN c13-3b-arm3b DONE rc=0
+05:11:03 load-watch: 0 slow-load warnings in the log so far
+  {'wall_s': 3393.7, 'turns_ok': 320, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 0.2812, 'later_ttft_p90_s': 4.6711}
+05:11:04 certus fetch requests in the run: 57
+05:11:04 ARM 3b DONE
+05:11:04 ALL DONE
+21:24:14 start: overflow arms 1-3 from empty certus tiers
+21:24:14 === arm 3a (seed 403): fresh start
+21:24:38 certus restarted fresh: 4 instances, tiers 0 bytes used, batched piece copies on
+21:28:35 sidecars (optimized-baseline) on ddabbfd0a4f50983260e88949d67de67d15adcd7
+21:28:35 arm 3a: prompt-only=false, KV events off
+21:28:36   optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-hh8t8 node5 00000000:A1:00.0 GPU KV cache size: 37,184
+21:28:36   optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-rnwqz node2 00000000:A1:00.0 GPU KV cache size: 37,184
+21:28:37   optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-rxvxt node2 00000000:41:00.0 GPU KV cache size: 37,184
+21:28:37   optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-zg66l node5 00000000:41:00.0 GPU KV cache size: 37,184
+router-check: OK  quickstart-epp-55bf6b5d97-nq6mn  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 3
+  cluster.ext_proc.membership_healthy: 1
+21:28:40 router check ok
+21:28:50 warm-up ok
+21:28:51 tiers used before run: 209977344 bytes (warm-up only)
+21:38:51 load-watch node5 hh8t8:    8.0 GB in    0.4 s =  19.5 GB/s
+21:38:51 load-watch WARN slow load node2 rnwqz:    6.2 GB in    1.8 s =   3.5 GB/s
+21:38:51 load-watch WARN slow load node2 rxvxt:    6.2 GB in    0.7 s =   9.2 GB/s
+21:38:51 load-watch node5 zg66l:    8.0 GB in    0.4 s =  20.0 GB/s
+22:39:41 start: overflow arms 1-3 from empty certus tiers
+22:39:41 === arm 3a (seed 403): fresh start
+22:40:28 certus restarted fresh: 4 instances, 4 drives pinned each, tiers 0 bytes used, batched piece copies on
+22:51:55 sidecars (optimized-baseline) on ddabbfd0a4f50983260e88949d67de67d15adcd7
+22:51:55 arm 3a: prompt-only=false, KV events off
+22:51:56   optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-7cqdr node5 00000000:41:00.0 GPU KV cache size: 37,184
+22:51:56   optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-ngq27 node2 00000000:A1:00.0 GPU KV cache size: 37,184
+22:51:57   optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-pklkq node2 00000000:41:00.0 GPU KV cache size: 37,184
+22:51:57   optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-xn58h node5 00000000:A1:00.0 GPU KV cache size: 37,184
+router-check: OK  quickstart-epp-55bf6b5d97-nq6mn  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 499
+  cluster.ext_proc.membership_healthy: 1
+22:52:00 router check ok
+22:52:10 warm-up ok
+22:52:10 tiers used before run: 209977344 bytes (warm-up only)
+23:02:11 load-watch node5 7cqdr:    7.0 GB in    0.3 s =  20.8 GB/s
+23:02:11 load-watch node2 ngq27:    8.9 GB in    0.5 s =  17.6 GB/s
+23:02:11 load-watch node2 pklkq:    5.3 GB in    0.2 s =  21.4 GB/s
+23:02:11 load-watch node5 xn58h:    6.2 GB in    0.3 s =  19.2 GB/s
+23:12:11 load-watch node5 7cqdr:   18.2 GB in    0.9 s =  20.5 GB/s
+23:12:11 load-watch node2 ngq27:   14.8 GB in    0.8 s =  18.3 GB/s
+23:12:11 load-watch node2 pklkq:   18.9 GB in    0.9 s =  20.2 GB/s
+23:12:11 load-watch node5 xn58h:   18.9 GB in    1.0 s =  19.0 GB/s
+23:22:11 load-watch node5 7cqdr:   22.0 GB in    1.0 s =  21.0 GB/s
+23:22:11 load-watch node2 ngq27:   23.5 GB in    1.3 s =  18.3 GB/s
+23:22:11 load-watch node2 pklkq:   25.1 GB in    1.2 s =  20.9 GB/s
+23:22:11 load-watch node5 xn58h:   22.0 GB in    1.2 s =  19.0 GB/s
+23:32:11 load-watch node5 7cqdr:   31.2 GB in    1.5 s =  21.2 GB/s
+23:32:11 load-watch node2 ngq27:   21.3 GB in    1.1 s =  18.5 GB/s
+23:32:11 load-watch node2 pklkq:   29.6 GB in    1.4 s =  20.8 GB/s
+23:32:11 load-watch node5 xn58h:   28.1 GB in    1.4 s =  19.8 GB/s
+23:42:11 load-watch node5 7cqdr:   24.6 GB in    1.2 s =  21.0 GB/s
+23:42:11 load-watch node2 ngq27:   20.5 GB in    1.1 s =  19.5 GB/s
+23:42:11 load-watch node2 pklkq:   22.7 GB in    1.1 s =  21.1 GB/s
+23:42:11 load-watch node5 xn58h:   22.3 GB in    1.2 s =  18.8 GB/s
+RUN c13-3a-arm3a-r2 DONE rc=0
+23:48:53 load-watch: 2 slow-load warnings in the log so far
+  {'wall_s': 3381.7, 'turns_ok': 320, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 0.2662, 'later_ttft_p90_s': 5.1119}
+23:48:54 certus fetch requests in the run: 0
+23:48:54 ARM 3a DONE
+23:48:54 === arm 3b (seed 403): fresh start
+23:49:20 certus drives short: certus-server-numa0-z5dgf(node5 NUMA 0: own=[0000:61:00.0 0000:62:00.0 0000:63:00.0 0000:64:00.0] unpinned=[ 0000:62:00.0 0000:64:00.0]) certus-server-numa1-46s64(node5 NUMA 1: own=[0000:c1:00.0 0000:c2:00.0 0000:c3:00.0 0000:c4:00.0] unpinned=[ 0000:c1:00.0 0000:c3:00.0])
+23:49:20 restarting certus (try 2 of 3)
+23:49:44 certus drives short: certus-server-numa0-hmtdh(node5 NUMA 0: own=[0000:61:00.0 0000:62:00.0 0000:63:00.0 0000:64:00.0] unpinned=[ 0000:62:00.0 0000:64:00.0]) certus-server-numa1-jc5sz(node5 NUMA 1: own=[0000:c1:00.0 0000:c2:00.0 0000:c3:00.0 0000:c4:00.0] unpinned=[ 0000:c1:00.0 0000:c3:00.0])
+23:49:44 restarting certus (try 3 of 3)
+23:50:11 certus restarted fresh: 4 instances, 4 drives pinned each, tiers 0 bytes used, batched piece copies on
+23:54:08 sidecars (optimized-baseline) on ddabbfd0a4f50983260e88949d67de67d15adcd7
+23:54:09 arm 3b: prompt-only=false, KV events on
+23:54:09   optimized-baseline-nvidia-gpu-vllm-decode-8fb5cb564-75xs4 node2 00000000:41:00.0 GPU KV cache size: 37,184
+23:54:09   optimized-baseline-nvidia-gpu-vllm-decode-8fb5cb564-7n4pf node5 00000000:41:00.0 GPU KV cache size: 37,184
+23:54:10   optimized-baseline-nvidia-gpu-vllm-decode-8fb5cb564-l7d6h node5 00000000:A1:00.0 GPU KV cache size: 37,184
+23:54:10   optimized-baseline-nvidia-gpu-vllm-decode-8fb5cb564-z99fc node2 00000000:A1:00.0 GPU KV cache size: 37,184
+router-check: OK  quickstart-epp-55bf6b5d97-nq6mn  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 872
+  cluster.ext_proc.membership_healthy: 1
+23:54:13 router check ok
+23:54:23 warm-up ok
+23:54:23 tiers used before run: 209977344 bytes (warm-up only)
+00:04:24 load-watch node2 75xs4:    7.0 GB in    0.4 s =  19.7 GB/s
+00:04:24 load-watch node5 7n4pf:    6.1 GB in    0.3 s =  22.1 GB/s
+00:04:24 load-watch node5 l7d6h:    8.9 GB in    0.5 s =  18.5 GB/s
+00:04:24 load-watch node2 z99fc:    6.2 GB in    0.3 s =  20.7 GB/s
+00:14:24 load-watch node2 75xs4:   23.8 GB in    1.2 s =  20.2 GB/s
+00:14:24 load-watch node5 7n4pf:   16.9 GB in    0.9 s =  19.3 GB/s
+00:14:24 load-watch node5 l7d6h:   20.6 GB in    1.1 s =  19.5 GB/s
+00:14:24 load-watch node2 z99fc:   18.3 GB in    1.0 s =  18.0 GB/s
+00:24:24 load-watch node2 75xs4:   31.3 GB in    1.5 s =  21.1 GB/s
+00:24:24 load-watch node5 7n4pf:   15.4 GB in    0.7 s =  21.0 GB/s
+00:24:24 load-watch node5 l7d6h:   28.1 GB in    1.5 s =  18.7 GB/s
+00:24:24 load-watch node2 z99fc:   21.6 GB in    1.3 s =  16.8 GB/s
+00:34:24 load-watch node2 75xs4:   30.5 GB in    1.5 s =  20.8 GB/s
+00:34:24 load-watch node5 7n4pf:   23.4 GB in    1.1 s =  21.6 GB/s
+00:34:24 load-watch node5 l7d6h:   27.2 GB in    1.4 s =  18.8 GB/s
+00:34:24 load-watch node2 z99fc:   26.6 GB in    1.4 s =  18.7 GB/s
+00:44:24 load-watch node2 75xs4:   29.6 GB in    1.4 s =  21.5 GB/s
+00:44:24 load-watch node5 7n4pf:   32.1 GB in    1.5 s =  21.9 GB/s
+00:44:24 load-watch node5 l7d6h:   29.9 GB in    1.4 s =  21.1 GB/s
+00:44:24 load-watch node2 z99fc:   30.5 GB in    1.5 s =  20.7 GB/s
+RUN c13-3b-arm3b-r2 DONE rc=0
+00:51:31 load-watch: 2 slow-load warnings in the log so far
+  {'wall_s': 3407.2, 'turns_ok': 320, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 0.2852, 'later_ttft_p90_s': 9.2739}
+00:51:32 certus fetch requests in the run: 64
+00:51:32 ARM 3b DONE
+00:51:32 === arm 3a (seed 403): fresh start
+00:52:12 certus restarted fresh: 4 instances, 4 drives pinned each, tiers 0 bytes used, batched piece copies on
+00:56:09 sidecars (optimized-baseline) on ddabbfd0a4f50983260e88949d67de67d15adcd7
+00:56:10 arm 3a: prompt-only=false, KV events off
+00:56:10   optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-6p9f7 node5 00000000:A1:00.0 GPU KV cache size: 37,184
+00:56:10   optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-nmcw2 node2 00000000:A1:00.0 GPU KV cache size: 37,184
+00:56:11   optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-pxnxc node5 00000000:41:00.0 GPU KV cache size: 37,184
+00:56:11   optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-swjnj node2 00000000:41:00.0 GPU KV cache size: 37,184
+router-check: OK  quickstart-epp-55bf6b5d97-nq6mn  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 1245
+  cluster.ext_proc.membership_healthy: 1
+00:56:14 router check ok
+00:56:24 warm-up ok
+00:56:25 tiers used before run: 209977344 bytes (warm-up only)
+01:06:25 load-watch node5 6p9f7:    5.3 GB in    0.3 s =  21.0 GB/s
+01:06:25 load-watch node2 nmcw2:    8.0 GB in    0.5 s =  17.2 GB/s
+01:06:25 load-watch node5 pxnxc:    8.0 GB in    0.4 s =  21.5 GB/s
+01:06:25 load-watch node2 swjnj:    5.9 GB in    0.3 s =  22.0 GB/s
+01:16:25 load-watch node5 6p9f7:   18.3 GB in    1.0 s =  19.0 GB/s
+01:16:25 load-watch node2 nmcw2:   20.7 GB in    1.2 s =  17.7 GB/s
+01:16:25 load-watch node5 pxnxc:   20.1 GB in    1.0 s =  20.7 GB/s
+01:16:25 load-watch node2 swjnj:   13.3 GB in    0.7 s =  20.1 GB/s
+01:26:25 load-watch node5 6p9f7:   23.5 GB in    1.3 s =  18.5 GB/s
+01:26:25 load-watch node2 nmcw2:   24.8 GB in    1.4 s =  17.9 GB/s
+01:26:25 load-watch node5 pxnxc:   30.1 GB in    1.6 s =  19.0 GB/s
+01:26:25 load-watch node2 swjnj:   21.3 GB in    1.0 s =  20.8 GB/s
+01:36:25 load-watch node5 6p9f7:   29.6 GB in    1.6 s =  18.5 GB/s
+01:36:25 load-watch node2 nmcw2:   29.9 GB in    1.6 s =  18.4 GB/s
+01:36:25 load-watch node5 pxnxc:   32.0 GB in    1.5 s =  21.6 GB/s
+01:36:25 load-watch node2 swjnj:   20.7 GB in    1.0 s =  20.9 GB/s
+01:46:26 load-watch node5 6p9f7:   15.0 GB in    0.8 s =  18.8 GB/s
+01:46:26 load-watch node2 nmcw2:   18.3 GB in    1.0 s =  18.5 GB/s
+01:46:26 load-watch node5 pxnxc:   14.7 GB in    0.7 s =  21.2 GB/s
+01:46:26 load-watch node2 swjnj:   22.6 GB in    1.1 s =  21.0 GB/s
+RUN c13-3a-arm3a-r3 DONE rc=0
+01:53:14 load-watch: 2 slow-load warnings in the log so far
+  {'wall_s': 3389.2, 'turns_ok': 320, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 0.2766, 'later_ttft_p90_s': 3.8716}
+01:53:15 certus fetch requests in the run: 0
+01:53:15 ARM 3a DONE
+01:53:15 === arm 3b (seed 403): fresh start
+01:53:43 certus restarted fresh: 4 instances, 4 drives pinned each, tiers 0 bytes used, batched piece copies on
+01:57:40 sidecars (optimized-baseline) on ddabbfd0a4f50983260e88949d67de67d15adcd7
+01:57:40 arm 3b: prompt-only=false, KV events on
+01:57:40   optimized-baseline-nvidia-gpu-vllm-decode-8fb5cb564-6dmcq node2 00000000:41:00.0 GPU KV cache size: 37,184
+01:57:41   optimized-baseline-nvidia-gpu-vllm-decode-8fb5cb564-sv9g4 node5 00000000:41:00.0 GPU KV cache size: 37,184
+01:57:41   optimized-baseline-nvidia-gpu-vllm-decode-8fb5cb564-w4lqf node5 00000000:A1:00.0 GPU KV cache size: 37,184
+01:57:42   optimized-baseline-nvidia-gpu-vllm-decode-8fb5cb564-xf87c node2 00000000:A1:00.0 GPU KV cache size: 37,184
+router-check: OK  quickstart-epp-55bf6b5d97-nq6mn  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 1613
+  cluster.ext_proc.membership_healthy: 1
+01:57:45 router check ok
+01:57:54 warm-up ok
+01:57:55 tiers used before run: 209977344 bytes (warm-up only)
+02:07:55 load-watch node2 6dmcq:    6.2 GB in    0.3 s =  21.2 GB/s
+02:07:55 load-watch node5 sv9g4:    9.8 GB in    0.5 s =  20.1 GB/s
+02:07:55 load-watch node5 w4lqf:    3.8 GB in    0.2 s =  22.8 GB/s
+02:07:56 load-watch node2 xf87c:    8.0 GB in    0.4 s =  17.9 GB/s
+02:17:56 load-watch node2 6dmcq:   21.0 GB in    1.0 s =  20.7 GB/s
+02:17:56 load-watch node5 sv9g4:   23.4 GB in    1.1 s =  20.7 GB/s
+02:17:56 load-watch node5 w4lqf:   16.0 GB in    0.8 s =  20.2 GB/s
+02:17:56 load-watch node2 xf87c:   20.8 GB in    1.1 s =  18.5 GB/s
+02:27:56 load-watch node2 6dmcq:   23.4 GB in    1.1 s =  20.8 GB/s
+02:27:56 load-watch node5 sv9g4:   28.4 GB in    1.4 s =  21.0 GB/s
+02:27:56 load-watch node5 w4lqf:   23.4 GB in    1.2 s =  19.4 GB/s
+02:27:56 load-watch node2 xf87c:   26.6 GB in    1.5 s =  18.1 GB/s
+02:37:56 load-watch node2 6dmcq:   32.0 GB in    1.5 s =  21.2 GB/s
+02:37:56 load-watch node5 sv9g4:   32.3 GB in    1.5 s =  21.4 GB/s
+02:37:56 load-watch node5 w4lqf:   25.7 GB in    1.4 s =  18.3 GB/s
+02:37:56 load-watch node2 xf87c:   30.2 GB in    1.7 s =  18.2 GB/s
+02:47:56 load-watch node2 6dmcq:   28.4 GB in    1.3 s =  22.3 GB/s
+02:47:56 load-watch node5 sv9g4:   31.1 GB in    1.4 s =  21.7 GB/s
+02:47:56 load-watch node5 w4lqf:   30.5 GB in    1.5 s =  20.2 GB/s
+02:47:56 load-watch node2 xf87c:   33.4 GB in    1.7 s =  20.2 GB/s
+RUN c13-3b-arm3b-r3 DONE rc=0
+02:53:19 load-watch: 2 slow-load warnings in the log so far
+  {'wall_s': 3303.1, 'turns_ok': 320, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 0.2908, 'later_ttft_p90_s': 2.2677}
+02:53:20 certus fetch requests in the run: 53
+02:53:20 ARM 3b DONE
+02:53:20 === arm 3a (seed 403): fresh start
+02:53:47 certus drives short: certus-server-numa0-zfspw(node5 NUMA 0: own=[0000:61:00.0 0000:62:00.0 0000:63:00.0 0000:64:00.0] unpinned=[ 0000:62:00.0 0000:64:00.0]) certus-server-numa1-nxvlg(node5 NUMA 1: own=[0000:c1:00.0 0000:c2:00.0 0000:c3:00.0 0000:c4:00.0] unpinned=[ 0000:c1:00.0 0000:c3:00.0])
+02:53:47 restarting certus (try 2 of 3)
+02:54:13 certus restarted fresh: 4 instances, 4 drives pinned each, tiers 0 bytes used, batched piece copies on
+02:58:10 sidecars (optimized-baseline) on ddabbfd0a4f50983260e88949d67de67d15adcd7
+02:58:11 arm 3a: prompt-only=false, KV events off
+02:58:11   optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-g9q4l node5 00000000:A1:00.0 GPU KV cache size: 37,184
+02:58:12   optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-grghq node2 00000000:41:00.0 GPU KV cache size: 37,184
+02:58:12   optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-pnwh5 node2 00000000:A1:00.0 GPU KV cache size: 37,184
+02:58:12   optimized-baseline-nvidia-gpu-vllm-decode-d8fcb995c-vbprg node5 00000000:41:00.0 GPU KV cache size: 37,184
+router-check: OK  quickstart-epp-55bf6b5d97-nq6mn  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 1977
+  cluster.ext_proc.membership_healthy: 1
+02:58:16 router check ok
+02:58:25 warm-up ok
+02:58:26 tiers used before run: 209977344 bytes (warm-up only)
+03:08:26 load-watch node5 g9q4l:    6.2 GB in    0.3 s =  23.0 GB/s
+03:08:26 load-watch node2 grghq:    9.6 GB in    0.5 s =  19.8 GB/s
+03:08:26 load-watch node2 pnwh5:    3.5 GB in    0.2 s =  22.3 GB/s
+03:08:26 load-watch node5 vbprg:    8.1 GB in    0.4 s =  19.7 GB/s
+03:18:26 load-watch node5 g9q4l:   16.3 GB in    0.9 s =  18.8 GB/s
+03:18:26 load-watch node2 grghq:   20.3 GB in    1.0 s =  20.0 GB/s
+03:18:26 load-watch node2 pnwh5:   17.4 GB in    0.9 s =  19.0 GB/s
+03:18:26 load-watch node5 vbprg:   18.8 GB in    0.9 s =  20.4 GB/s
+03:28:27 load-watch node5 g9q4l:   18.3 GB in    1.0 s =  19.0 GB/s
+03:28:27 load-watch node2 grghq:   23.4 GB in    1.1 s =  20.7 GB/s
+03:28:27 load-watch node2 pnwh5:   20.2 GB in    1.1 s =  18.0 GB/s
+03:28:27 load-watch node5 vbprg:   22.8 GB in    1.1 s =  20.9 GB/s
+03:38:27 load-watch node5 g9q4l:   24.6 GB in    1.3 s =  18.5 GB/s
+03:38:27 load-watch node2 grghq:   26.6 GB in    1.3 s =  20.9 GB/s
+03:38:27 load-watch node2 pnwh5:   24.0 GB in    1.3 s =  18.1 GB/s
+03:38:27 load-watch node5 vbprg:   30.8 GB in    1.5 s =  21.2 GB/s
+03:48:27 load-watch node5 g9q4l:   25.0 GB in    1.3 s =  19.1 GB/s
+03:48:27 load-watch node2 grghq:   19.2 GB in    0.9 s =  21.0 GB/s
+03:48:27 load-watch node2 pnwh5:   18.7 GB in    1.0 s =  19.4 GB/s
+03:48:27 load-watch node5 vbprg:   17.2 GB in    0.8 s =  21.4 GB/s
+RUN c13-3a-arm3a-r4 DONE rc=0
+03:55:45 load-watch: 2 slow-load warnings in the log so far
+  {'wall_s': 3418.5, 'turns_ok': 320, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 0.2721, 'later_ttft_p90_s': 10.9637}
+03:55:46 certus fetch requests in the run: 0
+03:55:46 ARM 3a DONE
+03:55:46 === arm 3b (seed 403): fresh start
+03:56:12 certus drives short: certus-server-numa0-p4qvn(node2 NUMA 0: own=[0000:61:00.0 0000:62:00.0 0000:63:00.0 0000:64:00.0] unpinned=[ 0000:62:00.0 0000:64:00.0]) certus-server-numa1-rsjf9(node2 NUMA 1: own=[0000:c1:00.0 0000:c2:00.0 0000:c3:00.0 0000:c4:00.0] unpinned=[ 0000:c1:00.0 0000:c3:00.0])
+03:56:12 restarting certus (try 2 of 3)
+03:56:36 certus drives short: certus-server-numa0-4tlh4(node2 NUMA 0: own=[0000:61:00.0 0000:62:00.0 0000:63:00.0 0000:64:00.0] unpinned=[ 0000:61:00.0])
+03:56:36 restarting certus (try 3 of 3)
+03:57:03 certus restarted fresh: 4 instances, 4 drives pinned each, tiers 0 bytes used, batched piece copies on
+04:01:00 sidecars (optimized-baseline) on ddabbfd0a4f50983260e88949d67de67d15adcd7
+04:01:00 arm 3b: prompt-only=false, KV events on
+04:01:00   optimized-baseline-nvidia-gpu-vllm-decode-8fb5cb564-59tcl node5 00000000:41:00.0 GPU KV cache size: 37,184
+04:01:01   optimized-baseline-nvidia-gpu-vllm-decode-8fb5cb564-jks5d node2 00000000:A1:00.0 GPU KV cache size: 37,184
+04:01:01   optimized-baseline-nvidia-gpu-vllm-decode-8fb5cb564-l8xws node2 00000000:41:00.0 GPU KV cache size: 37,184
+04:01:02   optimized-baseline-nvidia-gpu-vllm-decode-8fb5cb564-r4gj8 node5 00000000:A1:00.0 GPU KV cache size: 37,184
+router-check: OK  quickstart-epp-55bf6b5d97-nq6mn  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 2353
+  cluster.ext_proc.membership_healthy: 1
+04:01:05 router check ok
+04:01:14 warm-up ok
+04:01:15 tiers used before run: 209977344 bytes (warm-up only)
+04:11:15 load-watch node5 59tcl:    6.9 GB in    0.3 s =  21.7 GB/s
+04:11:15 load-watch node2 jks5d:    7.1 GB in    0.4 s =  18.4 GB/s
+04:11:15 load-watch node2 l8xws:    7.8 GB in    0.4 s =  18.9 GB/s
+04:11:15 load-watch node5 r4gj8:    6.2 GB in    0.3 s =  23.9 GB/s
+04:21:16 load-watch node5 59tcl:   21.2 GB in    1.0 s =  21.2 GB/s
+04:21:16 load-watch node2 jks5d:   18.0 GB in    1.0 s =  18.1 GB/s
+04:21:16 load-watch node2 l8xws:   24.3 GB in    1.2 s =  20.0 GB/s
+04:21:16 load-watch node5 r4gj8:   17.7 GB in    0.9 s =  20.6 GB/s
+04:31:16 load-watch node5 59tcl:   18.7 GB in    0.9 s =  20.7 GB/s
+04:31:16 load-watch node2 jks5d:   24.5 GB in    1.4 s =  17.9 GB/s
+04:31:16 load-watch node2 l8xws:   25.3 GB in    1.2 s =  20.7 GB/s
+04:31:16 load-watch node5 r4gj8:   25.1 GB in    1.3 s =  19.5 GB/s
+04:41:16 load-watch node5 59tcl:   29.3 GB in    1.4 s =  21.0 GB/s
+04:41:16 load-watch node2 jks5d:   31.4 GB in    1.7 s =  18.5 GB/s
+04:41:16 load-watch node2 l8xws:   31.1 GB in    1.5 s =  20.6 GB/s
+04:41:16 load-watch node5 r4gj8:   30.2 GB in    1.6 s =  19.0 GB/s
+04:51:16 load-watch node5 59tcl:   30.4 GB in    1.4 s =  22.0 GB/s
+04:51:16 load-watch node2 jks5d:   29.3 GB in    1.4 s =  20.8 GB/s
+04:51:16 load-watch node2 l8xws:   29.1 GB in    1.4 s =  20.9 GB/s
+04:51:16 load-watch node5 r4gj8:   32.8 GB in    1.6 s =  20.1 GB/s
+RUN c13-3b-arm3b-r4 DONE rc=0
+04:57:09 load-watch: 2 slow-load warnings in the log so far
+  {'wall_s': 3333.6, 'turns_ok': 320, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 0.2873, 'later_ttft_p90_s': 1.9428}
+04:57:10 certus fetch requests in the run: 59
+04:57:10 ARM 3b DONE
+04:57:10 ALL DONE

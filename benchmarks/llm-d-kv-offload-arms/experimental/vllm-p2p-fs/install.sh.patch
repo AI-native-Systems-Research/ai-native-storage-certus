@@ -1,0 +1,35 @@
+--- a/deploy/llm-d/install.sh	2026-11-04 11:54:36.629190395 -0800
++++ b/deploy/llm-d/install.sh	2026-11-05 14:43:20.323878347 -0800
+@@ -503,20 +503,29 @@
+     # are pd-certus's, so the two arms route identically.
+     install_overlay "${PD_VLLM_DIR}" pd-offload-rdma
+     OVERLAY="${PD_VLLM_DIR}/pd-offload-rdma"
++    if [ "${ARM5_FS:-0}" != "0" ]; then
++        # EXPERIMENT (scratch copy only): P2P + fs tier, events as certus's.
++        # ARM5_FS=probe: the same plus P2P debug logging.
++        prof=pd-offload-fs-rdma; [ "${ARM5_FS}" = probe ] && prof=pd-offload-fs-probe
++        # ARM5_FS=swap: the probe with the fs tier ahead of P2P.
++        [ "${ARM5_FS}" = swap ] && prof=pd-offload-fs-swap
++        install_overlay "${PD_VLLM_DIR}" $prof
++        OVERLAY="${PD_VLLM_DIR}/$prof"
++    fi
+     OVERLAY_SRC_DIR="${PROFILE_DIR}/pd-certus"
+-    cp "${PROFILE_DIR}/pd-certus/render.yaml" "${OVERLAY}/"
++    cp "${PROFILE_DIR}/pd-certus/render.yaml" "${PD_VLLM_DIR}/pd-offload-rdma/"
+     if ! kubectl get network-attachment-definitions -n "${NAMESPACE}" roce >/dev/null 2>&1 \
+             && [ "${DRY_RUN}" = "0" ]; then
+         echo "ERROR: no 'roce' network in ${NAMESPACE}; apply deploy/k8s/rdma-network/ first." >&2
+         exit 1
+     fi
+-    if grep -q 'REGISTRY/REPO/' "${OVERLAY}/kustomization.yaml"; then
++    if grep -q 'REGISTRY/REPO/' "${PD_VLLM_DIR}/pd-offload-rdma/kustomization.yaml"; then
+         if [ -z "${CERTUS_REGISTRY:-}" ] || [ -z "${CERTUS_REPO:-}" ]; then
+             echo "ERROR: profiles/${PROFILE}/pd-offload-rdma pins the REGISTRY/REPO placeholder;" >&2
+             echo "       set CERTUS_REGISTRY and CERTUS_REPO in ${SITE_ENV} or the environment." >&2
+             exit 1
+         fi
+-        sed -i "s|REGISTRY/REPO/|${CERTUS_REGISTRY}/${CERTUS_REPO}/|" "${OVERLAY}/kustomization.yaml"
++        sed -i "s|REGISTRY/REPO/|${CERTUS_REGISTRY}/${CERTUS_REPO}/|" "${PD_VLLM_DIR}/pd-offload-rdma/kustomization.yaml"
+         echo "[install] image registry -> ${CERTUS_REGISTRY}/${CERTUS_REPO}"
+     fi
+     echo "[install] vLLM CPU tier + P2P pull ENABLED (no certus)"

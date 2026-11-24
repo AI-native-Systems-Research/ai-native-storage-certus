@@ -1,0 +1,187 @@
+09:38:29 === arm 5 + fs (experiment): deploy
+09:38:31 disk tiers mounted and empty on node2 and node5
+10:11:14 === arm 5 + fs (experiment): deploy
+10:11:16 FATAL: node5: /mnt/kv-tier/numa0 not mounted
+10:12:05 === arm 5 + fs (experiment): deploy
+10:12:07 disk tiers mounted on node2 and node5
+10:19:40   pd-disaggregation-nvidia-gpu-vllm-decode-645bcd6788-g4rfx node2 00000000:41:00.0 GPU KV cache size: 37,184
+10:19:40   pd-disaggregation-nvidia-gpu-vllm-decode-645bcd6788-rcnh5 node5 00000000:41:00.0 GPU KV cache size: 37,184
+10:19:41   pd-disaggregation-nvidia-gpu-vllm-decode-645bcd6788-wqmq7 node2 00000000:A1:00.0 GPU KV cache size: 37,184
+10:19:41   pd-disaggregation-nvidia-gpu-vllm-prefill-8bf9f4fb-27bvb node5 00000000:A1:00.0 GPU KV cache size: 37,184
+10:19:41   pd-disaggregation-nvidia-gpu-vllm-decode-645bcd6788-g4rfx: [arm5-fs] GPU 00000000:41:00.0 -> NUMA 0 -> fs tier /mnt/kv-tier/numa0/kv-pd-disaggregation-nvidia-gpu-vllm-decode-645bc
+10:19:42   pd-disaggregation-nvidia-gpu-vllm-decode-645bcd6788-rcnh5: [arm5-fs] GPU 00000000:41:00.0 -> NUMA 0 -> fs tier /mnt/kv-tier/numa0/kv-pd-disaggregation-nvidia-gpu-vllm-decode-645bc
+10:19:42   pd-disaggregation-nvidia-gpu-vllm-decode-645bcd6788-wqmq7: [arm5-fs] GPU 00000000:A1:00.0 -> NUMA 1 -> fs tier /mnt/kv-tier/numa1/kv-pd-disaggregation-nvidia-gpu-vllm-decode-645bc
+10:19:42   pd-disaggregation-nvidia-gpu-vllm-prefill-8bf9f4fb-27bvb: [arm5-fs] GPU 00000000:A1:00.0 -> NUMA 1 -> fs tier /mnt/kv-tier/numa1/kv-pd-disaggregation-nvidia-gpu-vllm-prefill-8bf9
+router-check: OK  quickstart-epp-7f7dbcddf9-nxr44  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 40
+  cluster.ext_proc.membership_healthy: 1
+10:19:45 router check ok; sidecars on ddabbfd0a4f50983260e88949d67de67d15adcd7; DEPLOY DONE
+10:20:27 small run sm-arm5fs: 6 sessions x 8 turns, 2000-token answers, 3 in flight, seed 536
+router-check: OK  quickstart-epp-7f7dbcddf9-nxr44  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 41
+  cluster.ext_proc.membership_healthy: 1
+10:20:31 router check ok
+10:20:41 warm-up ok
+RUN sm-arm5fs DONE rc=0
+  {'wall_s': 813.3, 'turns_ok': 48, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 0.4503, 'later_ttft_p90_s': 0.6996}
+10:34:35 SMALL DONE sm-arm5fs
+10:35:35 === arm 5 + fs (experiment): overflow run from empty tiers
+10:40:49   pd-disaggregation-nvidia-gpu-vllm-decode-645bcd6788-59znz node5 00000000:41:00.0 GPU KV cache size: 37,184
+10:40:50   pd-disaggregation-nvidia-gpu-vllm-decode-645bcd6788-qqc4n node2 00000000:41:00.0 GPU KV cache size: 37,184
+10:40:50   pd-disaggregation-nvidia-gpu-vllm-decode-645bcd6788-sgjld node2 00000000:A1:00.0 GPU KV cache size: 37,184
+10:40:50   pd-disaggregation-nvidia-gpu-vllm-prefill-8bf9f4fb-2vqpn node5 00000000:A1:00.0 GPU KV cache size: 37,184
+node2 numa0 files 1
+node2 numa1 files 1
+node5 numa0 files 1
+node5 numa1 files 1
+router-check: OK  quickstart-epp-7f7dbcddf9-nxr44  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 159
+  cluster.ext_proc.membership_healthy: 1
+10:41:05 checks ok (4 pods, fs tier + event filter on each, router ok, warm-up ok)
+10:51:06 load-watch node5 59znz:    0.0 GB in    0.0 s =   0.0 GB/s
+10:51:06 load-watch node2 qqc4n:    0.0 GB in    0.0 s =   0.0 GB/s
+10:51:06 load-watch node2 sgjld:    0.0 GB in    0.0 s =   0.0 GB/s
+10:51:06 load-watch node5 2vqpn:   28.4 GB in    1.6 s =  17.7 GB/s
+11:01:06 load-watch node5 59znz:    0.0 GB in    0.0 s =   0.0 GB/s
+11:01:06 load-watch node2 qqc4n:    0.0 GB in    0.0 s =   0.0 GB/s
+11:01:06 load-watch node2 sgjld:    0.0 GB in    0.0 s =   0.0 GB/s
+11:01:06 load-watch node5 2vqpn:   81.0 GB in    4.3 s =  18.9 GB/s
+11:11:06 load-watch node5 59znz:    0.0 GB in    0.0 s =   0.0 GB/s
+11:11:06 load-watch node2 qqc4n:    0.0 GB in    0.0 s =   0.0 GB/s
+11:11:06 load-watch node2 sgjld:    0.0 GB in    0.0 s =   0.0 GB/s
+11:11:06 load-watch node5 2vqpn:  111.8 GB in    5.6 s =  19.8 GB/s
+11:21:06 load-watch node5 59znz:    0.0 GB in    0.0 s =   0.0 GB/s
+11:21:06 load-watch node2 qqc4n:    0.0 GB in    0.0 s =   0.0 GB/s
+11:21:06 load-watch node2 sgjld:    0.0 GB in    0.0 s =   0.0 GB/s
+11:21:06 load-watch node5 2vqpn:  117.2 GB in    6.0 s =  19.7 GB/s
+11:31:07 load-watch node5 59znz:    0.8 GB in    0.1 s =  11.8 GB/s
+11:31:07 load-watch node2 qqc4n:    1.0 GB in    0.1 s =  13.8 GB/s
+11:31:07 load-watch node2 sgjld:    3.2 GB in    0.2 s =  18.8 GB/s
+11:31:07 load-watch node5 2vqpn:  116.0 GB in    5.8 s =  20.0 GB/s
+RUN ov-5fs-arm5fs DONE rc=0
+  {'wall_s': 3328.7, 'turns_ok': 320, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 1.6416, 'later_ttft_p90_s': 2.6615}
+11:36:55 pulled: 280 of 320 decisions
+11:36:55 OVERFLOW DONE
+19:28:56 === arm 5 + fs (experiment): deploy
+19:28:57 disk tiers mounted on node2 and node5
+19:36:22   pd-disaggregation-nvidia-gpu-vllm-decode-7cddb5c76f-qg82k node2 00000000:A1:00.0 GPU KV cache size: 37,184
+19:36:22   pd-disaggregation-nvidia-gpu-vllm-decode-7cddb5c76f-tzvxb node5 00000000:41:00.0 GPU KV cache size: 37,184
+19:36:23   pd-disaggregation-nvidia-gpu-vllm-decode-7cddb5c76f-z5w44 node2 00000000:41:00.0 GPU KV cache size: 37,184
+19:36:23   pd-disaggregation-nvidia-gpu-vllm-prefill-65d5977447-dqfb2 node5 00000000:A1:00.0 GPU KV cache size: 37,184
+19:36:23   pd-disaggregation-nvidia-gpu-vllm-decode-7cddb5c76f-qg82k: [arm5-fs] GPU 00000000:A1:00.0 -> NUMA 1 -> fs tier /mnt/kv-tier/numa1/kv-pd-disaggregation-nvidia-gpu-vllm-decode-7cddb
+19:36:23   pd-disaggregation-nvidia-gpu-vllm-decode-7cddb5c76f-tzvxb: [arm5-fs] GPU 00000000:41:00.0 -> NUMA 0 -> fs tier /mnt/kv-tier/numa0/kv-pd-disaggregation-nvidia-gpu-vllm-decode-7cddb
+19:36:24   pd-disaggregation-nvidia-gpu-vllm-decode-7cddb5c76f-z5w44: [arm5-fs] GPU 00000000:41:00.0 -> NUMA 0 -> fs tier /mnt/kv-tier/numa0/kv-pd-disaggregation-nvidia-gpu-vllm-decode-7cddb
+19:36:24   pd-disaggregation-nvidia-gpu-vllm-prefill-65d5977447-dqfb2: [arm5-fs] GPU 00000000:A1:00.0 -> NUMA 1 -> fs tier /mnt/kv-tier/numa1/kv-pd-disaggregation-nvidia-gpu-vllm-prefill-65d5
+router-check: OK  quickstart-epp-7f7dbcddf9-qml9k  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 1245
+  cluster.ext_proc.membership_healthy: 1
+19:36:27   pd-disaggregation-nvidia-gpu-vllm-decode-7cddb5c76f-qg82k: no P2P debug lines yet
+19:36:27   pd-disaggregation-nvidia-gpu-vllm-decode-7cddb5c76f-tzvxb: no P2P debug lines yet
+19:36:27   pd-disaggregation-nvidia-gpu-vllm-decode-7cddb5c76f-z5w44: no P2P debug lines yet
+19:36:28   pd-disaggregation-nvidia-gpu-vllm-prefill-65d5977447-dqfb2: no P2P debug lines yet
+19:36:28 router check ok; sidecars on ddabbfd0a4f50983260e88949d67de67d15adcd7; DEPLOY DONE (ARM5_FS=probe)
+20:38:57 small run sm-5fs-probe: 6 sessions x 8 turns, 2000-token answers, 3 in flight, seed 501
+router-check: OK  quickstart-epp-7f7dbcddf9-qml9k  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 1620
+  cluster.ext_proc.membership_healthy: 1
+20:39:00 router check ok
+20:39:10 warm-up ok
+RUN sm-5fs-probe DONE rc=0
+  {'wall_s': 815.7, 'turns_ok': 48, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 0.478, 'later_ttft_p90_s': 0.7045}
+20:53:07 SMALL DONE sm-5fs-probe
+20:53:19 === arm 5 + fs (experiment, P2P debug logging): overflow run ov-5fs-probe from empty tiers
+20:58:03   pd-disaggregation-nvidia-gpu-vllm-decode-7cddb5c76f-5ndqb node2 00000000:41:00.0 GPU KV cache size: 37,184
+20:58:04   pd-disaggregation-nvidia-gpu-vllm-decode-7cddb5c76f-fr5nv node5 00000000:41:00.0 GPU KV cache size: 37,184
+20:58:04   pd-disaggregation-nvidia-gpu-vllm-decode-7cddb5c76f-zpr7d node2 00000000:A1:00.0 GPU KV cache size: 37,184
+20:58:04   pd-disaggregation-nvidia-gpu-vllm-prefill-65d5977447-7ppkz node5 00000000:A1:00.0 GPU KV cache size: 37,184
+node2 numa0 files 1
+node2 numa1 files 1
+node5 numa0 files 1
+node5 numa1 files 1
+router-check: OK  quickstart-epp-7f7dbcddf9-qml9k  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 1735
+  cluster.ext_proc.membership_healthy: 1
+20:58:20 checks ok (4 pods, fs tier + event filter on each, router ok, warm-up ok)
+21:08:20 load-watch node2 5ndqb:    0.0 GB in    0.0 s =   0.0 GB/s
+21:08:20 load-watch node5 fr5nv:    0.0 GB in    0.0 s =   0.0 GB/s
+21:08:20 load-watch node2 zpr7d:    0.0 GB in    0.0 s =   0.0 GB/s
+21:08:20 load-watch node5 7ppkz:   28.4 GB in    1.6 s =  17.9 GB/s
+21:18:20 load-watch node2 5ndqb:    0.0 GB in    0.0 s =   0.0 GB/s
+21:18:20 load-watch node5 fr5nv:    0.0 GB in    0.0 s =   0.0 GB/s
+21:18:20 load-watch node2 zpr7d:    0.0 GB in    0.0 s =   0.0 GB/s
+21:18:20 load-watch node5 7ppkz:   81.0 GB in    4.2 s =  19.1 GB/s
+21:28:21 load-watch node2 5ndqb:    0.0 GB in    0.0 s =   0.0 GB/s
+21:28:21 load-watch node5 fr5nv:    0.0 GB in    0.0 s =   0.0 GB/s
+21:28:21 load-watch node2 zpr7d:    0.0 GB in    0.0 s =   0.0 GB/s
+21:28:21 load-watch node5 7ppkz:  111.8 GB in    5.9 s =  18.9 GB/s
+21:38:21 load-watch node2 5ndqb:    0.0 GB in    0.0 s =   0.0 GB/s
+21:38:21 load-watch node5 fr5nv:    0.0 GB in    0.0 s =   0.0 GB/s
+21:38:21 load-watch node2 zpr7d:    0.0 GB in    0.0 s =   0.0 GB/s
+21:38:21 load-watch node5 7ppkz:  114.8 GB in    5.9 s =  19.6 GB/s
+21:48:21 load-watch node2 5ndqb:    1.0 GB in    0.1 s =  18.6 GB/s
+21:48:21 load-watch node5 fr5nv:    3.5 GB in    0.2 s =  14.5 GB/s
+21:48:21 load-watch node2 zpr7d:    0.8 GB in    0.0 s =  17.7 GB/s
+21:48:21 load-watch node5 7ppkz:  115.7 GB in    5.8 s =  20.0 GB/s
+RUN ov-5fs-probe DONE rc=0
+  {'wall_s': 3355.0, 'turns_ok': 320, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 1.6581, 'later_ttft_p90_s': 2.5784}
+21:54:35 pulled: 279 of 320 decisions
+21:54:40 OVERFLOW DONE ov-5fs-probe
+22:44:16 === arm 5 + fs (experiment): deploy
+22:44:18 disk tiers mounted on node2 and node5
+22:51:52   pd-disaggregation-nvidia-gpu-vllm-decode-5dc8d56597-7cppn node2 00000000:41:00.0 GPU KV cache size: 37,184
+22:51:52   pd-disaggregation-nvidia-gpu-vllm-decode-5dc8d56597-jll9p node2 00000000:A1:00.0 GPU KV cache size: 37,184
+22:51:53   pd-disaggregation-nvidia-gpu-vllm-decode-5dc8d56597-jn26r node5 00000000:41:00.0 GPU KV cache size: 37,184
+22:51:53   pd-disaggregation-nvidia-gpu-vllm-prefill-58764779f9-gsrfp node5 00000000:A1:00.0 GPU KV cache size: 37,184
+22:51:53   pd-disaggregation-nvidia-gpu-vllm-decode-5dc8d56597-7cppn: [arm5-fs] GPU 00000000:41:00.0 -> NUMA 0 -> fs tier /mnt/kv-tier/numa0/kv-pd-disaggregation-nvidia-gpu-vllm-decode-5dc8d
+22:51:53   pd-disaggregation-nvidia-gpu-vllm-decode-5dc8d56597-jll9p: [arm5-fs] GPU 00000000:A1:00.0 -> NUMA 1 -> fs tier /mnt/kv-tier/numa1/kv-pd-disaggregation-nvidia-gpu-vllm-decode-5dc8d
+22:51:54   pd-disaggregation-nvidia-gpu-vllm-decode-5dc8d56597-jn26r: [arm5-fs] GPU 00000000:41:00.0 -> NUMA 0 -> fs tier /mnt/kv-tier/numa0/kv-pd-disaggregation-nvidia-gpu-vllm-decode-5dc8d
+22:51:54   pd-disaggregation-nvidia-gpu-vllm-prefill-58764779f9-gsrfp: [arm5-fs] GPU 00000000:A1:00.0 -> NUMA 1 -> fs tier /mnt/kv-tier/numa1/kv-pd-disaggregation-nvidia-gpu-vllm-prefill-5876
+router-check: OK  quickstart-epp-7f7dbcddf9-qml9k  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 2418
+  cluster.ext_proc.membership_healthy: 1
+22:51:57 router check ok; sidecars on ddabbfd0a4f50983260e88949d67de67d15adcd7; DEPLOY DONE (ARM5_FS=swap)
+22:51:57 === arm 5 + fs (experiment, fs tier before P2P, debug logging): overflow run ov-5fs-swap from empty tiers
+22:57:12   pd-disaggregation-nvidia-gpu-vllm-decode-5dc8d56597-bq97l node2 00000000:41:00.0 GPU KV cache size: 37,184
+22:57:13   pd-disaggregation-nvidia-gpu-vllm-decode-5dc8d56597-fbn64 node5 00000000:41:00.0 GPU KV cache size: 37,184
+22:57:13   pd-disaggregation-nvidia-gpu-vllm-decode-5dc8d56597-j6gfq node2 00000000:A1:00.0 GPU KV cache size: 37,184
+22:57:14   pd-disaggregation-nvidia-gpu-vllm-prefill-58764779f9-nvgp8 node5 00000000:A1:00.0 GPU KV cache size: 37,184
+node2 numa0 files 1
+node2 numa1 files 1
+node5 numa0 files 1
+node5 numa1 files 1
+router-check: OK  quickstart-epp-7f7dbcddf9-qml9k  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 2450
+  cluster.ext_proc.membership_healthy: 1
+22:57:29 checks ok (4 pods, fs tier + event filter on each, router ok, warm-up ok)
+23:07:29 load-watch node2 bq97l:    0.0 GB in    0.0 s =   0.0 GB/s
+23:07:29 load-watch node5 fbn64:    0.0 GB in    0.0 s =   0.0 GB/s
+23:07:29 load-watch node2 j6gfq:    0.0 GB in    0.0 s =   0.0 GB/s
+23:07:29 load-watch node5 nvgp8:   28.4 GB in    1.6 s =  17.4 GB/s
+23:17:29 load-watch node2 bq97l:    0.0 GB in    0.0 s =   0.0 GB/s
+23:17:29 load-watch node5 fbn64:    0.0 GB in    0.0 s =   0.0 GB/s
+23:17:29 load-watch node2 j6gfq:    0.0 GB in    0.0 s =   0.0 GB/s
+23:17:29 load-watch node5 nvgp8:   81.0 GB in    4.2 s =  19.2 GB/s
+23:27:30 load-watch node2 bq97l:    0.0 GB in    0.0 s =   0.0 GB/s
+23:27:30 load-watch node5 fbn64:    0.0 GB in    0.0 s =   0.0 GB/s
+23:27:30 load-watch node2 j6gfq:    0.0 GB in    0.0 s =   0.0 GB/s
+23:27:30 load-watch node5 nvgp8:  111.8 GB in    6.1 s =  18.4 GB/s
+23:37:30 load-watch node2 bq97l:    0.0 GB in    0.0 s =   0.0 GB/s
+23:37:30 load-watch node5 fbn64:    0.0 GB in    0.0 s =   0.0 GB/s
+23:37:30 load-watch node2 j6gfq:    0.0 GB in    0.0 s =   0.0 GB/s
+23:37:30 load-watch node5 nvgp8:  110.1 GB in    5.6 s =  19.5 GB/s
+23:47:30 load-watch node2 bq97l:    1.0 GB in    0.1 s =  17.0 GB/s
+23:47:30 load-watch node5 fbn64:    0.8 GB in    0.0 s =  18.1 GB/s
+23:47:30 load-watch node2 j6gfq:    1.1 GB in    0.1 s =  18.4 GB/s
+23:47:30 load-watch node5 nvgp8:  120.5 GB in    6.1 s =  19.7 GB/s
+RUN ov-5fs-swap DONE rc=0
+  {'wall_s': 3352.6, 'turns_ok': 320, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 1.6179, 'later_ttft_p90_s': 2.5808}
+23:53:42 pulled: 280 of 320 decisions
+23:53:46 OVERFLOW DONE ov-5fs-swap

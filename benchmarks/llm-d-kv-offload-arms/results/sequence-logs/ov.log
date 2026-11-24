@@ -1,0 +1,61 @@
+00:13:11 start
+00:13:11 deploy arm 5: P/D + vLLM CPU tier + P2P pull (llm-d P2P guide), no certus
+deployment.apps/pd-disaggregation-nvidia-gpu-vllm-decode scaled
+00:18:53   pd-disaggregation-nvidia-gpu-vllm-decode-7d886456f9-4g45q on node5: p2p tier up, ZmqTransport 10.244.4.172:7777:
+00:18:53   pd-disaggregation-nvidia-gpu-vllm-decode-7d886456f9-r8fv4 on node2: p2p tier up, ZmqTransport 10.244.2.64:7777:
+00:18:53   pd-disaggregation-nvidia-gpu-vllm-decode-7d886456f9-tn9rr on node2: p2p tier up, ZmqTransport 10.244.2.62:7777:
+00:18:54   pd-disaggregation-nvidia-gpu-vllm-prefill-d685b899-lpz69 on node5: p2p tier up, ZmqTransport 10.244.4.171:7777:
+00:18:54   pd-disaggregation-nvidia-gpu-vllm-decode-7d886456f9-4g45q: GPU KV cache size: 37,184 tokens
+00:18:54   pd-disaggregation-nvidia-gpu-vllm-decode-7d886456f9-r8fv4: GPU KV cache size: 37,184 tokens
+00:18:54   pd-disaggregation-nvidia-gpu-vllm-decode-7d886456f9-tn9rr: GPU KV cache size: 37,184 tokens
+00:18:54   pd-disaggregation-nvidia-gpu-vllm-prefill-d685b899-lpz69: GPU KV cache size: 37,184 tokens
+00:19:04 warm-up ok
+00:19:04 run 5: arm 5 seed 405
+00:36:57 arm 5 rerun: prefill pinned to node5 GPU1 (A1:00), as arms 1, 2, 4
+00:37:07 warm-up ok
+00:37:07 run 5: arm 5 seed 415
+Terminated
+RUN ov-5-arm5 DONE rc=143
+00:45:01 ALL DONE
+01:11:15 arm 5 rerun: prefill pinned to node5 GPU1 (A1:00), as arms 1, 2, 4; PYTHONHASHSEED unset (hash-agreement check passed)
+01:11:25 warm-up ok
+01:11:25 run 5: arm 5 seed 425
+Terminated
+RUN ov-5-arm5 DONE rc=143
+01:20:04 ALL DONE
+02:38:14 arm 5 rerun: prefill pinned to node5 GPU1 (A1:00), as arms 1, 2, 4; PYTHONHASHSEED unset (hash-agreement check passed)
+02:38:24 warm-up ok
+02:38:24 run 5: arm 5 seed 435
+RUN ov-5-arm5 DONE rc=1
+  {'wall_s': 3321.7, 'turns_ok': 315, 'errors': 1, 'retired': 0, 'later_ttft_p50_s': 2.8804, 'later_ttft_p90_s': 4.2142}
+03:34:07 ALL DONE
+03:35:13 small run sm-arm5: 6 sessions x 8 turns, 2000-token answers, 3 in flight, seed 506
+03:35:23 warm-up ok
+RUN sm-arm5 DONE rc=0
+  {'wall_s': 813.9, 'turns_ok': 48, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 0.4316, 'later_ttft_p90_s': 0.7204}
+03:49:17 SMALL DONE sm-arm5
+08:29:22 small run sm-arm1: 6 sessions x 8 turns, 2000-token answers, 3 in flight, seed 506
+08:29:32 warm-up ok
+RUN sm-arm1 DONE rc=0
+  {'wall_s': 825.8, 'turns_ok': 48, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 0.9944, 'later_ttft_p90_s': 3.0953}
+08:43:38 SMALL DONE sm-arm1
+19:49:45 small run sm-arm1: 6 sessions x 8 turns, 2000-token answers, 3 in flight, seed 506
+router-check: OK  quickstart-epp-7f7dbcddf9-2zbm6  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 18
+  cluster.ext_proc.membership_healthy: 1
+19:49:48 router check ok
+19:49:57 warm-up ok
+RUN sm-arm1 DONE rc=0
+  {'wall_s': 808.7, 'turns_ok': 48, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 0.9397, 'later_ttft_p90_s': 1.333}
+20:03:46 SMALL DONE sm-arm1
+20:30:45 small run sm-arm1: 6 sessions x 8 turns, 2000-token answers, 3 in flight, seed 506
+router-check: OK  quickstart-epp-7f7dbcddf9-2zbm6  docker.io/envoyproxy/envoy:distroless-v1.33.2 ghcr.io/llm-d/llm-d-router-endpoint-picker:v1.0.0 
+  cluster.ext_proc.health_check.failure: 1
+  cluster.ext_proc.health_check.success: 264
+  cluster.ext_proc.membership_healthy: 1
+20:30:48 router check ok
+20:30:58 warm-up ok
+RUN sm-arm1 DONE rc=0
+  {'wall_s': 800.6, 'turns_ok': 48, 'errors': 0, 'retired': 0, 'later_ttft_p50_s': 0.5437, 'later_ttft_p90_s': 0.7908}
+20:44:39 SMALL DONE sm-arm1

@@ -1,0 +1,53 @@
+{
+ "wall_s": 3381.7,
+ "conversations": 40,
+ "turns_ok": 320,
+ "retired": 0,
+ "errors": 0,
+ "turn0_ttft_p50_s": 0.6609,
+ "later_ttft_p50_s": 0.2662,
+ "later_ttft_p90_s": 5.1119,
+ "latency_p50_s": 57.6245,
+ "per_turn": {
+  "0": {
+   "n": 40,
+   "prompt_tokens_mean": 4019,
+   "ttft_p50_s": 0.6609
+  },
+  "1": {
+   "n": 40,
+   "prompt_tokens_mean": 6028,
+   "ttft_p50_s": 0.1765
+  },
+  "2": {
+   "n": 40,
+   "prompt_tokens_mean": 8037,
+   "ttft_p50_s": 0.2105
+  },
+  "3": {
+   "n": 40,
+   "prompt_tokens_mean": 10044,
+   "ttft_p50_s": 0.2409
+  },
+  "4": {
+   "n": 40,
+   "prompt_tokens_mean": 12053,
+   "ttft_p50_s": 0.2693
+  },
+  "5": {
+   "n": 40,
+   "prompt_tokens_mean": 14065,
+   "ttft_p50_s": 0.2921
+  },
+  "6": {
+   "n": 40,
+   "prompt_tokens_mean": 16075,
+   "ttft_p50_s": 0.3368
+  },
+  "7": {
+   "n": 40,
+   "prompt_tokens_mean": 18086,
+   "ttft_p50_s": 3.8119
+  }
+ }
+}

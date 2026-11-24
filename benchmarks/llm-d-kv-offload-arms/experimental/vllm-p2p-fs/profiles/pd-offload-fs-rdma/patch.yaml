@@ -1,0 +1,119 @@
+# Both roles: pd-offload-rdma's engine flags, with the TieringOffloadingSpec's
+# secondary tiers [p2p, fs] in place of [p2p], the fs tier as arm 4 has it, and
+# its store events enabled. The command finds the GPU's NUMA node and the disk
+# tier there, as pd-tiered-rdma does, and puts events_as_certus.py on the path
+# with a sitecustomize so every vLLM process loads it before the connector.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pd-disaggregation-nvidia-gpu-vllm-prefill
+spec:
+  template:
+    spec:
+      containers:
+        - name: modelserver
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -eu
+              bdf="$(nvidia-smi --query-gpu=pci.bus_id --format=csv,noheader | head -1 | tr -d '[:space:]')"
+              numa="$(python3 -c 'import pathlib,sys;d,b,f=sys.argv[1].split(":");print(pathlib.Path(f"/sys/bus/pci/devices/{int(d,16):04x}:{b.lower()}:{f.lower()}/numa_node").read_text().strip())' "$bdf")"
+              root="/mnt/kv-tier/numa${numa}"
+              mountpoint -q "$root" || { echo "[arm5-fs] FATAL: no disk tier mounted at $root (tiered-disks.sh fs)"; exit 1; }
+              rm -rf "${root}"/kv-* 2>/dev/null || true
+              dir="${root}/kv-${POD_NAME}"; mkdir -p "$dir"
+              echo "[arm5-fs] GPU ${bdf} -> NUMA ${numa} -> fs tier ${dir} ($(df -h --output=source,size "$root" | tail -1))"
+              mkdir -p /tmp/arm5fs && cp /arm5fs/events_as_certus.py /tmp/arm5fs/ && echo "import events_as_certus" > /tmp/arm5fs/sitecustomize.py
+              nixl='{"kv_connector":"NixlConnector","kv_role":"kv_producer","kv_buffer_device":"cuda","kv_connector_extra_config":{"backends":["UCX"]}}'
+              cfg="$(python3 -c 'import json,sys
+              tier={"kv_connector":"OffloadingConnector","kv_role":"kv_both","kv_connector_extra_config":{"spec_name":"TieringOffloadingSpec","cpu_bytes_to_use":8556380160,"eviction_policy":"lru","self_describing_kv_events":True,"secondary_tiers":[{"type":"p2p","host":sys.argv[3],"port":7777},{"type":"fs","root_dir":sys.argv[2],"n_read_threads":16,"n_write_threads":16,"enable_kv_events":True}]}}
+              print(json.dumps({"kv_connector":"MultiConnector","kv_role":"kv_producer","kv_connector_extra_config":{"connectors":[json.loads(sys.argv[1]),tier]}},separators=(",",":")))' "$nixl" "$dir" "$POD_IP")"
+              # The filter loads in vLLM's processes only. Exported earlier, it
+              # also loads in the python3 calls above, whose stdout is captured.
+              export PYTHONPATH="/tmp/arm5fs${PYTHONPATH:+:$PYTHONPATH}"
+              exec vllm serve Qwen/Qwen3-8B \
+                --disable-access-log-for-endpoints=/health,/metrics,/v1/models \
+                --tensor-parallel-size=1 \
+                --gpu-memory-utilization=0.90 \
+                --kv-cache-memory-bytes=5483003904 \
+                --max-model-len=24576 \
+                --no-async-scheduling \
+                --disable-hybrid-kv-cache-manager \
+                --kv-transfer-config "$cfg" \
+                --kv-events-config "{\"enable_kv_cache_events\":true,\"publisher\":\"zmq\",\"endpoint\":\"tcp://*:5556\",\"topic\":\"kv@${POD_IP}:8000@Qwen/Qwen3-8B\"}"
+          env:
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+          volumeMounts:
+            - name: kv-tier
+              mountPath: /mnt/kv-tier
+              mountPropagation: HostToContainer
+            - name: arm5fs-events
+              mountPath: /arm5fs
+      volumes:
+        - name: kv-tier
+          hostPath:
+            path: /mnt/kv-tier
+            type: Directory
+        - name: arm5fs-events
+          configMap:
+            name: arm5fs-events
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pd-disaggregation-nvidia-gpu-vllm-decode
+spec:
+  template:
+    spec:
+      containers:
+        - name: modelserver
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -eu
+              bdf="$(nvidia-smi --query-gpu=pci.bus_id --format=csv,noheader | head -1 | tr -d '[:space:]')"
+              numa="$(python3 -c 'import pathlib,sys;d,b,f=sys.argv[1].split(":");print(pathlib.Path(f"/sys/bus/pci/devices/{int(d,16):04x}:{b.lower()}:{f.lower()}/numa_node").read_text().strip())' "$bdf")"
+              root="/mnt/kv-tier/numa${numa}"
+              mountpoint -q "$root" || { echo "[arm5-fs] FATAL: no disk tier mounted at $root (tiered-disks.sh fs)"; exit 1; }
+              rm -rf "${root}"/kv-* 2>/dev/null || true
+              dir="${root}/kv-${POD_NAME}"; mkdir -p "$dir"
+              echo "[arm5-fs] GPU ${bdf} -> NUMA ${numa} -> fs tier ${dir} ($(df -h --output=source,size "$root" | tail -1))"
+              mkdir -p /tmp/arm5fs && cp /arm5fs/events_as_certus.py /tmp/arm5fs/ && echo "import events_as_certus" > /tmp/arm5fs/sitecustomize.py
+              nixl='{"kv_connector":"NixlConnector","kv_role":"kv_consumer","kv_buffer_device":"cuda","kv_load_failure_policy":"fail","kv_connector_extra_config":{"backends":["UCX"]}}'
+              cfg="$(python3 -c 'import json,sys
+              tier={"kv_connector":"OffloadingConnector","kv_role":"kv_both","kv_connector_extra_config":{"spec_name":"TieringOffloadingSpec","cpu_bytes_to_use":8556380160,"eviction_policy":"lru","offload_prompt_only":False,"self_describing_kv_events":True,"secondary_tiers":[{"type":"p2p","host":sys.argv[3],"port":7777},{"type":"fs","root_dir":sys.argv[2],"n_read_threads":16,"n_write_threads":16,"enable_kv_events":True}]}}
+              print(json.dumps({"kv_connector":"MultiConnector","kv_role":"kv_consumer","kv_load_failure_policy":"fail","kv_connector_extra_config":{"connectors":[json.loads(sys.argv[1]),tier]}},separators=(",",":")))' "$nixl" "$dir" "$POD_IP")"
+              # The filter loads in vLLM's processes only. Exported earlier, it
+              # also loads in the python3 calls above, whose stdout is captured.
+              export PYTHONPATH="/tmp/arm5fs${PYTHONPATH:+:$PYTHONPATH}"
+              exec vllm serve Qwen/Qwen3-8B \
+                --disable-access-log-for-endpoints=/health,/metrics,/v1/models \
+                --tensor-parallel-size=1 \
+                --gpu-memory-utilization=0.90 \
+                --kv-cache-memory-bytes=5483003904 \
+                --max-model-len=24576 \
+                --no-async-scheduling \
+                --disable-hybrid-kv-cache-manager \
+                --kv-transfer-config "$cfg" \
+                --kv-events-config "{\"enable_kv_cache_events\":true,\"publisher\":\"zmq\",\"endpoint\":\"tcp://*:5556\",\"topic\":\"kv@${POD_IP}:8000@Qwen/Qwen3-8B\"}" \
+                --port=8200
+          env:
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+          volumeMounts:
+            - name: kv-tier
+              mountPath: /mnt/kv-tier
+              mountPropagation: HostToContainer
+            - name: arm5fs-events
+              mountPath: /arm5fs
+      volumes:
+        - name: kv-tier
+          hostPath:
+            path: /mnt/kv-tier
+            type: Directory
+        - name: arm5fs-events
+          configMap:
+            name: arm5fs-events

@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# EXPERIMENT, not committed: arm 5 with vLLM's filesystem tier beside its P2P
+# tier, and its KV events made to look to the router as certus's do, so the
+# comparison with arm 1 is on equal routing terms. Not a configuration vLLM or
+# llm-d documents. The committed arm 5 is profiles/a30/pd-offload-rdma.
+#
+# Layered on pd-offload-rdma (its RDMA wiring, sidecar --enable-p2p-pull, GPU KV
+# pin, router values) with the engines' commands replaced: the filesystem tier
+# is set up as pd-tiered-rdma's (arm 4), and events_as_certus.py is loaded
+# before vLLM starts.
+resources:
+  - ../pd-offload-rdma
+
+configMapGenerator:
+  - name: arm5fs-events
+    files:
+      - events_as_certus.py
+
+patches:
+  - path: patch.yaml
